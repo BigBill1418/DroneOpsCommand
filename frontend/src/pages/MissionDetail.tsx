@@ -21,6 +21,7 @@ import api from '../api/client';
 import { Mission, Report, Aircraft, CoverageData } from '../api/types';
 import FlightMap from '../components/FlightMap/FlightMap';
 import AircraftCard from '../components/AircraftCard/AircraftCard';
+import RichTextEditor from '../components/RichTextEditor/RichTextEditor';
 
 const inputStyles = {
   input: { background: '#050608', borderColor: '#1a1f2e', color: '#e8edf2' },
@@ -171,14 +172,12 @@ export default function MissionDetail() {
           </Button>
 
           {reportContent && (
-            <Textarea
-              label="Report Content (Editable)"
-              value={reportContent}
-              onChange={(e) => setReportContent(e.target.value)}
-              minRows={15}
-              autosize
-              styles={inputStyles}
-            />
+            <>
+              <Text c="#5a6478" size="xs" style={{ fontFamily: "'Share Tech Mono', monospace", letterSpacing: '1px' }}>
+                REPORT CONTENT (EDITABLE)
+              </Text>
+              <RichTextEditor content={reportContent} onChange={setReportContent} minHeight="400px" />
+            </>
           )}
         </Stack>
       </Card>

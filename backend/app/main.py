@@ -7,7 +7,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
 from app.database import Base, async_session, engine
-from app.routers import auth, customers, aircraft, missions, flights, maps, reports, invoices, llm
+from app.routers import auth, customers, aircraft, missions, flights, maps, reports, invoices, rate_templates, llm
 
 
 @asynccontextmanager
@@ -64,6 +64,7 @@ app.include_router(flights.router)
 app.include_router(maps.router)
 app.include_router(reports.router)
 app.include_router(invoices.router)
+app.include_router(rate_templates.router)
 app.include_router(llm.router)
 
 

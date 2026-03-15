@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.jwt import hash_password
 from app.config import settings
 from app.models.aircraft import Aircraft
+from app.models.invoice import RateTemplate, LineItemCategory
 from app.models.user import User
 
 AIRCRAFT_SEED = [
@@ -115,6 +116,89 @@ async def seed_database(db: AsyncSession):
             hashed_password=hash_password(settings.admin_password),
         )
         db.add(admin)
+
+    # Seed rate templates
+    rate_templates = [
+        {
+            "name": "Standard Hourly Rate",
+            "description": "Standard operator hourly rate for drone operations",
+            "category": LineItemCategory.BILLED_TIME,
+            "default_quantity": 1,
+            "default_unit": "hours",
+            "default_rate": 150.00,
+            "sort_order": 0,
+        },
+        {
+            "name": "Travel - Mileage",
+            "description": "Per-mile travel charge to and from mission site",
+            "category": LineItemCategory.TRAVEL,
+            "default_quantity": 1,
+            "default_unit": "miles",
+            "default_rate": 0.67,
+            "sort_order": 1,
+        },
+        {
+            "name": "Travel - Flat Rate",
+            "description": "Flat rate travel fee for local missions",
+            "category": LineItemCategory.TRAVEL,
+            "default_quantity": 1,
+            "default_unit": "flat",
+            "default_rate": 50.00,
+            "sort_order": 2,
+        },
+        {
+            "name": "Rapid Deployment",
+            "description": "Extra fee for same-day or emergency deployment",
+            "category": LineItemCategory.RAPID_DEPLOYMENT,
+            "default_quantity": 1,
+            "default_unit": "flat",
+            "default_rate": 250.00,
+            "sort_order": 3,
+        },
+        {
+            "name": "Night Operations Surcharge",
+            "description": "Additional charge for operations conducted at night or low-light",
+            "category": LineItemCategory.SPECIAL,
+            "default_quantity": 1,
+            "default_unit": "flat",
+            "default_rate": 100.00,
+            "sort_order": 4,
+        },
+        {
+            "name": "Thermal Imaging",
+            "description": "Thermal camera operations surcharge",
+            "category": LineItemCategory.EQUIPMENT,
+            "default_quantity": 1,
+            "default_unit": "hours",
+            "default_rate": 75.00,
+            "sort_order": 5,
+        },
+        {
+            "name": "Video Editing",
+            "description": "Post-mission video editing and production",
+            "category": LineItemCategory.BILLED_TIME,
+            "default_quantity": 1,
+            "default_unit": "hours",
+            "default_rate": 85.00,
+            "sort_order": 6,
+        },
+        {
+            "name": "Report Preparation",
+            "description": "Detailed report writing and documentation",
+            "category": LineItemCategory.BILLED_TIME,
+            "default_quantity": 1,
+            "default_unit": "flat",
+            "default_rate": 75.00,
+            "sort_order": 7,
+        },
+    ]
+
+    for tmpl_data in rate_templates:
+        result = await db.execute(
+            select(RateTemplate).where(RateTemplate.name == tmpl_data["name"])
+        )
+        if not result.scalar_one_or_none():
+            db.add(RateTemplate(**tmpl_data))
 
     # Seed aircraft
     for aircraft_data in AIRCRAFT_SEED:

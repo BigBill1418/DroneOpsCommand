@@ -54,3 +54,20 @@ class LineItem(Base):
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
 
     invoice = relationship("Invoice", back_populates="line_items")
+
+
+class RateTemplate(Base):
+    __tablename__ = "rate_templates"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    category: Mapped[LineItemCategory] = mapped_column(
+        Enum(LineItemCategory), default=LineItemCategory.OTHER
+    )
+    default_quantity: Mapped[float] = mapped_column(Numeric(10, 2), default=1)
+    default_unit: Mapped[str | None] = mapped_column(String(20), nullable=True)  # hours, miles, flat, each
+    default_rate: Mapped[float] = mapped_column(Numeric(10, 2), default=0)
+    is_active: Mapped[bool] = mapped_column(default=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

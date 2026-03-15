@@ -10,7 +10,8 @@ Invoicing and after-action reporting tool for drone operations. Built for [Barna
 - **AI Report Generation** — Local LLM (Ollama/Mistral) interprets flight data + operator notes to write professional client reports
 - **Aircraft Profiles** — DJI fleet management with product specs displayed in reports
 - **PDF Export** — Branded PDF reports with BarnardHQ styling, flight maps, aircraft specs, imagery, and invoicing
-- **Invoicing** — Line items for travel, billed time, rapid deployment, equipment, and custom fees
+- **Invoicing** — Line items for travel, billed time, rapid deployment, equipment, and custom fees with rate templates
+- **Rich Text Editing** — TipTap-powered editor for report narrative with full formatting controls
 - **Customer CRM** — Track customers, contact info, and job history
 - **Email Delivery** — Send PDF reports directly to customers with social media links
 - **JWT Authentication** — Secure API ready for future Android companion app
@@ -53,6 +54,14 @@ All settings via environment variables (`.env` file):
 - `SMTP_HOST/PORT/USER/PASSWORD` — Email server for sending reports
 - `JWT_SECRET_KEY` — Change this to a random secret for production
 - `ADMIN_USERNAME/PASSWORD` — Initial admin credentials
+
+## Phase 2 Roadmap
+
+- **React Native Android App** — Mission creation, photo capture on-site, report review, and customer lookup from the field. Communicates with the stack via JWT-authenticated HTTPS API.
+- **Voice-to-Text** — On-device speech recognition in the Android app for dictating operator field notes hands-free during or after missions.
+- **Report Templates** — Multiple PDF templates for different mission types
+- **Analytics** — Revenue tracking and mission type breakdown
+- **Live Flight Tracking** — WebSocket integration for real-time drone position
 
 ## Development
 

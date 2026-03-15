@@ -32,9 +32,10 @@ import {
 } from '@tabler/icons-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
-import { Aircraft, Customer, CoverageData } from '../api/types';
+import { Aircraft, Customer, CoverageData, RateTemplate } from '../api/types';
 import FlightMap from '../components/FlightMap/FlightMap';
 import AircraftCard from '../components/AircraftCard/AircraftCard';
+import RichTextEditor from '../components/RichTextEditor/RichTextEditor';
 
 const inputStyles = {
   input: { background: '#050608', borderColor: '#1a1f2e', color: '#e8edf2' },
@@ -83,6 +84,7 @@ export default function MissionNew() {
 
   // Invoice
   const [lineItems, setLineItems] = useState<any[]>([]);
+  const [rateTemplates, setRateTemplates] = useState<RateTemplate[]>([]);
 
   const navigate = useNavigate();
 
@@ -101,6 +103,7 @@ export default function MissionNew() {
   useEffect(() => {
     api.get('/customers').then((r) => setCustomers(r.data)).catch(() => {});
     api.get('/aircraft').then((r) => setAircraft(r.data)).catch(() => {});
+    api.get('/rate-templates?active_only=true').then((r) => setRateTemplates(r.data)).catch(() => {});
   }, []);
 
   const loadFlights = async () => {
@@ -405,12 +408,10 @@ export default function MissionNew() {
                   <Text c="#00d4ff" fw={600} style={{ fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' }}>
                     GENERATED REPORT
                   </Text>
-                  <Textarea
-                    value={reportContent}
-                    onChange={(e) => setReportContent(e.target.value)}
-                    minRows={15}
-                    autosize
-                    styles={inputStyles}
+                  <RichTextEditor
+                    content={reportContent}
+                    onChange={setReportContent}
+                    minHeight="400px"
                   />
                 </>
               )}
@@ -432,15 +433,44 @@ export default function MissionNew() {
                 <>
                   <Group justify="space-between">
                     <Text c="#e8edf2" fw={600}>Line Items</Text>
-                    <Button
-                      leftSection={<IconPlus size={14} />}
-                      size="xs"
-                      color="cyan"
-                      variant="light"
-                      onClick={addLineItem}
-                    >
-                      Add Item
-                    </Button>
+                    <Group gap="xs">
+                      <Select
+                        placeholder="Add from template..."
+                        data={rateTemplates.map((t) => ({
+                          value: t.id,
+                          label: `${t.name} ($${t.default_rate}/${t.default_unit || 'ea'})`,
+                        }))}
+                        clearable
+                        size="xs"
+                        onChange={(val) => {
+                          if (!val) return;
+                          const tmpl = rateTemplates.find((t) => t.id === val);
+                          if (tmpl) {
+                            setLineItems((prev) => [
+                              ...prev,
+                              {
+                                description: tmpl.name + (tmpl.description ? ` — ${tmpl.description}` : ''),
+                                category: tmpl.category,
+                                quantity: tmpl.default_quantity,
+                                unit_price: tmpl.default_rate,
+                              },
+                            ]);
+                          }
+                        }}
+                        styles={{
+                          input: { background: '#050608', borderColor: '#1a1f2e', color: '#e8edf2', width: 280 },
+                        }}
+                      />
+                      <Button
+                        leftSection={<IconPlus size={14} />}
+                        size="xs"
+                        color="cyan"
+                        variant="light"
+                        onClick={addLineItem}
+                      >
+                        Blank Item
+                      </Button>
+                    </Group>
                   </Group>
 
                   {lineItems.map((item, i) => (

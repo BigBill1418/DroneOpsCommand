@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@mantine/tiptap": "^7.14.0",
     "@mantine/core": "^7.14.0",
     "@mantine/hooks": "^7.14.0",
     "@mantine/form": "^7.14.0",
@@ -23,6 +24,12 @@
     "react-dom": "^18.3.1",
     "react-leaflet": "^4.2.1",
     "react-markdown": "^9.0.1",
+    "@tiptap/extension-highlight": "^2.10.0",
+    "@tiptap/extension-link": "^2.10.0",
+    "@tiptap/extension-text-align": "^2.10.0",
+    "@tiptap/extension-underline": "^2.10.0",
+    "@tiptap/react": "^2.10.0",
+    "@tiptap/starter-kit": "^2.10.0",
     "react-router-dom": "^6.28.0"
   },
   "devDependencies": {

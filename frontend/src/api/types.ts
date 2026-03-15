@@ -89,6 +89,19 @@ export interface Invoice {
   line_items: LineItem[];
 }
 
+export interface RateTemplate {
+  id: string;
+  name: string;
+  description: string | null;
+  category: string;
+  default_quantity: number;
+  default_unit: string | null;
+  default_rate: number;
+  is_active: boolean;
+  sort_order: number;
+  created_at: string;
+}
+
 export interface CoverageData {
   acres: number;
   square_yards: number | null;

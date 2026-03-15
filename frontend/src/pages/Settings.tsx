@@ -17,9 +17,9 @@ import {
 } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
-import { IconCheck, IconX, IconPlus, IconEdit, IconTrash } from '@tabler/icons-react';
+import { IconCheck, IconX, IconPlus, IconEdit, IconTrash, IconCurrencyDollar } from '@tabler/icons-react';
 import api from '../api/client';
-import { Aircraft } from '../api/types';
+import { Aircraft, RateTemplate } from '../api/types';
 
 const inputStyles = {
   input: { background: '#050608', borderColor: '#1a1f2e', color: '#e8edf2' },
@@ -34,14 +34,22 @@ export default function Settings() {
   const [aircraft, setAircraft] = useState<Aircraft[]>([]);
   const [aircraftModal, setAircraftModal] = useState(false);
   const [editingAircraftId, setEditingAircraftId] = useState<string | null>(null);
+  const [rateTemplates, setRateTemplates] = useState<RateTemplate[]>([]);
+  const [rateModal, setRateModal] = useState(false);
+  const [editingRateId, setEditingRateId] = useState<string | null>(null);
 
   const aircraftForm = useForm({
     initialValues: { model_name: '', manufacturer: 'DJI', specs_json: '{}' },
   });
 
+  const rateForm = useForm({
+    initialValues: { name: '', description: '', category: 'other', default_quantity: 1, default_unit: '', default_rate: 0 },
+  });
+
   useEffect(() => {
     api.get('/llm/status').then((r) => setLlmStatus(r.data)).catch(() => setLlmStatus({ status: 'offline' })).finally(() => setLlmLoading(false));
     api.get('/aircraft').then((r) => setAircraft(r.data)).catch(() => {});
+    api.get('/rate-templates').then((r) => setRateTemplates(r.data)).catch(() => {});
   }, []);
 
   const handleSaveAircraft = async (values: typeof aircraftForm.values) => {
@@ -80,6 +88,51 @@ export default function Settings() {
     if (!confirm('Delete this aircraft?')) return;
     await api.delete(`/aircraft/${id}`);
     setAircraft((prev) => prev.filter((a) => a.id !== id));
+  };
+
+  const handleSaveRate = async (values: typeof rateForm.values) => {
+    try {
+      if (editingRateId) {
+        await api.put(`/rate-templates/${editingRateId}`, values);
+      } else {
+        await api.post('/rate-templates', values);
+      }
+      setRateModal(false);
+      setEditingRateId(null);
+      rateForm.reset();
+      api.get('/rate-templates').then((r) => setRateTemplates(r.data));
+      notifications.show({ title: 'Saved', message: 'Rate template saved', color: 'cyan' });
+    } catch {
+      notifications.show({ title: 'Error', message: 'Failed to save rate template', color: 'red' });
+    }
+  };
+
+  const handleEditRate = (t: RateTemplate) => {
+    setEditingRateId(t.id);
+    rateForm.setValues({
+      name: t.name,
+      description: t.description || '',
+      category: t.category,
+      default_quantity: t.default_quantity,
+      default_unit: t.default_unit || '',
+      default_rate: t.default_rate,
+    });
+    setRateModal(true);
+  };
+
+  const handleDeleteRate = async (id: string) => {
+    if (!confirm('Delete this rate template?')) return;
+    await api.delete(`/rate-templates/${id}`);
+    setRateTemplates((prev) => prev.filter((t) => t.id !== id));
+  };
+
+  const categoryLabels: Record<string, string> = {
+    travel: 'Travel',
+    billed_time: 'Billed Time',
+    rapid_deployment: 'Rapid Deploy',
+    equipment: 'Equipment',
+    special: 'Special',
+    other: 'Other',
   };
 
   return (
@@ -177,6 +230,79 @@ export default function Settings() {
           </Table.Tbody>
         </Table>
       </Card>
+
+      {/* Rate Templates */}
+      <Card padding="lg" radius="md" style={cardStyle}>
+        <Group justify="space-between" mb="md">
+          <Title order={3} c="#e8edf2" style={{ letterSpacing: '1px' }}>RATE TEMPLATES</Title>
+          <Button
+            leftSection={<IconPlus size={14} />}
+            size="xs"
+            color="cyan"
+            onClick={() => { setEditingRateId(null); rateForm.reset(); setRateModal(true); }}
+          >
+            Add Template
+          </Button>
+        </Group>
+
+        <Table styles={{
+          table: { color: '#e8edf2' },
+          th: { color: '#00d4ff', fontFamily: "'Share Tech Mono', monospace", fontSize: '11px', borderBottom: '1px solid #1a1f2e' },
+          td: { borderBottom: '1px solid #1a1f2e' },
+        }}>
+          <Table.Thead>
+            <Table.Tr>
+              <Table.Th>NAME</Table.Th>
+              <Table.Th>CATEGORY</Table.Th>
+              <Table.Th>DEFAULT RATE</Table.Th>
+              <Table.Th>UNIT</Table.Th>
+              <Table.Th>ACTIONS</Table.Th>
+            </Table.Tr>
+          </Table.Thead>
+          <Table.Tbody>
+            {rateTemplates.map((t) => (
+              <Table.Tr key={t.id}>
+                <Table.Td fw={600}>{t.name}</Table.Td>
+                <Table.Td><Badge color="cyan" variant="light" size="sm">{categoryLabels[t.category] || t.category}</Badge></Table.Td>
+                <Table.Td c="#00d4ff" style={{ fontFamily: "'Share Tech Mono', monospace" }}>${Number(t.default_rate).toFixed(2)}</Table.Td>
+                <Table.Td c="#5a6478">{t.default_unit || '—'}</Table.Td>
+                <Table.Td>
+                  <Group gap="xs">
+                    <ActionIcon variant="subtle" color="cyan" onClick={() => handleEditRate(t)}>
+                      <IconEdit size={14} />
+                    </ActionIcon>
+                    <ActionIcon variant="subtle" color="red" onClick={() => handleDeleteRate(t.id)}>
+                      <IconTrash size={14} />
+                    </ActionIcon>
+                  </Group>
+                </Table.Td>
+              </Table.Tr>
+            ))}
+          </Table.Tbody>
+        </Table>
+      </Card>
+
+      {/* Rate Template Modal */}
+      <Modal
+        opened={rateModal}
+        onClose={() => setRateModal(false)}
+        title={editingRateId ? 'Edit Rate Template' : 'New Rate Template'}
+        styles={{ header: { background: '#0e1117' }, content: { background: '#0e1117' }, title: { color: '#e8edf2', fontFamily: "'Bebas Neue', sans-serif" } }}
+      >
+        <form onSubmit={rateForm.onSubmit(handleSaveRate)}>
+          <Stack gap="sm">
+            <TextInput label="Name" required {...rateForm.getInputProps('name')} styles={inputStyles} />
+            <TextInput label="Description" {...rateForm.getInputProps('description')} styles={inputStyles} />
+            <TextInput label="Category" placeholder="billed_time, travel, equipment, special, rapid_deployment, other" {...rateForm.getInputProps('category')} styles={inputStyles} />
+            <TextInput label="Default Quantity" type="number" {...rateForm.getInputProps('default_quantity')} styles={inputStyles} />
+            <TextInput label="Default Unit" placeholder="hours, miles, flat" {...rateForm.getInputProps('default_unit')} styles={inputStyles} />
+            <TextInput label="Default Rate ($)" type="number" step="0.01" {...rateForm.getInputProps('default_rate')} styles={inputStyles} />
+            <Button type="submit" color="cyan" styles={{ root: { fontFamily: "'Bebas Neue', sans-serif" } }}>
+              SAVE
+            </Button>
+          </Stack>
+        </form>
+      </Modal>
 
       <Modal
         opened={aircraftModal}
