@@ -121,7 +121,7 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     ports:
-      - "80:80"
+      - "3080:80"
     depends_on:
       - backend
 
