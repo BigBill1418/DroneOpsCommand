@@ -1,0 +1,137 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-droneops}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme_in_production}
+      POSTGRES_DB: ${POSTGRES_DB:-droneops}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-droneops}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    volumes:
+      - ollama_data:/root/.ollama
+    ports:
+      - "11434:11434"
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+    # CPU-only, no GPU passthrough needed
+
+  ollama-setup:
+    image: curlimages/curl:latest
+    depends_on:
+      ollama:
+        condition: service_started
+    restart: "no"
+    entrypoint: >
+      sh -c "
+        echo 'Waiting for Ollama to be ready...' &&
+        until curl -s http://ollama:11434/api/tags > /dev/null 2>&1; do sleep 2; done &&
+        echo 'Pulling Mistral model...' &&
+        curl -s http://ollama:11434/api/pull -d '{\"name\": \"mistral:7b-instruct-v0.3-q4_K_M\"}' &&
+        echo 'Model ready!'
+      "
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://droneops:changeme_in_production@db:5432/droneops}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://ollama:11434}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-mistral:7b-instruct-v0.3-q4_K_M}
+      - OPENDRONELOG_URL=${OPENDRONELOG_URL:-}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-changeme_generate_a_random_secret}
+      - JWT_ALGORITHM=${JWT_ALGORITHM:-HS256}
+      - JWT_ACCESS_TOKEN_EXPIRE_MINUTES=${JWT_ACCESS_TOKEN_EXPIRE_MINUTES:-30}
+      - JWT_REFRESH_TOKEN_EXPIRE_DAYS=${JWT_REFRESH_TOKEN_EXPIRE_DAYS:-30}
+      - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-changeme_in_production}
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+      - SMTP_FROM_EMAIL=${SMTP_FROM_EMAIL:-reports@barnardhq.com}
+      - SMTP_FROM_NAME=${SMTP_FROM_NAME:-BarnardHQ Drone Operations}
+      - SMTP_USE_TLS=${SMTP_USE_TLS:-true}
+      - UPLOAD_DIR=/data/uploads
+      - REPORTS_DIR=/data/reports
+    volumes:
+      - app_data:/data
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: celery -A app.tasks.celery_tasks worker --loglevel=info
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://droneops:changeme_in_production@db:5432/droneops}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://ollama:11434}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-mistral:7b-instruct-v0.3-q4_K_M}
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+      - SMTP_FROM_EMAIL=${SMTP_FROM_EMAIL:-reports@barnardhq.com}
+      - SMTP_FROM_NAME=${SMTP_FROM_NAME:-BarnardHQ Drone Operations}
+      - SMTP_USE_TLS=${SMTP_USE_TLS:-true}
+      - UPLOAD_DIR=/data/uploads
+      - REPORTS_DIR=/data/reports
+    volumes:
+      - app_data:/data
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
+  ollama_data:
+  app_data:

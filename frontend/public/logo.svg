@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 80">
+  <rect width="300" height="80" fill="#050608"/>
+  <text x="20" y="55" font-family="Arial Black, sans-serif" font-size="40" font-weight="900" letter-spacing="4">
+    <tspan fill="#e8edf2">BARNARD</tspan><tspan fill="#00d4ff">HQ</tspan>
+  </text>
+  <text x="20" y="72" font-family="monospace" font-size="10" fill="#5a6478" letter-spacing="3">
+    DRONE OPERATIONS
+  </text>
+</svg>

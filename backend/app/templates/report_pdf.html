@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Rajdhani:wght@400;500;600;700&family=Share+Tech+Mono&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Rajdhani', sans-serif;
+    font-size: 11pt;
+    color: #1a1a2e;
+    line-height: 1.5;
+    background: #fff;
+  }
+
+  .header {
+    background: linear-gradient(135deg, #050608 0%, #0e1117 100%);
+    color: #e8edf2;
+    padding: 30px 40px;
+    margin: -10px -10px 0 -10px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .logo {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 32pt;
+    letter-spacing: 3px;
+  }
+
+  .logo .hq { color: #00d4ff; }
+
+  .header-right {
+    text-align: right;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 9pt;
+    color: #5a6478;
+  }
+
+  .header-right .report-title {
+    font-family: 'Rajdhani', sans-serif;
+    font-size: 14pt;
+    font-weight: 600;
+    color: #00d4ff;
+    margin-bottom: 4px;
+  }
+
+  h1 {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 20pt;
+    color: #050608;
+    border-bottom: 3px solid #00d4ff;
+    padding-bottom: 5px;
+    margin: 25px 0 15px 0;
+    letter-spacing: 2px;
+  }
+
+  h2 {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 16pt;
+    color: #0e1117;
+    border-left: 4px solid #ff6b1a;
+    padding-left: 10px;
+    margin: 20px 0 10px 0;
+    letter-spacing: 1px;
+  }
+
+  .section { margin: 15px 0; padding: 0 10px; }
+
+  .info-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin: 10px 0;
+  }
+
+  .info-item {
+    padding: 6px 10px;
+    background: #f5f7fa;
+    border-radius: 4px;
+  }
+
+  .info-label {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 8pt;
+    color: #5a6478;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+
+  .info-value {
+    font-weight: 600;
+    font-size: 11pt;
+  }
+
+  .highlight-box {
+    background: linear-gradient(135deg, #050608 0%, #0e1117 100%);
+    color: #e8edf2;
+    padding: 15px 20px;
+    border-radius: 6px;
+    margin: 15px 0;
+  }
+
+  .highlight-box .stat {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 24pt;
+    color: #00d4ff;
+  }
+
+  .highlight-box .stat-label {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 8pt;
+    color: #5a6478;
+  }
+
+  /* Aircraft section */
+  .aircraft-grid {
+    display: flex;
+    gap: 15px;
+    margin: 10px 0;
+    flex-wrap: wrap;
+  }
+
+  .aircraft-card {
+    flex: 1;
+    min-width: 200px;
+    border: 1px solid #e0e4ea;
+    border-radius: 6px;
+    padding: 12px;
+    text-align: center;
+  }
+
+  .aircraft-card img {
+    max-width: 150px;
+    max-height: 100px;
+    margin-bottom: 8px;
+  }
+
+  .aircraft-card .model-name {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 14pt;
+    color: #0e1117;
+    letter-spacing: 1px;
+  }
+
+  .aircraft-card .manufacturer {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 8pt;
+    color: #5a6478;
+  }
+
+  .specs-table {
+    width: 100%;
+    font-size: 9pt;
+    text-align: left;
+    margin-top: 6px;
+  }
+
+  .specs-table td {
+    padding: 2px 4px;
+    border-bottom: 1px solid #f0f0f0;
+  }
+
+  .specs-table td:first-child {
+    font-family: 'Share Tech Mono', monospace;
+    color: #5a6478;
+    font-size: 8pt;
+    width: 45%;
+  }
+
+  /* Map */
+  .map-container {
+    text-align: center;
+    margin: 15px 0;
+  }
+
+  .map-container img {
+    max-width: 100%;
+    border: 2px solid #0e1117;
+    border-radius: 6px;
+  }
+
+  /* Flight table */
+  table.flights {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 10px 0;
+    font-size: 10pt;
+  }
+
+  table.flights th {
+    background: #0e1117;
+    color: #00d4ff;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 8pt;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    padding: 8px 10px;
+    text-align: left;
+  }
+
+  table.flights td {
+    padding: 6px 10px;
+    border-bottom: 1px solid #e0e4ea;
+  }
+
+  table.flights tr:nth-child(even) { background: #f8f9fb; }
+
+  /* Report narrative */
+  .narrative {
+    white-space: pre-wrap;
+    line-height: 1.7;
+    font-size: 11pt;
+  }
+
+  /* Images */
+  .image-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin: 10px 0;
+  }
+
+  .image-item {
+    text-align: center;
+  }
+
+  .image-item img {
+    max-width: 100%;
+    max-height: 250px;
+    border-radius: 4px;
+    border: 1px solid #e0e4ea;
+  }
+
+  .image-item .caption {
+    font-size: 9pt;
+    color: #5a6478;
+    margin-top: 4px;
+  }
+
+  /* Invoice */
+  table.invoice {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 10px 0;
+  }
+
+  table.invoice th {
+    background: #f5f7fa;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 8pt;
+    text-transform: uppercase;
+    padding: 8px 10px;
+    text-align: left;
+    border-bottom: 2px solid #0e1117;
+  }
+
+  table.invoice td {
+    padding: 6px 10px;
+    border-bottom: 1px solid #e0e4ea;
+  }
+
+  .invoice-totals {
+    text-align: right;
+    margin-top: 10px;
+    font-size: 11pt;
+  }
+
+  .invoice-totals .total-line {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 18pt;
+    color: #00d4ff;
+  }
+
+  /* Footer */
+  .footer {
+    margin-top: 40px;
+    padding: 20px 40px;
+    background: linear-gradient(135deg, #050608 0%, #0e1117 100%);
+    color: #5a6478;
+    text-align: center;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 8pt;
+    margin: 40px -10px -10px -10px;
+  }
+
+  .footer a { color: #00d4ff; text-decoration: none; }
+
+  .footer .social-links {
+    margin: 8px 0;
+    font-size: 9pt;
+  }
+
+  .footer .logo-small {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 16pt;
+    color: #e8edf2;
+    letter-spacing: 2px;
+  }
+
+  .footer .logo-small .hq { color: #00d4ff; }
+
+  @page {
+    size: letter;
+    margin: 10mm;
+  }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<div class="header">
+  <div>
+    <div class="logo">BARNARD<span class="hq">HQ</span></div>
+    <div style="font-family: 'Share Tech Mono', monospace; font-size: 8pt; color: #5a6478; letter-spacing: 2px;">
+      DRONE OPERATIONS
+    </div>
+  </div>
+  <div class="header-right">
+    <div class="report-title">{{ mission.title }}</div>
+    <div>DATE: {{ mission.mission_date or generated_at }}</div>
+    <div>TYPE: {{ mission.mission_type | upper }}</div>
+    {% if mission.location_name %}
+    <div>LOCATION: {{ mission.location_name }}</div>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Mission Summary -->
+<div class="section">
+  <h1>MISSION SUMMARY</h1>
+  <div class="info-grid">
+    <div class="info-item">
+      <div class="info-label">Client</div>
+      <div class="info-value">{{ mission.customer_name or 'N/A' }}</div>
+    </div>
+    <div class="info-item">
+      <div class="info-label">Company</div>
+      <div class="info-value">{{ mission.customer_company or 'N/A' }}</div>
+    </div>
+    <div class="info-item">
+      <div class="info-label">Mission Type</div>
+      <div class="info-value">{{ mission.mission_type | replace('_', ' ') | title }}</div>
+    </div>
+    <div class="info-item">
+      <div class="info-label">Location</div>
+      <div class="info-value">{{ mission.location_name or 'N/A' }}</div>
+    </div>
+  </div>
+
+  {% if report.ground_covered_acres %}
+  <div class="highlight-box">
+    <div style="display: flex; gap: 40px;">
+      <div>
+        <div class="stat">{{ "%.2f"|format(report.ground_covered_acres) }}</div>
+        <div class="stat-label">ACRES COVERED</div>
+      </div>
+      {% if report.flight_duration_total_seconds %}
+      <div>
+        <div class="stat">{{ "%.0f"|format(report.flight_duration_total_seconds / 60) }}</div>
+        <div class="stat-label">MINUTES FLIGHT TIME</div>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+</div>
+
+<!-- Aircraft Used -->
+{% if aircraft_list %}
+<div class="section">
+  <h1>AIRCRAFT DEPLOYED</h1>
+  <div class="aircraft-grid">
+    {% for aircraft in aircraft_list %}
+    <div class="aircraft-card">
+      {% if aircraft.image_filename %}
+      <img src="{{ aircraft.image_filename }}" alt="{{ aircraft.model_name }}">
+      {% endif %}
+      <div class="model-name">{{ aircraft.model_name }}</div>
+      <div class="manufacturer">{{ aircraft.manufacturer }}</div>
+      {% if aircraft.specs %}
+      <table class="specs-table">
+        {% if aircraft.specs.get('max_flight_time') %}
+        <tr><td>Max Flight Time</td><td>{{ aircraft.specs.max_flight_time }}</td></tr>
+        {% endif %}
+        {% if aircraft.specs.get('max_speed') %}
+        <tr><td>Max Speed</td><td>{{ aircraft.specs.max_speed }}</td></tr>
+        {% endif %}
+        {% if aircraft.specs.get('camera') %}
+        <tr><td>Camera</td><td>{{ aircraft.specs.camera }}</td></tr>
+        {% endif %}
+        {% if aircraft.specs.get('sensors') %}
+        <tr><td>Sensors</td><td>{{ aircraft.specs.sensors }}</td></tr>
+        {% endif %}
+        {% if aircraft.specs.get('weight') %}
+        <tr><td>Weight</td><td>{{ aircraft.specs.weight }}</td></tr>
+        {% endif %}
+        {% if aircraft.specs.get('thermal') %}
+        <tr><td>Thermal</td><td>{{ aircraft.specs.thermal }}</td></tr>
+        {% endif %}
+      </table>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+<!-- Flight Path Map -->
+{% if report.map_image_path %}
+<div class="section">
+  <h1>FLIGHT PATH MAP</h1>
+  <div class="map-container">
+    <p style="font-size: 9pt; color: #5a6478; margin-bottom: 8px;">
+      Multi-flight overlay showing all flight paths and estimated coverage area
+    </p>
+    <!-- Map rendered as HTML, embedded as screenshot in production -->
+    <p style="font-style: italic; color: #5a6478; font-size: 9pt;">
+      [Interactive map available in web report — static version included in print]
+    </p>
+  </div>
+</div>
+{% endif %}
+
+<!-- Report Narrative -->
+<div class="section">
+  <h1>OPERATIONS REPORT</h1>
+  <div class="narrative">{{ report.final_content }}</div>
+</div>
+
+<!-- Mission Images -->
+{% if images %}
+<div class="section">
+  <h1>MISSION IMAGERY</h1>
+  <div class="image-grid">
+    {% for img in images %}
+    <div class="image-item">
+      <img src="file://{{ img.file_path }}" alt="{{ img.caption or 'Mission image' }}">
+      {% if img.caption %}
+      <div class="caption">{{ img.caption }}</div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+<!-- Invoice -->
+{% if invoice %}
+<div class="section" style="page-break-before: always;">
+  <h1>INVOICE{% if invoice.invoice_number %} #{{ invoice.invoice_number }}{% endif %}</h1>
+
+  {% if invoice.line_items %}
+  <table class="invoice">
+    <thead>
+      <tr>
+        <th>Description</th>
+        <th>Category</th>
+        <th style="text-align: right;">Qty</th>
+        <th style="text-align: right;">Unit Price</th>
+        <th style="text-align: right;">Total</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in invoice.line_items %}
+      <tr>
+        <td>{{ item.description }}</td>
+        <td>{{ item.category | replace('_', ' ') | title }}</td>
+        <td style="text-align: right;">{{ item.quantity }}</td>
+        <td style="text-align: right;">${{ "%.2f"|format(item.unit_price) }}</td>
+        <td style="text-align: right;">${{ "%.2f"|format(item.total) }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  <div class="invoice-totals">
+    <div>Subtotal: ${{ "%.2f"|format(invoice.subtotal) }}</div>
+    {% if invoice.tax_rate > 0 %}
+    <div>Tax ({{ "%.1f"|format(invoice.tax_rate * 100) }}%): ${{ "%.2f"|format(invoice.tax_amount) }}</div>
+    {% endif %}
+    <div class="total-line">TOTAL: ${{ "%.2f"|format(invoice.total) }}</div>
+  </div>
+
+  {% if invoice.notes %}
+  <div style="margin-top: 15px; font-size: 9pt; color: #5a6478;">
+    <strong>Notes:</strong> {{ invoice.notes }}
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+
+<!-- Footer -->
+<div class="footer">
+  <div class="logo-small">BARNARD<span class="hq">HQ</span></div>
+  <div class="social-links">
+    <a href="https://barnardhq.com">barnardhq.com</a> &nbsp;|&nbsp;
+    <a href="https://facebook.com/barnardHQ">facebook.com/barnardHQ</a>
+  </div>
+  <div style="margin-top: 6px;">
+    FAA Part 107 Certified &nbsp;|&nbsp; Professional Drone Operations<br>
+    &copy; {{ year }} BarnardHQ. All rights reserved.
+  </div>
+</div>
+
+</body>
+</html>

@@ -1,0 +1,201 @@
+import { useEffect, useState } from 'react';
+import {
+  Badge,
+  Button,
+  Card,
+  Group,
+  Loader,
+  Stack,
+  Text,
+  Textarea,
+  Title,
+} from '@mantine/core';
+import { notifications } from '@mantine/notifications';
+import {
+  IconDownload,
+  IconRobot,
+  IconSend,
+} from '@tabler/icons-react';
+import { useParams, useNavigate } from 'react-router-dom';
+import api from '../api/client';
+import { Mission, Report, Aircraft, CoverageData } from '../api/types';
+import FlightMap from '../components/FlightMap/FlightMap';
+import AircraftCard from '../components/AircraftCard/AircraftCard';
+
+const inputStyles = {
+  input: { background: '#050608', borderColor: '#1a1f2e', color: '#e8edf2' },
+  label: { color: '#5a6478', fontFamily: "'Share Tech Mono', monospace", fontSize: '11px', letterSpacing: '1px' },
+};
+
+const statusColors: Record<string, string> = {
+  draft: 'yellow',
+  completed: 'cyan',
+  sent: 'green',
+};
+
+export default function MissionDetail() {
+  const { id } = useParams<{ id: string }>();
+  const [mission, setMission] = useState<Mission | null>(null);
+  const [report, setReport] = useState<Report | null>(null);
+  const [mapGeojson, setMapGeojson] = useState<any>(null);
+  const [coverage, setCoverage] = useState<CoverageData | null>(null);
+  const [aircraftList, setAircraftList] = useState<Aircraft[]>([]);
+  const [narrative, setNarrative] = useState('');
+  const [reportContent, setReportContent] = useState('');
+  const [generating, setGenerating] = useState(false);
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!id) return;
+    api.get(`/missions/${id}`).then((r) => setMission(r.data)).catch(() => navigate('/'));
+    api.get(`/missions/${id}/report`).then((r) => {
+      setReport(r.data);
+      setNarrative(r.data.user_narrative || '');
+      setReportContent(r.data.final_content || '');
+    }).catch(() => {});
+    api.get(`/missions/${id}/map`).then((r) => setMapGeojson(r.data)).catch(() => {});
+    api.get(`/missions/${id}/map/coverage`).then((r) => setCoverage(r.data)).catch(() => {});
+    api.get('/aircraft').then((r) => setAircraftList(r.data)).catch(() => {});
+  }, [id]);
+
+  if (!mission) return <Group justify="center" py="xl"><Loader color="cyan" /></Group>;
+
+  const handleGenerate = async () => {
+    setGenerating(true);
+    try {
+      const resp = await api.post(`/missions/${id}/report/generate`, { user_narrative: narrative });
+      setReport(resp.data);
+      setReportContent(resp.data.final_content || '');
+      notifications.show({ title: 'Report Generated', message: 'Ready for review', color: 'cyan' });
+    } catch {
+      notifications.show({ title: 'Error', message: 'Generation failed', color: 'red' });
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const handleSaveReport = async () => {
+    try {
+      await api.put(`/missions/${id}/report`, { final_content: reportContent });
+      notifications.show({ title: 'Saved', message: 'Report updated', color: 'cyan' });
+    } catch {}
+  };
+
+  const handleGeneratePDF = async () => {
+    await handleSaveReport();
+    try {
+      const resp = await api.post(`/missions/${id}/report/pdf`, {}, { responseType: 'blob' });
+      const url = URL.createObjectURL(new Blob([resp.data], { type: 'application/pdf' }));
+      window.open(url, '_blank');
+    } catch {
+      notifications.show({ title: 'Error', message: 'PDF generation failed', color: 'red' });
+    }
+  };
+
+  const handleSend = async () => {
+    try {
+      await api.post(`/missions/${id}/report/send`);
+      notifications.show({ title: 'Sent', message: 'Report emailed to customer', color: 'green' });
+    } catch (err: any) {
+      notifications.show({ title: 'Error', message: err.response?.data?.detail || 'Send failed', color: 'red' });
+    }
+  };
+
+  // Find unique aircraft used in this mission's flights
+  const usedAircraftIds = new Set(mission.flights.filter(f => f.aircraft_id).map(f => f.aircraft_id));
+  const usedAircraft = aircraftList.filter(a => usedAircraftIds.has(a.id));
+
+  const cardStyle = { background: '#0e1117', border: '1px solid #1a1f2e' };
+
+  return (
+    <Stack gap="lg">
+      <Group justify="space-between">
+        <div>
+          <Title order={2} c="#e8edf2" style={{ letterSpacing: '2px' }}>{mission.title.toUpperCase()}</Title>
+          <Group gap="xs" mt={4}>
+            <Badge color={statusColors[mission.status]} variant="light">{mission.status}</Badge>
+            <Text c="#5a6478" size="sm" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+              {mission.mission_type.replace('_', ' ').toUpperCase()} | {mission.location_name || 'No location'} | {mission.mission_date || 'No date'}
+            </Text>
+          </Group>
+        </div>
+      </Group>
+
+      {/* Aircraft */}
+      {usedAircraft.length > 0 && (
+        <Card padding="lg" radius="md" style={cardStyle}>
+          <Title order={3} c="#e8edf2" mb="md" style={{ letterSpacing: '1px' }}>AIRCRAFT DEPLOYED</Title>
+          <Group>{usedAircraft.map((a) => <AircraftCard key={a.id} aircraft={a} />)}</Group>
+        </Card>
+      )}
+
+      {/* Flight Map */}
+      <Card padding="lg" radius="md" style={cardStyle}>
+        <Title order={3} c="#e8edf2" mb="md" style={{ letterSpacing: '1px' }}>FLIGHT PATH MAP</Title>
+        <FlightMap geojson={mapGeojson} coverage={coverage ?? undefined} height="400px" />
+        {coverage && (
+          <Group mt="sm" gap="xl">
+            <div>
+              <Text c="#5a6478" size="xs" style={{ fontFamily: "'Share Tech Mono', monospace" }}>AREA COVERED</Text>
+              <Text c="#00d4ff" size="xl" fw={700} style={{ fontFamily: "'Bebas Neue', sans-serif" }}>
+                {coverage.acres >= 1 ? `${coverage.acres.toFixed(2)} acres` : `${coverage.square_yards?.toFixed(0)} sq yd`}
+              </Text>
+            </div>
+            <div>
+              <Text c="#5a6478" size="xs" style={{ fontFamily: "'Share Tech Mono', monospace" }}>FLIGHTS</Text>
+              <Text c="#00d4ff" size="xl" fw={700} style={{ fontFamily: "'Bebas Neue', sans-serif" }}>{coverage.num_flights}</Text>
+            </div>
+          </Group>
+        )}
+      </Card>
+
+      {/* Report Editor */}
+      <Card padding="lg" radius="md" style={cardStyle}>
+        <Title order={3} c="#e8edf2" mb="md" style={{ letterSpacing: '1px' }}>OPERATIONS REPORT</Title>
+        <Stack gap="md">
+          <Textarea
+            label="Operator Notes"
+            value={narrative}
+            onChange={(e) => setNarrative(e.target.value)}
+            minRows={4}
+            styles={inputStyles}
+          />
+          <Button
+            leftSection={generating ? <Loader size={14} color="white" /> : <IconRobot size={16} />}
+            color="cyan"
+            onClick={handleGenerate}
+            disabled={generating || !narrative}
+            styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}
+          >
+            {generating ? 'GENERATING...' : report ? 'REGENERATE REPORT' : 'GENERATE REPORT'}
+          </Button>
+
+          {reportContent && (
+            <Textarea
+              label="Report Content (Editable)"
+              value={reportContent}
+              onChange={(e) => setReportContent(e.target.value)}
+              minRows={15}
+              autosize
+              styles={inputStyles}
+            />
+          )}
+        </Stack>
+      </Card>
+
+      {/* Actions */}
+      <Card padding="lg" radius="md" style={cardStyle}>
+        <Group>
+          <Button leftSection={<IconDownload size={16} />} color="cyan" onClick={handleGeneratePDF}
+            styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}>
+            GENERATE PDF
+          </Button>
+          <Button leftSection={<IconSend size={16} />} color="orange" variant="light" onClick={handleSend}
+            styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}>
+            EMAIL TO CUSTOMER
+          </Button>
+        </Group>
+      </Card>
+    </Stack>
+  );
+}

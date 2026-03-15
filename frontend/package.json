@@ -1,0 +1,39 @@
+{
+  "name": "droneops-frontend",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@mantine/core": "^7.14.0",
+    "@mantine/hooks": "^7.14.0",
+    "@mantine/form": "^7.14.0",
+    "@mantine/notifications": "^7.14.0",
+    "@mantine/dropzone": "^7.14.0",
+    "@mantine/dates": "^7.14.0",
+    "@tabler/icons-react": "^3.24.0",
+    "axios": "^1.7.9",
+    "dayjs": "^1.11.13",
+    "leaflet": "^1.9.4",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-leaflet": "^4.2.1",
+    "react-markdown": "^9.0.1",
+    "react-router-dom": "^6.28.0"
+  },
+  "devDependencies": {
+    "@types/leaflet": "^1.9.15",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "postcss": "^8.4.49",
+    "postcss-preset-mantine": "^1.17.0",
+    "postcss-simple-vars": "^7.0.1",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.3"
+  }
+}
