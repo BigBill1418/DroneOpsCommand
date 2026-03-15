@@ -83,3 +83,4 @@ async def delete_rate_template(
     if not template:
         raise HTTPException(status_code=404, detail="Rate template not found")
     await db.delete(template)
+    await db.flush()
