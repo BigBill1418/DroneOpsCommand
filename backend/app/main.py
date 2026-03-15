@@ -7,6 +7,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
 from app.database import Base, async_session, engine
+import app.models  # noqa: F401 — ensure all models registered with Base before create_all
 from app.routers import auth, customers, aircraft, missions, flights, maps, reports, invoices, rate_templates, llm
 
 
