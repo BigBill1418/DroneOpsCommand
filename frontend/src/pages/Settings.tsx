@@ -211,7 +211,7 @@ export default function Settings() {
               <Table.Tr key={a.id}>
                 <Table.Td fw={600}>{a.model_name}</Table.Td>
                 <Table.Td c="#5a6478">{a.manufacturer}</Table.Td>
-                <Table.Td c="#5a6478" size="xs">
+                <Table.Td c="#5a6478" style={{ fontSize: '12px' }}>
                   {a.specs.max_flight_time && `${a.specs.max_flight_time}`}
                   {a.specs.camera && ` | ${a.specs.camera.substring(0, 30)}...`}
                 </Table.Td>

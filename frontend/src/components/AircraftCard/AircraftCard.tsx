@@ -50,7 +50,6 @@ export default function AircraftCard({ aircraft, compact = false }: AircraftCard
 
         {specEntries.length > 0 && (
           <Table
-            size="xs"
             styles={{
               table: { color: '#e8edf2' },
               td: { borderBottom: '1px solid #1a1f2e', padding: '4px 6px', fontSize: '12px' },
