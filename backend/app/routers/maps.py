@@ -1,12 +1,15 @@
+import asyncio
+from functools import partial
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.auth.jwt import get_current_user
 from app.database import get_db
-from app.models.mission import Mission
+from app.models.mission import Mission, MissionFlight
 from app.models.user import User
 from app.services.map_renderer import (
     calculate_area_acres,
@@ -16,6 +19,19 @@ from app.services.map_renderer import (
 )
 
 router = APIRouter(prefix="/api/missions", tags=["maps"])
+
+
+async def _load_mission(db: AsyncSession, mission_id: UUID) -> Mission:
+    """Load a mission with flights and aircraft eagerly loaded."""
+    result = await db.execute(
+        select(Mission)
+        .where(Mission.id == mission_id)
+        .options(selectinload(Mission.flights).selectinload(MissionFlight.aircraft))
+    )
+    mission = result.scalar_one_or_none()
+    if not mission:
+        raise HTTPException(status_code=404, detail="Mission not found")
+    return mission
 
 
 def _flights_to_dicts(mission: Mission) -> list[dict]:
@@ -42,13 +58,10 @@ async def get_map_data(
     _user: User = Depends(get_current_user),
 ):
     """Get GeoJSON data for interactive flight path map."""
-    result = await db.execute(select(Mission).where(Mission.id == mission_id))
-    mission = result.scalar_one_or_none()
-    if not mission:
-        raise HTTPException(status_code=404, detail="Mission not found")
-
+    mission = await _load_mission(db, mission_id)
     flights = _flights_to_dicts(mission)
-    return generate_map_geojson(flights)
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, generate_map_geojson, flights)
 
 
 @router.get("/{mission_id}/map/coverage")
@@ -59,14 +72,14 @@ async def get_coverage(
     _user: User = Depends(get_current_user),
 ):
     """Calculate area coverage in acres."""
-    result = await db.execute(select(Mission).where(Mission.id == mission_id))
-    mission = result.scalar_one_or_none()
-    if not mission:
-        raise HTTPException(status_code=404, detail="Mission not found")
-
+    mission = await _load_mission(db, mission_id)
     flights = _flights_to_dicts(mission)
-    tracks = extract_gps_tracks(flights)
-    acres = calculate_area_acres(tracks, buffer_meters=buffer_meters)
+
+    loop = asyncio.get_event_loop()
+    tracks = await loop.run_in_executor(None, extract_gps_tracks, flights)
+    acres = await loop.run_in_executor(
+        None, partial(calculate_area_acres, tracks, buffer_meters=buffer_meters)
+    )
 
     return {
         "acres": round(acres, 2),
@@ -83,12 +96,9 @@ async def render_map(
     _user: User = Depends(get_current_user),
 ):
     """Render a static map image for PDF inclusion."""
-    result = await db.execute(select(Mission).where(Mission.id == mission_id))
-    mission = result.scalar_one_or_none()
-    if not mission:
-        raise HTTPException(status_code=404, detail="Mission not found")
-
+    mission = await _load_mission(db, mission_id)
     flights = _flights_to_dicts(mission)
-    map_path = render_static_map(flights)
+    loop = asyncio.get_event_loop()
+    map_path = await loop.run_in_executor(None, render_static_map, flights)
 
     return {"map_path": map_path}

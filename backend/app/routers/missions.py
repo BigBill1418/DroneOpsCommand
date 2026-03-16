@@ -75,7 +75,13 @@ async def get_mission(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
-    result = await db.execute(select(Mission).where(Mission.id == mission_id))
+    result = await db.execute(
+        select(Mission).where(Mission.id == mission_id).options(
+            selectinload(Mission.flights),
+            selectinload(Mission.images),
+            selectinload(Mission.customer),
+        )
+    )
     mission = result.scalar_one_or_none()
     if not mission:
         raise HTTPException(status_code=404, detail="Mission not found")

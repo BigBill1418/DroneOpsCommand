@@ -107,7 +107,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="DroneOpsReport",
     description="Invoicing and after-action reporting tool for drone operations",
-    version="1.7.8",
+    version="1.8.0",
     lifespan=lifespan,
 )
 
