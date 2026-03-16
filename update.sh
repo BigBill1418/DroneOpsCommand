@@ -15,8 +15,15 @@ if [ -f "$DEPLOY_MARKER" ]; then
   PREV_COMMIT=$(cat "$DEPLOY_MARKER")
 fi
 
-echo "=== Pulling latest changes ==="
-git pull origin main
+BRANCH="claude/drone-report-generator-qk9UM"
+
+echo "=== Fetching latest from $BRANCH ==="
+git fetch origin "$BRANCH"
+
+echo "=== Merging into main ==="
+git checkout main 2>/dev/null || git checkout -b main origin/main
+git merge --ff-only "origin/$BRANCH"
+git push origin main 2>/dev/null || true
 CURRENT_COMMIT=$(git rev-parse HEAD)
 
 # Figure out what changed since last deploy
