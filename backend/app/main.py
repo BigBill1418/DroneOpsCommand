@@ -12,7 +12,7 @@ from app.routers import auth, customers, aircraft, missions, flights, maps, repo
 
 
 async def _add_missing_columns(conn):
-    """Add columns that create_all won't add to existing tables."""
+    """Add columns and enum values that create_all won't add to existing tables."""
     import logging
     from sqlalchemy import text, inspect as sa_inspect
 
@@ -21,7 +21,38 @@ async def _add_missing_columns(conn):
     try:
         inspector = sa_inspect(conn)
 
-        # Map of table -> columns to add (col_name, col_sql)
+        # --- Sync PostgreSQL enum types with Python enum values ---
+        # create_all creates enum types once but never adds new values.
+        # This causes INSERT failures when new Python enum members are used.
+        from app.models.mission import MissionType, MissionStatus
+        from app.models.invoice import LineItemCategory
+
+        pg_enum_sync = {
+            "missiontype": [e.value for e in MissionType],
+            "missionstatus": [e.value for e in MissionStatus],
+            "lineitemcategory": [e.value for e in LineItemCategory],
+        }
+
+        for enum_name, expected_values in pg_enum_sync.items():
+            # Get current values in the PostgreSQL enum type
+            result = conn.execute(
+                text("SELECT enumlabel FROM pg_enum JOIN pg_type ON pg_enum.enumtypid = pg_type.oid WHERE pg_type.typname = :name"),
+                {"name": enum_name},
+            )
+            existing_values = {row[0] for row in result}
+
+            if not existing_values:
+                # Enum type doesn't exist yet — create_all will handle it
+                continue
+
+            for val in expected_values:
+                if val not in existing_values:
+                    logger.info("Adding enum value '%s' to PostgreSQL type '%s'", val, enum_name)
+                    # ALTER TYPE ... ADD VALUE cannot run inside a transaction on older PG,
+                    # but on PG 12+ it works inside a transaction block.
+                    conn.execute(text(f"ALTER TYPE {enum_name} ADD VALUE IF NOT EXISTS '{val}'"))
+
+        # --- Add missing columns ---
         migrations = {
             "reports": [
                 ("include_download_link", "ALTER TABLE reports ADD COLUMN include_download_link BOOLEAN DEFAULT FALSE"),

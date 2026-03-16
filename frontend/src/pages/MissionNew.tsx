@@ -377,8 +377,9 @@ export default function MissionNew() {
       }
       loadFlights();
       setActive(1);
-    } catch {
-      notifications.show({ title: 'Error', message: `Failed to ${isEditing ? 'update' : 'create'} mission`, color: 'red' });
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail || err?.message || 'Unknown error';
+      notifications.show({ title: 'Error', message: `Failed to ${isEditing ? 'update' : 'create'} mission: ${detail}`, color: 'red' });
     }
   };
 
