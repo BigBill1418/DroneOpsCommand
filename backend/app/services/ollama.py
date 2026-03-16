@@ -9,7 +9,7 @@ after-action report based on the following mission data and operator notes.
 Include these sections:
 1. **Mission Overview** - Brief summary of the operation, date, location, and objective
 2. **Area Coverage** - Description of the area searched/surveyed, including total acreage and terrain
-3. **Flight Operations Summary** - Details of each flight including aircraft used, duration, and coverage
+3. **Flight Operations Summary** - Total flight time, total distance, number of flights, and aircraft used
 4. **Key Findings** - What was observed or accomplished during the mission
 5. **Recommendations** - Follow-up actions or suggestions for the client
 
@@ -24,26 +24,39 @@ async def generate_report(
     location: str,
     flight_summaries: list[dict],
     ground_covered_acres: float | None = None,
+    total_duration_seconds: float = 0,
+    total_distance_meters: float = 0,
     mission_date: str | None = None,
 ) -> str:
     """Generate a report narrative using Ollama."""
 
-    # Build the context prompt
+    # Build per-flight details (aircraft and altitude only)
     flight_details = ""
     for i, flight in enumerate(flight_summaries, 1):
         flight_details += f"\nFlight {i}:\n"
         flight_details += f"  Aircraft: {flight.get('aircraft', 'Unknown')}\n"
-        flight_details += f"  Duration: {flight.get('duration', 'Unknown')}\n"
-        flight_details += f"  Distance: {flight.get('distance', 'Unknown')}\n"
         flight_details += f"  Max Altitude: {flight.get('max_altitude', 'Unknown')}\n"
         if flight.get('notes'):
             flight_details += f"  Notes: {flight['notes']}\n"
+
+    # Build mission-level totals
+    totals = f"Number of Flights: {len(flight_summaries)}"
+    if total_duration_seconds > 0:
+        minutes = total_duration_seconds / 60
+        totals += f"\nTotal Flight Time: {minutes:.0f} minutes"
+    if total_distance_meters > 0:
+        miles = total_distance_meters / 1609.344
+        totals += f"\nTotal Distance Covered: {miles:.2f} miles"
+    if ground_covered_acres:
+        totals += f"\nEstimated Area Covered: {ground_covered_acres:.2f} acres"
 
     user_prompt = f"""Mission: {mission_title}
 Date: {mission_date or 'Not specified'}
 Type: {mission_type}
 Location: {location}
-{f'Estimated Area Covered: {ground_covered_acres:.2f} acres' if ground_covered_acres else ''}
+
+Mission Totals:
+{totals}
 
 Flight Data:
 {flight_details}

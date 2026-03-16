@@ -364,6 +364,12 @@
         <div class="stat-label">MINUTES FLIGHT TIME</div>
       </div>
       {% endif %}
+      {% if report.flight_distance_total_meters %}
+      <div>
+        <div class="stat">{{ "%.2f"|format(report.flight_distance_total_meters / 1609.344) }}</div>
+        <div class="stat-label">MILES COVERED</div>
+      </div>
+      {% endif %}
     </div>
   </div>
   {% endif %}

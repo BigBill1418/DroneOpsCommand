@@ -49,7 +49,8 @@ def generate_report_task(
     flight_summaries: list[dict],
     ground_covered_acres: float | None,
     total_duration: float,
-    map_path: str | None,
+    total_distance: float = 0,
+    map_path: str | None = None,
     mission_date: str | None = None,
 ):
     """Background task to generate LLM report content."""
@@ -72,6 +73,8 @@ def generate_report_task(
                 location=location,
                 flight_summaries=flight_summaries,
                 ground_covered_acres=ground_covered_acres,
+                total_duration_seconds=total_duration,
+                total_distance_meters=total_distance,
                 mission_date=mission_date,
             )
         )

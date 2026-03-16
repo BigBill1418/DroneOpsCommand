@@ -41,10 +41,10 @@ def _build_flight_summaries(mission: Mission) -> list[dict]:
         cache = f.flight_data_cache or {}
         summary = {
             "aircraft": f.aircraft.model_name if f.aircraft else "Unknown",
-            "duration": cache.get("duration", cache.get("flight_time", "Unknown")),
-            "distance": cache.get("distance", cache.get("total_distance", "Unknown")),
-            "max_altitude": cache.get("max_altitude", cache.get("max_height", "Unknown")),
+            "max_altitude": cache.get("max_altitude", cache.get("maxAltitude", cache.get("max_height", "Unknown"))),
         }
+        if cache.get("notes"):
+            summary["notes"] = cache["notes"]
         summaries.append(summary)
     return summaries
 
@@ -85,11 +85,17 @@ async def generate_report(
     map_path = render_static_map(flights) if tracks else None
 
     total_duration = 0
+    total_distance = 0
     for f in mission.flights:
         cache = f.flight_data_cache or {}
-        dur = cache.get("duration_seconds", cache.get("flight_time_seconds", 0))
+        dur = cache.get("duration_secs", cache.get("durationSecs",
+              cache.get("duration_seconds", cache.get("flight_time_seconds", 0))))
         if isinstance(dur, (int, float)):
             total_duration += dur
+        dist = cache.get("total_distance", cache.get("totalDistance",
+               cache.get("distance", cache.get("distance_meters", 0))))
+        if isinstance(dist, (int, float)):
+            total_distance += dist
 
     # Ensure a report record exists so the frontend can poll GET /report
     existing = await db.execute(select(Report).where(Report.mission_id == mission_id))
@@ -98,6 +104,7 @@ async def generate_report(
         report.user_narrative = data.user_narrative
         report.ground_covered_acres = acres if acres > 0 else None
         report.flight_duration_total_seconds = total_duration if total_duration > 0 else None
+        report.flight_distance_total_meters = total_distance if total_distance > 0 else None
         report.map_image_path = map_path
     else:
         report = Report(
@@ -105,6 +112,7 @@ async def generate_report(
             user_narrative=data.user_narrative,
             ground_covered_acres=acres if acres > 0 else None,
             flight_duration_total_seconds=total_duration if total_duration > 0 else None,
+            flight_distance_total_meters=total_distance if total_distance > 0 else None,
             map_image_path=map_path,
         )
         db.add(report)
@@ -121,6 +129,7 @@ async def generate_report(
         flight_summaries=flight_summaries,
         ground_covered_acres=acres if acres > 0 else None,
         total_duration=total_duration,
+        total_distance=total_distance,
         map_path=map_path,
     )
 
@@ -205,6 +214,7 @@ async def generate_report_pdf(
         "final_content": report.final_content or "",
         "ground_covered_acres": report.ground_covered_acres,
         "flight_duration_total_seconds": report.flight_duration_total_seconds,
+        "flight_distance_total_meters": report.flight_distance_total_meters,
         "map_image_path": report.map_image_path,
     }
 

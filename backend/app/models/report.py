@@ -20,6 +20,7 @@ class Report(Base):
     final_content: Mapped[str | None] = mapped_column(Text, nullable=True)
     ground_covered_acres: Mapped[float | None] = mapped_column(Float, nullable=True)
     flight_duration_total_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
+    flight_distance_total_meters: Mapped[float | None] = mapped_column(Float, nullable=True)
     map_image_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
     pdf_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
     generated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

@@ -21,6 +21,7 @@ class ReportResponse(BaseModel):
     final_content: str | None
     ground_covered_acres: float | None
     flight_duration_total_seconds: float | None
+    flight_distance_total_meters: float | None
     map_image_path: str | None
     pdf_path: str | None
     generated_at: datetime | None
