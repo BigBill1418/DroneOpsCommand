@@ -116,6 +116,7 @@ async def generate_report(
         user_narrative=data.user_narrative,
         mission_title=mission.title,
         mission_type=mission.mission_type.value,
+        mission_date=str(mission.mission_date) if mission.mission_date else None,
         location=mission.location_name or "Not specified",
         flight_summaries=flight_summaries,
         ground_covered_acres=acres if acres > 0 else None,

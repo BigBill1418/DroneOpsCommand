@@ -50,6 +50,7 @@ def generate_report_task(
     ground_covered_acres: float | None,
     total_duration: float,
     map_path: str | None,
+    mission_date: str | None = None,
 ):
     """Background task to generate LLM report content."""
     from sqlalchemy import create_engine, select
@@ -71,6 +72,7 @@ def generate_report_task(
                 location=location,
                 flight_summaries=flight_summaries,
                 ground_covered_acres=ground_covered_acres,
+                mission_date=mission_date,
             )
         )
 

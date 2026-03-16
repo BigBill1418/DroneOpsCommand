@@ -24,6 +24,7 @@ async def generate_report(
     location: str,
     flight_summaries: list[dict],
     ground_covered_acres: float | None = None,
+    mission_date: str | None = None,
 ) -> str:
     """Generate a report narrative using Ollama."""
 
@@ -39,6 +40,7 @@ async def generate_report(
             flight_details += f"  Notes: {flight['notes']}\n"
 
     user_prompt = f"""Mission: {mission_title}
+Date: {mission_date or 'Not specified'}
 Type: {mission_type}
 Location: {location}
 {f'Estimated Area Covered: {ground_covered_acres:.2f} acres' if ground_covered_acres else ''}
