@@ -154,7 +154,7 @@ function MonthlyChart({ data }: { data: { month: string; revenue: number }[] }) 
       <Text size="11px" c="#5a6478" mb="sm" style={{ ...monoFont, letterSpacing: '1px' }} tt="uppercase">
         MONTHLY REVENUE
       </Text>
-      <Group gap={6} align="end" style={{ height: 120 }}>
+      <Group gap={8} align="end" style={{ height: 120 }}>
         {data.map((d, i) => {
           const pct = maxVal > 0 ? (d.revenue / maxVal) * 100 : 0;
           return (
@@ -202,7 +202,7 @@ function TopCustomers({ customers }: { customers: { name: string; company: strin
       <Text size="11px" c="#5a6478" mb="sm" style={{ ...monoFont, letterSpacing: '1px' }} tt="uppercase">
         TOP CUSTOMERS
       </Text>
-      <Stack gap={6}>
+      <Stack gap={8}>
         {customers.slice(0, 5).map((c, i) => (
           <Group key={c.name} justify="space-between">
             <Group gap="xs">
