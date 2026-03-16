@@ -62,6 +62,12 @@ Generate the after-action report:"""
                 "options": {
                     "temperature": 0.3,
                     "num_predict": 1024,
+                    # CPU perf: use all 8 threads on Ryzen V1500B
+                    "num_thread": 8,
+                    # Smaller context window — our prompts are well under 2k
+                    "num_ctx": 2048,
+                    # Larger batch = faster prompt evaluation
+                    "num_batch": 256,
                 },
             },
         )

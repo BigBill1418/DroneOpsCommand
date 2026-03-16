@@ -32,7 +32,17 @@ services:
       - ollama_data:/root/.ollama
     environment:
       - OLLAMA_HOST=0.0.0.0
-    # CPU-only, no GPU passthrough needed
+      # Keep model loaded in RAM permanently (64GB available)
+      - OLLAMA_KEEP_ALIVE=-1
+      # Single-request mode — all CPU goes to one generation
+      - OLLAMA_NUM_PARALLEL=1
+      # Only keep one model loaded (saves RAM for the model itself)
+      - OLLAMA_MAX_LOADED_MODELS=1
+      # Enable flash attention for faster inference
+      - OLLAMA_FLASH_ATTENTION=1
+    # Pin all 8 hardware threads and reserve 8GB for the model + runtime
+    cpuset: "0-7"
+    mem_reservation: 8g
 
   ollama-setup:
     image: curlimages/curl:latest
@@ -46,7 +56,9 @@ services:
         until curl -s http://ollama:11434/api/tags > /dev/null 2>&1; do sleep 2; done &&
         echo 'Pulling Mistral model...' &&
         curl -s http://ollama:11434/api/pull -d '{\"name\": \"mistral:7b-instruct-v0.3-q4_K_M\"}' &&
-        echo 'Model ready!'
+        echo 'Warming up model (loading into RAM)...' &&
+        curl -s http://ollama:11434/api/generate -d '{\"model\": \"mistral:7b-instruct-v0.3-q4_K_M\", \"prompt\": \"hi\", \"options\": {\"num_predict\": 1}}' &&
+        echo 'Model pulled and loaded into RAM!'
       "
 
   backend:
