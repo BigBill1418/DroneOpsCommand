@@ -48,6 +48,36 @@ const inputStyles = {
   label: { color: '#5a6478', fontFamily: "'Share Tech Mono', monospace", fontSize: '11px', letterSpacing: '1px' },
 };
 
+/** Format flight date from various possible field names */
+function flightDate(f: any): string {
+  const raw = f.start_time || f.startTime || f.date || f.created_at || '';
+  if (!raw) return '—';
+  try {
+    const d = new Date(raw);
+    if (isNaN(d.getTime())) return String(raw);
+    return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+  } catch { return String(raw); }
+}
+
+/** Format flight duration (seconds -> Xm Xs) */
+function flightDuration(f: any): string {
+  const secs = f.duration_secs || f.durationSecs || f.duration || f.duration_seconds || f.flight_duration || 0;
+  if (!secs) return '—';
+  const m = Math.floor(Number(secs) / 60);
+  const s = Math.round(Number(secs) % 60);
+  return m > 0 ? `${m}m ${s}s` : `${s}s`;
+}
+
+/** Get drone model name */
+function flightDrone(f: any): string {
+  return f.drone_model || f.droneModel || f.drone || f.aircraft || f.model || f.aircraft_name || '—';
+}
+
+/** Get display name for a flight */
+function flightName(f: any): string {
+  return f.display_name || f.displayName || f.name || f.title || f.file_name || f.fileName || `Flight ${f.id ?? ''}`;
+}
+
 const missionTypes = [
   { value: 'sar', label: 'Search & Rescue' },
   { value: 'videography', label: 'Videography' },
@@ -685,10 +715,11 @@ export default function MissionNew() {
                     <Table.Thead>
                       <Table.Tr>
                         <Table.Th w={40}></Table.Th>
+                        <Table.Th>NAME</Table.Th>
                         <Table.Th>DATE</Table.Th>
                         <Table.Th>DRONE</Table.Th>
                         <Table.Th>DURATION</Table.Th>
-                        <Table.Th>AIRCRAFT</Table.Th>
+                        <Table.Th>ASSIGN AIRCRAFT</Table.Th>
                       </Table.Tr>
                     </Table.Thead>
                     <Table.Tbody>
@@ -706,9 +737,10 @@ export default function MissionNew() {
                                 onChange={() => handleRemoveFlight(i)}
                               />
                             </Table.Td>
-                            <Table.Td style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: '11px' }}>{flight.date || flight.start_time || '—'}</Table.Td>
-                            <Table.Td>{flight.drone || flight.aircraft || '—'}</Table.Td>
-                            <Table.Td>{flight.duration || flight.flight_time || '—'}</Table.Td>
+                            <Table.Td style={{ fontSize: '11px' }}>{flightName(flight)}</Table.Td>
+                            <Table.Td style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: '11px' }}>{flightDate(flight)}</Table.Td>
+                            <Table.Td style={{ fontSize: '11px' }}>{flightDrone(flight)}</Table.Td>
+                            <Table.Td style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: '11px' }}>{flightDuration(flight)}</Table.Td>
                             <Table.Td>
                               <Select
                                 size="xs"
@@ -736,9 +768,10 @@ export default function MissionNew() {
                                 onChange={() => isSelected ? handleRemoveFlight(selectedIdx) : handleAddFlight(flight, missionAircraft[0] || undefined)}
                               />
                             </Table.Td>
-                            <Table.Td style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: '11px' }}>{flight.date || flight.start_time || '—'}</Table.Td>
-                            <Table.Td>{flight.drone || flight.aircraft || '—'}</Table.Td>
-                            <Table.Td>{flight.duration || flight.flight_time || '—'}</Table.Td>
+                            <Table.Td style={{ fontSize: '11px' }}>{flightName(flight)}</Table.Td>
+                            <Table.Td style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: '11px' }}>{flightDate(flight)}</Table.Td>
+                            <Table.Td style={{ fontSize: '11px' }}>{flightDrone(flight)}</Table.Td>
+                            <Table.Td style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: '11px' }}>{flightDuration(flight)}</Table.Td>
                             <Table.Td>
                               {isSelected ? (
                                 <Select

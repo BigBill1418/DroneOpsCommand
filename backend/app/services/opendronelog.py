@@ -8,7 +8,13 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-FLIGHT_ENDPOINTS = ["/api/flights", "/flights", "/api/v1/flights"]
+# OpenDroneLog REST API endpoints (per official docs)
+# Listing:  GET /api/flights -> Flight[]
+# Detail:   GET /api/flight_data?flight_id={id}&max_points={n} -> { flight, telemetry, track, messages }
+# Import:   POST /api/import
+# Delete:   DELETE /api/flights/delete?flight_id={id}
+
+FLIGHT_LIST_ENDPOINTS = ["/api/flights", "/flights", "/api/v1/flights"]
 
 
 async def _get_opendronelog_url(db: AsyncSession | None = None) -> str:
@@ -40,8 +46,42 @@ def _extract_flights(data: object) -> list[dict]:
         for key in ("flights", "data", "results", "items"):
             if key in data and isinstance(data[key], list):
                 return data[key]
-        # Single flight object — not useful for listing
     return []
+
+
+def _normalize_flight(raw: dict) -> dict:
+    """Normalize an OpenDroneLog flight object to a consistent schema.
+
+    OpenDroneLog uses camelCase (id, fileName, displayName, droneModel,
+    durationSecs, totalDistance, maxAltitude, maxSpeed, startTime, homeLat,
+    homeLon, pointCount, notes, color, tags, droneSerial, batterySerial).
+
+    We produce a flat dict with both the original keys and normalized aliases
+    so the frontend can use predictable field names.
+    """
+    return {
+        # Preserve all original keys
+        **raw,
+        # Normalized aliases for frontend consumption
+        "id": raw.get("id"),
+        "name": raw.get("displayName") or raw.get("fileName") or raw.get("name") or raw.get("title") or "",
+        "file_name": raw.get("fileName") or raw.get("file_name") or "",
+        "display_name": raw.get("displayName") or raw.get("display_name") or "",
+        "drone_model": raw.get("droneModel") or raw.get("drone_model") or raw.get("drone") or raw.get("aircraft") or raw.get("model") or "",
+        "drone_serial": raw.get("droneSerial") or raw.get("drone_serial") or "",
+        "battery_serial": raw.get("batterySerial") or raw.get("battery_serial") or "",
+        "start_time": raw.get("startTime") or raw.get("start_time") or raw.get("date") or raw.get("created_at") or "",
+        "duration_secs": raw.get("durationSecs") or raw.get("duration_secs") or raw.get("duration") or raw.get("duration_seconds") or raw.get("flight_duration") or 0,
+        "total_distance": raw.get("totalDistance") or raw.get("total_distance") or raw.get("distance") or raw.get("distance_meters") or 0,
+        "max_altitude": raw.get("maxAltitude") or raw.get("max_altitude") or raw.get("max_alt") or raw.get("altitude_max") or 0,
+        "max_speed": raw.get("maxSpeed") or raw.get("max_speed") or 0,
+        "home_lat": raw.get("homeLat") or raw.get("home_lat") or None,
+        "home_lon": raw.get("homeLon") or raw.get("home_lon") or None,
+        "point_count": raw.get("pointCount") or raw.get("point_count") or 0,
+        "notes": raw.get("notes") or "",
+        "color": raw.get("color") or "",
+        "tags": raw.get("tags") or [],
+    }
 
 
 class OpenDroneLogClient:
@@ -61,7 +101,7 @@ class OpenDroneLogClient:
 
         async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
             last_error = None
-            for suffix in FLIGHT_ENDPOINTS:
+            for suffix in FLIGHT_LIST_ENDPOINTS:
                 url = f"{base_url}{suffix}"
                 try:
                     resp = await client.get(url)
@@ -73,8 +113,9 @@ class OpenDroneLogClient:
                         continue
                     data = resp.json()
                     flights = _extract_flights(data)
-                    logger.info("OpenDroneLog: %d flights from %s", len(flights), url)
-                    return flights
+                    normalized = [_normalize_flight(f) for f in flights]
+                    logger.info("OpenDroneLog: %d flights from %s", len(normalized), url)
+                    return normalized
                 except httpx.ConnectError as e:
                     raise ConnectionError(
                         f"Cannot connect to OpenDroneLog at {base_url}. "
@@ -97,32 +138,87 @@ class OpenDroneLogClient:
             return []
 
     async def get_flight(self, flight_id: str, db: AsyncSession | None = None) -> dict:
-        """Get detailed flight data including telemetry."""
+        """Get detailed flight data including telemetry.
+
+        OpenDroneLog uses: GET /api/flight_data?flight_id={id}&max_points={n}
+        Falls back to legacy patterns for compatibility.
+        """
         base_url = await self.get_url(db)
         if not base_url:
             return {}
         async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+            # Primary: OpenDroneLog's actual endpoint
             for pattern in [
+                f"{base_url}/api/flight_data?flight_id={flight_id}&max_points=5000",
+                f"{base_url}/api/flight_data?flight_id={flight_id}",
+                # Legacy fallbacks
                 f"{base_url}/api/flights/{flight_id}",
                 f"{base_url}/flights/{flight_id}",
                 f"{base_url}/api/v1/flights/{flight_id}",
             ]:
                 try:
                     resp = await client.get(pattern)
+                    if resp.status_code == 404:
+                        continue
                     resp.raise_for_status()
-                    return resp.json()
+                    data = resp.json()
+                    # OpenDroneLog returns { flight, telemetry, track, messages }
+                    if isinstance(data, dict) and "flight" in data:
+                        result = _normalize_flight(data["flight"])
+                        result["telemetry"] = data.get("telemetry", {})
+                        result["track"] = data.get("track", [])
+                        result["messages"] = data.get("messages", [])
+                        return result
+                    # Legacy format: just a flight object
+                    return _normalize_flight(data) if isinstance(data, dict) else data
                 except httpx.HTTPStatusError as e:
                     if e.response.status_code == 404:
                         continue
                     raise
+                except httpx.ConnectError:
+                    raise
+                except Exception as exc:
+                    logger.warning("OpenDroneLog get_flight error for %s: %s", pattern, exc)
+                    continue
             return {}
 
-    async def get_flight_track(self, flight_id: str, db: AsyncSession | None = None) -> list[dict]:
-        """Get GPS track data for a flight (lat, lng, alt arrays)."""
+    async def get_flight_track(self, flight_id: str, db: AsyncSession | None = None) -> list:
+        """Get GPS track data for a flight.
+
+        OpenDroneLog embeds track in the flight_data response as
+        track: [[lon, lat, alt], ...]. We convert to [{lat, lng, alt}, ...]
+        for the frontend map component.
+        """
         base_url = await self.get_url(db)
         if not base_url:
             return []
         async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+            # Primary: get from flight_data endpoint
+            for pattern in [
+                f"{base_url}/api/flight_data?flight_id={flight_id}&max_points=5000",
+                f"{base_url}/api/flight_data?flight_id={flight_id}",
+            ]:
+                try:
+                    resp = await client.get(pattern)
+                    if resp.status_code == 404:
+                        continue
+                    resp.raise_for_status()
+                    data = resp.json()
+                    if isinstance(data, dict):
+                        track = data.get("track", [])
+                        if track and isinstance(track, list):
+                            # ODL track format: [[lon, lat, alt], ...]
+                            if isinstance(track[0], (list, tuple)) and len(track[0]) >= 2:
+                                return [
+                                    {"lat": pt[1], "lng": pt[0], "alt": pt[2] if len(pt) > 2 else 0}
+                                    for pt in track
+                                ]
+                            return track
+                except Exception as exc:
+                    logger.warning("OpenDroneLog track error: %s", exc)
+                    continue
+
+            # Fallback: legacy endpoints
             for pattern in [
                 f"{base_url}/api/flights/{flight_id}/track",
                 f"{base_url}/flights/{flight_id}/track",
@@ -132,14 +228,18 @@ class OpenDroneLogClient:
                     resp = await client.get(pattern)
                     resp.raise_for_status()
                     return resp.json()
-                except httpx.HTTPStatusError as e:
-                    if e.response.status_code == 404:
-                        continue
-                    raise
+                except Exception:
+                    continue
 
-            # Fallback: extract from full flight data
+            # Last resort: extract from full flight data
             flight = await self.get_flight(flight_id, db)
-            return flight.get("track", flight.get("gps_data", []))
+            track = flight.get("track", flight.get("gps_data", []))
+            if track and isinstance(track, list) and isinstance(track[0], (list, tuple)):
+                return [
+                    {"lat": pt[1], "lng": pt[0], "alt": pt[2] if len(pt) > 2 else 0}
+                    for pt in track
+                ]
+            return track
 
     async def test_connection(self, db: AsyncSession | None = None) -> dict:
         """Test connection to OpenDroneLog and return status info."""
@@ -160,7 +260,7 @@ class OpenDroneLogClient:
                 }
 
             # Now try to find the flights endpoint
-            for suffix in FLIGHT_ENDPOINTS:
+            for suffix in FLIGHT_LIST_ENDPOINTS:
                 endpoint = f"{base_url}{suffix}"
                 try:
                     resp = await client.get(endpoint)
@@ -173,6 +273,7 @@ class OpenDroneLogClient:
                             "message": f"Connected. Found {count} flight(s).",
                             "url": base_url,
                             "api_endpoint": endpoint,
+                            "flight_count": count,
                         }
                 except Exception:
                     continue
