@@ -48,7 +48,11 @@ class OpenDroneLogClient:
             for url in endpoints:
                 try:
                     resp = await client.get(url)
-                    resp.raise_for_status()
+                    if resp.status_code >= 400:
+                        last_error = f"HTTP {resp.status_code} from {url}"
+                        if resp.status_code == 404:
+                            continue  # Try next endpoint
+                        continue  # Try next endpoint for any error
                     data = resp.json()
                     # Handle both array and paginated responses
                     if isinstance(data, list):
@@ -59,20 +63,17 @@ class OpenDroneLogClient:
                             if key in data and isinstance(data[key], list):
                                 return data[key]
                         return [data]  # Single flight response
-                except httpx.HTTPStatusError as e:
-                    last_error = e
-                    if e.response.status_code == 404:
-                        continue  # Try next endpoint
-                    raise
                 except httpx.ConnectError as e:
                     raise ConnectionError(
                         f"Cannot connect to OpenDroneLog at {base_url}. "
                         f"If OpenDroneLog is running on the host machine, use "
                         f"'http://host.docker.internal:<port>' as the URL. Error: {e}"
                     )
+                except Exception:
+                    continue  # Try next endpoint
 
             if last_error:
-                raise last_error
+                raise ConnectionError(f"No working flights endpoint found at {base_url}. Last error: {last_error}")
             return []
 
     async def get_flight(self, flight_id: str, db: AsyncSession | None = None) -> dict:

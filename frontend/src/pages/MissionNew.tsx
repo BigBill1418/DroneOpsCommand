@@ -34,6 +34,7 @@ import {
   IconDownload,
   IconUpload,
   IconPhoto,
+  IconRefresh,
 } from '@tabler/icons-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
@@ -118,6 +119,13 @@ export default function MissionNew() {
     api.get('/aircraft').then((r) => setAircraft(r.data)).catch(() => {});
     api.get('/rate-templates?active_only=true').then((r) => setRateTemplates(r.data)).catch(() => {});
   }, []);
+
+  // Load flights when step 2 (Flights) becomes active
+  useEffect(() => {
+    if (active === 1 && missionId && availableFlights.length === 0 && !flightsLoading) {
+      loadFlights();
+    }
+  }, [active, missionId]);
 
   const loadFlights = async () => {
     setFlightsLoading(true);
@@ -451,9 +459,21 @@ export default function MissionNew() {
 
               {/* Flight logs — scrollable table */}
               <Group justify="space-between" align="center">
-                <Text c="#e8edf2" fw={600} style={{ fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' }}>
-                  FLIGHT LOGS
-                </Text>
+                <Group gap="xs">
+                  <Text c="#e8edf2" fw={600} style={{ fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' }}>
+                    FLIGHT LOGS
+                  </Text>
+                  <ActionIcon
+                    variant="subtle"
+                    color="cyan"
+                    size="sm"
+                    onClick={loadFlights}
+                    loading={flightsLoading}
+                    title="Reload flights from OpenDroneLog"
+                  >
+                    <IconRefresh size={14} />
+                  </ActionIcon>
+                </Group>
                 {selectedFlights.length > 0 && (
                   <Badge color="cyan" variant="light" size="sm">{selectedFlights.length} selected</Badge>
                 )}
