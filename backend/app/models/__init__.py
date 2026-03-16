@@ -4,6 +4,7 @@ from app.models.aircraft import Aircraft
 from app.models.report import Report
 from app.models.invoice import Invoice, LineItem, LineItemCategory, RateTemplate
 from app.models.user import User
+from app.models.system_settings import SystemSetting
 
 __all__ = [
     "Customer",
@@ -19,4 +20,5 @@ __all__ = [
     "LineItemCategory",
     "RateTemplate",
     "User",
+    "SystemSetting",
 ]

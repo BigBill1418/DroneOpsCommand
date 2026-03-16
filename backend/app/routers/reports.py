@@ -269,6 +269,7 @@ async def send_report(
         customer_name=mission.customer.name,
         mission_title=mission.title,
         pdf_path=report.pdf_path,
+        db=db,
     )
 
     report.sent_at = datetime.utcnow()

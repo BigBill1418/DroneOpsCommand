@@ -200,6 +200,17 @@ async def seed_database(db: AsyncSession):
         if not result.scalar_one_or_none():
             db.add(RateTemplate(**tmpl_data))
 
+    # Migrate: rename Mini 4 Pro -> Mini 5 Pro with updated specs
+    result = await db.execute(
+        select(Aircraft).where(Aircraft.model_name == "DJI Mini 4 Pro")
+    )
+    old_mini = result.scalar_one_or_none()
+    if old_mini:
+        mini5_data = next(a for a in AIRCRAFT_SEED if a["model_name"] == "DJI Mini 5 Pro")
+        old_mini.model_name = mini5_data["model_name"]
+        old_mini.image_filename = mini5_data["image_filename"]
+        old_mini.specs = mini5_data["specs"]
+
     # Seed aircraft
     for aircraft_data in AIRCRAFT_SEED:
         result = await db.execute(

@@ -14,10 +14,12 @@ import {
   ActionIcon,
   Modal,
   Textarea,
+  NumberInput,
+  PasswordInput,
 } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
-import { IconCheck, IconX, IconPlus, IconEdit, IconTrash, IconCurrencyDollar } from '@tabler/icons-react';
+import { IconCheck, IconX, IconPlus, IconEdit, IconTrash, IconCurrencyDollar, IconMail, IconSend } from '@tabler/icons-react';
 import api from '../api/client';
 import { Aircraft, RateTemplate } from '../api/types';
 
@@ -37,6 +39,8 @@ export default function Settings() {
   const [rateTemplates, setRateTemplates] = useState<RateTemplate[]>([]);
   const [rateModal, setRateModal] = useState(false);
   const [editingRateId, setEditingRateId] = useState<string | null>(null);
+  const [smtpSaving, setSmtpSaving] = useState(false);
+  const [smtpTesting, setSmtpTesting] = useState(false);
 
   const aircraftForm = useForm({
     initialValues: { model_name: '', manufacturer: 'DJI', specs_json: '{}' },
@@ -46,10 +50,23 @@ export default function Settings() {
     initialValues: { name: '', description: '', category: 'other', default_quantity: 1, default_unit: '', default_rate: 0 },
   });
 
+  const smtpForm = useForm({
+    initialValues: {
+      smtp_host: '',
+      smtp_port: '587',
+      smtp_user: '',
+      smtp_password: '',
+      smtp_from_email: '',
+      smtp_from_name: '',
+      smtp_use_tls: 'true',
+    },
+  });
+
   useEffect(() => {
     api.get('/llm/status').then((r) => setLlmStatus(r.data)).catch(() => setLlmStatus({ status: 'offline' })).finally(() => setLlmLoading(false));
     api.get('/aircraft').then((r) => setAircraft(r.data)).catch(() => {});
     api.get('/rate-templates').then((r) => setRateTemplates(r.data)).catch(() => {});
+    api.get('/settings/smtp').then((r) => smtpForm.setValues(r.data)).catch(() => {});
   }, []);
 
   const handleSaveAircraft = async (values: typeof aircraftForm.values) => {
@@ -126,6 +143,37 @@ export default function Settings() {
     setRateTemplates((prev) => prev.filter((t) => t.id !== id));
   };
 
+  const handleSaveSmtp = async (values: typeof smtpForm.values) => {
+    setSmtpSaving(true);
+    try {
+      await api.put('/settings/smtp', values);
+      notifications.show({ title: 'Saved', message: 'SMTP settings updated', color: 'cyan' });
+      // Reload to get masked password
+      const r = await api.get('/settings/smtp');
+      smtpForm.setValues(r.data);
+    } catch {
+      notifications.show({ title: 'Error', message: 'Failed to save SMTP settings', color: 'red' });
+    } finally {
+      setSmtpSaving(false);
+    }
+  };
+
+  const handleTestSmtp = async () => {
+    setSmtpTesting(true);
+    try {
+      const r = await api.post('/settings/smtp/test');
+      if (r.data.status === 'ok') {
+        notifications.show({ title: 'Success', message: r.data.message, color: 'green' });
+      } else {
+        notifications.show({ title: 'SMTP Error', message: r.data.message, color: 'red' });
+      }
+    } catch {
+      notifications.show({ title: 'Error', message: 'Failed to test SMTP', color: 'red' });
+    } finally {
+      setSmtpTesting(false);
+    }
+  };
+
   const categoryLabels: Record<string, string> = {
     travel: 'Travel',
     billed_time: 'Billed Time',
@@ -170,13 +218,50 @@ export default function Settings() {
         )}
       </Card>
 
-      {/* Info Card */}
+      {/* SMTP Settings */}
       <Card padding="lg" radius="md" style={cardStyle}>
-        <Title order={3} c="#e8edf2" mb="md" style={{ letterSpacing: '1px' }}>CONNECTIONS</Title>
-        <Text c="#5a6478" size="sm">
-          OpenDroneLog URL and SMTP settings are configured via environment variables in docker-compose.yml.
-          Update your .env file and restart the containers to change these settings.
-        </Text>
+        <Group justify="space-between" mb="md">
+          <Group gap="sm">
+            <IconMail size={20} color="#00d4ff" />
+            <Title order={3} c="#e8edf2" style={{ letterSpacing: '1px' }}>SMTP / EMAIL</Title>
+          </Group>
+          <Button
+            leftSection={<IconSend size={14} />}
+            size="xs"
+            variant="light"
+            color="cyan"
+            loading={smtpTesting}
+            onClick={handleTestSmtp}
+          >
+            Send Test
+          </Button>
+        </Group>
+        <form onSubmit={smtpForm.onSubmit(handleSaveSmtp)}>
+          <Stack gap="sm">
+            <Group grow>
+              <TextInput label="SMTP Host" placeholder="smtp.gmail.com" {...smtpForm.getInputProps('smtp_host')} styles={inputStyles} />
+              <TextInput label="SMTP Port" placeholder="587" {...smtpForm.getInputProps('smtp_port')} styles={inputStyles} />
+            </Group>
+            <Group grow>
+              <TextInput label="Username" placeholder="user@example.com" {...smtpForm.getInputProps('smtp_user')} styles={inputStyles} />
+              <PasswordInput label="Password" placeholder="App password or SMTP key" {...smtpForm.getInputProps('smtp_password')} styles={inputStyles} />
+            </Group>
+            <Group grow>
+              <TextInput label="From Email" placeholder="reports@barnardhq.com" {...smtpForm.getInputProps('smtp_from_email')} styles={inputStyles} />
+              <TextInput label="From Name" placeholder="BarnardHQ Drone Operations" {...smtpForm.getInputProps('smtp_from_name')} styles={inputStyles} />
+            </Group>
+            <Switch
+              label="Use TLS"
+              checked={smtpForm.values.smtp_use_tls === 'true'}
+              onChange={(e) => smtpForm.setFieldValue('smtp_use_tls', e.currentTarget.checked ? 'true' : 'false')}
+              color="cyan"
+              styles={{ label: { color: '#5a6478', fontFamily: "'Share Tech Mono', monospace", fontSize: '11px', letterSpacing: '1px' } }}
+            />
+            <Button type="submit" color="cyan" loading={smtpSaving} styles={{ root: { fontFamily: "'Bebas Neue', sans-serif" } }}>
+              SAVE SMTP SETTINGS
+            </Button>
+          </Stack>
+        </form>
       </Card>
 
       {/* Aircraft Manager */}
