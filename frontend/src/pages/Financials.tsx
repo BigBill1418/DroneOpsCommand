@@ -15,15 +15,12 @@ import {
 import { notifications } from '@mantine/notifications';
 import {
   IconCash,
-  IconCoin,
   IconChartBar,
-  IconCheck,
-  IconClock,
   IconDrone,
   IconReceipt,
   IconSearch,
   IconTrendingUp,
-  IconUsers,
+  IconCalendar,
 } from '@tabler/icons-react';
 import api from '../api/client';
 
@@ -283,27 +280,13 @@ export default function Financials() {
         </Card>
       ) : (
         <>
-          {/* ===== Summary Stats Row 1 ===== */}
-          <SimpleGrid cols={{ base: 2, sm: 3, md: 5 }}>
+          {/* ===== Summary Stats ===== */}
+          <SimpleGrid cols={{ base: 2, sm: 3, md: 4 }}>
             <StatCard
               icon={IconCash}
-              label="Total Revenue"
+              label="Total Billed"
               value={formatCurrency(data.total_revenue)}
-              sub={`${data.invoiced_count} invoiced`}
-            />
-            <StatCard
-              icon={IconCheck}
-              label="Collected"
-              value={formatCurrency(data.total_paid)}
-              sub={`${data.paid_count} paid`}
-              color="#2ecc40"
-            />
-            <StatCard
-              icon={IconClock}
-              label="Outstanding"
-              value={formatCurrency(data.total_outstanding)}
-              sub={`${data.invoiced_count - data.paid_count} unpaid`}
-              color={data.total_outstanding > 0 ? '#ff6b6b' : '#5a6478'}
+              sub={`${data.invoiced_count} mission${data.invoiced_count !== 1 ? 's' : ''}`}
             />
             <StatCard
               icon={IconTrendingUp}
@@ -312,10 +295,16 @@ export default function Financials() {
             />
             <StatCard
               icon={IconReceipt}
-              label="Collection Rate"
-              value={`${data.collection_rate}%`}
-              sub={`${data.billable_missions} billable`}
-              color={data.collection_rate >= 80 ? '#2ecc40' : data.collection_rate >= 50 ? '#ffd43b' : '#ff6b6b'}
+              label="Billable Missions"
+              value={String(data.billable_missions)}
+              sub={`${data.invoiced_count} invoiced`}
+            />
+            <StatCard
+              icon={IconCalendar}
+              label="Prepaid"
+              value={String(data.paid_count)}
+              sub={data.paid_count > 0 ? formatCurrency(data.total_paid) : 'none'}
+              color="#2ecc40"
             />
           </SimpleGrid>
 
@@ -395,13 +384,12 @@ export default function Financials() {
                     <Table.Th>CUSTOMER</Table.Th>
                     <Table.Th>LOCATION</Table.Th>
                     <Table.Th style={{ textAlign: 'right' }}>AMOUNT</Table.Th>
-                    <Table.Th>STATUS</Table.Th>
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
                   {filtered.length === 0 ? (
                     <Table.Tr>
-                      <Table.Td colSpan={7}>
+                      <Table.Td colSpan={6}>
                         <Text c="#5a6478" ta="center" py="md">No invoiced missions found.</Text>
                       </Table.Td>
                     </Table.Tr>
@@ -427,18 +415,14 @@ export default function Financials() {
                           <Text size="xs" c="#5a6478" lineClamp={1}>{m.location || '—'}</Text>
                         </Table.Td>
                         <Table.Td style={{ textAlign: 'right' }}>
-                          <Text size="sm" c="#00d4ff" style={monoFont} fw={600}>
-                            {formatCurrency(m.invoice_total)}
-                          </Text>
-                        </Table.Td>
-                        <Table.Td>
-                          <Badge
-                            size="xs"
-                            color={m.paid ? 'green' : 'red'}
-                            variant="light"
-                          >
-                            {m.paid ? 'PAID' : 'UNPAID'}
-                          </Badge>
+                          <Group gap={6} justify="flex-end" wrap="nowrap">
+                            <Text size="sm" c="#00d4ff" style={monoFont} fw={600}>
+                              {formatCurrency(m.invoice_total)}
+                            </Text>
+                            {m.paid && (
+                              <Badge size="xs" color="green" variant="light">PREPAID</Badge>
+                            )}
+                          </Group>
                         </Table.Td>
                       </Table.Tr>
                     ))
