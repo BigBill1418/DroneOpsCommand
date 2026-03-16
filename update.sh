@@ -20,10 +20,11 @@ BRANCH="claude/drone-report-generator-qk9UM"
 echo "=== Fetching latest from $BRANCH ==="
 git fetch origin "$BRANCH"
 
-echo "=== Merging into main ==="
+echo "=== Syncing main to $BRANCH ==="
 git checkout main 2>/dev/null || git checkout -b main origin/main
-git merge --ff-only "origin/$BRANCH"
-git push origin main 2>/dev/null || true
+# Feature branch is source of truth — force main to match it
+git reset --hard "origin/$BRANCH"
+git push origin main --force 2>/dev/null || true
 CURRENT_COMMIT=$(git rev-parse HEAD)
 
 # Figure out what changed since last deploy
