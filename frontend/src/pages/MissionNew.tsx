@@ -677,6 +677,10 @@ export default function MissionNew() {
   const handleGeneratePDF = async () => {
     if (!missionId) return;
     try {
+      // Ensure invoice is persisted before PDF generation
+      if (form.values.is_billable && lineItems.filter((li) => li.description).length > 0) {
+        await handleSaveInvoice();
+      }
       // Save final report content
       if (reportContent) {
         await api.put(`/missions/${missionId}/report`, { final_content: reportContent });
@@ -1202,7 +1206,7 @@ export default function MissionNew() {
                   ))}
 
                   {lineItems.length > 0 && (
-                    <Text c="#00d4ff" ta="right" fw={700} style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: '20px' }}>
+                    <Text c="cyan" ta="right" fw={700} style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: '20px' }}>
                       TOTAL: ${lineItems.reduce((sum, item) => sum + (item.quantity || 0) * (item.unit_price || 0), 0).toFixed(2)}
                     </Text>
                   )}
@@ -1221,7 +1225,21 @@ export default function MissionNew() {
                 </>
               )}
 
-              <Button color="cyan" onClick={() => setActive(5)} styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}>
+              <Button
+                color="cyan"
+                onClick={async () => {
+                  if (form.values.is_billable) {
+                    const validItems = lineItems.filter((li) => li.description);
+                    if (validItems.length === 0) {
+                      notifications.show({ title: 'Invoice Required', message: 'Billable missions require at least one line item with a description.', color: 'red' });
+                      return;
+                    }
+                    await handleSaveInvoice();
+                  }
+                  setActive(5);
+                }}
+                styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}
+              >
                 CONTINUE TO REVIEW
               </Button>
             </Stack>
