@@ -40,6 +40,23 @@
         flight data, area coverage, imagery, and any applicable billing details.
       </p>
 
+      {% if download_link %}
+      <div style="background: linear-gradient(135deg, #050608 0%, #0e1117 100%); border-radius: 6px; padding: 20px; margin: 20px 0; text-align: center;">
+        <div style="font-family: 'Arial Black', Arial, sans-serif; font-size: 14px; color: #00d4ff; letter-spacing: 1px; margin-bottom: 8px;">
+          HIGH RESOLUTION FILES
+        </div>
+        <p style="font-size: 13px; color: #e8edf2; margin: 0 0 15px 0;">
+          Download all high-resolution images and video from your mission:
+        </p>
+        <a href="{{ download_link.url }}" style="display: inline-block; padding: 12px 30px; background: #00d4ff; color: #050608; font-family: 'Arial Black', Arial, sans-serif; font-size: 14px; letter-spacing: 2px; text-decoration: none; border-radius: 4px;">
+          DOWNLOAD FILES
+        </a>
+        <div style="font-size: 11px; color: #ff6b1a; margin-top: 10px;">
+          This link expires: {{ download_link.expires_at }}
+        </div>
+      </div>
+      {% endif %}
+
       <p style="font-size: 14px; color: #333; line-height: 1.6; margin: 0 0 15px 0;">
         If you have any questions or would like to discuss the results, please don't
         hesitate to reach out. We value your business and look forward to serving you again.

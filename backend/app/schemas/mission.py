@@ -54,6 +54,9 @@ class MissionUpdate(BaseModel):
     area_coordinates: dict | None = None
     status: MissionStatus | None = None
     is_billable: bool | None = None
+    unas_folder_path: str | None = None
+    download_link_url: str | None = None
+    download_link_expires_at: datetime | None = None
 
 
 class MissionResponse(BaseModel):
@@ -67,6 +70,9 @@ class MissionResponse(BaseModel):
     area_coordinates: dict | None
     status: MissionStatus
     is_billable: bool
+    unas_folder_path: str | None = None
+    download_link_url: str | None = None
+    download_link_expires_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
     flights: list[MissionFlightResponse] = []

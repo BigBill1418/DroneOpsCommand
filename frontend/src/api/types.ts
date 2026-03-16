@@ -46,6 +46,9 @@ export interface Mission {
   area_coordinates: Record<string, any> | null;
   status: string;
   is_billable: boolean;
+  unas_folder_path: string | null;
+  download_link_url: string | null;
+  download_link_expires_at: string | null;
   created_at: string;
   updated_at: string;
   flights: MissionFlight[];
@@ -62,6 +65,7 @@ export interface Report {
   flight_duration_total_seconds: number | null;
   map_image_path: string | null;
   pdf_path: string | null;
+  include_download_link: boolean;
   generated_at: string | null;
   sent_at: string | null;
 }

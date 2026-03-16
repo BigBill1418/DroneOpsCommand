@@ -6,6 +6,7 @@ import {
   Group,
   Loader,
   Stack,
+  Switch,
   Text,
   Textarea,
   Title,
@@ -14,6 +15,7 @@ import { notifications } from '@mantine/notifications';
 import {
   IconDownload,
   IconEdit,
+  IconLink,
   IconRobot,
   IconSend,
 } from '@tabler/icons-react';
@@ -45,6 +47,7 @@ export default function MissionDetail() {
   const [narrative, setNarrative] = useState('');
   const [reportContent, setReportContent] = useState('');
   const [generating, setGenerating] = useState(false);
+  const [includeDownloadLink, setIncludeDownloadLink] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -54,6 +57,7 @@ export default function MissionDetail() {
       setReport(r.data);
       setNarrative(r.data.user_narrative || '');
       setReportContent(r.data.final_content || '');
+      setIncludeDownloadLink(r.data.include_download_link || false);
     }).catch(() => {});
     api.get(`/missions/${id}/map`).then((r) => setMapGeojson(r.data)).catch(() => {});
     api.get(`/missions/${id}/map/coverage`).then((r) => setCoverage(r.data)).catch(() => {});
@@ -65,7 +69,7 @@ export default function MissionDetail() {
   const handleGenerate = async () => {
     setGenerating(true);
     try {
-      const resp = await api.post(`/missions/${id}/report/generate`, { user_narrative: narrative });
+      const resp = await api.post(`/missions/${id}/report/generate`, { user_narrative: narrative, include_download_link: includeDownloadLink });
       setReport(resp.data);
       setReportContent(resp.data.final_content || '');
       notifications.show({ title: 'Report Generated', message: 'Ready for review', color: 'cyan' });
@@ -160,6 +164,40 @@ export default function MissionDetail() {
         )}
       </Card>
 
+      {/* Download Link Status */}
+      {mission.download_link_url && (
+        <Card padding="lg" radius="md" style={cardStyle}>
+          <Group justify="space-between" align="center">
+            <div>
+              <Group gap="xs" mb={4}>
+                <IconLink size={16} color="#00d4ff" />
+                <Title order={3} c="#e8edf2" style={{ letterSpacing: '1px' }}>MISSION FOOTAGE DOWNLOAD</Title>
+              </Group>
+              <Text c="#5a6478" size="xs" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+                {mission.download_link_url}
+              </Text>
+            </div>
+            <Badge
+              color={mission.download_link_expires_at && new Date(mission.download_link_expires_at) > new Date() ? 'green' : 'red'}
+              variant="light"
+              size="lg"
+            >
+              {mission.download_link_expires_at && new Date(mission.download_link_expires_at) > new Date() ? 'LINK ACTIVE' : 'LINK EXPIRED'}
+            </Badge>
+          </Group>
+          {mission.unas_folder_path && (
+            <Text c="#5a6478" size="xs" mt="xs" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+              UNAS PATH: {mission.unas_folder_path}
+            </Text>
+          )}
+          {mission.download_link_expires_at && (
+            <Text c="#ff6b1a" size="xs" mt={4} style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+              EXPIRES: {new Date(mission.download_link_expires_at).toLocaleString()}
+            </Text>
+          )}
+        </Card>
+      )}
+
       {/* Report Editor */}
       <Card padding="lg" radius="md" style={cardStyle}>
         <Title order={3} c="#e8edf2" mb="md" style={{ letterSpacing: '1px' }}>OPERATIONS REPORT</Title>
@@ -170,6 +208,14 @@ export default function MissionDetail() {
             onChange={(e) => setNarrative(e.target.value)}
             minRows={4}
             styles={inputStyles}
+          />
+          <Switch
+            label="Include download link in report"
+            description={mission.download_link_url ? 'Client will see a download button for mission footage' : 'Set a download link URL when editing the mission first'}
+            color="cyan"
+            checked={includeDownloadLink}
+            onChange={(e) => setIncludeDownloadLink(e.currentTarget.checked)}
+            disabled={!mission.download_link_url}
           />
           <Button
             leftSection={generating ? <Loader size={14} color="white" /> : <IconRobot size={16} />}

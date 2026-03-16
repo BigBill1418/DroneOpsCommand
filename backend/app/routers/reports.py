@@ -104,6 +104,7 @@ async def generate_report(
     report = existing.scalar_one_or_none()
     if report:
         report.user_narrative = data.user_narrative
+        report.include_download_link = data.include_download_link
         report.ground_covered_acres = acres if acres > 0 else None
         report.flight_duration_total_seconds = total_duration if total_duration > 0 else None
         report.flight_distance_total_meters = total_distance if total_distance > 0 else None
@@ -112,6 +113,7 @@ async def generate_report(
         report = Report(
             mission_id=mission_id,
             user_narrative=data.user_narrative,
+            include_download_link=data.include_download_link,
             ground_covered_acres=acres if acres > 0 else None,
             flight_duration_total_seconds=total_duration if total_duration > 0 else None,
             flight_distance_total_meters=total_distance if total_distance > 0 else None,
@@ -275,6 +277,16 @@ async def generate_report_pdf(
     # Images
     image_list = [{"file_path": img.file_path, "caption": img.caption} for img in mission.images]
 
+    # Download link
+    download_link = None
+    if report.include_download_link and mission.download_link_url:
+        download_link = {
+            "url": mission.download_link_url,
+            "expires_at": mission.download_link_expires_at.strftime("%B %d, %Y at %I:%M %p")
+            if mission.download_link_expires_at
+            else "N/A",
+        }
+
     pdf_path = generate_pdf(
         mission=mission_dict,
         report=report_dict,
@@ -282,6 +294,7 @@ async def generate_report_pdf(
         aircraft_list=aircraft_list,
         image_paths=image_list,
         payment_links=payment_links,
+        download_link=download_link,
     )
 
     report.pdf_path = pdf_path
@@ -311,12 +324,23 @@ async def send_report(
     if not report or not report.pdf_path:
         raise HTTPException(status_code=400, detail="PDF not generated yet")
 
+    # Build download link for email
+    download_link = None
+    if report.include_download_link and mission.download_link_url:
+        download_link = {
+            "url": mission.download_link_url,
+            "expires_at": mission.download_link_expires_at.strftime("%B %d, %Y at %I:%M %p")
+            if mission.download_link_expires_at
+            else "N/A",
+        }
+
     await send_report_email(
         to_email=mission.customer.email,
         customer_name=mission.customer.name,
         mission_title=mission.title,
         pdf_path=report.pdf_path,
         db=db,
+        download_link=download_link,
     )
 
     report.sent_at = datetime.utcnow()

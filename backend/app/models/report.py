@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import String, Text, DateTime, Float, ForeignKey
+from sqlalchemy import String, Text, DateTime, Float, Boolean, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -23,6 +23,7 @@ class Report(Base):
     flight_distance_total_meters: Mapped[float | None] = mapped_column(Float, nullable=True)
     map_image_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
     pdf_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    include_download_link: Mapped[bool] = mapped_column(Boolean, default=False)
     generated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 

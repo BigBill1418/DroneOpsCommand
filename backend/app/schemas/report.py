@@ -6,11 +6,13 @@ from pydantic import BaseModel
 
 class ReportGenerateRequest(BaseModel):
     user_narrative: str
+    include_download_link: bool = False
 
 
 class ReportUpdateRequest(BaseModel):
     final_content: str | None = None
     user_narrative: str | None = None
+    include_download_link: bool | None = None
 
 
 class ReportResponse(BaseModel):
@@ -24,6 +26,7 @@ class ReportResponse(BaseModel):
     flight_distance_total_meters: float | None
     map_image_path: str | None
     pdf_path: str | None
+    include_download_link: bool = False
     generated_at: datetime | None
     sent_at: datetime | None
 

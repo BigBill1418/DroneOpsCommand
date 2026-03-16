@@ -56,6 +56,7 @@ async def send_report_email(
     mission_title: str,
     pdf_path: str,
     db: AsyncSession | None = None,
+    download_link: dict | None = None,
 ) -> bool:
     """Send report PDF to customer via email."""
 
@@ -80,6 +81,7 @@ async def send_report_email(
     html_body = template.render(
         customer_name=customer_name,
         mission_title=mission_title,
+        download_link=download_link,
     )
 
     msg = MIMEMultipart()

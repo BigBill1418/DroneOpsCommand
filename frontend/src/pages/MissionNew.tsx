@@ -137,6 +137,12 @@ export default function MissionNew() {
   const [paidInFull, setPaidInFull] = useState(false);
   const [invoiceExists, setInvoiceExists] = useState(false);
 
+  // UNAS Download Link
+  const [unasFolderPath, setUnasFolderPath] = useState('');
+  const [downloadLinkUrl, setDownloadLinkUrl] = useState('');
+  const [downloadLinkExpiresAt, setDownloadLinkExpiresAt] = useState<Date | null>(null);
+  const [includeDownloadLink, setIncludeDownloadLink] = useState(false);
+
   // Aircraft assigned to this mission
   const [missionAircraft, setMissionAircraft] = useState<string[]>([]);
 
@@ -181,6 +187,11 @@ export default function MissionNew() {
           is_billable: m.is_billable,
         });
 
+        // Populate UNAS download link fields
+        setUnasFolderPath(m.unas_folder_path || '');
+        setDownloadLinkUrl(m.download_link_url || '');
+        setDownloadLinkExpiresAt(m.download_link_expires_at ? new Date(m.download_link_expires_at) : null);
+
         // Populate flights from cached data
         const flights = m.flights.map((f) => ({
           ...(f.flight_data_cache || {}),
@@ -209,6 +220,7 @@ export default function MissionNew() {
           const reportResp = await api.get(`/missions/${editId}/report`);
           setNarrative(reportResp.data.user_narrative || '');
           setReportContent(reportResp.data.final_content || '');
+          setIncludeDownloadLink(reportResp.data.include_download_link || false);
         } catch {}
 
         // Load invoice
@@ -344,21 +356,22 @@ export default function MissionNew() {
   const handleCreateMission = async () => {
     const values = form.values;
     try {
+      const missionPayload = {
+        ...values,
+        customer_id: values.customer_id || null,
+        mission_date: values.mission_date?.toISOString().split('T')[0] || null,
+        unas_folder_path: unasFolderPath || null,
+        download_link_url: downloadLinkUrl || null,
+        download_link_expires_at: downloadLinkExpiresAt?.toISOString() || null,
+      };
+
       if (isEditing && missionId) {
         // Update existing mission
-        await api.put(`/missions/${missionId}`, {
-          ...values,
-          customer_id: values.customer_id || null,
-          mission_date: values.mission_date?.toISOString().split('T')[0] || null,
-        });
+        await api.put(`/missions/${missionId}`, missionPayload);
         notifications.show({ title: 'Mission Updated', message: values.title, color: 'cyan' });
       } else {
         // Create new mission
-        const resp = await api.post('/missions', {
-          ...values,
-          customer_id: values.customer_id || null,
-          mission_date: values.mission_date?.toISOString().split('T')[0] || null,
-        });
+        const resp = await api.post('/missions', missionPayload);
         setMissionId(resp.data.id);
         notifications.show({ title: 'Mission Created', message: resp.data.title, color: 'cyan' });
       }
@@ -550,6 +563,7 @@ export default function MissionNew() {
     try {
       const resp = await api.post(`/missions/${missionId}/report/generate`, {
         user_narrative: narrative,
+        include_download_link: includeDownloadLink,
       });
       const taskId = resp.data.task_id;
       if (!taskId) {
@@ -737,6 +751,46 @@ export default function MissionNew() {
                 checked={form.values.is_billable}
                 onChange={(e) => form.setFieldValue('is_billable', e.currentTarget.checked)}
               />
+
+              {/* UNAS Download Link */}
+              <Text c="#00d4ff" fw={600} mt="md" style={{ fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px', fontSize: '14px' }}>
+                MISSION FOOTAGE (UNAS)
+              </Text>
+              <TextInput
+                label="UNAS Folder Path"
+                placeholder="/missions/2024-03-15-solar-inspection/"
+                value={unasFolderPath}
+                onChange={(e) => setUnasFolderPath(e.currentTarget.value)}
+                styles={inputStyles}
+              />
+              <TextInput
+                label="Download Link URL"
+                placeholder="Paste share link from UNAS web interface"
+                value={downloadLinkUrl}
+                onChange={(e) => setDownloadLinkUrl(e.currentTarget.value)}
+                styles={inputStyles}
+              />
+              {downloadLinkUrl && (
+                <DateInput
+                  label="Link Expires At"
+                  value={downloadLinkExpiresAt}
+                  onChange={setDownloadLinkExpiresAt}
+                  styles={inputStyles}
+                />
+              )}
+              {downloadLinkUrl && downloadLinkExpiresAt && (
+                <Badge
+                  color={new Date() < downloadLinkExpiresAt ? 'green' : 'red'}
+                  variant="light"
+                  size="sm"
+                >
+                  {new Date() < downloadLinkExpiresAt ? 'Link Active' : 'Link Expired'}
+                </Badge>
+              )}
+              <Text c="#5a6478" size="xs" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+                Create a share link in your UNAS web interface, then paste the URL here.
+              </Text>
+
               <Button color="cyan" onClick={handleCreateMission} styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}>
                 {isEditing ? 'SAVE & CONTINUE' : 'CREATE & CONTINUE'}
               </Button>
@@ -979,6 +1033,14 @@ export default function MissionNew() {
                 onChange={(e) => setNarrative(e.target.value)}
                 minRows={5}
                 styles={inputStyles}
+              />
+              <Switch
+                label="Include download link in report"
+                description={downloadLinkUrl ? 'Client will see a download button for mission footage' : 'Set a download link URL in Step 1 first'}
+                color="cyan"
+                checked={includeDownloadLink}
+                onChange={(e) => setIncludeDownloadLink(e.currentTarget.checked)}
+                disabled={!downloadLinkUrl}
               />
               <Button
                 leftSection={generating ? <Loader size={16} color="white" /> : <IconRobot size={16} />}

@@ -454,6 +454,27 @@
 </div>
 {% endif %}
 
+<!-- Mission Footage Download -->
+{% if download_link %}
+<div class="section">
+  <h1>MISSION FOOTAGE DOWNLOAD</h1>
+  <div style="padding: 20px; background: linear-gradient(135deg, #050608 0%, #0e1117 100%); border-radius: 6px; text-align: center;">
+    <div style="font-family: 'Bebas Neue', sans-serif; font-size: 14pt; color: #00d4ff; letter-spacing: 1px; margin-bottom: 8px;">
+      HIGH RESOLUTION FILES
+    </div>
+    <p style="font-size: 10pt; color: #e8edf2; margin-bottom: 12px;">
+      Download all high-resolution images and video from this mission:
+    </p>
+    <a href="{{ download_link.url }}" style="display: inline-block; padding: 10px 30px; background: #00d4ff; color: #050608; font-family: 'Bebas Neue', sans-serif; font-size: 14pt; letter-spacing: 2px; text-decoration: none; border-radius: 4px;">
+      DOWNLOAD FILES
+    </a>
+    <div style="font-family: 'Share Tech Mono', monospace; font-size: 8pt; color: #ff6b1a; margin-top: 10px;">
+      THIS LINK EXPIRES: {{ download_link.expires_at }}
+    </div>
+  </div>
+</div>
+{% endif %}
+
 <!-- Invoice -->
 {% if invoice %}
 <div class="section" style="page-break-before: always;">
