@@ -19,7 +19,7 @@ import {
 } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
-import { IconCheck, IconX, IconPlus, IconEdit, IconTrash, IconCurrencyDollar, IconMail, IconSend, IconBrandPaypal, IconCash, IconDrone, IconPlugConnected } from '@tabler/icons-react';
+import { IconCheck, IconX, IconPlus, IconEdit, IconTrash, IconCurrencyDollar, IconMail, IconSend, IconBrandPaypal, IconCash, IconDrone, IconPlugConnected, IconMapPin, IconSearch } from '@tabler/icons-react';
 import api from '../api/client';
 import { Aircraft, RateTemplate } from '../api/types';
 
@@ -45,6 +45,9 @@ export default function Settings() {
   const [odlSaving, setOdlSaving] = useState(false);
   const [odlTesting, setOdlTesting] = useState(false);
   const [odlStatus, setOdlStatus] = useState<any>(null);
+  const [weatherSaving, setWeatherSaving] = useState(false);
+  const [weatherLooking, setWeatherLooking] = useState(false);
+  const [weatherQuery, setWeatherQuery] = useState('');
 
   const aircraftForm = useForm({
     initialValues: { model_name: '', manufacturer: 'DJI', specs_json: '{}' },
@@ -74,6 +77,10 @@ export default function Settings() {
     initialValues: { opendronelog_url: '' },
   });
 
+  const weatherForm = useForm({
+    initialValues: { weather_lat: '', weather_lon: '', weather_label: '', weather_airport_icao: '' },
+  });
+
   useEffect(() => {
     api.get('/llm/status').then((r) => setLlmStatus(r.data)).catch(() => setLlmStatus({ status: 'offline' })).finally(() => setLlmLoading(false));
     api.get('/aircraft').then((r) => setAircraft(r.data)).catch(() => {});
@@ -81,6 +88,7 @@ export default function Settings() {
     api.get('/settings/smtp').then((r) => smtpForm.setValues(r.data)).catch(() => {});
     api.get('/settings/payment').then((r) => paymentForm.setValues(r.data)).catch(() => {});
     api.get('/settings/opendronelog').then((r) => odlForm.setValues(r.data)).catch(() => {});
+    api.get('/settings/weather').then((r) => weatherForm.setValues(r.data)).catch(() => {});
   }, []);
 
   const handleSaveAircraft = async (values: typeof aircraftForm.values) => {
@@ -225,6 +233,41 @@ export default function Settings() {
     }
   };
 
+  const handleSaveWeather = async (values: typeof weatherForm.values) => {
+    setWeatherSaving(true);
+    try {
+      await api.put('/settings/weather', values);
+      notifications.show({ title: 'Saved', message: `Weather location set to ${values.weather_label || 'configured coordinates'}`, color: 'cyan' });
+    } catch {
+      notifications.show({ title: 'Error', message: 'Failed to save weather location', color: 'red' });
+    } finally {
+      setWeatherSaving(false);
+    }
+  };
+
+  const handleLookupLocation = async () => {
+    if (!weatherQuery.trim()) return;
+    setWeatherLooking(true);
+    try {
+      const r = await api.post('/settings/weather/lookup', { query: weatherQuery.trim() });
+      if (r.data.error) {
+        notifications.show({ title: 'Not Found', message: r.data.error, color: 'orange' });
+      } else {
+        weatherForm.setValues({
+          weather_lat: r.data.lat,
+          weather_lon: r.data.lon,
+          weather_label: r.data.label,
+          weather_airport_icao: r.data.airport_icao,
+        });
+        notifications.show({ title: 'Location Found', message: `${r.data.label} — nearest airport: ${r.data.airport_icao || 'none found'}`, color: 'green' });
+      }
+    } catch {
+      notifications.show({ title: 'Error', message: 'Location lookup failed', color: 'red' });
+    } finally {
+      setWeatherLooking(false);
+    }
+  };
+
   const categoryLabels: Record<string, string> = {
     travel: 'Travel',
     billed_time: 'Billed Time',
@@ -310,6 +353,54 @@ export default function Settings() {
             )}
             <Button type="submit" color="cyan" loading={odlSaving} styles={{ root: { fontFamily: "'Bebas Neue', sans-serif" } }}>
               SAVE
+            </Button>
+          </Stack>
+        </form>
+      </Card>
+
+      {/* Weather / Airspace Location */}
+      <Card padding="lg" radius="md" style={cardStyle}>
+        <Group gap="sm" mb="md">
+          <IconMapPin size={20} color="#00d4ff" />
+          <Title order={3} c="#e8edf2" style={{ letterSpacing: '1px' }}>WEATHER & AIRSPACE LOCATION</Title>
+        </Group>
+        <Text c="#5a6478" size="xs" mb="sm" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+          Set the location for dashboard weather, METAR, TFR, and NOTAM monitoring. Enter a zip code or city name to auto-fill.
+        </Text>
+        <Group mb="md" align="end">
+          <TextInput
+            label="Search by Zip Code or City"
+            placeholder="97402 or Eugene, OR"
+            value={weatherQuery}
+            onChange={(e) => setWeatherQuery(e.currentTarget.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleLookupLocation(); } }}
+            styles={inputStyles}
+            style={{ flex: 1 }}
+          />
+          <Button
+            leftSection={<IconSearch size={14} />}
+            color="cyan"
+            variant="light"
+            loading={weatherLooking}
+            onClick={handleLookupLocation}
+            styles={{ root: { fontFamily: "'Bebas Neue', sans-serif" } }}
+          >
+            LOOKUP
+          </Button>
+        </Group>
+        <form onSubmit={weatherForm.onSubmit(handleSaveWeather)}>
+          <Stack gap="sm">
+            <TextInput label="Location Label" placeholder="Eugene, OR" {...weatherForm.getInputProps('weather_label')} styles={inputStyles} />
+            <Group grow>
+              <TextInput label="Latitude" placeholder="44.0500" {...weatherForm.getInputProps('weather_lat')} styles={inputStyles} />
+              <TextInput label="Longitude" placeholder="-123.0900" {...weatherForm.getInputProps('weather_lon')} styles={inputStyles} />
+            </Group>
+            <TextInput label="Nearest Airport (ICAO)" placeholder="KEUG" {...weatherForm.getInputProps('weather_airport_icao')} styles={inputStyles} />
+            <Text c="#5a6478" size="xs" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+              ICAO airport code is used for METAR, TFR, and NOTAM data. The lookup fills this automatically.
+            </Text>
+            <Button type="submit" color="cyan" loading={weatherSaving} styles={{ root: { fontFamily: "'Bebas Neue', sans-serif" } }}>
+              SAVE WEATHER LOCATION
             </Button>
           </Stack>
         </form>

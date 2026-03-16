@@ -28,6 +28,13 @@ PAYMENT_KEYS = [
     "venmo_link",
 ]
 
+WEATHER_KEYS = [
+    "weather_lat",
+    "weather_lon",
+    "weather_label",
+    "weather_airport_icao",
+]
+
 
 class OpenDroneLogSettings(BaseModel):
     opendronelog_url: str = ""
@@ -36,6 +43,13 @@ class OpenDroneLogSettings(BaseModel):
 class PaymentSettings(BaseModel):
     paypal_link: str = ""
     venmo_link: str = ""
+
+
+class WeatherLocationSettings(BaseModel):
+    weather_lat: str = ""
+    weather_lon: str = ""
+    weather_label: str = ""
+    weather_airport_icao: str = ""
 
 
 class SmtpSettings(BaseModel):
@@ -194,3 +208,92 @@ async def update_payment_settings(
 
     await db.commit()
     return {"status": "ok"}
+
+
+@router.get("/weather")
+async def get_weather_settings(
+    _user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get weather monitoring location settings."""
+    result = await db.execute(
+        select(SystemSetting).where(SystemSetting.key.in_(WEATHER_KEYS))
+    )
+    rows = {r.key: r.value for r in result.scalars().all()}
+    return {key: rows.get(key, "") for key in WEATHER_KEYS}
+
+
+@router.put("/weather")
+async def update_weather_settings(
+    payload: WeatherLocationSettings,
+    _user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update weather monitoring location."""
+    for key, value in payload.model_dump().items():
+        result = await db.execute(
+            select(SystemSetting).where(SystemSetting.key == key)
+        )
+        existing = result.scalar_one_or_none()
+        if existing:
+            existing.value = value
+        else:
+            db.add(SystemSetting(key=key, value=value))
+
+    await db.commit()
+    return {"status": "ok"}
+
+
+@router.post("/weather/lookup")
+async def lookup_weather_location(
+    payload: dict,
+    _user: User = Depends(get_current_user),
+):
+    """Look up coordinates and nearest airport from a zip code or place name."""
+    import httpx
+
+    query = payload.get("query", "").strip()
+    if not query:
+        return {"error": "No query provided"}
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                "https://nominatim.openstreetmap.org/search",
+                params={"q": query, "format": "json", "limit": 1, "countrycodes": "us"},
+                headers={"User-Agent": "DroneOpsReport/1.0"},
+            )
+            resp.raise_for_status()
+            results = resp.json()
+            if not results:
+                return {"error": "Location not found"}
+
+            lat = float(results[0]["lat"])
+            lon = float(results[0]["lon"])
+            display_name = results[0].get("display_name", query)
+            parts = display_name.split(",")
+            label = ", ".join(p.strip() for p in parts[:2]) if len(parts) >= 2 else display_name
+
+            # Find nearest airport for METAR/TFR/NOTAM data
+            airport_icao = ""
+            try:
+                airport_resp = await client.get(
+                    "https://aviationweather.gov/api/data/stationinfo",
+                    params={"bbox": f"{lat-0.5},{lon-0.5},{lat+0.5},{lon+0.5}", "format": "json"},
+                )
+                if airport_resp.status_code == 200:
+                    stations = airport_resp.json()
+                    if isinstance(stations, list) and stations:
+                        best = min(stations, key=lambda s: (s.get("lat", 0) - lat)**2 + (s.get("lon", 0) - lon)**2)
+                        airport_icao = best.get("icaoId", "")
+            except Exception:
+                pass
+
+            return {
+                "lat": f"{lat:.4f}",
+                "lon": f"{lon:.4f}",
+                "label": label,
+                "airport_icao": airport_icao,
+            }
+    except Exception as exc:
+        return {"error": str(exc)}

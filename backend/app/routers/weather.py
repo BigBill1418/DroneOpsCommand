@@ -6,19 +6,47 @@ from datetime import datetime
 
 import httpx
 from fastapi import APIRouter, Depends
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.jwt import get_current_user
+from app.database import get_db
+from app.models.system_settings import SystemSetting
 from app.models.user import User
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/weather", tags=["weather"])
 
-# 97402 = Eugene, OR
+# Fallback defaults — overridden by Settings > Weather Location
 DEFAULT_LAT = 44.05
 DEFAULT_LON = -123.09
-DEFAULT_LABEL = "Eugene, OR 97402"
-NEAREST_AIRPORT = "KEUG"  # Mahlon Sweet Field
+DEFAULT_LABEL = "Eugene, OR"
+NEAREST_AIRPORT = "KEUG"
+
+
+async def _load_weather_location(db: AsyncSession) -> tuple[float, float, str, str]:
+    """Load configured weather location from DB, falling back to defaults."""
+    result = await db.execute(
+        select(SystemSetting).where(
+            SystemSetting.key.in_(["weather_lat", "weather_lon", "weather_label", "weather_airport_icao"])
+        )
+    )
+    rows = {r.key: r.value for r in result.scalars().all()}
+
+    try:
+        lat = float(rows["weather_lat"]) if rows.get("weather_lat") else DEFAULT_LAT
+    except (ValueError, TypeError):
+        lat = DEFAULT_LAT
+    try:
+        lon = float(rows["weather_lon"]) if rows.get("weather_lon") else DEFAULT_LON
+    except (ValueError, TypeError):
+        lon = DEFAULT_LON
+
+    label = rows.get("weather_label") or DEFAULT_LABEL
+    airport = rows.get("weather_airport_icao") or NEAREST_AIRPORT
+
+    return lat, lon, label, airport
 
 # Wind direction labels
 WIND_DIRS = [
@@ -56,17 +84,20 @@ FLIGHT_CAT_INFO = {
 @router.get("/current")
 async def get_weather_and_airspace(
     _user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
-    """Fetch current weather (Open-Meteo + METAR) and FAA data for ops area."""
-    weather = await _fetch_weather()
-    metar = await _fetch_metar()
-    tfrs = await _fetch_tfrs()
-    notams = await _fetch_notams()
-    alerts = await _fetch_nws_alerts()
+    """Fetch current weather (Open-Meteo + METAR) and FAA data for configured location."""
+    lat, lon, label, airport = await _load_weather_location(db)
+
+    weather = await _fetch_weather(lat, lon)
+    metar = await _fetch_metar(airport)
+    tfrs = await _fetch_tfrs(airport)
+    notams = await _fetch_notams(airport)
+    alerts = await _fetch_nws_alerts(lat, lon)
 
     return {
-        "location": DEFAULT_LABEL,
-        "airport": NEAREST_AIRPORT,
+        "location": label,
+        "airport": airport,
         "weather": weather,
         "metar": metar,
         "tfrs": tfrs,
@@ -76,11 +107,11 @@ async def get_weather_and_airspace(
     }
 
 
-async def _fetch_weather() -> dict:
+async def _fetch_weather(lat: float, lon: float) -> dict:
     """Fetch current weather from Open-Meteo (free, no API key)."""
     url = (
         "https://api.open-meteo.com/v1/forecast"
-        f"?latitude={DEFAULT_LAT}&longitude={DEFAULT_LON}"
+        f"?latitude={lat}&longitude={lon}"
         "&current=temperature_2m,relative_humidity_2m,weather_code,"
         "wind_speed_10m,wind_direction_10m,wind_gusts_10m,"
         "cloud_cover,visibility,pressure_msl"
@@ -116,7 +147,7 @@ async def _fetch_weather() -> dict:
         return {"error": str(exc)}
 
 
-async def _fetch_metar() -> dict:
+async def _fetch_metar(airport: str) -> dict:
     """Fetch METAR from AviationWeather.gov (free, no key).
 
     Provides official aviation obs including flight category (VFR/IFR).
@@ -125,7 +156,7 @@ async def _fetch_metar() -> dict:
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.get(
                 "https://aviationweather.gov/api/data/metar",
-                params={"ids": NEAREST_AIRPORT, "format": "json"},
+                params={"ids": airport, "format": "json"},
             )
             if resp.status_code != 200:
                 return {"error": f"HTTP {resp.status_code}"}
@@ -146,7 +177,7 @@ async def _fetch_metar() -> dict:
                 gust_kt = int(gust_match.group(1))
 
             return {
-                "station": obs.get("icaoId", NEAREST_AIRPORT),
+                "station": obs.get("icaoId", airport),
                 "station_name": obs.get("name", ""),
                 "report_time": obs.get("reportTime", ""),
                 "raw_metar": raw,
@@ -167,15 +198,14 @@ async def _fetch_metar() -> dict:
         return {"error": str(exc)}
 
 
-async def _fetch_tfrs() -> list[dict]:
+async def _fetch_tfrs(airport: str) -> list[dict]:
     """Fetch active FAA TFRs from AviationWeather.gov (official, reliable)."""
     try:
         async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
-            # Use AviationWeather.gov TFR/NOTAM endpoint filtered for TFRs near our area
             resp = await client.get(
                 "https://aviationweather.gov/api/data/notam",
                 params={
-                    "icao": NEAREST_AIRPORT,
+                    "icao": airport,
                     "format": "json",
                     "type": "tfr",
                 },
@@ -226,24 +256,23 @@ async def _fetch_tfrs_fallback() -> list[dict]:
         return [{"status": f"TFR feeds unavailable — check tfr.faa.gov manually"}]
 
 
-async def _fetch_notams() -> list[dict]:
+async def _fetch_notams(airport: str) -> list[dict]:
     """Fetch NOTAMs from AviationWeather.gov (official FAA source, free, no key)."""
     try:
         async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
             resp = await client.get(
                 "https://aviationweather.gov/api/data/notam",
                 params={
-                    "icao": NEAREST_AIRPORT,
+                    "icao": airport,
                     "format": "json",
                 },
             )
             if resp.status_code != 200:
-                # Fallback to aviationapi.com
-                return await _fetch_notams_fallback()
+                return await _fetch_notams_fallback(airport)
 
             data = resp.json()
             if not data or not isinstance(data, list):
-                return await _fetch_notams_fallback()
+                return await _fetch_notams_fallback(airport)
 
             notams = []
             for notam in data[:8]:
@@ -256,29 +285,29 @@ async def _fetch_notams() -> list[dict]:
                 })
 
             if not notams:
-                return [{"status": f"No active NOTAMs for {NEAREST_AIRPORT}"}]
+                return [{"status": f"No active NOTAMs for {airport}"}]
 
             return notams
     except Exception as exc:
         logger.warning("Failed to fetch NOTAMs from AviationWeather: %s", exc)
-        return await _fetch_notams_fallback()
+        return await _fetch_notams_fallback(airport)
 
 
-async def _fetch_notams_fallback() -> list[dict]:
+async def _fetch_notams_fallback(airport: str) -> list[dict]:
     """Fallback: try aviationapi.com for NOTAMs."""
     try:
         async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
             resp = await client.get(
                 "https://api.aviationapi.com/v1/notams",
-                params={"apt": NEAREST_AIRPORT},
+                params={"apt": airport},
             )
             if resp.status_code != 200:
-                return [{"status": f"No active NOTAMs for {NEAREST_AIRPORT}"}]
+                return [{"status": f"No active NOTAMs for {airport}"}]
 
             data = resp.json()
-            keug_notams = data.get(NEAREST_AIRPORT, data if isinstance(data, list) else [])
+            airport_notams = data.get(airport, data if isinstance(data, list) else [])
             notams = []
-            for notam in keug_notams[:8]:
+            for notam in airport_notams[:8]:
                 notams.append({
                     "id": notam.get("notam_id", notam.get("id", "")),
                     "type": notam.get("classification", notam.get("type", "NOTAM")),
@@ -288,21 +317,21 @@ async def _fetch_notams_fallback() -> list[dict]:
                 })
 
             if not notams:
-                return [{"status": f"No active NOTAMs for {NEAREST_AIRPORT}"}]
+                return [{"status": f"No active NOTAMs for {airport}"}]
 
             return notams
     except Exception as exc:
         logger.warning("NOTAM fallback also failed: %s", exc)
-        return [{"status": f"NOTAM feeds unavailable — check NOTAMs manually"}]
+        return [{"status": "NOTAM feeds unavailable — check NOTAMs manually"}]
 
 
-async def _fetch_nws_alerts() -> list[dict]:
+async def _fetch_nws_alerts(lat: float, lon: float) -> list[dict]:
     """Fetch active NWS weather alerts for the area (free, no key)."""
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.get(
                 "https://api.weather.gov/alerts/active",
-                params={"point": f"{DEFAULT_LAT},{DEFAULT_LON}"},
+                params={"point": f"{lat},{lon}"},
                 headers={"User-Agent": "(DroneOpsReport, ops@barnardhq.com)"},
             )
             if resp.status_code != 200:
