@@ -58,19 +58,19 @@ function formatDurationLong(seconds: number): string {
 
 function formatDistance(meters: number | null | undefined): string {
   if (!meters && meters !== 0) return '—';
-  const m = Number(meters);
-  if (m >= 1000) return `${(m / 1000).toFixed(2)} km`;
-  return `${Math.round(m)} m`;
+  const feet = Number(meters) * 3.28084;
+  if (feet >= 5280) return `${(feet / 5280).toFixed(2)} mi`;
+  return `${Math.round(feet)} ft`;
 }
 
 function formatAltitude(meters: number | null | undefined): string {
   if (!meters && meters !== 0) return '—';
-  return `${Math.round(Number(meters))} m`;
+  return `${Math.round(Number(meters) * 3.28084)} ft`;
 }
 
 function formatSpeed(ms: number | null | undefined): string {
   if (!ms && ms !== 0) return '—';
-  return `${(Number(ms) * 3.6).toFixed(1)} km/h`;
+  return `${(Number(ms) * 2.23694).toFixed(1)} mph`;
 }
 
 function formatDate(dateStr: string | null | undefined): string {

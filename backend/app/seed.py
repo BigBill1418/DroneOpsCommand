@@ -16,14 +16,14 @@ AIRCRAFT_SEED = [
         "image_filename": "dji_m30t.svg",
         "specs": {
             "max_flight_time": "41 min",
-            "max_speed": "51 mph (82 km/h)",
+            "max_speed": "51 mph",
             "camera": "48MP Wide + 12MP Zoom (16x optical)",
             "thermal": "640×512 Radiometric Thermal",
             "sensors": "FPV, Infrared, Visual, Laser Rangefinder",
-            "weight": "3.77 kg (with batteries)",
+            "weight": "8.3 lbs (with batteries)",
             "ip_rating": "IP55",
-            "wind_resistance": "33 mph (15 m/s)",
-            "transmission": "O3 Enterprise, 15 km range",
+            "wind_resistance": "33 mph",
+            "transmission": "O3 Enterprise, 9.3 mi range",
         },
     },
     {
@@ -32,14 +32,14 @@ AIRCRAFT_SEED = [
         "image_filename": "dji_m4td.svg",
         "specs": {
             "max_flight_time": "38 min",
-            "max_speed": "50 mph (80 km/h)",
+            "max_speed": "50 mph",
             "camera": "Wide + Zoom + Thermal + Laser Rangefinder",
             "thermal": "High-res Radiometric Thermal",
             "sensors": "Omnidirectional Obstacle Sensing",
-            "weight": "2.3 kg",
+            "weight": "5.1 lbs",
             "ip_rating": "IP55",
-            "wind_resistance": "33 mph (15 m/s)",
-            "transmission": "O4 Enterprise, 20 km range",
+            "wind_resistance": "33 mph",
+            "transmission": "O4 Enterprise, 12.4 mi range",
         },
     },
     {
@@ -48,13 +48,13 @@ AIRCRAFT_SEED = [
         "image_filename": "dji_mavic3pro.svg",
         "specs": {
             "max_flight_time": "43 min",
-            "max_speed": "47 mph (75.6 km/h)",
+            "max_speed": "47 mph",
             "camera": "4/3 CMOS Hasselblad + 1/1.3\" Medium Tele + 1/2\" Tele",
             "sensors": "Omnidirectional Obstacle Sensing, APAS 5.0",
-            "weight": "958 g",
+            "weight": "2.1 lbs",
             "video": "5.1K/50fps, 4K/120fps, Apple ProRes",
-            "wind_resistance": "27 mph (12 m/s)",
-            "transmission": "O3+, 15 km range",
+            "wind_resistance": "27 mph",
+            "transmission": "O3+, 9.3 mi range",
         },
     },
     {
@@ -63,13 +63,13 @@ AIRCRAFT_SEED = [
         "image_filename": "dji_avata2.svg",
         "specs": {
             "max_flight_time": "23 min",
-            "max_speed": "60 mph (97 km/h)",
+            "max_speed": "60 mph",
             "camera": "1/1.3\" CMOS, 12MP, 4K/60fps",
             "sensors": "Downward Vision, Infrared ToF",
-            "weight": "377 g",
+            "weight": "13.3 oz",
             "fov": "155° Super-Wide FOV",
             "stabilization": "RockSteady + HorizonSteady",
-            "transmission": "O4, 13 km range",
+            "transmission": "O4, 8.1 mi range",
         },
     },
     {
@@ -78,13 +78,13 @@ AIRCRAFT_SEED = [
         "image_filename": "dji_fpv.svg",
         "specs": {
             "max_flight_time": "20 min",
-            "max_speed": "87 mph (140 km/h)",
+            "max_speed": "87 mph",
             "camera": "1/2.3\" CMOS, 12MP, 4K/60fps",
             "sensors": "Forward + Downward Obstacle Sensing",
-            "weight": "795 g",
+            "weight": "1.75 lbs",
             "fov": "150° FOV",
             "modes": "Normal, Sport, Manual (Acro)",
-            "transmission": "O3, 10 km range",
+            "transmission": "O3, 6.2 mi range",
         },
     },
     {
@@ -93,13 +93,13 @@ AIRCRAFT_SEED = [
         "image_filename": "dji_mini5pro.svg",
         "specs": {
             "max_flight_time": "38 min",
-            "max_speed": "36 mph (57.6 km/h)",
+            "max_speed": "36 mph",
             "camera": "1/1.3\" CMOS, 50MP, 4K/120fps",
             "sensors": "Omnidirectional Obstacle Sensing, APAS 6.0",
-            "weight": "249 g (Sub-250g, no registration in many areas)",
+            "weight": "8.8 oz (Sub-250g, no registration in many areas)",
             "video": "4K HDR, D-Log M, HLG, 10-bit, SlowMo",
-            "wind_resistance": "24 mph (10.7 m/s)",
-            "transmission": "O4+, 20 km range",
+            "wind_resistance": "24 mph",
+            "transmission": "O4+, 12.4 mi range",
         },
     },
 ]
@@ -213,12 +213,17 @@ async def seed_database(db: AsyncSession):
         old_mini.image_filename = mini5_data["image_filename"]
         old_mini.specs = mini5_data["specs"]
 
-    # Seed aircraft
+    # Seed aircraft (upsert specs to keep them current)
     for aircraft_data in AIRCRAFT_SEED:
         result = await db.execute(
             select(Aircraft).where(Aircraft.model_name == aircraft_data["model_name"])
         )
-        if not result.scalar_one_or_none():
+        existing = result.scalar_one_or_none()
+        if existing:
+            existing.specs = aircraft_data["specs"]
+            if "image_filename" in aircraft_data:
+                existing.image_filename = aircraft_data["image_filename"]
+        else:
             aircraft = Aircraft(**aircraft_data)
             db.add(aircraft)
 
