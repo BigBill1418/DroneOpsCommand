@@ -262,7 +262,7 @@ export default function MissionDetail() {
       </Card>
 
       {/* Actions */}
-      <Card padding={{ base: 'sm', sm: 'lg' }} radius="md" style={cardStyle}>
+      <Card padding="lg" radius="md" style={cardStyle}>
         <Group wrap="wrap">
           <Button leftSection={<IconDownload size={16} />} color="cyan" onClick={handleGeneratePDF}
             styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}>

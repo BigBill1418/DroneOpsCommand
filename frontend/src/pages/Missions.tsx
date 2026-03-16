@@ -75,7 +75,7 @@ export default function Missions() {
         }}
       />
 
-      <Card padding={{ base: 'sm', sm: 'lg' }} radius="md" style={{ background: '#0e1117', border: '1px solid #1a1f2e' }}>
+      <Card padding="lg" radius="md" style={{ background: '#0e1117', border: '1px solid #1a1f2e' }}>
         {filtered.length === 0 ? (
           <Text c="#5a6478" ta="center" py="xl">No missions found.</Text>
         ) : (
