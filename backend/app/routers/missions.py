@@ -1,4 +1,5 @@
 import io
+import logging
 import os
 import uuid as uuid_mod
 from uuid import UUID
@@ -21,6 +22,9 @@ from app.schemas.mission import (
     MissionResponse,
     MissionUpdate,
 )
+from app.services.opendronelog import opendronelog_client
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/missions", tags=["missions"])
 
@@ -105,6 +109,27 @@ async def add_flight(
     result = await db.execute(select(Mission).where(Mission.id == mission_id))
     if not result.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Mission not found")
+
+    # Enrich flight_data_cache with GPS track from OpenDroneLog
+    cache = data.flight_data_cache or {}
+    has_track = any(
+        key in cache and isinstance(cache[key], list) and len(cache[key]) > 0
+        for key in ("track", "gps_data", "coordinates")
+    )
+    if not has_track and data.opendronelog_flight_id:
+        try:
+            track = await opendronelog_client.get_flight_track(
+                data.opendronelog_flight_id, db
+            )
+            if track:
+                cache["track"] = track
+                data.flight_data_cache = cache
+        except Exception as exc:
+            logger.warning(
+                "Could not fetch GPS track for flight %s: %s",
+                data.opendronelog_flight_id,
+                exc,
+            )
 
     flight = MissionFlight(mission_id=mission_id, **data.model_dump())
     db.add(flight)
