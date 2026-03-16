@@ -2,6 +2,12 @@
 set -e
 cd /volume1/docker/droneops
 
+# Use sudo for docker if not running as root and not in docker group
+DOCKER="docker compose"
+if [ "$(id -u)" -ne 0 ] && ! docker info >/dev/null 2>&1; then
+  DOCKER="sudo docker compose"
+fi
+
 echo "=== Pulling latest changes ==="
 git pull origin claude/drone-report-generator-qk9UM
 
@@ -34,20 +40,20 @@ fi
 
 if $REBUILD_FRONTEND; then
   echo "=== Rebuilding frontend ==="
-  sudo docker compose build $CACHE_FLAG frontend
+  $DOCKER build $CACHE_FLAG frontend
 fi
 
 if $REBUILD_BACKEND; then
   echo "=== Rebuilding backend + worker ==="
-  sudo docker compose build $CACHE_FLAG backend worker
+  $DOCKER build $CACHE_FLAG backend worker
 fi
 
 if $REBUILD_FRONTEND || $REBUILD_BACKEND; then
   echo "=== Restarting changed services ==="
-  sudo docker compose up -d
+  $DOCKER up -d
 else
   echo "=== No app changes detected, nothing to rebuild ==="
 fi
 
 echo "=== Done ==="
-sudo docker compose ps
+$DOCKER ps
