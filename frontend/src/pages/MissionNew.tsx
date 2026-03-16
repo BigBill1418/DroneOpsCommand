@@ -332,24 +332,15 @@ export default function MissionNew() {
   // Clean up debounce on unmount
   useEffect(() => () => { if (mapDebounceRef.current) clearTimeout(mapDebounceRef.current); }, []);
 
-  // Queue to serialize flight add/remove operations without dropping clicks
-  const flightOpQueue = useRef<Array<() => Promise<void>>>([]);
-  const flightOpRunning = useRef(false);
+  // Track in-flight API calls so map data refreshes once all settle
+  const pendingOps = useRef(0);
 
-  const enqueueFlightOp = (op: () => Promise<void>) => {
-    flightOpQueue.current.push(op);
-    if (!flightOpRunning.current) processFlightQueue();
-  };
-
-  const processFlightQueue = async () => {
-    if (flightOpRunning.current) return;
-    flightOpRunning.current = true;
-    while (flightOpQueue.current.length > 0) {
-      const op = flightOpQueue.current.shift()!;
-      try { await op(); } catch {}
+  const trackOp = async (op: () => Promise<void>) => {
+    pendingOps.current++;
+    try { await op(); } catch {} finally {
+      pendingOps.current--;
+      if (pendingOps.current === 0) loadMapData();
     }
-    flightOpRunning.current = false;
-    loadMapData();
   };
 
   // Step 1: Create or update mission
@@ -391,16 +382,28 @@ export default function MissionNew() {
     }
   };
 
-  // Step 2: Add flights (queued to prevent concurrent API calls without dropping clicks)
+  // Step 2: Add / remove flights — optimistic UI, parallel API calls
   const handleAddFlight = (flight: any, aircraftId?: string) => {
     if (!missionId) return;
-    enqueueFlightOp(async () => {
-      const resp = await api.post(`/missions/${missionId}/flights`, {
-        opendronelog_flight_id: String(flight.id || flight.flight_id),
-        aircraft_id: aircraftId || null,
-        flight_data_cache: flight,
-      });
-      setSelectedFlights((prev) => [...prev, { ...flight, _flightId: resp.data.id, _aircraftId: aircraftId || null }]);
+    // Optimistic: add immediately with a temp placeholder _flightId
+    const tempId = `_pending_${Date.now()}_${Math.random()}`;
+    const optimistic = { ...flight, _flightId: tempId, _aircraftId: aircraftId || null };
+    setSelectedFlights((prev) => [...prev, optimistic]);
+
+    trackOp(async () => {
+      try {
+        const resp = await api.post(`/missions/${missionId}/flights`, {
+          opendronelog_flight_id: String(flight.id || flight.flight_id),
+          aircraft_id: aircraftId || null,
+          flight_data_cache: flight,
+        });
+        // Replace temp ID with real one
+        setSelectedFlights((prev) => prev.map((f) => f._flightId === tempId ? { ...f, _flightId: resp.data.id } : f));
+      } catch {
+        // Revert on failure
+        setSelectedFlights((prev) => prev.filter((f) => f._flightId !== tempId));
+        notifications.show({ title: 'Error', message: 'Failed to add flight', color: 'red' });
+      }
     });
   };
 
@@ -408,9 +411,20 @@ export default function MissionNew() {
     if (!missionId) return;
     const flight = selectedFlights[flightIndex];
     if (!flight?._flightId) return;
-    enqueueFlightOp(async () => {
-      await api.delete(`/missions/${missionId}/flights/${flight._flightId}`);
-      setSelectedFlights((prev) => prev.filter((_, i) => i !== flightIndex));
+    // Optimistic: remove immediately
+    setSelectedFlights((prev) => prev.filter((_, i) => i !== flightIndex));
+
+    // If it was still pending (never saved), nothing to delete server-side
+    if (String(flight._flightId).startsWith('_pending_')) return;
+
+    trackOp(async () => {
+      try {
+        await api.delete(`/missions/${missionId}/flights/${flight._flightId}`);
+      } catch {
+        // Revert: add it back
+        setSelectedFlights((prev) => [...prev, flight]);
+        notifications.show({ title: 'Error', message: 'Failed to remove flight', color: 'red' });
+      }
     });
   };
 
