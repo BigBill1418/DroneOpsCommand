@@ -126,6 +126,19 @@ export default function AppLayout({ onLogout }: AppLayoutProps) {
             }}
           />
         ))}
+        <Text
+          size="xs"
+          c="#5a6478"
+          style={{
+            fontFamily: "'Share Tech Mono', monospace",
+            fontSize: '10px',
+            position: 'absolute',
+            bottom: 12,
+            left: 16,
+          }}
+        >
+          v1.1
+        </Text>
       </AppShell.Navbar>
 
       <AppShell.Main>
