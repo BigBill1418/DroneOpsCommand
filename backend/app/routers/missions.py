@@ -48,7 +48,9 @@ async def create_mission(
         mission = Mission(**data.model_dump())
         db.add(mission)
         await db.flush()
-        await db.refresh(mission, ["flights", "images", "customer"])
+        # Re-query so selectin relationships (flights, images, customer) load automatically
+        result = await db.execute(select(Mission).where(Mission.id == mission.id))
+        mission = result.scalar_one()
         return mission
     except Exception as exc:
         logger.exception("Failed to create mission: %s", exc)
@@ -84,7 +86,9 @@ async def update_mission(
         setattr(mission, key, value)
 
     await db.flush()
-    await db.refresh(mission, ["flights", "images", "customer"])
+    # Re-query so selectin relationships reload with updated data
+    result = await db.execute(select(Mission).where(Mission.id == mission_id))
+    mission = result.scalar_one()
     return mission
 
 
