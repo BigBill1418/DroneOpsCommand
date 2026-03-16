@@ -137,7 +137,7 @@ export default function AppLayout({ onLogout }: AppLayoutProps) {
             left: 16,
           }}
         >
-          v1.3
+          v1.4
         </Text>
       </AppShell.Navbar>
 

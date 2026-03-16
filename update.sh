@@ -8,20 +8,34 @@ if [ "$(id -u)" -ne 0 ] && ! docker info >/dev/null 2>&1; then
   DOCKER="sudo docker compose"
 fi
 
+# Track last deployed commit so we catch ALL changes, not just the latest pull
+DEPLOY_MARKER=".last_deployed_commit"
+PREV_COMMIT=""
+if [ -f "$DEPLOY_MARKER" ]; then
+  PREV_COMMIT=$(cat "$DEPLOY_MARKER")
+fi
+
 echo "=== Pulling latest changes ==="
 git pull origin claude/drone-report-generator-qk9UM
+CURRENT_COMMIT=$(git rev-parse HEAD)
 
-# Figure out what changed
-CHANGED=$(git diff --name-only HEAD@{1} HEAD 2>/dev/null || echo "all")
+# Figure out what changed since last deploy
+if [ -n "$PREV_COMMIT" ] && git cat-file -t "$PREV_COMMIT" >/dev/null 2>&1; then
+  CHANGED=$(git diff --name-only "$PREV_COMMIT" "$CURRENT_COMMIT")
+else
+  # First run or marker invalid — rebuild everything
+  CHANGED="all"
+fi
 
 REBUILD_FRONTEND=false
 REBUILD_BACKEND=false
 
-if echo "$CHANGED" | grep -q "^frontend/"; then
+if [ "$CHANGED" = "all" ]; then
   REBUILD_FRONTEND=true
-fi
-if echo "$CHANGED" | grep -q "^backend/"; then
   REBUILD_BACKEND=true
+else
+  echo "$CHANGED" | grep -q "^frontend/" && REBUILD_FRONTEND=true
+  echo "$CHANGED" | grep -q "^backend/" && REBUILD_BACKEND=true
 fi
 
 # --clean flag forces full rebuild (no cache)
@@ -55,5 +69,8 @@ else
   echo "=== No app changes detected, nothing to rebuild ==="
 fi
 
-echo "=== Done ==="
+# Save current commit as deployed
+echo "$CURRENT_COMMIT" > "$DEPLOY_MARKER"
+
+echo "=== Done ($(echo "$CURRENT_COMMIT" | head -c 7)) ==="
 $DOCKER ps

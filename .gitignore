@@ -32,3 +32,4 @@ pip-log.txt
 
 # Docker
 docker-compose.override.yml
+.last_deployed_commit
