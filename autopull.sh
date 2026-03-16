@@ -1,6 +1,6 @@
 #!/bin/bash
 # Polls the remote branch for new commits and auto-deploys.
-# Run via cron: */5 * * * * /volume1/docker/droneops/autopull.sh
+# Run via cron: * * * * * /volume1/docker/droneops/autopull.sh
 #
 # Logs to /volume1/docker/droneops/autopull.log
 
