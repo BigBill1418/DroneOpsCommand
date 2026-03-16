@@ -111,7 +111,7 @@ def generate_map_geojson(flights: list[dict]) -> dict:
     tracks = extract_gps_tracks(flights)
 
     features = []
-    colors = ["#00d4ff", "#ff6b1a", "#00ff88", "#ff4444", "#ffaa00", "#aa44ff"]
+    colors = ["#003d99", "#ff6b1a", "#00ff88", "#ff4444", "#ffaa00", "#aa44ff"]
 
     for i, track in enumerate(tracks):
         flight = flights[i] if i < len(flights) else {}
@@ -170,7 +170,7 @@ def render_static_map(flights: list[dict], width: int = 800, height: int = 600) 
     if not tracks:
         return ""
 
-    colors = ["#00d4ff", "#ff6b1a", "#00ff88", "#ff4444", "#ffaa00", "#aa44ff"]
+    colors = ["#003d99", "#ff6b1a", "#00ff88", "#ff4444", "#ffaa00", "#aa44ff"]
 
     m = StaticMap(width, height, url_template="https://tile.openstreetmap.org/{z}/{x}/{y}.png")
 

@@ -16,7 +16,7 @@ if [ -f "$DEPLOY_MARKER" ]; then
 fi
 
 echo "=== Pulling latest changes ==="
-git pull origin claude/drone-report-generator-qk9UM
+git pull origin main
 CURRENT_COMMIT=$(git rev-parse HEAD)
 
 # Figure out what changed since last deploy

@@ -112,9 +112,9 @@ function FlightMap({ geojson, coverage, height = '400px' }: FlightMapProps) {
               key={`line-${i}`}
               positions={(feature.geometry.coordinates as number[][]).map((c) => [c[1], c[0]] as [number, number])}
               pathOptions={{
-                color: feature.properties.color || '#00d4ff',
-                weight: 3,
-                opacity: 0.8,
+                color: feature.properties.color || '#003d99',
+                weight: 4,
+                opacity: 0.9,
               }}
             >
               <Popup>
@@ -132,8 +132,8 @@ function FlightMap({ geojson, coverage, height = '400px' }: FlightMapProps) {
               key={`poly-${i}`}
               positions={(feature.geometry.coordinates as number[][][])[0].map((c) => [c[1], c[0]] as [number, number])}
               pathOptions={{
-                color: '#00d4ff',
-                fillColor: '#00d4ff',
+                color: '#003d99',
+                fillColor: '#003d99',
                 fillOpacity: 0.1,
                 weight: 2,
                 dashArray: '5, 5',
@@ -151,7 +151,7 @@ function FlightMap({ geojson, coverage, height = '400px' }: FlightMapProps) {
               ]}
               radius={feature.properties.type === 'start' ? 6 : 4}
               pathOptions={{
-                color: feature.properties.color || '#00d4ff',
+                color: feature.properties.color || '#003d99',
                 fillColor: feature.properties.type === 'start' ? feature.properties.color : '#ffffff',
                 fillOpacity: 1,
               }}
@@ -192,7 +192,7 @@ function FlightMap({ geojson, coverage, height = '400px' }: FlightMapProps) {
         {coverage && (
           <Text
             size="sm"
-            c="#00d4ff"
+            c="#003d99"
             fw={600}
             style={{ fontFamily: "'Share Tech Mono', monospace" }}
           >
