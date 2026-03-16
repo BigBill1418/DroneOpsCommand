@@ -8,7 +8,7 @@ from sqlalchemy.orm import selectinload
 from app.auth.jwt import get_current_user
 from app.database import get_db
 from app.models.invoice import Invoice, LineItemCategory
-from app.models.mission import Mission
+from app.models.mission import Mission, MissionFlight
 from app.models.user import User
 
 router = APIRouter(prefix="/api/financials", tags=["financials"])
@@ -25,7 +25,7 @@ async def financials_summary(
         .where(Mission.is_billable == True)
         .options(
             selectinload(Mission.customer),
-            selectinload(Mission.flights),
+            selectinload(Mission.flights).selectinload(MissionFlight.aircraft),
             selectinload(Mission.invoice).selectinload(Invoice.line_items),
         )
     )

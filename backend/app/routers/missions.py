@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, s
 from PIL import Image as PILImage
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.auth.jwt import get_current_user
 from app.config import settings
@@ -48,8 +49,14 @@ async def create_mission(
         mission = Mission(**data.model_dump())
         db.add(mission)
         await db.flush()
-        # Re-query so selectin relationships (flights, images, customer) load automatically
-        result = await db.execute(select(Mission).where(Mission.id == mission.id))
+        # Re-query with explicit eager loads so relationships are populated for response
+        result = await db.execute(
+            select(Mission).where(Mission.id == mission.id).options(
+                selectinload(Mission.flights),
+                selectinload(Mission.images),
+                selectinload(Mission.customer),
+            )
+        )
         mission = result.scalar_one()
         return mission
     except Exception as exc:
@@ -86,8 +93,14 @@ async def update_mission(
         setattr(mission, key, value)
 
     await db.flush()
-    # Re-query so selectin relationships reload with updated data
-    result = await db.execute(select(Mission).where(Mission.id == mission_id))
+    # Re-query with explicit eager loads so relationships are populated for response
+    result = await db.execute(
+        select(Mission).where(Mission.id == mission_id).options(
+            selectinload(Mission.flights),
+            selectinload(Mission.images),
+            selectinload(Mission.customer),
+        )
+    )
     mission = result.scalar_one()
     return mission
 
