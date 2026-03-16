@@ -9,8 +9,22 @@ import {
   Badge,
   Button,
   Table,
+  Loader,
+  Tooltip,
 } from '@mantine/core';
-import { IconDrone, IconUsers, IconFileText, IconPlane, IconPlus } from '@tabler/icons-react';
+import {
+  IconDrone,
+  IconUsers,
+  IconFileText,
+  IconPlane,
+  IconPlus,
+  IconWind,
+  IconTemperature,
+  IconCloud,
+  IconEye,
+  IconAlertTriangle,
+  IconInfoCircle,
+} from '@tabler/icons-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
 import { Mission, Customer } from '../api/types';
@@ -52,10 +66,65 @@ const statusColors: Record<string, string> = {
   sent: 'green',
 };
 
+interface WeatherData {
+  temperature_f: number | null;
+  humidity_pct: number | null;
+  condition: string;
+  weather_code: number;
+  wind_speed_mph: number | null;
+  wind_direction_deg: number | null;
+  wind_direction: string | null;
+  wind_gusts_mph: number | null;
+  cloud_cover_pct: number | null;
+  visibility_m: number | null;
+  pressure_msl_hpa: number | null;
+  error?: string;
+}
+
+interface NotamEntry {
+  id?: string;
+  type?: string;
+  text?: string;
+  effective?: string;
+  expires?: string;
+  status?: string;
+}
+
+interface TfrEntry {
+  notam_id?: string;
+  type?: string;
+  status?: string;
+}
+
+interface WeatherResponse {
+  location: string;
+  weather: WeatherData;
+  tfrs: TfrEntry[];
+  notams: NotamEntry[];
+  fetched_at: string;
+}
+
+function WindIndicator({ deg }: { deg: number }) {
+  return (
+    <svg width="24" height="24" viewBox="0 0 24 24" style={{ transform: `rotate(${deg + 180}deg)` }}>
+      <path d="M12 2 L8 14 L12 11 L16 14 Z" fill="#00d4ff" />
+    </svg>
+  );
+}
+
+function getWindSeverity(speed: number | null, gusts: number | null): { color: string; label: string } {
+  const max = Math.max(speed || 0, gusts || 0);
+  if (max >= 25) return { color: '#ff4444', label: 'HAZARDOUS' };
+  if (max >= 15) return { color: '#ff6b1a', label: 'CAUTION' };
+  return { color: '#00ff88', label: 'FAVORABLE' };
+}
+
 export default function Dashboard() {
   const [missions, setMissions] = useState<Mission[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [flightCount, setFlightCount] = useState<number | null>(null);
+  const [wxData, setWxData] = useState<WeatherResponse | null>(null);
+  const [wxLoading, setWxLoading] = useState(true);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -65,101 +134,313 @@ export default function Dashboard() {
       const data = Array.isArray(r.data) ? r.data : r.data?.flights || r.data?.data || r.data?.results || r.data?.items || [];
       setFlightCount(data.length);
     }).catch(() => setFlightCount(0));
+    api.get('/weather/current').then((r) => setWxData(r.data)).catch(() => {}).finally(() => setWxLoading(false));
   }, []);
 
   const recentMissions = missions.slice(0, 5);
   const draftCount = missions.filter((m) => m.status === 'draft').length;
-  const completedCount = missions.filter((m) => m.status === 'completed' || m.status === 'sent').length;
+
+  const wx = wxData?.weather;
+  const windSeverity = wx ? getWindSeverity(wx.wind_speed_mph, wx.wind_gusts_mph) : null;
 
   return (
-    <Stack gap="lg">
-      <Group justify="space-between">
-        <Title order={2} c="#e8edf2" style={{ letterSpacing: '2px' }}>
-          DASHBOARD
-        </Title>
-        <Button
-          leftSection={<IconPlus size={16} />}
-          color="cyan"
-          onClick={() => navigate('/missions/new')}
-          styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}
-        >
-          NEW MISSION
-        </Button>
-      </Group>
+    <div style={{ position: 'relative', minHeight: '100%' }}>
+      {/* Background watermark */}
+      <div
+        style={{
+          position: 'fixed',
+          top: '50%',
+          left: '55%',
+          transform: 'translate(-50%, -50%)',
+          width: '700px',
+          height: '440px',
+          backgroundImage: 'url(/dashboard-bg.svg)',
+          backgroundSize: 'contain',
+          backgroundRepeat: 'no-repeat',
+          backgroundPosition: 'center',
+          opacity: 0.12,
+          pointerEvents: 'none',
+          zIndex: 0,
+        }}
+      />
 
-      <SimpleGrid cols={{ base: 1, sm: 4 }}>
-        <StatCard icon={IconPlane} label="FLIGHTS (ODL)" value={flightCount !== null ? String(flightCount) : '—'} color="#00d4ff" />
-        <StatCard icon={IconDrone} label="TOTAL MISSIONS" value={String(missions.length)} color="#00d4ff" />
-        <StatCard icon={IconFileText} label="DRAFTS PENDING" value={String(draftCount)} color="#ff6b1a" />
-        <StatCard icon={IconUsers} label="CUSTOMERS" value={String(customers.length)} color="#00d4ff" />
-      </SimpleGrid>
-
-      <Card
-        padding="lg"
-        radius="md"
-        style={{ background: '#0e1117', border: '1px solid #1a1f2e' }}
-      >
-        <Title order={3} c="#e8edf2" mb="md" style={{ letterSpacing: '1px' }}>
-          RECENT MISSIONS
-        </Title>
-
-        {recentMissions.length === 0 ? (
-          <Text c="#5a6478" ta="center" py="xl">
-            No missions yet. Create your first mission to get started.
-          </Text>
-        ) : (
-          <Table
-            highlightOnHover
-            styles={{
-              table: { color: '#e8edf2' },
-              th: {
-                color: '#00d4ff',
-                fontFamily: "'Share Tech Mono', monospace",
-                fontSize: '13px',
-                letterSpacing: '1px',
-                borderBottom: '1px solid #1a1f2e',
-              },
-              td: { borderBottom: '1px solid #1a1f2e' },
-              tr: { '&:hover': { backgroundColor: 'rgba(0, 212, 255, 0.05)' } },
-            }}
+      <Stack gap="lg" style={{ position: 'relative', zIndex: 1 }}>
+        <Group justify="space-between">
+          <Title order={2} c="#e8edf2" style={{ letterSpacing: '2px' }}>
+            DASHBOARD
+          </Title>
+          <Button
+            leftSection={<IconPlus size={16} />}
+            color="cyan"
+            onClick={() => navigate('/missions/new')}
+            styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}
           >
-            <Table.Thead>
-              <Table.Tr>
-                <Table.Th>MISSION</Table.Th>
-                <Table.Th>TYPE</Table.Th>
-                <Table.Th>DATE</Table.Th>
-                <Table.Th>STATUS</Table.Th>
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
-              {recentMissions.map((mission) => (
-                <Table.Tr
-                  key={mission.id}
-                  style={{ cursor: 'pointer' }}
-                  onClick={() => navigate(`/missions/${mission.id}`)}
-                >
-                  <Table.Td>{mission.title}</Table.Td>
-                  <Table.Td>
-                    <Text size="sm" c="#5a6478" tt="capitalize">
-                      {mission.mission_type.replace('_', ' ')}
-                    </Text>
-                  </Table.Td>
-                  <Table.Td>
-                    <Text size="sm" c="#5a6478" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
-                      {mission.mission_date || '—'}
-                    </Text>
-                  </Table.Td>
-                  <Table.Td>
-                    <Badge color={statusColors[mission.status] || 'gray'} variant="light" size="sm">
-                      {mission.status}
-                    </Badge>
-                  </Table.Td>
+            NEW MISSION
+          </Button>
+        </Group>
+
+        <SimpleGrid cols={{ base: 1, sm: 4 }}>
+          <StatCard icon={IconPlane} label="FLIGHTS (ODL)" value={flightCount !== null ? String(flightCount) : '—'} color="#00d4ff" />
+          <StatCard icon={IconDrone} label="TOTAL MISSIONS" value={String(missions.length)} color="#00d4ff" />
+          <StatCard icon={IconFileText} label="DRAFTS PENDING" value={String(draftCount)} color="#ff6b1a" />
+          <StatCard icon={IconUsers} label="CUSTOMERS" value={String(customers.length)} color="#00d4ff" />
+        </SimpleGrid>
+
+        <Card
+          padding="lg"
+          radius="md"
+          style={{ background: '#0e1117', border: '1px solid #1a1f2e' }}
+        >
+          <Title order={3} c="#e8edf2" mb="md" style={{ letterSpacing: '1px' }}>
+            RECENT MISSIONS
+          </Title>
+
+          {recentMissions.length === 0 ? (
+            <Text c="#5a6478" ta="center" py="xl">
+              No missions yet. Create your first mission to get started.
+            </Text>
+          ) : (
+            <Table
+              highlightOnHover
+              styles={{
+                table: { color: '#e8edf2' },
+                th: {
+                  color: '#00d4ff',
+                  fontFamily: "'Share Tech Mono', monospace",
+                  fontSize: '13px',
+                  letterSpacing: '1px',
+                  borderBottom: '1px solid #1a1f2e',
+                },
+                td: { borderBottom: '1px solid #1a1f2e' },
+                tr: { '&:hover': { backgroundColor: 'rgba(0, 212, 255, 0.05)' } },
+              }}
+            >
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th>MISSION</Table.Th>
+                  <Table.Th>TYPE</Table.Th>
+                  <Table.Th>DATE</Table.Th>
+                  <Table.Th>STATUS</Table.Th>
                 </Table.Tr>
-              ))}
-            </Table.Tbody>
-          </Table>
-        )}
-      </Card>
-    </Stack>
+              </Table.Thead>
+              <Table.Tbody>
+                {recentMissions.map((mission) => (
+                  <Table.Tr
+                    key={mission.id}
+                    style={{ cursor: 'pointer' }}
+                    onClick={() => navigate(`/missions/${mission.id}`)}
+                  >
+                    <Table.Td>{mission.title}</Table.Td>
+                    <Table.Td>
+                      <Text size="sm" c="#5a6478" tt="capitalize">
+                        {mission.mission_type.replace('_', ' ')}
+                      </Text>
+                    </Table.Td>
+                    <Table.Td>
+                      <Text size="sm" c="#5a6478" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+                        {mission.mission_date || '—'}
+                      </Text>
+                    </Table.Td>
+                    <Table.Td>
+                      <Badge color={statusColors[mission.status] || 'gray'} variant="light" size="sm">
+                        {mission.status}
+                      </Badge>
+                    </Table.Td>
+                  </Table.Tr>
+                ))}
+              </Table.Tbody>
+            </Table>
+          )}
+        </Card>
+
+        {/* Weather & Airspace Widget */}
+        <Card
+          padding="lg"
+          radius="md"
+          style={{ background: '#0e1117', border: '1px solid #1a1f2e' }}
+        >
+          <Group justify="space-between" mb="md">
+            <Title order={3} c="#e8edf2" style={{ letterSpacing: '1px' }}>
+              FLIGHT CONDITIONS
+            </Title>
+            {wxData && (
+              <Text size="xs" c="#5a6478" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+                {wxData.location}
+              </Text>
+            )}
+          </Group>
+
+          {wxLoading ? (
+            <Group justify="center" py="xl">
+              <Loader color="cyan" size="sm" />
+              <Text c="#5a6478" size="sm">Loading weather data...</Text>
+            </Group>
+          ) : wx && !wx.error ? (
+            <Stack gap="md">
+              {/* Wind status bar */}
+              {windSeverity && (
+                <div style={{
+                  padding: '8px 16px',
+                  borderRadius: '6px',
+                  background: `${windSeverity.color}15`,
+                  border: `1px solid ${windSeverity.color}40`,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                }}>
+                  <IconWind size={16} color={windSeverity.color} />
+                  <Text size="xs" c={windSeverity.color} fw={700}
+                    style={{ fontFamily: "'Share Tech Mono', monospace", letterSpacing: '2px' }}>
+                    WIND STATUS: {windSeverity.label}
+                  </Text>
+                </div>
+              )}
+
+              {/* Weather stats grid */}
+              <SimpleGrid cols={{ base: 2, sm: 4 }}>
+                {/* Temperature */}
+                <div style={{ padding: '12px', background: '#050608', borderRadius: '6px', border: '1px solid #1a1f2e' }}>
+                  <Group gap="xs" mb={4}>
+                    <IconTemperature size={14} color="#5a6478" />
+                    <Text size="xs" c="#5a6478" style={{ fontFamily: "'Share Tech Mono', monospace", letterSpacing: '1px' }}>
+                      TEMP
+                    </Text>
+                  </Group>
+                  <Text c="#e8edf2" fw={700} style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: '24px' }}>
+                    {wx.temperature_f != null ? `${Math.round(wx.temperature_f)}°F` : '—'}
+                  </Text>
+                  <Text size="xs" c="#5a6478">{wx.condition}</Text>
+                </div>
+
+                {/* Wind Speed */}
+                <div style={{ padding: '12px', background: '#050608', borderRadius: '6px', border: '1px solid #1a1f2e' }}>
+                  <Group gap="xs" mb={4}>
+                    <IconWind size={14} color="#5a6478" />
+                    <Text size="xs" c="#5a6478" style={{ fontFamily: "'Share Tech Mono', monospace", letterSpacing: '1px' }}>
+                      WIND
+                    </Text>
+                  </Group>
+                  <Group gap="xs" align="baseline">
+                    <Text c="#e8edf2" fw={700} style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: '24px' }}>
+                      {wx.wind_speed_mph != null ? `${Math.round(wx.wind_speed_mph)}` : '—'}
+                    </Text>
+                    <Text size="xs" c="#5a6478">MPH</Text>
+                    {wx.wind_direction_deg != null && <WindIndicator deg={wx.wind_direction_deg} />}
+                  </Group>
+                  <Text size="xs" c="#5a6478">
+                    {wx.wind_direction || '—'}{wx.wind_gusts_mph ? ` / Gusts ${Math.round(wx.wind_gusts_mph)} mph` : ''}
+                  </Text>
+                </div>
+
+                {/* Cloud Cover */}
+                <div style={{ padding: '12px', background: '#050608', borderRadius: '6px', border: '1px solid #1a1f2e' }}>
+                  <Group gap="xs" mb={4}>
+                    <IconCloud size={14} color="#5a6478" />
+                    <Text size="xs" c="#5a6478" style={{ fontFamily: "'Share Tech Mono', monospace", letterSpacing: '1px' }}>
+                      CLOUDS
+                    </Text>
+                  </Group>
+                  <Text c="#e8edf2" fw={700} style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: '24px' }}>
+                    {wx.cloud_cover_pct != null ? `${wx.cloud_cover_pct}%` : '—'}
+                  </Text>
+                  <Text size="xs" c="#5a6478">
+                    {wx.humidity_pct != null ? `Humidity ${wx.humidity_pct}%` : ''}
+                  </Text>
+                </div>
+
+                {/* Visibility */}
+                <div style={{ padding: '12px', background: '#050608', borderRadius: '6px', border: '1px solid #1a1f2e' }}>
+                  <Group gap="xs" mb={4}>
+                    <IconEye size={14} color="#5a6478" />
+                    <Text size="xs" c="#5a6478" style={{ fontFamily: "'Share Tech Mono', monospace", letterSpacing: '1px' }}>
+                      VISIBILITY
+                    </Text>
+                  </Group>
+                  <Text c="#e8edf2" fw={700} style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: '24px' }}>
+                    {wx.visibility_m != null ? `${(wx.visibility_m / 1609.344).toFixed(1)}` : '—'}
+                  </Text>
+                  <Text size="xs" c="#5a6478">statute miles</Text>
+                </div>
+              </SimpleGrid>
+
+              {/* FAA Airspace — TFRs and NOTAMs */}
+              <div style={{ marginTop: '4px' }}>
+                <Group gap="xs" mb="sm">
+                  <IconAlertTriangle size={16} color="#ff6b1a" />
+                  <Text size="sm" c="#e8edf2" fw={600} style={{ letterSpacing: '1px' }}>
+                    FAA AIRSPACE — KEUG
+                  </Text>
+                </Group>
+
+                {/* TFRs */}
+                <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="sm">
+                  <div style={{ padding: '12px', background: '#050608', borderRadius: '6px', border: '1px solid #1a1f2e' }}>
+                    <Text size="xs" c="#ff6b1a" fw={700} mb="xs"
+                      style={{ fontFamily: "'Share Tech Mono', monospace", letterSpacing: '1px' }}>
+                      TEMPORARY FLIGHT RESTRICTIONS
+                    </Text>
+                    {wxData?.tfrs && wxData.tfrs.length > 0 ? (
+                      <Stack gap={4}>
+                        {wxData.tfrs.map((tfr, i) => (
+                          <Group key={i} gap="xs">
+                            {tfr.status ? (
+                              <Text size="xs" c="#5a6478">{tfr.status}</Text>
+                            ) : (
+                              <>
+                                <Badge size="xs" color="orange" variant="light">TFR</Badge>
+                                <Text size="xs" c="#e8edf2" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+                                  {tfr.notam_id}
+                                </Text>
+                              </>
+                            )}
+                          </Group>
+                        ))}
+                      </Stack>
+                    ) : (
+                      <Text size="xs" c="#00ff88">No active TFRs</Text>
+                    )}
+                  </div>
+
+                  {/* NOTAMs */}
+                  <div style={{ padding: '12px', background: '#050608', borderRadius: '6px', border: '1px solid #1a1f2e', maxHeight: '200px', overflowY: 'auto' }}>
+                    <Text size="xs" c="#00d4ff" fw={700} mb="xs"
+                      style={{ fontFamily: "'Share Tech Mono', monospace", letterSpacing: '1px' }}>
+                      NOTAMS
+                    </Text>
+                    {wxData?.notams && wxData.notams.length > 0 ? (
+                      <Stack gap={6}>
+                        {wxData.notams.map((notam, i) => (
+                          <div key={i}>
+                            {notam.status ? (
+                              <Text size="xs" c="#5a6478">{notam.status}</Text>
+                            ) : (
+                              <Tooltip label={notam.text || ''} multiline w={400} position="left" withArrow>
+                                <Group gap="xs" style={{ cursor: 'help' }}>
+                                  <IconInfoCircle size={12} color="#5a6478" />
+                                  <Text size="xs" c="#e8edf2" lineClamp={1}
+                                    style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: '11px' }}>
+                                    {notam.id || 'NOTAM'}: {(notam.text || '').slice(0, 80)}{(notam.text || '').length > 80 ? '...' : ''}
+                                  </Text>
+                                </Group>
+                              </Tooltip>
+                            )}
+                          </div>
+                        ))}
+                      </Stack>
+                    ) : (
+                      <Text size="xs" c="#00ff88">No active NOTAMs</Text>
+                    )}
+                  </div>
+                </SimpleGrid>
+              </div>
+            </Stack>
+          ) : (
+            <Text c="#5a6478" ta="center" py="md">
+              Weather data unavailable — check network connection.
+            </Text>
+          )}
+        </Card>
+      </Stack>
+    </div>
   );
 }
