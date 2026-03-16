@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import {
   ActionIcon,
   Badge,
@@ -12,10 +12,12 @@ import {
   TextInput,
   Textarea,
   Title,
+  Popover,
+  Loader,
 } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
-import { IconPlus, IconEdit, IconTrash, IconSearch } from '@tabler/icons-react';
+import { IconPlus, IconEdit, IconTrash, IconSearch, IconMapPin } from '@tabler/icons-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
 import { Customer } from '../api/types';
@@ -35,6 +37,32 @@ export default function Customers() {
   const form = useForm({
     initialValues: { name: '', email: '', phone: '', address: '', company: '', notes: '' },
   });
+
+  const [addressSuggestions, setAddressSuggestions] = useState<{ display_name: string }[]>([]);
+  const [addressLoading, setAddressLoading] = useState(false);
+  const [addressPopover, setAddressPopover] = useState(false);
+  const addressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const searchAddress = useCallback((query: string) => {
+    if (addressTimerRef.current) clearTimeout(addressTimerRef.current);
+    if (query.length < 4) { setAddressSuggestions([]); setAddressPopover(false); return; }
+    addressTimerRef.current = setTimeout(async () => {
+      setAddressLoading(true);
+      try {
+        const resp = await fetch(
+          `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&limit=5&q=${encodeURIComponent(query)}`,
+          { headers: { 'Accept-Language': 'en' } }
+        );
+        const data = await resp.json();
+        setAddressSuggestions(data);
+        setAddressPopover(data.length > 0);
+      } catch {
+        setAddressSuggestions([]);
+      } finally {
+        setAddressLoading(false);
+      }
+    }, 400);
+  }, []);
 
   const loadCustomers = () => {
     api.get('/customers').then((r) => setCustomers(r.data)).catch(() => {});
@@ -171,7 +199,39 @@ export default function Customers() {
             <TextInput label="Email" {...form.getInputProps('email')} styles={inputStyles} />
             <TextInput label="Phone" {...form.getInputProps('phone')} styles={inputStyles} />
             <TextInput label="Company" {...form.getInputProps('company')} styles={inputStyles} />
-            <Textarea label="Address" {...form.getInputProps('address')} styles={inputStyles} />
+            <Popover opened={addressPopover} onClose={() => setAddressPopover(false)} position="bottom-start" width="target">
+              <Popover.Target>
+                <TextInput
+                  label="Address"
+                  leftSection={addressLoading ? <Loader size={14} color="cyan" /> : <IconMapPin size={14} />}
+                  {...form.getInputProps('address')}
+                  onChange={(e) => {
+                    form.getInputProps('address').onChange(e);
+                    searchAddress(e.target.value);
+                  }}
+                  onFocus={() => { if (addressSuggestions.length > 0) setAddressPopover(true); }}
+                  styles={inputStyles}
+                />
+              </Popover.Target>
+              <Popover.Dropdown style={{ background: '#0e1117', border: '1px solid #1a1f2e', padding: 0, maxHeight: 200, overflow: 'auto' }}>
+                {addressSuggestions.map((s, i) => (
+                  <Text
+                    key={i}
+                    size="sm"
+                    c="#e8edf2"
+                    p="xs"
+                    style={{ cursor: 'pointer', borderBottom: '1px solid #1a1f2e' }}
+                    onMouseDown={(e) => { e.preventDefault(); }}
+                    onClick={() => {
+                      form.setFieldValue('address', s.display_name);
+                      setAddressPopover(false);
+                    }}
+                  >
+                    {s.display_name}
+                  </Text>
+                ))}
+              </Popover.Dropdown>
+            </Popover>
             <Textarea label="Notes" {...form.getInputProps('notes')} styles={inputStyles} />
             <Button type="submit" color="cyan" fullWidth styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}>
               {editingId ? 'UPDATE' : 'CREATE'}

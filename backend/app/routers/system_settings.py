@@ -23,6 +23,17 @@ SMTP_KEYS = [
 ]
 
 
+PAYMENT_KEYS = [
+    "paypal_link",
+    "venmo_link",
+]
+
+
+class PaymentSettings(BaseModel):
+    paypal_link: str = ""
+    venmo_link: str = ""
+
+
 class SmtpSettings(BaseModel):
     smtp_host: str = ""
     smtp_port: str = "587"
@@ -112,3 +123,37 @@ async def test_smtp(
         return {"status": "ok", "message": f"Test email sent to {smtp['smtp_from_email']}"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
+
+@router.get("/payment")
+async def get_payment_settings(
+    _user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get PayPal and Venmo links."""
+    result = await db.execute(
+        select(SystemSetting).where(SystemSetting.key.in_(PAYMENT_KEYS))
+    )
+    rows = {r.key: r.value for r in result.scalars().all()}
+    return {key: rows.get(key, "") for key in PAYMENT_KEYS}
+
+
+@router.put("/payment")
+async def update_payment_settings(
+    payload: PaymentSettings,
+    _user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update PayPal and Venmo links."""
+    for key, value in payload.model_dump().items():
+        result = await db.execute(
+            select(SystemSetting).where(SystemSetting.key == key)
+        )
+        existing = result.scalar_one_or_none()
+        if existing:
+            existing.value = value
+        else:
+            db.add(SystemSetting(key=key, value=value))
+
+    await db.commit()
+    return {"status": "ok"}

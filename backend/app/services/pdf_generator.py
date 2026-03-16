@@ -18,6 +18,7 @@ def generate_pdf(
     invoice: dict | None = None,
     aircraft_list: list[dict] | None = None,
     image_paths: list[dict] | None = None,
+    payment_links: dict | None = None,
 ) -> str:
     """Generate a PDF report and return the file path."""
 
@@ -29,6 +30,7 @@ def generate_pdf(
         invoice=invoice,
         aircraft_list=aircraft_list or [],
         images=image_paths or [],
+        payment_links=payment_links or {},
         generated_at=datetime.utcnow().strftime("%B %d, %Y"),
         year=datetime.utcnow().year,
     )

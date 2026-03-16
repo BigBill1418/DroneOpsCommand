@@ -19,7 +19,7 @@ import {
 } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
-import { IconCheck, IconX, IconPlus, IconEdit, IconTrash, IconCurrencyDollar, IconMail, IconSend } from '@tabler/icons-react';
+import { IconCheck, IconX, IconPlus, IconEdit, IconTrash, IconCurrencyDollar, IconMail, IconSend, IconBrandPaypal, IconCash } from '@tabler/icons-react';
 import api from '../api/client';
 import { Aircraft, RateTemplate } from '../api/types';
 
@@ -41,6 +41,7 @@ export default function Settings() {
   const [editingRateId, setEditingRateId] = useState<string | null>(null);
   const [smtpSaving, setSmtpSaving] = useState(false);
   const [smtpTesting, setSmtpTesting] = useState(false);
+  const [paymentSaving, setPaymentSaving] = useState(false);
 
   const aircraftForm = useForm({
     initialValues: { model_name: '', manufacturer: 'DJI', specs_json: '{}' },
@@ -62,11 +63,16 @@ export default function Settings() {
     },
   });
 
+  const paymentForm = useForm({
+    initialValues: { paypal_link: '', venmo_link: '' },
+  });
+
   useEffect(() => {
     api.get('/llm/status').then((r) => setLlmStatus(r.data)).catch(() => setLlmStatus({ status: 'offline' })).finally(() => setLlmLoading(false));
     api.get('/aircraft').then((r) => setAircraft(r.data)).catch(() => {});
     api.get('/rate-templates').then((r) => setRateTemplates(r.data)).catch(() => {});
     api.get('/settings/smtp').then((r) => smtpForm.setValues(r.data)).catch(() => {});
+    api.get('/settings/payment').then((r) => paymentForm.setValues(r.data)).catch(() => {});
   }, []);
 
   const handleSaveAircraft = async (values: typeof aircraftForm.values) => {
@@ -174,6 +180,18 @@ export default function Settings() {
     }
   };
 
+  const handleSavePayment = async (values: typeof paymentForm.values) => {
+    setPaymentSaving(true);
+    try {
+      await api.put('/settings/payment', values);
+      notifications.show({ title: 'Saved', message: 'Payment links updated', color: 'cyan' });
+    } catch {
+      notifications.show({ title: 'Error', message: 'Failed to save payment links', color: 'red' });
+    } finally {
+      setPaymentSaving(false);
+    }
+  };
+
   const categoryLabels: Record<string, string> = {
     travel: 'Travel',
     billed_time: 'Billed Time',
@@ -259,6 +277,37 @@ export default function Settings() {
             />
             <Button type="submit" color="cyan" loading={smtpSaving} styles={{ root: { fontFamily: "'Bebas Neue', sans-serif" } }}>
               SAVE SMTP SETTINGS
+            </Button>
+          </Stack>
+        </form>
+      </Card>
+
+      {/* Payment Links */}
+      <Card padding="lg" radius="md" style={cardStyle}>
+        <Group gap="sm" mb="md">
+          <IconCash size={20} color="#00d4ff" />
+          <Title order={3} c="#e8edf2" style={{ letterSpacing: '1px' }}>PAYMENT LINKS</Title>
+        </Group>
+        <Text c="#5a6478" size="xs" mb="sm" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+          These links appear on invoices that are not marked as paid in full.
+        </Text>
+        <form onSubmit={paymentForm.onSubmit(handleSavePayment)}>
+          <Stack gap="sm">
+            <TextInput
+              label="PayPal Link"
+              placeholder="https://paypal.me/yourname"
+              leftSection={<IconBrandPaypal size={14} />}
+              {...paymentForm.getInputProps('paypal_link')}
+              styles={inputStyles}
+            />
+            <TextInput
+              label="Venmo Link"
+              placeholder="https://venmo.com/yourname"
+              {...paymentForm.getInputProps('venmo_link')}
+              styles={inputStyles}
+            />
+            <Button type="submit" color="cyan" loading={paymentSaving} styles={{ root: { fontFamily: "'Bebas Neue', sans-serif" } }}>
+              SAVE PAYMENT LINKS
             </Button>
           </Stack>
         </form>

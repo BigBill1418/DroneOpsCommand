@@ -17,6 +17,7 @@ class MissionType(str, enum.Enum):
     MAPPING = "mapping"
     PHOTOGRAPHY = "photography"
     SURVEY = "survey"
+    SECURITY_INVESTIGATIONS = "security_investigations"
     OTHER = "other"
 
 

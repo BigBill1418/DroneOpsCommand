@@ -50,6 +50,7 @@ const missionTypes = [
   { value: 'mapping', label: 'Mapping' },
   { value: 'photography', label: 'Photography' },
   { value: 'survey', label: 'Survey' },
+  { value: 'security_investigations', label: 'Security & Investigations' },
   { value: 'other', label: 'Other' },
 ];
 
@@ -85,6 +86,7 @@ export default function MissionNew() {
   // Invoice
   const [lineItems, setLineItems] = useState<any[]>([]);
   const [rateTemplates, setRateTemplates] = useState<RateTemplate[]>([]);
+  const [paidInFull, setPaidInFull] = useState(false);
 
   const navigate = useNavigate();
 
@@ -210,7 +212,7 @@ export default function MissionNew() {
   const handleSaveInvoice = async () => {
     if (!missionId) return;
     try {
-      await api.post(`/missions/${missionId}/invoice`, { tax_rate: 0 });
+      await api.post(`/missions/${missionId}/invoice`, { tax_rate: 0, paid_in_full: paidInFull });
       for (const item of lineItems) {
         if (item.description) {
           await api.post(`/missions/${missionId}/invoice/items`, item);
@@ -535,6 +537,14 @@ export default function MissionNew() {
                       TOTAL: ${lineItems.reduce((sum, item) => sum + (item.quantity || 0) * (item.unit_price || 0), 0).toFixed(2)}
                     </Text>
                   )}
+
+                  <Switch
+                    label="Paid in Full"
+                    color="green"
+                    checked={paidInFull}
+                    onChange={(e) => setPaidInFull(e.currentTarget.checked)}
+                    styles={{ label: { color: '#e8edf2', fontFamily: "'Share Tech Mono', monospace" } }}
+                  />
 
                   <Button color="cyan" onClick={handleSaveInvoice} styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}>
                     SAVE INVOICE

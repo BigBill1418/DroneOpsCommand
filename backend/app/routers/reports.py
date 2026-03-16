@@ -213,6 +213,7 @@ async def generate_report_pdf(
             "tax_rate": float(mission.invoice.tax_rate),
             "tax_amount": float(mission.invoice.tax_amount),
             "total": float(mission.invoice.total),
+            "paid_in_full": mission.invoice.paid_in_full,
             "notes": mission.invoice.notes,
             "line_items": [
                 {
@@ -226,6 +227,15 @@ async def generate_report_pdf(
             ],
         }
 
+    # Load payment links for invoice
+    payment_links = {}
+    if mission.is_billable and invoice_dict and not invoice_dict.get("paid_in_full"):
+        from app.models.system_settings import SystemSetting
+        pl_result = await db.execute(
+            select(SystemSetting).where(SystemSetting.key.in_(["paypal_link", "venmo_link"]))
+        )
+        payment_links = {r.key: r.value for r in pl_result.scalars().all()}
+
     # Images
     image_list = [{"file_path": img.file_path, "caption": img.caption} for img in mission.images]
 
@@ -235,6 +245,7 @@ async def generate_report_pdf(
         invoice=invoice_dict if mission.is_billable else None,
         aircraft_list=aircraft_list,
         image_paths=image_list,
+        payment_links=payment_links,
     )
 
     report.pdf_path = pdf_path

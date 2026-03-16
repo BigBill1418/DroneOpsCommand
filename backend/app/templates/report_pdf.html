@@ -486,6 +486,32 @@
     <div class="total-line">TOTAL: ${{ "%.2f"|format(invoice.total) }}</div>
   </div>
 
+  {% if invoice.paid_in_full %}
+  <div style="margin-top: 15px; padding: 12px 20px; background: #e6f9e6; border: 2px solid #2ecc40; border-radius: 6px; text-align: center;">
+    <span style="font-family: 'Bebas Neue', sans-serif; font-size: 18pt; color: #2ecc40; letter-spacing: 2px;">PAID IN FULL</span>
+  </div>
+  {% else %}
+  {% if payment_links and (payment_links.get('paypal_link') or payment_links.get('venmo_link')) %}
+  <div style="margin-top: 20px; padding: 15px 20px; background: #f5f7fa; border: 1px solid #e0e4ea; border-radius: 6px;">
+    <div style="font-family: 'Bebas Neue', sans-serif; font-size: 14pt; color: #0e1117; letter-spacing: 1px; margin-bottom: 8px;">
+      PAYMENT OPTIONS
+    </div>
+    <div style="font-size: 10pt;">
+      {% if payment_links.get('paypal_link') %}
+      <div style="margin-bottom: 6px;">
+        <strong>PayPal:</strong> <a href="{{ payment_links.paypal_link }}" style="color: #003087; text-decoration: underline;">{{ payment_links.paypal_link }}</a>
+      </div>
+      {% endif %}
+      {% if payment_links.get('venmo_link') %}
+      <div>
+        <strong>Venmo:</strong> <a href="{{ payment_links.venmo_link }}" style="color: #3D95CE; text-decoration: underline;">{{ payment_links.venmo_link }}</a>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+  {% endif %}
+
   {% if invoice.notes %}
   <div style="margin-top: 15px; font-size: 9pt; color: #5a6478;">
     <strong>Notes:</strong> {{ invoice.notes }}

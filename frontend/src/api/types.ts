@@ -84,6 +84,7 @@ export interface Invoice {
   tax_rate: number;
   tax_amount: number;
   total: number;
+  paid_in_full: boolean;
   notes: string | null;
   created_at: string;
   line_items: LineItem[];

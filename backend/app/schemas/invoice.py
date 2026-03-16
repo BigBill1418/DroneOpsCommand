@@ -37,12 +37,14 @@ class LineItemResponse(BaseModel):
 class InvoiceCreate(BaseModel):
     invoice_number: str | None = None
     tax_rate: float = 0
+    paid_in_full: bool = False
     notes: str | None = None
 
 
 class InvoiceUpdate(BaseModel):
     invoice_number: str | None = None
     tax_rate: float | None = None
+    paid_in_full: bool | None = None
     notes: str | None = None
 
 
@@ -54,6 +56,7 @@ class InvoiceResponse(BaseModel):
     tax_rate: float
     tax_amount: float
     total: float
+    paid_in_full: bool
     notes: str | None
     created_at: datetime
     line_items: list[LineItemResponse] = []
