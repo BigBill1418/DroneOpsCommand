@@ -1,3 +1,4 @@
+import logging
 import os
 from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
@@ -10,6 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.models.system_settings import SystemSetting
+
+logger = logging.getLogger("droneops.email")
 
 template_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "templates")
 jinja_env = Environment(loader=FileSystemLoader(template_dir))
@@ -59,6 +62,7 @@ async def send_report_email(
     download_link: dict | None = None,
 ) -> bool:
     """Send report PDF to customer via email."""
+    logger.info("Preparing email to %s for mission '%s'", to_email, mission_title)
 
     # Load SMTP config from DB if session provided, else use env
     if db:
@@ -75,6 +79,7 @@ async def send_report_email(
         }
 
     if not smtp["smtp_host"]:
+        logger.error("SMTP not configured — cannot send email")
         raise ValueError("SMTP not configured. Set SMTP_HOST in settings.")
 
     template = jinja_env.get_template("email_body.html")
@@ -92,20 +97,30 @@ async def send_report_email(
     msg.attach(MIMEText(html_body, "html"))
 
     # Attach PDF
-    if pdf_path and os.path.exists(pdf_path):
-        with open(pdf_path, "rb") as f:
-            pdf_attachment = MIMEApplication(f.read(), _subtype="pdf")
-            pdf_filename = os.path.basename(pdf_path)
-            pdf_attachment.add_header("Content-Disposition", "attachment", filename=pdf_filename)
-            msg.attach(pdf_attachment)
+    if pdf_path:
+        try:
+            with open(pdf_path, "rb") as f:
+                pdf_attachment = MIMEApplication(f.read(), _subtype="pdf")
+                pdf_filename = os.path.basename(pdf_path)
+                pdf_attachment.add_header("Content-Disposition", "attachment", filename=pdf_filename)
+                msg.attach(pdf_attachment)
+                logger.info("PDF attached: %s", pdf_filename)
+        except FileNotFoundError:
+            logger.error("PDF file not found for email attachment: %s", pdf_path)
+            raise ValueError(f"PDF file not found: {pdf_path}")
 
-    await aiosmtplib.send(
-        msg,
-        hostname=smtp["smtp_host"],
-        port=int(smtp["smtp_port"]),
-        username=smtp["smtp_user"] or None,
-        password=smtp["smtp_password"] or None,
-        use_tls=smtp["smtp_use_tls"] if isinstance(smtp["smtp_use_tls"], bool) else _parse_bool(str(smtp["smtp_use_tls"]), True),
-    )
+    try:
+        await aiosmtplib.send(
+            msg,
+            hostname=smtp["smtp_host"],
+            port=int(smtp["smtp_port"]),
+            username=smtp["smtp_user"] or None,
+            password=smtp["smtp_password"] or None,
+            use_tls=smtp["smtp_use_tls"] if isinstance(smtp["smtp_use_tls"], bool) else _parse_bool(str(smtp["smtp_use_tls"]), True),
+        )
+        logger.info("Email sent successfully to %s", to_email)
+    except Exception as exc:
+        logger.error("SMTP send failed to %s: %s", to_email, exc, exc_info=True)
+        raise
 
     return True

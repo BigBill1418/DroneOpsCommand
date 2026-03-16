@@ -2,6 +2,7 @@ import axios from 'axios';
 
 const api = axios.create({
   baseURL: '/api',
+  timeout: 30000, // 30s default timeout — prevents indefinite hangs
 });
 
 // Attach JWT token to requests

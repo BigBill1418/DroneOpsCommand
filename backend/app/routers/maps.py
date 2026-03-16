@@ -1,4 +1,6 @@
 import asyncio
+import logging
+import time
 from functools import partial
 from uuid import UUID
 
@@ -17,6 +19,8 @@ from app.services.map_renderer import (
     generate_map_geojson,
     render_static_map,
 )
+
+logger = logging.getLogger("droneops.maps")
 
 router = APIRouter(prefix="/api/missions", tags=["maps"])
 
@@ -58,10 +62,17 @@ async def get_map_data(
     _user: User = Depends(get_current_user),
 ):
     """Get GeoJSON data for interactive flight path map."""
+    start = time.perf_counter()
     mission = await _load_mission(db, mission_id)
     flights = _flights_to_dicts(mission)
     loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, generate_map_geojson, flights)
+    try:
+        result = await loop.run_in_executor(None, generate_map_geojson, flights)
+        logger.info("Map GeoJSON for mission %s: %.2fs", mission_id, time.perf_counter() - start)
+        return result
+    except Exception as exc:
+        logger.error("Map GeoJSON failed for mission %s: %s", mission_id, exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Map generation failed: {exc}")
 
 
 @router.get("/{mission_id}/map/coverage")
@@ -72,14 +83,22 @@ async def get_coverage(
     _user: User = Depends(get_current_user),
 ):
     """Calculate area coverage in acres."""
+    start = time.perf_counter()
     mission = await _load_mission(db, mission_id)
     flights = _flights_to_dicts(mission)
 
     loop = asyncio.get_event_loop()
-    tracks = await loop.run_in_executor(None, extract_gps_tracks, flights)
-    acres = await loop.run_in_executor(
-        None, partial(calculate_area_acres, tracks, buffer_meters=buffer_meters)
-    )
+    try:
+        tracks = await loop.run_in_executor(None, extract_gps_tracks, flights)
+        acres = await loop.run_in_executor(
+            None, partial(calculate_area_acres, tracks, buffer_meters=buffer_meters)
+        )
+    except Exception as exc:
+        logger.error("Coverage calculation failed for mission %s: %s", mission_id, exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Coverage calculation failed: {exc}")
+
+    logger.info("Coverage for mission %s: %.2f acres, %d tracks (%.2fs)",
+                mission_id, acres, len(tracks), time.perf_counter() - start)
 
     return {
         "acres": round(acres, 2),
@@ -96,9 +115,16 @@ async def render_map(
     _user: User = Depends(get_current_user),
 ):
     """Render a static map image for PDF inclusion."""
+    start = time.perf_counter()
     mission = await _load_mission(db, mission_id)
     flights = _flights_to_dicts(mission)
     loop = asyncio.get_event_loop()
-    map_path = await loop.run_in_executor(None, render_static_map, flights)
+    try:
+        map_path = await loop.run_in_executor(None, render_static_map, flights)
+        logger.info("Map rendered for mission %s: %s (%.2fs)",
+                     mission_id, map_path, time.perf_counter() - start)
+    except Exception as exc:
+        logger.error("Map render failed for mission %s: %s", mission_id, exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Map render failed: {exc}")
 
     return {"map_path": map_path}

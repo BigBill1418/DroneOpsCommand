@@ -1,3 +1,4 @@
+import asyncio
 import io
 import logging
 import os
@@ -7,7 +8,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, status
 from PIL import Image as PILImage
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -26,7 +27,7 @@ from app.schemas.mission import (
 )
 from app.services.opendronelog import opendronelog_client
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("droneops.missions")
 
 router = APIRouter(prefix="/api/missions", tags=["missions"])
 
@@ -36,7 +37,15 @@ async def list_missions(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
-    result = await db.execute(select(Mission).order_by(Mission.created_at.desc()))
+    result = await db.execute(
+        select(Mission)
+        .order_by(Mission.created_at.desc())
+        .options(
+            selectinload(Mission.flights),
+            selectinload(Mission.images),
+            selectinload(Mission.customer),
+        )
+    )
     return result.scalars().all()
 
 
@@ -250,6 +259,12 @@ async def remove_flight(
 MAX_IMAGE_DIMENSION = 1920  # Max width or height for report images
 
 
+def _write_file(path: str, content: bytes):
+    """Write bytes to disk (runs in executor to avoid blocking)."""
+    with open(path, "wb") as f:
+        f.write(content)
+
+
 def _resize_image(content: bytes, max_dim: int = MAX_IMAGE_DIMENSION) -> tuple[bytes, str]:
     """Resize image if it exceeds max dimensions. Returns (bytes, extension)."""
     try:
@@ -270,8 +285,8 @@ def _resize_image(content: bytes, max_dim: int = MAX_IMAGE_DIMENSION) -> tuple[b
             img = img.convert("RGB")
         img.save(buf, format="JPEG", quality=82, optimize=True)
         return buf.getvalue(), ".jpg"
-    except Exception:
-        # If we can't process it, return original
+    except Exception as exc:
+        logger.warning("Image resize failed, using original: %s", exc)
         return content, ""
 
 
@@ -292,21 +307,22 @@ async def upload_image(
     os.makedirs(upload_dir, exist_ok=True)
 
     content = await file.read()
+    logger.info("Image upload for mission %s: %s (%d bytes)", mission_id, file.filename, len(content))
 
-    # Resize large images for report use
-    resized_content, forced_ext = _resize_image(content)
+    # Resize large images in thread executor to avoid blocking
+    loop = asyncio.get_event_loop()
+    resized_content, forced_ext = await loop.run_in_executor(None, _resize_image, content)
     ext = forced_ext or (os.path.splitext(file.filename)[1] if file.filename else ".jpg")
     filename = f"{uuid_mod.uuid4()}{ext}"
     file_path = os.path.join(upload_dir, filename)
 
-    with open(file_path, "wb") as f:
-        f.write(resized_content)
+    await loop.run_in_executor(None, _write_file, file_path, resized_content)
 
-    # Get sort order
+    # Get sort order using COUNT instead of loading all images
     count_result = await db.execute(
-        select(MissionImage).where(MissionImage.mission_id == mission_id)
+        select(func.count()).select_from(MissionImage).where(MissionImage.mission_id == mission_id)
     )
-    sort_order = len(count_result.scalars().all())
+    sort_order = count_result.scalar() or 0
 
     image = MissionImage(
         mission_id=mission_id,
@@ -317,6 +333,7 @@ async def upload_image(
     db.add(image)
     await db.flush()
     await db.refresh(image)
+    logger.info("Image saved for mission %s: %s", mission_id, file_path)
     return image
 
 

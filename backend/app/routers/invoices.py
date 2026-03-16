@@ -1,8 +1,10 @@
+import logging
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.auth.jwt import get_current_user
 from app.database import get_db
@@ -17,6 +19,8 @@ from app.schemas.invoice import (
     LineItemResponse,
     LineItemUpdate,
 )
+
+logger = logging.getLogger("droneops.invoices")
 
 router = APIRouter(prefix="/api/missions", tags=["invoices"])
 
@@ -36,7 +40,11 @@ async def get_invoice(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
-    result = await db.execute(select(Invoice).where(Invoice.mission_id == mission_id))
+    result = await db.execute(
+        select(Invoice)
+        .where(Invoice.mission_id == mission_id)
+        .options(selectinload(Invoice.line_items))
+    )
     invoice = result.scalar_one_or_none()
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
@@ -74,7 +82,11 @@ async def update_invoice(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
-    result = await db.execute(select(Invoice).where(Invoice.mission_id == mission_id))
+    result = await db.execute(
+        select(Invoice)
+        .where(Invoice.mission_id == mission_id)
+        .options(selectinload(Invoice.line_items))
+    )
     invoice = result.scalar_one_or_none()
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
@@ -97,7 +109,11 @@ async def add_line_item(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
-    result = await db.execute(select(Invoice).where(Invoice.mission_id == mission_id))
+    result = await db.execute(
+        select(Invoice)
+        .where(Invoice.mission_id == mission_id)
+        .options(selectinload(Invoice.line_items))
+    )
     invoice = result.scalar_one_or_none()
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
@@ -114,8 +130,13 @@ async def add_line_item(
     db.add(item)
     await db.flush()
 
-    # Recalculate totals
-    await db.refresh(invoice)
+    # Recalculate totals — re-query to include new item
+    result = await db.execute(
+        select(Invoice)
+        .where(Invoice.id == invoice.id)
+        .options(selectinload(Invoice.line_items))
+    )
+    invoice = result.scalar_one()
     _recalculate_invoice(invoice)
     await db.flush()
     await db.refresh(item)
@@ -141,11 +162,14 @@ async def update_line_item(
     item.total = float(item.quantity) * float(item.unit_price)
     await db.flush()
 
-    # Recalculate invoice totals
-    invoice_result = await db.execute(select(Invoice).where(Invoice.mission_id == mission_id))
+    # Recalculate invoice totals with eager loaded line_items
+    invoice_result = await db.execute(
+        select(Invoice)
+        .where(Invoice.mission_id == mission_id)
+        .options(selectinload(Invoice.line_items))
+    )
     invoice = invoice_result.scalar_one_or_none()
     if invoice:
-        await db.refresh(invoice)
         _recalculate_invoice(invoice)
         await db.flush()
 
@@ -169,10 +193,13 @@ async def delete_line_item(
     await db.delete(item)
     await db.flush()
 
-    # Recalculate invoice totals
-    invoice_result = await db.execute(select(Invoice).where(Invoice.id == invoice_id))
+    # Recalculate invoice totals with eager loaded line_items
+    invoice_result = await db.execute(
+        select(Invoice)
+        .where(Invoice.id == invoice_id)
+        .options(selectinload(Invoice.line_items))
+    )
     invoice = invoice_result.scalar_one_or_none()
     if invoice:
-        await db.refresh(invoice)
         _recalculate_invoice(invoice)
         await db.flush()

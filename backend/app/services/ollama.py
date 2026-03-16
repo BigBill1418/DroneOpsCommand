@@ -1,6 +1,10 @@
+import logging
+
 import httpx
 
 from app.config import settings
+
+logger = logging.getLogger("droneops.ollama")
 
 SYSTEM_PROMPT = """You are a professional drone operations report writer for BarnardHQ, \
 an FAA Part 107 certified drone operations company. Generate a detailed, client-facing \
@@ -66,29 +70,42 @@ Operator Notes:
 
 Generate the after-action report:"""
 
-    async with httpx.AsyncClient(timeout=300) as client:
-        resp = await client.post(
-            f"{settings.ollama_base_url}/api/generate",
-            json={
-                "model": settings.ollama_model,
-                "prompt": user_prompt,
-                "system": SYSTEM_PROMPT,
-                "stream": False,
-                "options": {
-                    "temperature": 0.3,
-                    "num_predict": 768,
-                    # Use 6 of 8 threads — leaves headroom for the OS and other services
-                    "num_thread": 6,
-                    # Smaller context window — our prompts are well under 2k
-                    "num_ctx": 1536,
-                    # Batch size reduced to lower peak CPU load
-                    "num_batch": 192,
+    logger.info("LLM report generation starting for '%s' (%s)", mission_title, location)
+    try:
+        async with httpx.AsyncClient(timeout=300) as client:
+            resp = await client.post(
+                f"{settings.ollama_base_url}/api/generate",
+                json={
+                    "model": settings.ollama_model,
+                    "prompt": user_prompt,
+                    "system": SYSTEM_PROMPT,
+                    "stream": False,
+                    "options": {
+                        "temperature": 0.3,
+                        "num_predict": 768,
+                        # Use 6 of 8 threads — leaves headroom for the OS and other services
+                        "num_thread": 6,
+                        # Smaller context window — our prompts are well under 2k
+                        "num_ctx": 1536,
+                        # Batch size reduced to lower peak CPU load
+                        "num_batch": 192,
+                    },
                 },
-            },
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        return data.get("response", "")
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            response_text = data.get("response", "")
+            logger.info("LLM report generated: %d chars", len(response_text))
+            return response_text
+    except httpx.TimeoutException:
+        logger.error("Ollama request timed out after 300s for '%s'", mission_title)
+        raise
+    except httpx.HTTPStatusError as exc:
+        logger.error("Ollama HTTP error %s: %s", exc.response.status_code, exc)
+        raise
+    except Exception as exc:
+        logger.error("Ollama request failed: %s", exc, exc_info=True)
+        raise
 
 
 async def check_ollama_status() -> dict:
@@ -106,4 +123,5 @@ async def check_ollama_status() -> dict:
                 "model_available": any(settings.ollama_model in m for m in models),
             }
     except Exception as e:
+        logger.warning("Ollama status check failed: %s", e)
         return {"status": "offline", "error": str(e)}

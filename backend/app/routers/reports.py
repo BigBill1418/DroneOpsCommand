@@ -1,4 +1,8 @@
+import asyncio
+import logging
+import time
 from datetime import datetime
+from functools import partial
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -10,15 +14,33 @@ from sqlalchemy.orm import selectinload
 from app.auth.jwt import get_current_user
 from app.database import get_db
 from app.models.invoice import Invoice
-from app.models.mission import Mission
+from app.models.mission import Mission, MissionFlight
 from app.models.report import Report
 from app.models.user import User
 from app.schemas.report import ReportGenerateRequest, ReportResponse, ReportUpdateRequest
 from app.services.map_renderer import calculate_area_acres, extract_gps_tracks, render_static_map
-from app.services.ollama import generate_report as llm_generate_report
 from app.services.pdf_generator import generate_pdf
 
+logger = logging.getLogger("droneops.reports")
+
 router = APIRouter(prefix="/api/missions", tags=["reports"])
+
+
+async def _load_mission_with_flights(db: AsyncSession, mission_id: UUID) -> Mission:
+    """Load a mission with flights and aircraft eagerly loaded."""
+    result = await db.execute(
+        select(Mission)
+        .where(Mission.id == mission_id)
+        .options(
+            selectinload(Mission.flights).selectinload(MissionFlight.aircraft),
+            selectinload(Mission.customer),
+            selectinload(Mission.images),
+        )
+    )
+    mission = result.scalar_one_or_none()
+    if not mission:
+        raise HTTPException(status_code=404, detail="Mission not found")
+    return mission
 
 
 def _flights_to_dicts(mission: Mission) -> list[dict]:
@@ -74,17 +96,36 @@ async def generate_report(
     """Kick off LLM report generation as a background task."""
     from app.tasks.celery_tasks import generate_report_task
 
-    result = await db.execute(select(Mission).where(Mission.id == mission_id))
-    mission = result.scalar_one_or_none()
-    if not mission:
-        raise HTTPException(status_code=404, detail="Mission not found")
+    logger.info("Report generation requested for mission %s", mission_id)
+    start = time.perf_counter()
 
-    # Pre-compute everything we can before handing off to the worker
+    mission = await _load_mission_with_flights(db, mission_id)
+    logger.info("Mission %s loaded: %d flights", mission_id, len(mission.flights))
+
+    # Pre-compute geo data in thread executor to avoid blocking event loop
     flights = _flights_to_dicts(mission)
-    tracks = extract_gps_tracks(flights)
-    acres = calculate_area_acres(tracks)
+    loop = asyncio.get_event_loop()
+
+    try:
+        tracks = await loop.run_in_executor(None, extract_gps_tracks, flights)
+        acres = await loop.run_in_executor(None, calculate_area_acres, tracks)
+        logger.info("Mission %s geo: %d tracks, %.2f acres (%.2fs)",
+                     mission_id, len(tracks), acres, time.perf_counter() - start)
+    except Exception as exc:
+        logger.error("Mission %s geo computation failed: %s", mission_id, exc)
+        tracks = []
+        acres = 0.0
+
     flight_summaries = _build_flight_summaries(mission)
-    map_path = render_static_map(flights) if tracks else None
+
+    map_path = None
+    if tracks:
+        try:
+            map_path = await loop.run_in_executor(None, render_static_map, flights)
+            logger.info("Mission %s map rendered: %s (%.2fs)",
+                         mission_id, map_path, time.perf_counter() - start)
+        except Exception as exc:
+            logger.error("Mission %s map render failed: %s", mission_id, exc)
 
     total_duration = 0
     total_distance = 0
@@ -137,6 +178,9 @@ async def generate_report(
         map_path=map_path,
     )
 
+    elapsed = time.perf_counter() - start
+    logger.info("Mission %s report task dispatched: %s (%.2fs)", mission_id, task.id, elapsed)
+
     return {"task_id": task.id, "status": "generating"}
 
 
@@ -156,6 +200,7 @@ async def get_generation_status(
     elif result.state == "SUCCESS":
         return {"status": "complete"}
     elif result.state == "FAILURE":
+        logger.error("Report task %s failed: %s", task_id, result.result)
         return {"status": "failed", "detail": str(result.result)}
     else:
         return {"status": "generating"}
@@ -191,10 +236,15 @@ async def generate_report_pdf(
     _user: User = Depends(get_current_user),
 ):
     """Generate PDF from the report."""
+    logger.info("PDF generation requested for mission %s", mission_id)
+    start = time.perf_counter()
+
     result = await db.execute(
         select(Mission)
         .where(Mission.id == mission_id)
         .options(
+            selectinload(Mission.flights).selectinload(MissionFlight.aircraft),
+            selectinload(Mission.images),
             selectinload(Mission.customer),
             selectinload(Mission.invoice).selectinload(Invoice.line_items),
         )
@@ -288,18 +338,31 @@ async def generate_report_pdf(
             else "N/A",
         }
 
-    pdf_path = generate_pdf(
-        mission=mission_dict,
-        report=report_dict,
-        invoice=invoice_dict if mission.is_billable else None,
-        aircraft_list=aircraft_list,
-        image_paths=image_list,
-        payment_links=payment_links,
-        download_link=download_link,
-    )
+    # Run WeasyPrint in thread executor — it's CPU-intensive and blocks
+    loop = asyncio.get_event_loop()
+    try:
+        pdf_path = await loop.run_in_executor(
+            None,
+            partial(
+                generate_pdf,
+                mission=mission_dict,
+                report=report_dict,
+                invoice=invoice_dict if mission.is_billable else None,
+                aircraft_list=aircraft_list,
+                image_paths=image_list,
+                payment_links=payment_links,
+                download_link=download_link,
+            ),
+        )
+    except Exception as exc:
+        logger.error("Mission %s PDF generation failed: %s", mission_id, exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"PDF generation failed: {exc}")
 
     report.pdf_path = pdf_path
     await db.flush()
+
+    elapsed = time.perf_counter() - start
+    logger.info("Mission %s PDF generated: %s (%.2fs)", mission_id, pdf_path, elapsed)
 
     return FileResponse(pdf_path, media_type="application/pdf", filename=f"report_{mission.title}.pdf")
 
@@ -313,10 +376,7 @@ async def send_report(
     """Send report PDF to customer via email."""
     from app.services.email_service import send_report_email
 
-    result = await db.execute(select(Mission).where(Mission.id == mission_id))
-    mission = result.scalar_one_or_none()
-    if not mission:
-        raise HTTPException(status_code=404, detail="Mission not found")
+    mission = await _load_mission_with_flights(db, mission_id)
     if not mission.customer or not mission.customer.email:
         raise HTTPException(status_code=400, detail="Customer email not set")
 
@@ -335,17 +395,23 @@ async def send_report(
             else "N/A",
         }
 
-    await send_report_email(
-        to_email=mission.customer.email,
-        customer_name=mission.customer.name,
-        mission_title=mission.title,
-        pdf_path=report.pdf_path,
-        db=db,
-        download_link=download_link,
-    )
+    logger.info("Sending report for mission %s to %s", mission_id, mission.customer.email)
+    try:
+        await send_report_email(
+            to_email=mission.customer.email,
+            customer_name=mission.customer.name,
+            mission_title=mission.title,
+            pdf_path=report.pdf_path,
+            db=db,
+            download_link=download_link,
+        )
+    except Exception as exc:
+        logger.error("Mission %s email send failed: %s", mission_id, exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Email send failed: {exc}")
 
     report.sent_at = datetime.utcnow()
     mission.status = "sent"
     await db.flush()
 
+    logger.info("Mission %s report sent successfully", mission_id)
     return {"message": "Report sent successfully"}

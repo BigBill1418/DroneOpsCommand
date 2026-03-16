@@ -1,7 +1,9 @@
+import logging
 import os
+import time
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
@@ -9,6 +11,14 @@ from app.config import settings
 from app.database import Base, async_session, engine
 import app.models  # noqa: F401 — ensure all models registered with Base before create_all
 from app.routers import auth, customers, aircraft, missions, flights, maps, reports, invoices, rate_templates, llm, system_settings, financials, weather
+
+# Configure root logger for the app
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+logger = logging.getLogger("droneops")
 
 
 def _add_missing_columns(conn):
@@ -107,7 +117,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="DroneOpsReport",
     description="Invoicing and after-action reporting tool for drone operations",
-    version="1.8.0",
+    version="1.9.0",
     lifespan=lifespan,
 )
 
@@ -143,6 +153,25 @@ app.include_router(llm.router)
 app.include_router(system_settings.router)
 app.include_router(financials.router)
 app.include_router(weather.router)
+
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    """Log every request with timing — critical for diagnosing hangs."""
+    start = time.perf_counter()
+    method = request.method
+    path = request.url.path
+    logger.info("REQ %s %s", method, path)
+    try:
+        response = await call_next(request)
+        elapsed = time.perf_counter() - start
+        level = logging.WARNING if elapsed > 5.0 else logging.INFO
+        logger.log(level, "RES %s %s %s %.2fs", method, path, response.status_code, elapsed)
+        return response
+    except Exception as exc:
+        elapsed = time.perf_counter() - start
+        logger.error("ERR %s %s failed after %.2fs: %s", method, path, elapsed, exc)
+        raise
 
 
 @app.get("/api/health")

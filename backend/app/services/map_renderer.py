@@ -1,3 +1,4 @@
+import logging
 import math
 import os
 import uuid
@@ -8,6 +9,7 @@ from shapely.ops import unary_union
 
 from app.config import settings
 
+logger = logging.getLogger("droneops.map_renderer")
 
 # Convert square meters to acres
 SQ_METERS_TO_ACRES = 0.000247105
@@ -28,17 +30,23 @@ def extract_gps_tracks(flights: list[dict]) -> list[list[tuple[float, float]]]:
 
         if isinstance(gps_data, list):
             for point in gps_data:
-                if isinstance(point, dict):
-                    lat = point.get("lat", point.get("latitude"))
-                    lng = point.get("lng", point.get("lon", point.get("longitude")))
-                    if lat is not None and lng is not None:
-                        track.append((float(lat), float(lng)))
-                elif isinstance(point, (list, tuple)) and len(point) >= 2:
-                    track.append((float(point[0]), float(point[1])))
+                try:
+                    if isinstance(point, dict):
+                        lat = point.get("lat", point.get("latitude"))
+                        lng = point.get("lng", point.get("lon", point.get("longitude")))
+                        if lat is not None and lng is not None:
+                            track.append((float(lat), float(lng)))
+                    elif isinstance(point, (list, tuple)) and len(point) >= 2:
+                        track.append((float(point[0]), float(point[1])))
+                except (ValueError, TypeError) as exc:
+                    logger.debug("Skipping invalid GPS point %s: %s", point, exc)
+                    continue
 
         if track:
             tracks.append(track)
 
+    logger.info("Extracted %d GPS tracks (%d total points)",
+                len(tracks), sum(len(t) for t in tracks))
     return tracks
 
 
@@ -56,31 +64,37 @@ def calculate_area_acres(tracks: list[list[tuple[float, float]]], buffer_meters:
     if not all_points:
         return 0.0
 
-    center_lat = sum(p[0] for p in all_points) / len(all_points)
-    center_lng = sum(p[1] for p in all_points) / len(all_points)
+    try:
+        center_lat = sum(p[0] for p in all_points) / len(all_points)
+        center_lng = sum(p[1] for p in all_points) / len(all_points)
 
-    # Determine UTM zone
-    utm_zone = int((center_lng + 180) / 6) + 1
-    hemisphere = "north" if center_lat >= 0 else "south"
-    epsg_code = 32600 + utm_zone if hemisphere == "north" else 32700 + utm_zone
+        # Determine UTM zone
+        utm_zone = int((center_lng + 180) / 6) + 1
+        hemisphere = "north" if center_lat >= 0 else "south"
+        epsg_code = 32600 + utm_zone if hemisphere == "north" else 32700 + utm_zone
 
-    # Transform to UTM for accurate area calculation
-    transformer = Transformer.from_crs("EPSG:4326", f"EPSG:{epsg_code}", always_xy=True)
+        # Transform to UTM for accurate area calculation
+        transformer = Transformer.from_crs("EPSG:4326", f"EPSG:{epsg_code}", always_xy=True)
 
-    lines = []
-    for track in tracks:
-        if len(track) < 2:
-            continue
-        utm_coords = [transformer.transform(lng, lat) for lat, lng in track]
-        lines.append(LineString(utm_coords))
+        lines = []
+        for track in tracks:
+            if len(track) < 2:
+                continue
+            utm_coords = [transformer.transform(lng, lat) for lat, lng in track]
+            lines.append(LineString(utm_coords))
 
-    if not lines:
+        if not lines:
+            return 0.0
+
+        multi_line = MultiLineString(lines)
+        buffered = multi_line.buffer(buffer_meters)
+        area_sq_meters = buffered.area
+        acres = area_sq_meters * SQ_METERS_TO_ACRES
+        logger.info("Area calculation: %.2f acres (%.0f sq m, buffer=%.0fm)", acres, area_sq_meters, buffer_meters)
+        return acres
+    except Exception as exc:
+        logger.error("Area calculation failed: %s", exc, exc_info=True)
         return 0.0
-
-    multi_line = MultiLineString(lines)
-    buffered = multi_line.buffer(buffer_meters)
-    area_sq_meters = buffered.area
-    return area_sq_meters * SQ_METERS_TO_ACRES
 
 
 def calculate_convex_hull_geojson(tracks: list[list[tuple[float, float]]]) -> dict | None:
@@ -89,21 +103,25 @@ def calculate_convex_hull_geojson(tracks: list[list[tuple[float, float]]]) -> di
     if len(all_points) < 3:
         return None
 
-    mp = MultiPoint([(lng, lat) for lat, lng in all_points])
-    hull = mp.convex_hull
+    try:
+        mp = MultiPoint([(lng, lat) for lat, lng in all_points])
+        hull = mp.convex_hull
 
-    if hull.is_empty:
+        if hull.is_empty:
+            return None
+
+        coords = list(hull.exterior.coords) if hasattr(hull, 'exterior') else []
+        return {
+            "type": "Feature",
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [[[c[0], c[1]] for c in coords]],
+            },
+            "properties": {"type": "coverage_area"},
+        }
+    except Exception as exc:
+        logger.error("Convex hull calculation failed: %s", exc)
         return None
-
-    coords = list(hull.exterior.coords) if hasattr(hull, 'exterior') else []
-    return {
-        "type": "Feature",
-        "geometry": {
-            "type": "Polygon",
-            "coordinates": [[[c[0], c[1]] for c in coords]],
-        },
-        "properties": {"type": "coverage_area"},
-    }
 
 
 def generate_map_geojson(flights: list[dict]) -> dict:
@@ -152,6 +170,7 @@ def generate_map_geojson(flights: list[dict]) -> dict:
     if hull_feature:
         features.append(hull_feature)
 
+    logger.info("Generated GeoJSON: %d features from %d tracks", len(features), len(tracks))
     return {"type": "FeatureCollection", "features": features}
 
 
@@ -168,36 +187,42 @@ def render_static_map(flights: list[dict], width: int = 800, height: int = 600) 
 
     tracks = extract_gps_tracks(flights)
     if not tracks:
+        logger.info("No tracks for static map, skipping render")
         return ""
 
     colors = ["#003d99", "#ff6b1a", "#00ff88", "#ff4444", "#ffaa00", "#aa44ff"]
 
-    m = StaticMap(width, height, url_template="https://tile.openstreetmap.org/{z}/{x}/{y}.png")
+    try:
+        m = StaticMap(width, height, url_template="https://tile.openstreetmap.org/{z}/{x}/{y}.png")
 
-    for i, track in enumerate(tracks):
-        color = colors[i % len(colors)]
+        for i, track in enumerate(tracks):
+            color = colors[i % len(colors)]
 
-        # Draw the flight path line — staticmap uses (lng, lat) order
-        if len(track) >= 2:
-            line_coords = [(lng, lat) for lat, lng in track]
-            m.add_line(Line(line_coords, color, 3))
+            # Draw the flight path line — staticmap uses (lng, lat) order
+            if len(track) >= 2:
+                line_coords = [(lng, lat) for lat, lng in track]
+                m.add_line(Line(line_coords, color, 3))
 
-        # Start marker (green tint)
-        if track:
-            start_lat, start_lng = track[0]
-            m.add_marker(CircleMarker((start_lng, start_lat), color, 8))
+            # Start marker (green tint)
+            if track:
+                start_lat, start_lng = track[0]
+                m.add_marker(CircleMarker((start_lng, start_lat), color, 8))
 
-        # End marker (smaller)
-        if len(track) > 1:
-            end_lat, end_lng = track[-1]
-            m.add_marker(CircleMarker((end_lng, end_lat), color, 5))
+            # End marker (smaller)
+            if len(track) > 1:
+                end_lat, end_lng = track[-1]
+                m.add_marker(CircleMarker((end_lng, end_lat), color, 5))
 
-    # Render the image — staticmap auto-calculates zoom and center to fit all elements
-    image = m.render()
+        # Render the image — staticmap auto-calculates zoom and center to fit all elements
+        image = m.render()
 
-    os.makedirs(settings.reports_dir, exist_ok=True)
-    map_filename = f"map_{uuid.uuid4().hex[:8]}.png"
-    map_path = os.path.join(settings.reports_dir, map_filename)
-    image.save(map_path)
+        os.makedirs(settings.reports_dir, exist_ok=True)
+        map_filename = f"map_{uuid.uuid4().hex[:8]}.png"
+        map_path = os.path.join(settings.reports_dir, map_filename)
+        image.save(map_path)
 
-    return map_path
+        logger.info("Static map rendered: %s (%d tracks)", map_path, len(tracks))
+        return map_path
+    except Exception as exc:
+        logger.error("Static map render failed: %s", exc, exc_info=True)
+        return ""
