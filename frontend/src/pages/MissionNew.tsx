@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import {
   Button,
   Card,
@@ -17,7 +17,9 @@ import {
   Badge,
   Checkbox,
   Loader,
-  FileInput,
+  Progress,
+  Image,
+  SimpleGrid,
 } from '@mantine/core';
 import { DateInput } from '@mantine/dates';
 import { useForm } from '@mantine/form';
@@ -29,6 +31,8 @@ import {
   IconFileText,
   IconSend,
   IconDownload,
+  IconUpload,
+  IconPhoto,
 } from '@tabler/icons-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
@@ -82,6 +86,12 @@ export default function MissionNew() {
   const [narrative, setNarrative] = useState('');
   const [reportContent, setReportContent] = useState('');
   const [generating, setGenerating] = useState(false);
+
+  // Images
+  const [uploadedImages, setUploadedImages] = useState<{ name: string; status: 'pending' | 'uploading' | 'done' | 'error' }[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Invoice
   const [lineItems, setLineItems] = useState<any[]>([]);
@@ -150,34 +160,143 @@ export default function MissionNew() {
     }
   };
 
+  // Aircraft assigned to this mission
+  const [missionAircraft, setMissionAircraft] = useState<string[]>([]);
+
   // Step 2: Add flights
-  const handleAddFlight = async (flight: any) => {
+  const handleAddFlight = async (flight: any, aircraftId?: string) => {
     if (!missionId) return;
     try {
-      await api.post(`/missions/${missionId}/flights`, {
+      const resp = await api.post(`/missions/${missionId}/flights`, {
         opendronelog_flight_id: String(flight.id || flight.flight_id),
-        aircraft_id: null,
+        aircraft_id: aircraftId || null,
         flight_data_cache: flight,
       });
-      setSelectedFlights((prev) => [...prev, flight]);
+      setSelectedFlights((prev) => [...prev, { ...flight, _flightId: resp.data.id, _aircraftId: aircraftId || null }]);
       loadMapData();
     } catch {
       notifications.show({ title: 'Error', message: 'Failed to add flight', color: 'red' });
     }
   };
 
-  // Step 3: Upload images
-  const handleImageUpload = async (files: File[]) => {
+  const handleAssignAircraft = async (flightIndex: number, aircraftId: string | null) => {
     if (!missionId) return;
-    for (const file of files) {
+    const flight = selectedFlights[flightIndex];
+    if (!flight?._flightId) return;
+    try {
+      await api.put(`/missions/${missionId}/flights/${flight._flightId}`, {
+        opendronelog_flight_id: String(flight.id || flight.flight_id),
+        aircraft_id: aircraftId,
+        flight_data_cache: flight,
+      });
+      setSelectedFlights((prev) => {
+        const updated = [...prev];
+        updated[flightIndex] = { ...updated[flightIndex], _aircraftId: aircraftId };
+        return updated;
+      });
+    } catch {
+      notifications.show({ title: 'Error', message: 'Failed to assign aircraft', color: 'red' });
+    }
+  };
+
+  // Step 3: Upload images
+  const collectFilesFromEntry = async (entry: FileSystemEntry): Promise<File[]> => {
+    if (entry.isFile) {
+      return new Promise((resolve) => {
+        (entry as FileSystemFileEntry).file((f) => {
+          if (f.type.startsWith('image/')) resolve([f]);
+          else resolve([]);
+        });
+      });
+    }
+    if (entry.isDirectory) {
+      const reader = (entry as FileSystemDirectoryEntry).createReader();
+      const entries: FileSystemEntry[] = await new Promise((resolve) => reader.readEntries(resolve));
+      const nested = await Promise.all(entries.map(collectFilesFromEntry));
+      return nested.flat();
+    }
+    return [];
+  };
+
+  const uploadFiles = async (files: File[]) => {
+    if (!missionId || files.length === 0) return;
+    const imageFiles = files.filter((f) => f.type.startsWith('image/'));
+    if (imageFiles.length === 0) {
+      notifications.show({ title: 'No images', message: 'No image files found in selection', color: 'yellow' });
+      return;
+    }
+
+    setUploading(true);
+    const tracker = imageFiles.map((f) => ({ name: f.name, status: 'pending' as const }));
+    setUploadedImages((prev) => [...prev, ...tracker]);
+
+    let successCount = 0;
+    for (let i = 0; i < imageFiles.length; i++) {
+      setUploadedImages((prev) => {
+        const updated = [...prev];
+        const idx = prev.length - imageFiles.length + i;
+        updated[idx] = { ...updated[idx], status: 'uploading' };
+        return updated;
+      });
+
       const formData = new FormData();
-      formData.append('file', file);
+      formData.append('file', imageFiles[i]);
       formData.append('caption', '');
       try {
-        await api.post(`/missions/${missionId}/images`, formData);
-      } catch {}
+        await api.post(`/missions/${missionId}/images`, formData, {
+          timeout: 120000,  // 2 min timeout for large files
+        });
+        successCount++;
+        setUploadedImages((prev) => {
+          const updated = [...prev];
+          const idx = prev.length - imageFiles.length + i;
+          updated[idx] = { ...updated[idx], status: 'done' };
+          return updated;
+        });
+      } catch {
+        setUploadedImages((prev) => {
+          const updated = [...prev];
+          const idx = prev.length - imageFiles.length + i;
+          updated[idx] = { ...updated[idx], status: 'error' };
+          return updated;
+        });
+      }
     }
-    notifications.show({ title: 'Uploaded', message: `${files.length} image(s) uploaded`, color: 'cyan' });
+
+    setUploading(false);
+    notifications.show({
+      title: 'Upload Complete',
+      message: `${successCount} of ${imageFiles.length} image(s) uploaded successfully`,
+      color: successCount === imageFiles.length ? 'cyan' : 'yellow',
+    });
+  };
+
+  const handleDrop = useCallback(async (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+
+    const items = e.dataTransfer.items;
+    if (items) {
+      const allFiles: File[] = [];
+      const entries = Array.from(items)
+        .map((item) => item.webkitGetAsEntry?.())
+        .filter(Boolean) as FileSystemEntry[];
+
+      if (entries.length > 0) {
+        const nested = await Promise.all(entries.map(collectFilesFromEntry));
+        allFiles.push(...nested.flat());
+      } else {
+        // Fallback for browsers without webkitGetAsEntry
+        allFiles.push(...Array.from(e.dataTransfer.files).filter((f) => f.type.startsWith('image/')));
+      }
+      await uploadFiles(allFiles);
+    }
+  }, [missionId]);
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (files) await uploadFiles(Array.from(files));
+    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
   // Step 4: Generate report
@@ -304,11 +423,42 @@ export default function MissionNew() {
           </Card>
         </Stepper.Step>
 
-        {/* Step 2: Select Flights */}
-        <Stepper.Step label="Flights" description="Select flight logs">
+        {/* Step 2: Flights & Aircraft */}
+        <Stepper.Step label="Flights" description="Flights & aircraft">
           <Card padding="lg" radius="md" mt="md" style={cardStyle}>
             <Stack gap="md">
-              <Text c="#e8edf2" fw={600}>Select flights from OpenDroneLog</Text>
+              {/* Aircraft selection for this mission */}
+              <Text c="#e8edf2" fw={600} style={{ fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' }}>
+                ASSIGN AIRCRAFT TO MISSION
+              </Text>
+              <Text c="#5a6478" size="xs">Select the aircraft used during this mission. You can also assign specific aircraft to individual flights below.</Text>
+              <Checkbox.Group value={missionAircraft} onChange={setMissionAircraft}>
+                <Group gap="sm">
+                  {aircraft.map((a) => (
+                    <Checkbox
+                      key={a.id}
+                      value={a.id}
+                      label={a.model_name}
+                      color="cyan"
+                      styles={{ label: { color: '#e8edf2' } }}
+                    />
+                  ))}
+                </Group>
+              </Checkbox.Group>
+
+              {/* Selected aircraft cards */}
+              {missionAircraft.length > 0 && (
+                <Group>
+                  {aircraft.filter((a) => missionAircraft.includes(a.id)).map((a) => (
+                    <AircraftCard key={a.id} aircraft={a} compact />
+                  ))}
+                </Group>
+              )}
+
+              {/* Flight logs from OpenDroneLog */}
+              <Text c="#e8edf2" fw={600} mt="md" style={{ fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' }}>
+                FLIGHT LOGS
+              </Text>
               {flightsLoading ? (
                 <Group justify="center"><Loader color="cyan" /></Group>
               ) : availableFlights.length === 0 ? (
@@ -322,18 +472,20 @@ export default function MissionNew() {
                       <Table.Th>DRONE</Table.Th>
                       <Table.Th>DURATION</Table.Th>
                       <Table.Th>DISTANCE</Table.Th>
+                      <Table.Th>ASSIGNED AIRCRAFT</Table.Th>
                     </Table.Tr>
                   </Table.Thead>
                   <Table.Tbody>
                     {availableFlights.map((flight: any, i: number) => {
-                      const isSelected = selectedFlights.some((f) => (f.id || f.flight_id) === (flight.id || flight.flight_id));
+                      const selectedIdx = selectedFlights.findIndex((f) => (f.id || f.flight_id) === (flight.id || flight.flight_id));
+                      const isSelected = selectedIdx >= 0;
                       return (
                         <Table.Tr key={i}>
                           <Table.Td>
                             <Checkbox
                               color="cyan"
                               checked={isSelected}
-                              onChange={() => !isSelected && handleAddFlight(flight)}
+                              onChange={() => !isSelected && handleAddFlight(flight, missionAircraft[0] || undefined)}
                               disabled={isSelected}
                             />
                           </Table.Td>
@@ -341,6 +493,21 @@ export default function MissionNew() {
                           <Table.Td>{flight.drone || flight.aircraft || '—'}</Table.Td>
                           <Table.Td>{flight.duration || flight.flight_time || '—'}</Table.Td>
                           <Table.Td>{flight.distance || flight.total_distance || '—'}</Table.Td>
+                          <Table.Td>
+                            {isSelected ? (
+                              <Select
+                                size="xs"
+                                placeholder="Select aircraft"
+                                data={aircraft.map((a) => ({ value: a.id, label: a.model_name }))}
+                                value={selectedFlights[selectedIdx]?._aircraftId || null}
+                                onChange={(val) => handleAssignAircraft(selectedIdx, val)}
+                                clearable
+                                styles={{ input: { background: '#050608', borderColor: '#1a1f2e', color: '#e8edf2', minWidth: 150 } }}
+                              />
+                            ) : (
+                              <Text c="#5a6478" size="xs">—</Text>
+                            )}
+                          </Table.Td>
                         </Table.Tr>
                       );
                     })}
@@ -369,14 +536,61 @@ export default function MissionNew() {
           <Card padding="lg" radius="md" mt="md" style={cardStyle}>
             <Stack gap="md">
               <Text c="#e8edf2" fw={600}>Upload Mission Images</Text>
-              <FileInput
-                label="Select images"
-                multiple
+              <Text c="#5a6478" size="xs">Drag and drop images or folders here. Large images are automatically resized for the report.</Text>
+
+              {/* Drop zone */}
+              <div
+                onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+                onDragLeave={() => setDragOver(false)}
+                onDrop={handleDrop}
+                onClick={() => fileInputRef.current?.click()}
+                style={{
+                  border: `2px dashed ${dragOver ? '#00d4ff' : '#1a1f2e'}`,
+                  borderRadius: 8,
+                  padding: '40px 20px',
+                  textAlign: 'center',
+                  cursor: 'pointer',
+                  background: dragOver ? 'rgba(0, 212, 255, 0.05)' : '#050608',
+                  transition: 'all 0.2s',
+                }}
+              >
+                <IconUpload size={36} color={dragOver ? '#00d4ff' : '#5a6478'} style={{ marginBottom: 8 }} />
+                <Text c={dragOver ? '#00d4ff' : '#5a6478'} fw={600}>
+                  {uploading ? 'Uploading...' : 'Drop images or folders here, or click to browse'}
+                </Text>
+                <Text c="#5a6478" size="xs" mt={4}>Supports JPG, PNG, HEIC, and other image formats</Text>
+              </div>
+
+              <input
+                ref={fileInputRef}
+                type="file"
                 accept="image/*"
-                onChange={(files) => files && handleImageUpload(files)}
-                styles={inputStyles}
+                multiple
+                onChange={handleFileSelect}
+                style={{ display: 'none' }}
               />
-              <Button color="cyan" onClick={() => setActive(3)} styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}>
+
+              {/* Upload progress */}
+              {uploadedImages.length > 0 && (
+                <Stack gap="xs">
+                  <Text c="#00d4ff" fw={600} size="sm" style={{ fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' }}>
+                    UPLOADED ({uploadedImages.filter((i) => i.status === 'done').length}/{uploadedImages.length})
+                  </Text>
+                  {uploadedImages.map((img, i) => (
+                    <Group key={i} gap="xs">
+                      <IconPhoto size={14} color={img.status === 'done' ? '#2ecc40' : img.status === 'error' ? '#ff6b6b' : '#5a6478'} />
+                      <Text size="xs" c={img.status === 'error' ? '#ff6b6b' : '#e8edf2'} style={{ flex: 1, fontFamily: "'Share Tech Mono', monospace" }}>
+                        {img.name}
+                      </Text>
+                      {img.status === 'uploading' && <Loader size={12} color="cyan" />}
+                      {img.status === 'done' && <Badge size="xs" color="green">Done</Badge>}
+                      {img.status === 'error' && <Badge size="xs" color="red">Failed</Badge>}
+                    </Group>
+                  ))}
+                </Stack>
+              )}
+
+              <Button color="cyan" onClick={() => setActive(3)} disabled={uploading} styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}>
                 CONTINUE
               </Button>
             </Stack>
@@ -568,9 +782,9 @@ export default function MissionNew() {
               </Text>
 
               {/* Aircraft used */}
-              {selectedFlights.length > 0 && (
+              {missionAircraft.length > 0 && (
                 <Group>
-                  {aircraft.slice(0, 3).map((a) => (
+                  {aircraft.filter((a) => missionAircraft.includes(a.id)).map((a) => (
                     <AircraftCard key={a.id} aircraft={a} compact />
                   ))}
                 </Group>

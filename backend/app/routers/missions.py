@@ -1,8 +1,10 @@
+import io
 import os
 import uuid as uuid_mod
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, status
+from PIL import Image as PILImage
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -111,6 +113,31 @@ async def add_flight(
     return flight
 
 
+@router.put("/{mission_id}/flights/{flight_id}", response_model=MissionFlightResponse)
+async def update_flight(
+    mission_id: UUID,
+    flight_id: UUID,
+    data: MissionFlightCreate,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(MissionFlight).where(
+            MissionFlight.id == flight_id, MissionFlight.mission_id == mission_id
+        )
+    )
+    flight = result.scalar_one_or_none()
+    if not flight:
+        raise HTTPException(status_code=404, detail="Flight not found")
+
+    for key, value in data.model_dump(exclude_unset=True).items():
+        setattr(flight, key, value)
+
+    await db.flush()
+    await db.refresh(flight)
+    return flight
+
+
 @router.delete("/{mission_id}/flights/{flight_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def remove_flight(
     mission_id: UUID,
@@ -131,6 +158,34 @@ async def remove_flight(
 
 # --- Mission Images ---
 
+MAX_IMAGE_DIMENSION = 1920  # Max width or height for report images
+
+
+def _resize_image(content: bytes, max_dim: int = MAX_IMAGE_DIMENSION) -> tuple[bytes, str]:
+    """Resize image if it exceeds max dimensions. Returns (bytes, extension)."""
+    try:
+        img = PILImage.open(io.BytesIO(content))
+        # Preserve orientation from EXIF
+        try:
+            from PIL import ImageOps
+            img = ImageOps.exif_transpose(img)
+        except Exception:
+            pass
+
+        if img.width > max_dim or img.height > max_dim:
+            img.thumbnail((max_dim, max_dim), PILImage.LANCZOS)
+
+        # Save as JPEG for consistency and smaller file size
+        buf = io.BytesIO()
+        if img.mode in ("RGBA", "P"):
+            img = img.convert("RGB")
+        img.save(buf, format="JPEG", quality=82, optimize=True)
+        return buf.getvalue(), ".jpg"
+    except Exception:
+        # If we can't process it, return original
+        return content, ""
+
+
 @router.post("/{mission_id}/images", response_model=MissionImageResponse, status_code=status.HTTP_201_CREATED)
 async def upload_image(
     mission_id: UUID,
@@ -147,13 +202,16 @@ async def upload_image(
     upload_dir = os.path.join(settings.upload_dir, str(mission_id))
     os.makedirs(upload_dir, exist_ok=True)
 
-    ext = os.path.splitext(file.filename)[1] if file.filename else ".jpg"
+    content = await file.read()
+
+    # Resize large images for report use
+    resized_content, forced_ext = _resize_image(content)
+    ext = forced_ext or (os.path.splitext(file.filename)[1] if file.filename else ".jpg")
     filename = f"{uuid_mod.uuid4()}{ext}"
     file_path = os.path.join(upload_dir, filename)
 
-    content = await file.read()
     with open(file_path, "wb") as f:
-        f.write(content)
+        f.write(resized_content)
 
     # Get sort order
     count_result = await db.execute(
