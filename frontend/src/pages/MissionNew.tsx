@@ -158,7 +158,7 @@ export default function MissionNew() {
   useEffect(() => {
     api.get('/customers').then((r) => setCustomers(r.data)).catch(() => {});
     api.get('/aircraft').then((r) => setAircraft(r.data)).catch(() => {});
-    api.get('/rate-templates?active_only=true').then((r) => setRateTemplates(r.data)).catch(() => {});
+    api.get('/rate-templates').then((r) => setRateTemplates(r.data)).catch(() => {});
   }, []);
 
   // Load existing mission data when editing

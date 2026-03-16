@@ -15,12 +15,12 @@ router = APIRouter(prefix="/api/rate-templates", tags=["rate-templates"])
 
 @router.get("", response_model=list[RateTemplateResponse])
 async def list_rate_templates(
-    active_only: bool = False,
+    include_inactive: bool = False,
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
     query = select(RateTemplate).order_by(RateTemplate.sort_order, RateTemplate.name)
-    if active_only:
+    if not include_inactive:
         query = query.where(RateTemplate.is_active == True)
     result = await db.execute(query)
     return result.scalars().all()
@@ -82,5 +82,5 @@ async def delete_rate_template(
     template = result.scalar_one_or_none()
     if not template:
         raise HTTPException(status_code=404, detail="Rate template not found")
-    await db.delete(template)
+    template.is_active = False
     await db.flush()

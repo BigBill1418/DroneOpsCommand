@@ -197,7 +197,9 @@ async def seed_database(db: AsyncSession):
         result = await db.execute(
             select(RateTemplate).where(RateTemplate.name == tmpl_data["name"])
         )
-        if not result.scalar_one_or_none():
+        existing = result.scalar_one_or_none()
+        # Skip if it exists (active or soft-deleted — don't resurrect deleted templates)
+        if not existing:
             db.add(RateTemplate(**tmpl_data))
 
     # Migrate: rename Mini 4 Pro -> Mini 5 Pro with updated specs
