@@ -618,8 +618,8 @@ export default function MissionNew() {
         final_content: reportContent || undefined,
       });
       notifications.show({ title: 'Draft Saved', message: 'Report draft has been saved', color: 'cyan' });
-    } catch {
-      notifications.show({ title: 'Error', message: 'Failed to save draft', color: 'red' });
+    } catch (err: any) {
+      notifications.show({ title: 'Error', message: err.response?.data?.detail || 'Failed to save draft. Try restarting the backend.', color: 'red' });
     } finally {
       setSavingDraft(false);
     }
@@ -718,6 +718,7 @@ export default function MissionNew() {
         active={active}
         onStepClick={setActive}
         color="cyan"
+        size="sm"
         styles={{
           step: { color: '#e8edf2' },
           stepLabel: { color: '#e8edf2', fontFamily: "'Rajdhani', sans-serif" },

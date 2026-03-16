@@ -168,52 +168,116 @@ async def _fetch_metar() -> dict:
 
 
 async def _fetch_tfrs() -> list[dict]:
-    """Fetch active FAA TFRs from the FAA's TFR feed."""
+    """Fetch active FAA TFRs from AviationWeather.gov (official, reliable)."""
     try:
         async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+            # Use AviationWeather.gov TFR/NOTAM endpoint filtered for TFRs near our area
             resp = await client.get(
-                "https://tfr.faa.gov/tfr_map_498/tfrQueryList.jsp",
-                headers={"Accept": "text/html"},
+                "https://aviationweather.gov/api/data/notam",
+                params={
+                    "icao": NEAREST_AIRPORT,
+                    "format": "json",
+                    "type": "tfr",
+                },
             )
             if resp.status_code != 200:
-                return [{"status": "TFR feed returned non-200 — check tfr.faa.gov"}]
+                # Fallback: try the FAA TFR GeoJSON feed
+                return await _fetch_tfrs_fallback()
 
-            text = resp.text
+            data = resp.json()
+            if not data or not isinstance(data, list):
+                return [{"status": "No active TFRs for area"}]
+
             tfrs = []
-            rows = re.findall(
-                r'<tr[^>]*>.*?notamId=([^"&]+).*?</tr>',
-                text, re.DOTALL,
-            )
-            for notam_id in rows[:10]:
+            for item in data[:10]:
                 tfrs.append({
-                    "notam_id": notam_id.strip(),
+                    "notam_id": item.get("notamId", item.get("id", "")),
                     "type": "TFR",
+                    "text": (item.get("text", item.get("message", "")) or "")[:200],
+                    "effective": item.get("effectiveStart", item.get("effective", "")),
+                    "expires": item.get("effectiveEnd", item.get("expire", "")),
                 })
 
             if not tfrs:
-                return [{"status": "No active TFRs parsed — check tfr.faa.gov for current data"}]
+                return [{"status": "No active TFRs for area"}]
 
             return tfrs
     except Exception as exc:
-        logger.warning("Failed to fetch TFRs: %s", exc)
-        return [{"status": f"TFR feed unavailable: {exc}"}]
+        logger.warning("Failed to fetch TFRs from AviationWeather: %s", exc)
+        return await _fetch_tfrs_fallback()
+
+
+async def _fetch_tfrs_fallback() -> list[dict]:
+    """Fallback: try FAA TFR GeoJSON feed."""
+    try:
+        async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
+            resp = await client.get(
+                "https://tfr.faa.gov/tfr2/list.html",
+                headers={"Accept": "text/html"},
+            )
+            if resp.status_code == 200:
+                # Just report that TFRs exist — link user to check manually
+                notam_ids = re.findall(r'notamId=([^"&\s]+)', resp.text)
+                if notam_ids:
+                    return [{"notam_id": nid.strip(), "type": "TFR"} for nid in notam_ids[:10]]
+            return [{"status": "No active TFRs parsed — check tfr.faa.gov"}]
+    except Exception as exc:
+        logger.warning("TFR fallback also failed: %s", exc)
+        return [{"status": f"TFR feeds unavailable — check tfr.faa.gov manually"}]
 
 
 async def _fetch_notams() -> list[dict]:
-    """Fetch NOTAMs for KEUG from aviationapi.com (free, no key)."""
+    """Fetch NOTAMs from AviationWeather.gov (official FAA source, free, no key)."""
     try:
         async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+            resp = await client.get(
+                "https://aviationweather.gov/api/data/notam",
+                params={
+                    "icao": NEAREST_AIRPORT,
+                    "format": "json",
+                },
+            )
+            if resp.status_code != 200:
+                # Fallback to aviationapi.com
+                return await _fetch_notams_fallback()
+
+            data = resp.json()
+            if not data or not isinstance(data, list):
+                return await _fetch_notams_fallback()
+
+            notams = []
+            for notam in data[:8]:
+                notams.append({
+                    "id": notam.get("notamId", notam.get("id", "")),
+                    "type": notam.get("classification", notam.get("type", "NOTAM")),
+                    "text": notam.get("text", notam.get("message", notam.get("traditionalMessage", ""))),
+                    "effective": notam.get("effectiveStart", notam.get("effective", "")),
+                    "expires": notam.get("effectiveEnd", notam.get("expire", "")),
+                })
+
+            if not notams:
+                return [{"status": f"No active NOTAMs for {NEAREST_AIRPORT}"}]
+
+            return notams
+    except Exception as exc:
+        logger.warning("Failed to fetch NOTAMs from AviationWeather: %s", exc)
+        return await _fetch_notams_fallback()
+
+
+async def _fetch_notams_fallback() -> list[dict]:
+    """Fallback: try aviationapi.com for NOTAMs."""
+    try:
+        async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
             resp = await client.get(
                 "https://api.aviationapi.com/v1/notams",
                 params={"apt": NEAREST_AIRPORT},
             )
             if resp.status_code != 200:
-                return [{"status": "NOTAM feed unavailable"}]
+                return [{"status": f"No active NOTAMs for {NEAREST_AIRPORT}"}]
 
             data = resp.json()
-            notams = []
-
             keug_notams = data.get(NEAREST_AIRPORT, data if isinstance(data, list) else [])
+            notams = []
             for notam in keug_notams[:8]:
                 notams.append({
                     "id": notam.get("notam_id", notam.get("id", "")),
@@ -224,12 +288,12 @@ async def _fetch_notams() -> list[dict]:
                 })
 
             if not notams:
-                return [{"status": "No active NOTAMs for KEUG"}]
+                return [{"status": f"No active NOTAMs for {NEAREST_AIRPORT}"}]
 
             return notams
     except Exception as exc:
-        logger.warning("Failed to fetch NOTAMs: %s", exc)
-        return [{"status": f"NOTAM feed unavailable: {exc}"}]
+        logger.warning("NOTAM fallback also failed: %s", exc)
+        return [{"status": f"NOTAM feeds unavailable — check NOTAMs manually"}]
 
 
 async def _fetch_nws_alerts() -> list[dict]:

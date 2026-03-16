@@ -64,6 +64,24 @@ def generate_report_task(
     asyncio.set_event_loop(loop)
 
     try:
+        # Wait for Ollama to be ready before calling LLM
+        import httpx as _httpx
+        for attempt in range(6):
+            try:
+                _resp = loop.run_until_complete(
+                    _httpx.AsyncClient(timeout=5).get(f"{settings.ollama_base_url}/api/tags")
+                )
+                if _resp.status_code == 200:
+                    break
+            except Exception:
+                pass
+            if attempt < 5:
+                import time
+                logger.info("Waiting for Ollama to be ready (attempt %d/6)...", attempt + 1)
+                time.sleep(5)
+        else:
+            raise RuntimeError(f"Ollama not reachable at {settings.ollama_base_url} after 30s")
+
         # Call the LLM
         llm_content = loop.run_until_complete(
             llm_generate_report(
@@ -110,6 +128,6 @@ def generate_report_task(
 
     except Exception as exc:
         logger.error("Report generation failed for mission %s: %s", mission_id, exc)
-        raise self.retry(exc=exc, max_retries=1, countdown=5)
+        raise self.retry(exc=exc, max_retries=3, countdown=15)
     finally:
         loop.close()

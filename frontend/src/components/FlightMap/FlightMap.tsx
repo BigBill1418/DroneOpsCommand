@@ -1,5 +1,5 @@
-import { memo, useEffect, useState } from 'react';
-import { MapContainer, TileLayer, Polyline, CircleMarker, Polygon, Popup, useMap } from 'react-leaflet';
+import { memo, useEffect, useState, useCallback } from 'react';
+import { MapContainer, TileLayer, Polyline, CircleMarker, Polygon, Popup, useMap, useMapEvents } from 'react-leaflet';
 import { Box, Text, Group, Badge, Stack } from '@mantine/core';
 import 'leaflet/dist/leaflet.css';
 
@@ -39,7 +39,30 @@ function FitBounds({ features }: { features: GeoJSONFeature[] }) {
   return null;
 }
 
+function ScrollHint({ onShow }: { onShow: (show: boolean) => void }) {
+  useMapEvents({
+    // Show hint when user scrolls without modifier key
+  });
+
+  useEffect(() => {
+    const el = document.querySelector('.leaflet-container') as HTMLElement | null;
+    if (!el) return;
+
+    const handleWheel = (e: WheelEvent) => {
+      if (e.ctrlKey || e.metaKey) return; // allow zoom
+      onShow(true);
+      setTimeout(() => onShow(false), 1500);
+    };
+    el.addEventListener('wheel', handleWheel, { passive: true });
+    return () => el.removeEventListener('wheel', handleWheel);
+  }, [onShow]);
+
+  return null;
+}
+
 function FlightMap({ geojson, coverage, height = '400px' }: FlightMapProps) {
+  const [showScrollHint, setShowScrollHint] = useState(false);
+  const handleShowHint = useCallback((show: boolean) => setShowScrollHint(show), []);
   if (!geojson || !geojson.features || geojson.features.length === 0) {
     return (
       <Box
@@ -71,15 +94,17 @@ function FlightMap({ geojson, coverage, height = '400px' }: FlightMapProps) {
 
   return (
     <Stack gap="xs">
-      <Box style={{ height, borderRadius: 8, overflow: 'hidden', border: '2px solid #1a1f2e' }}>
+      <Box style={{ height, borderRadius: 8, overflow: 'hidden', border: '2px solid #1a1f2e', position: 'relative' }}>
         <MapContainer
           center={center}
           zoom={14}
           style={{ height: '100%', width: '100%' }}
           attributionControl={false}
+          scrollWheelZoom={false}
         >
           <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
           <FitBounds features={geojson.features} />
+          <ScrollHint onShow={handleShowHint} />
 
           {/* Flight paths */}
           {lines.map((feature, i) => (
@@ -135,6 +160,17 @@ function FlightMap({ geojson, coverage, height = '400px' }: FlightMapProps) {
             </CircleMarker>
           ))}
         </MapContainer>
+        {showScrollHint && (
+          <div style={{
+            position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: 'rgba(5,6,8,0.7)', zIndex: 1000, borderRadius: 8, pointerEvents: 'none',
+            transition: 'opacity 0.3s',
+          }}>
+            <Text c="#e8edf2" size="sm" fw={600} style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+              Use Ctrl + Scroll to zoom the map
+            </Text>
+          </div>
+        )}
       </Box>
 
       {/* Legend and coverage info */}

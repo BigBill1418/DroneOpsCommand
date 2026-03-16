@@ -5,13 +5,15 @@ import {
   Button,
   Card,
   Group,
+  ScrollArea,
   Stack,
   Table,
   Text,
   TextInput,
   Title,
 } from '@mantine/core';
-import { IconEdit, IconPlus, IconSearch } from '@tabler/icons-react';
+import { IconEdit, IconPlus, IconSearch, IconTrash } from '@tabler/icons-react';
+import { notifications } from '@mantine/notifications';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
 import { Mission } from '../api/types';
@@ -31,6 +33,17 @@ export default function Missions() {
     api.get('/missions').then((r) => setMissions(r.data)).catch(() => {});
   }, []);
 
+  const handleDelete = async (missionId: string, title: string) => {
+    if (!window.confirm(`Delete "${title}"? This cannot be undone.`)) return;
+    try {
+      await api.delete(`/missions/${missionId}`);
+      setMissions((prev) => prev.filter((m) => m.id !== missionId));
+      notifications.show({ title: 'Deleted', message: `${title} has been deleted`, color: 'cyan' });
+    } catch {
+      notifications.show({ title: 'Error', message: 'Failed to delete mission', color: 'red' });
+    }
+  };
+
   const filtered = missions.filter(
     (m) =>
       m.title.toLowerCase().includes(search.toLowerCase()) ||
@@ -40,7 +53,7 @@ export default function Missions() {
 
   return (
     <Stack gap="lg">
-      <Group justify="space-between">
+      <Group justify="space-between" wrap="wrap">
         <Title order={2} c="#e8edf2" style={{ letterSpacing: '2px' }}>MISSIONS</Title>
         <Button
           leftSection={<IconPlus size={16} />}
@@ -62,12 +75,13 @@ export default function Missions() {
         }}
       />
 
-      <Card padding="lg" radius="md" style={{ background: '#0e1117', border: '1px solid #1a1f2e' }}>
+      <Card padding={{ base: 'sm', sm: 'lg' }} radius="md" style={{ background: '#0e1117', border: '1px solid #1a1f2e' }}>
         {filtered.length === 0 ? (
           <Text c="#5a6478" ta="center" py="xl">No missions found.</Text>
         ) : (
+          <ScrollArea type="auto">
           <Table highlightOnHover styles={{
-            table: { color: '#e8edf2' },
+            table: { color: '#e8edf2', minWidth: 650 },
             th: { color: '#00d4ff', fontFamily: "'Share Tech Mono', monospace", fontSize: '13px', letterSpacing: '1px', borderBottom: '1px solid #1a1f2e' },
             td: { borderBottom: '1px solid #1a1f2e' },
           }}>
@@ -79,7 +93,7 @@ export default function Missions() {
                 <Table.Th>DATE</Table.Th>
                 <Table.Th>STATUS</Table.Th>
                 <Table.Th>BILLABLE</Table.Th>
-                <Table.Th w={50}></Table.Th>
+                <Table.Th w={80}></Table.Th>
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
@@ -92,20 +106,32 @@ export default function Missions() {
                   <Table.Td><Badge color={statusColors[m.status]} variant="light" size="sm">{m.status}</Badge></Table.Td>
                   <Table.Td>{m.is_billable ? <Badge color="orange" variant="light" size="sm">$</Badge> : '—'}</Table.Td>
                   <Table.Td>
-                    <ActionIcon
-                      variant="subtle"
-                      color="cyan"
-                      size="sm"
-                      onClick={(e) => { e.stopPropagation(); navigate(`/missions/${m.id}/edit`); }}
-                      title="Edit mission"
-                    >
-                      <IconEdit size={14} />
-                    </ActionIcon>
+                    <Group gap={4} wrap="nowrap">
+                      <ActionIcon
+                        variant="subtle"
+                        color="cyan"
+                        size="sm"
+                        onClick={(e) => { e.stopPropagation(); navigate(`/missions/${m.id}/edit`); }}
+                        title="Edit mission"
+                      >
+                        <IconEdit size={14} />
+                      </ActionIcon>
+                      <ActionIcon
+                        variant="subtle"
+                        color="red"
+                        size="sm"
+                        onClick={(e) => { e.stopPropagation(); handleDelete(m.id, m.title); }}
+                        title="Delete mission"
+                      >
+                        <IconTrash size={14} />
+                      </ActionIcon>
+                    </Group>
                   </Table.Td>
                 </Table.Tr>
               ))}
             </Table.Tbody>
           </Table>
+          </ScrollArea>
         )}
       </Card>
     </Stack>

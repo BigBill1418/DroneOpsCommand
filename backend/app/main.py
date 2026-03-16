@@ -11,11 +11,39 @@ import app.models  # noqa: F401 — ensure all models registered with Base befor
 from app.routers import auth, customers, aircraft, missions, flights, maps, reports, invoices, rate_templates, llm, system_settings, financials, weather
 
 
+async def _add_missing_columns(conn):
+    """Add columns that create_all won't add to existing tables."""
+    from sqlalchemy import text, inspect as sa_inspect
+
+    inspector = sa_inspect(conn)
+
+    # Map of table -> columns to add (col_name, col_sql)
+    migrations = {
+        "reports": [
+            ("include_download_link", "ALTER TABLE reports ADD COLUMN include_download_link BOOLEAN DEFAULT FALSE"),
+        ],
+        "missions": [
+            ("unas_folder_path", "ALTER TABLE missions ADD COLUMN unas_folder_path VARCHAR(500)"),
+            ("download_link_url", "ALTER TABLE missions ADD COLUMN download_link_url VARCHAR(1000)"),
+            ("download_link_expires_at", "ALTER TABLE missions ADD COLUMN download_link_expires_at TIMESTAMP"),
+        ],
+    }
+
+    for table, columns in migrations.items():
+        if not inspector.has_table(table):
+            continue
+        existing = {c["name"] for c in inspector.get_columns(table)}
+        for col_name, alter_sql in columns:
+            if col_name not in existing:
+                conn.execute(text(alter_sql))
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Create tables
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(_add_missing_columns)
 
     # Seed data
     from app.seed import seed_database

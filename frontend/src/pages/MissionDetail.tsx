@@ -18,6 +18,7 @@ import {
   IconLink,
   IconRobot,
   IconSend,
+  IconTrash,
 } from '@tabler/icons-react';
 import { useParams, useNavigate } from 'react-router-dom';
 import api from '../api/client';
@@ -84,7 +85,9 @@ export default function MissionDetail() {
     try {
       await api.put(`/missions/${id}/report`, { final_content: reportContent });
       notifications.show({ title: 'Saved', message: 'Report updated', color: 'cyan' });
-    } catch {}
+    } catch (err: any) {
+      notifications.show({ title: 'Error', message: err.response?.data?.detail || 'Failed to save report', color: 'red' });
+    }
   };
 
   const handleGeneratePDF = async () => {
@@ -115,7 +118,7 @@ export default function MissionDetail() {
 
   return (
     <Stack gap="lg">
-      <Group justify="space-between">
+      <Group justify="space-between" wrap="wrap">
         <div>
           <Title order={2} c="#e8edf2" style={{ letterSpacing: '2px' }}>{mission.title.toUpperCase()}</Title>
           <Group gap="xs" mt={4}>
@@ -125,15 +128,35 @@ export default function MissionDetail() {
             </Text>
           </Group>
         </div>
-        <Button
-          leftSection={<IconEdit size={16} />}
-          color="cyan"
-          variant="light"
-          onClick={() => navigate(`/missions/${id}/edit`)}
-          styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}
-        >
-          EDIT MISSION
-        </Button>
+        <Group gap="xs">
+          <Button
+            leftSection={<IconEdit size={16} />}
+            color="cyan"
+            variant="light"
+            onClick={() => navigate(`/missions/${id}/edit`)}
+            styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}
+          >
+            EDIT MISSION
+          </Button>
+          <Button
+            leftSection={<IconTrash size={16} />}
+            color="red"
+            variant="light"
+            onClick={async () => {
+              if (!window.confirm(`Delete "${mission.title}"? This cannot be undone.`)) return;
+              try {
+                await api.delete(`/missions/${id}`);
+                notifications.show({ title: 'Deleted', message: 'Mission deleted', color: 'cyan' });
+                navigate('/missions');
+              } catch {
+                notifications.show({ title: 'Error', message: 'Failed to delete', color: 'red' });
+              }
+            }}
+            styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}
+          >
+            DELETE
+          </Button>
+        </Group>
       </Group>
 
       {/* Aircraft */}
@@ -147,7 +170,7 @@ export default function MissionDetail() {
       {/* Flight Map */}
       <Card padding="lg" radius="md" style={cardStyle}>
         <Title order={3} c="#e8edf2" mb="md" style={{ letterSpacing: '1px' }}>FLIGHT PATH MAP</Title>
-        <FlightMap geojson={mapGeojson} coverage={coverage ?? undefined} height="400px" />
+        <FlightMap geojson={mapGeojson} coverage={coverage ?? undefined} height="min(400px, 60vw)" />
         {coverage && (
           <Group mt="sm" gap="xl">
             <div>
@@ -167,11 +190,11 @@ export default function MissionDetail() {
       {/* Download Link Status */}
       {mission.download_link_url && (
         <Card padding="lg" radius="md" style={cardStyle}>
-          <Group justify="space-between" align="center">
+          <Group justify="space-between" align="center" wrap="wrap">
             <div>
-              <Group gap="xs" mb={4}>
+              <Group gap="xs" mb={4} wrap="wrap">
                 <IconLink size={16} color="#00d4ff" />
-                <Title order={3} c="#e8edf2" style={{ letterSpacing: '1px' }}>MISSION FOOTAGE DOWNLOAD</Title>
+                <Title order={4} c="#e8edf2" style={{ letterSpacing: '1px' }}>MISSION FOOTAGE DOWNLOAD</Title>
               </Group>
               <Text c="#5a6478" size="xs" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
                 {mission.download_link_url}
@@ -239,8 +262,8 @@ export default function MissionDetail() {
       </Card>
 
       {/* Actions */}
-      <Card padding="lg" radius="md" style={cardStyle}>
-        <Group>
+      <Card padding={{ base: 'sm', sm: 'lg' }} radius="md" style={cardStyle}>
+        <Group wrap="wrap">
           <Button leftSection={<IconDownload size={16} />} color="cyan" onClick={handleGeneratePDF}
             styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}>
             GENERATE PDF

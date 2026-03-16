@@ -6,6 +6,7 @@ import {
   Card,
   Group,
   Modal,
+  ScrollArea,
   Stack,
   Table,
   Text,
@@ -121,7 +122,7 @@ export default function Customers() {
 
   return (
     <Stack gap="lg">
-      <Group justify="space-between">
+      <Group justify="space-between" wrap="wrap">
         <Title order={2} c="#e8edf2" style={{ letterSpacing: '2px' }}>CUSTOMERS</Title>
         <Button
           leftSection={<IconPlus size={16} />}
@@ -141,12 +142,13 @@ export default function Customers() {
         styles={inputStyles}
       />
 
-      <Card padding="lg" radius="md" style={{ background: '#0e1117', border: '1px solid #1a1f2e' }}>
+      <Card padding={{ base: 'sm', sm: 'lg' }} radius="md" style={{ background: '#0e1117', border: '1px solid #1a1f2e' }}>
         {filtered.length === 0 ? (
           <Text c="#5a6478" ta="center" py="xl">No customers found.</Text>
         ) : (
+          <ScrollArea type="auto">
           <Table highlightOnHover styles={{
-            table: { color: '#e8edf2' },
+            table: { color: '#e8edf2', minWidth: 550 },
             th: { color: '#00d4ff', fontFamily: "'Share Tech Mono', monospace", fontSize: '13px', letterSpacing: '1px', borderBottom: '1px solid #1a1f2e' },
             td: { borderBottom: '1px solid #1a1f2e' },
           }}>
@@ -180,6 +182,7 @@ export default function Customers() {
               ))}
             </Table.Tbody>
           </Table>
+          </ScrollArea>
         )}
       </Card>
 

@@ -77,6 +77,7 @@ export default function AppLayout({ onLogout }: AppLayoutProps) {
               size="xs"
               c="#5a6478"
               style={{ fontFamily: "'Share Tech Mono', monospace", letterSpacing: '2px' }}
+              visibleFrom="sm"
             >
               DRONE OPS REPORT
             </Text>

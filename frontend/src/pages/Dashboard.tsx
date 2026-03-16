@@ -10,6 +10,7 @@ import {
   Button,
   Table,
   Loader,
+  ScrollArea,
   Tooltip,
 } from '@mantine/core';
 import {
@@ -173,7 +174,7 @@ export default function Dashboard() {
   return (
     <div style={{ position: 'relative', minHeight: '100%' }}>
       <Stack gap="lg" style={{ position: 'relative', zIndex: 1 }}>
-        <Group justify="space-between">
+        <Group justify="space-between" wrap="wrap">
           <Title order={2} c="#e8edf2" style={{ letterSpacing: '2px' }}>
             DASHBOARD
           </Title>
@@ -208,10 +209,11 @@ export default function Dashboard() {
               No missions yet. Create your first mission to get started.
             </Text>
           ) : (
+            <ScrollArea type="auto">
             <Table
               highlightOnHover
               styles={{
-                table: { color: '#e8edf2' },
+                table: { color: '#e8edf2', minWidth: 500 },
                 th: {
                   color: '#00d4ff',
                   fontFamily: "'Share Tech Mono', monospace",
@@ -258,6 +260,7 @@ export default function Dashboard() {
                 ))}
               </Table.Tbody>
             </Table>
+            </ScrollArea>
           )}
         </Card>
 
