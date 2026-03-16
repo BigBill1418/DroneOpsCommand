@@ -36,9 +36,9 @@ import {
   IconPhoto,
   IconRefresh,
 } from '@tabler/icons-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import api from '../api/client';
-import { Aircraft, Customer, CoverageData, RateTemplate } from '../api/types';
+import { Aircraft, Customer, CoverageData, RateTemplate, Mission, Invoice } from '../api/types';
 import FlightMap from '../components/FlightMap/FlightMap';
 import AircraftCard from '../components/AircraftCard/AircraftCard';
 import RichTextEditor from '../components/RichTextEditor/RichTextEditor';
@@ -70,10 +70,14 @@ const lineItemCategories = [
 ];
 
 export default function MissionNew() {
+  const { id: editId } = useParams<{ id: string }>();
+  const isEditing = Boolean(editId);
+
   const [active, setActive] = useState(0);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [aircraft, setAircraft] = useState<Aircraft[]>([]);
-  const [missionId, setMissionId] = useState<string | null>(null);
+  const [missionId, setMissionId] = useState<string | null>(editId || null);
+  const [missionLoaded, setMissionLoaded] = useState(!isEditing);
 
   // Flight selection
   const [availableFlights, setAvailableFlights] = useState<any[]>([]);
@@ -90,7 +94,7 @@ export default function MissionNew() {
   const [generating, setGenerating] = useState(false);
 
   // Images
-  const [uploadedImages, setUploadedImages] = useState<{ name: string; status: 'pending' | 'uploading' | 'done' | 'error' }[]>([]);
+  const [uploadedImages, setUploadedImages] = useState<{ name: string; status: 'pending' | 'uploading' | 'done' | 'error'; imageId?: string }[]>([]);
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -99,6 +103,10 @@ export default function MissionNew() {
   const [lineItems, setLineItems] = useState<any[]>([]);
   const [rateTemplates, setRateTemplates] = useState<RateTemplate[]>([]);
   const [paidInFull, setPaidInFull] = useState(false);
+  const [invoiceExists, setInvoiceExists] = useState(false);
+
+  // Aircraft assigned to this mission
+  const [missionAircraft, setMissionAircraft] = useState<string[]>([]);
 
   const navigate = useNavigate();
 
@@ -114,11 +122,118 @@ export default function MissionNew() {
     },
   });
 
+  // Load reference data
   useEffect(() => {
     api.get('/customers').then((r) => setCustomers(r.data)).catch(() => {});
     api.get('/aircraft').then((r) => setAircraft(r.data)).catch(() => {});
     api.get('/rate-templates?active_only=true').then((r) => setRateTemplates(r.data)).catch(() => {});
   }, []);
+
+  // Load existing mission data when editing
+  useEffect(() => {
+    if (!editId) return;
+
+    const loadMission = async () => {
+      try {
+        const missionResp = await api.get(`/missions/${editId}`);
+        const m: Mission = missionResp.data;
+
+        // Populate form
+        form.setValues({
+          customer_id: m.customer_id || '',
+          title: m.title,
+          mission_type: m.mission_type,
+          description: m.description || '',
+          mission_date: m.mission_date ? new Date(m.mission_date + 'T00:00:00') : null,
+          location_name: m.location_name || '',
+          is_billable: m.is_billable,
+        });
+
+        // Populate flights from cached data
+        const flights = m.flights.map((f) => ({
+          ...(f.flight_data_cache || {}),
+          _flightId: f.id,
+          _aircraftId: f.aircraft_id || null,
+          id: f.flight_data_cache?.id || f.opendronelog_flight_id,
+          flight_id: f.opendronelog_flight_id,
+        }));
+        setSelectedFlights(flights);
+
+        // Populate aircraft used
+        const aircraftIds = [...new Set(m.flights.filter((f) => f.aircraft_id).map((f) => f.aircraft_id!))];
+        setMissionAircraft(aircraftIds);
+
+        // Populate images
+        if (m.images.length > 0) {
+          setUploadedImages(m.images.map((img) => ({
+            name: img.file_path.split('/').pop() || 'image',
+            status: 'done' as const,
+            imageId: img.id,
+          })));
+        }
+
+        // Load report
+        try {
+          const reportResp = await api.get(`/missions/${editId}/report`);
+          setNarrative(reportResp.data.user_narrative || '');
+          setReportContent(reportResp.data.final_content || '');
+        } catch {}
+
+        // Load invoice
+        try {
+          const invResp = await api.get(`/missions/${editId}/invoice`);
+          const inv: Invoice = invResp.data;
+          setInvoiceExists(true);
+          setPaidInFull(inv.paid_in_full);
+          if (inv.line_items.length > 0) {
+            setLineItems(inv.line_items.map((li) => ({
+              id: li.id,
+              description: li.description,
+              category: li.category,
+              quantity: li.quantity,
+              unit_price: li.unit_price,
+            })));
+          }
+        } catch {}
+
+        // Load map data
+        try {
+          const [mapResp, covResp] = await Promise.all([
+            api.get(`/missions/${editId}/map`),
+            api.get(`/missions/${editId}/map/coverage`),
+          ]);
+          setMapGeojson(mapResp.data);
+          setCoverage(covResp.data);
+        } catch {}
+
+        // Determine which step to land on
+        let startStep = 0;
+        if (m.flights.length > 0) startStep = 1;
+        if (m.images.length > 0) startStep = 2;
+        // Report check — we loaded it above
+        // Invoice check — we loaded it above
+        // We'll update step after all loads are done via a microtask
+        setTimeout(() => {
+          // Re-check with loaded state
+          setMissionLoaded(true);
+        }, 0);
+        setActive(startStep);
+      } catch {
+        notifications.show({ title: 'Error', message: 'Failed to load mission', color: 'red' });
+        navigate('/missions');
+      }
+    };
+
+    loadMission();
+  }, [editId]);
+
+  // After mission loads, upgrade step based on report/invoice
+  useEffect(() => {
+    if (!isEditing || !missionLoaded) return;
+    // Bump step forward based on loaded data
+    if (reportContent) setActive((prev) => Math.max(prev, 3));
+    if (invoiceExists) setActive((prev) => Math.max(prev, 4));
+  }, [missionLoaded]);
 
   // Load flights when step 2 (Flights) becomes active
   useEffect(() => {
@@ -151,26 +266,34 @@ export default function MissionNew() {
     } catch {}
   };
 
-  // Step 1: Create mission
+  // Step 1: Create or update mission
   const handleCreateMission = async () => {
     const values = form.values;
     try {
-      const resp = await api.post('/missions', {
-        ...values,
-        customer_id: values.customer_id || null,
-        mission_date: values.mission_date?.toISOString().split('T')[0] || null,
-      });
-      setMissionId(resp.data.id);
-      notifications.show({ title: 'Mission Created', message: resp.data.title, color: 'cyan' });
+      if (isEditing && missionId) {
+        // Update existing mission
+        await api.put(`/missions/${missionId}`, {
+          ...values,
+          customer_id: values.customer_id || null,
+          mission_date: values.mission_date?.toISOString().split('T')[0] || null,
+        });
+        notifications.show({ title: 'Mission Updated', message: values.title, color: 'cyan' });
+      } else {
+        // Create new mission
+        const resp = await api.post('/missions', {
+          ...values,
+          customer_id: values.customer_id || null,
+          mission_date: values.mission_date?.toISOString().split('T')[0] || null,
+        });
+        setMissionId(resp.data.id);
+        notifications.show({ title: 'Mission Created', message: resp.data.title, color: 'cyan' });
+      }
       loadFlights();
       setActive(1);
     } catch {
-      notifications.show({ title: 'Error', message: 'Failed to create mission', color: 'red' });
+      notifications.show({ title: 'Error', message: `Failed to ${isEditing ? 'update' : 'create'} mission`, color: 'red' });
     }
   };
-
-  // Aircraft assigned to this mission
-  const [missionAircraft, setMissionAircraft] = useState<string[]>([]);
 
   // Step 2: Add flights
   const handleAddFlight = async (flight: any, aircraftId?: string) => {
@@ -185,6 +308,19 @@ export default function MissionNew() {
       loadMapData();
     } catch {
       notifications.show({ title: 'Error', message: 'Failed to add flight', color: 'red' });
+    }
+  };
+
+  const handleRemoveFlight = async (flightIndex: number) => {
+    if (!missionId) return;
+    const flight = selectedFlights[flightIndex];
+    if (!flight?._flightId) return;
+    try {
+      await api.delete(`/missions/${missionId}/flights/${flight._flightId}`);
+      setSelectedFlights((prev) => prev.filter((_, i) => i !== flightIndex));
+      loadMapData();
+    } catch {
+      notifications.show({ title: 'Error', message: 'Failed to remove flight', color: 'red' });
     }
   };
 
@@ -252,14 +388,14 @@ export default function MissionNew() {
       formData.append('file', imageFiles[i]);
       formData.append('caption', '');
       try {
-        await api.post(`/missions/${missionId}/images`, formData, {
+        const resp = await api.post(`/missions/${missionId}/images`, formData, {
           timeout: 120000,  // 2 min timeout for large files
         });
         successCount++;
         setUploadedImages((prev) => {
           const updated = [...prev];
           const idx = prev.length - imageFiles.length + i;
-          updated[idx] = { ...updated[idx], status: 'done' };
+          updated[idx] = { ...updated[idx], status: 'done', imageId: resp.data.id };
           return updated;
         });
       } catch {
@@ -278,6 +414,20 @@ export default function MissionNew() {
       message: `${successCount} of ${imageFiles.length} image(s) uploaded successfully`,
       color: successCount === imageFiles.length ? 'cyan' : 'yellow',
     });
+  };
+
+  const handleDeleteImage = async (index: number) => {
+    if (!missionId) return;
+    const img = uploadedImages[index];
+    if (img.imageId) {
+      try {
+        await api.delete(`/missions/${missionId}/images/${img.imageId}`);
+      } catch {
+        notifications.show({ title: 'Error', message: 'Failed to delete image', color: 'red' });
+        return;
+      }
+    }
+    setUploadedImages((prev) => prev.filter((_, i) => i !== index));
   };
 
   const handleDrop = useCallback(async (e: React.DragEvent) => {
@@ -340,14 +490,32 @@ export default function MissionNew() {
   const handleSaveInvoice = async () => {
     if (!missionId) return;
     try {
-      await api.post(`/missions/${missionId}/invoice`, { tax_rate: 0, paid_in_full: paidInFull });
+      if (invoiceExists) {
+        // Update existing invoice
+        await api.put(`/missions/${missionId}/invoice`, { paid_in_full: paidInFull });
+        // Delete existing line items and re-add (simplest approach)
+        const invResp = await api.get(`/missions/${missionId}/invoice`);
+        for (const existing of invResp.data.line_items) {
+          await api.delete(`/missions/${missionId}/invoice/items/${existing.id}`);
+        }
+      } else {
+        await api.post(`/missions/${missionId}/invoice`, { tax_rate: 0, paid_in_full: paidInFull });
+        setInvoiceExists(true);
+      }
       for (const item of lineItems) {
         if (item.description) {
-          await api.post(`/missions/${missionId}/invoice/items`, item);
+          await api.post(`/missions/${missionId}/invoice/items`, {
+            description: item.description,
+            category: item.category,
+            quantity: item.quantity,
+            unit_price: item.unit_price,
+          });
         }
       }
-      notifications.show({ title: 'Invoice Saved', message: 'Line items added', color: 'cyan' });
-    } catch {}
+      notifications.show({ title: 'Invoice Saved', message: 'Line items saved', color: 'cyan' });
+    } catch {
+      notifications.show({ title: 'Error', message: 'Failed to save invoice', color: 'red' });
+    }
   };
 
   // Step 6: Generate PDF & Send
@@ -384,9 +552,21 @@ export default function MissionNew() {
 
   const cardStyle = { background: '#0e1117', border: '1px solid #1a1f2e' };
 
+  // Show loader while loading existing mission
+  if (isEditing && !missionLoaded) {
+    return (
+      <Stack gap="lg" align="center" py="xl">
+        <Loader color="cyan" size="lg" />
+        <Text c="#5a6478">Loading mission...</Text>
+      </Stack>
+    );
+  }
+
   return (
     <Stack gap="lg">
-      <Title order={2} c="#e8edf2" style={{ letterSpacing: '2px' }}>NEW MISSION</Title>
+      <Title order={2} c="#e8edf2" style={{ letterSpacing: '2px' }}>
+        {isEditing ? 'EDIT MISSION' : 'NEW MISSION'}
+      </Title>
 
       <Stepper
         active={active}
@@ -426,7 +606,7 @@ export default function MissionNew() {
                 onChange={(e) => form.setFieldValue('is_billable', e.currentTarget.checked)}
               />
               <Button color="cyan" onClick={handleCreateMission} styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}>
-                CREATE & CONTINUE
+                {isEditing ? 'SAVE & CONTINUE' : 'CREATE & CONTINUE'}
               </Button>
             </Stack>
           </Card>
@@ -481,7 +661,7 @@ export default function MissionNew() {
 
               {flightsLoading ? (
                 <Group justify="center" py="md"><Loader color="cyan" /></Group>
-              ) : availableFlights.length === 0 ? (
+              ) : availableFlights.length === 0 && selectedFlights.length === 0 ? (
                 <Text c="#5a6478" size="sm">No flights found. Check OpenDroneLog URL in Settings.</Text>
               ) : (
                 <ScrollArea h={280} type="auto" offsetScrollbars styles={{ viewport: { borderRadius: 4 } }}>
@@ -500,18 +680,48 @@ export default function MissionNew() {
                       </Table.Tr>
                     </Table.Thead>
                     <Table.Tbody>
+                      {/* Show selected flights that aren't in available (e.g. loaded from existing mission) */}
+                      {selectedFlights.map((flight: any, i: number) => {
+                        const inAvailable = availableFlights.some((af) => (af.id || af.flight_id) === (flight.id || flight.flight_id));
+                        if (inAvailable) return null; // will be shown in availableFlights loop
+                        return (
+                          <Table.Tr key={`sel-${i}`} style={{ background: 'rgba(0,212,255,0.05)' }}>
+                            <Table.Td>
+                              <Checkbox
+                                color="cyan"
+                                size="xs"
+                                checked={true}
+                                onChange={() => handleRemoveFlight(i)}
+                              />
+                            </Table.Td>
+                            <Table.Td style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: '11px' }}>{flight.date || flight.start_time || '—'}</Table.Td>
+                            <Table.Td>{flight.drone || flight.aircraft || '—'}</Table.Td>
+                            <Table.Td>{flight.duration || flight.flight_time || '—'}</Table.Td>
+                            <Table.Td>
+                              <Select
+                                size="xs"
+                                placeholder="Assign..."
+                                data={aircraft.map((a) => ({ value: a.id, label: a.model_name }))}
+                                value={flight._aircraftId || null}
+                                onChange={(val) => handleAssignAircraft(i, val)}
+                                clearable
+                                styles={{ input: { background: '#050608', borderColor: '#1a1f2e', color: '#e8edf2', minWidth: 130, height: 28, minHeight: 28, fontSize: '11px' } }}
+                              />
+                            </Table.Td>
+                          </Table.Tr>
+                        );
+                      })}
                       {availableFlights.map((flight: any, i: number) => {
                         const selectedIdx = selectedFlights.findIndex((f) => (f.id || f.flight_id) === (flight.id || flight.flight_id));
                         const isSelected = selectedIdx >= 0;
                         return (
-                          <Table.Tr key={i} style={{ background: isSelected ? 'rgba(0,212,255,0.05)' : undefined }}>
+                          <Table.Tr key={`av-${i}`} style={{ background: isSelected ? 'rgba(0,212,255,0.05)' : undefined }}>
                             <Table.Td>
                               <Checkbox
                                 color="cyan"
                                 size="xs"
                                 checked={isSelected}
-                                onChange={() => !isSelected && handleAddFlight(flight, missionAircraft[0] || undefined)}
-                                disabled={isSelected}
+                                onChange={() => isSelected ? handleRemoveFlight(selectedIdx) : handleAddFlight(flight, missionAircraft[0] || undefined)}
                               />
                             </Table.Td>
                             <Table.Td style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: '11px' }}>{flight.date || flight.start_time || '—'}</Table.Td>
@@ -595,7 +805,7 @@ export default function MissionNew() {
               {uploadedImages.length > 0 && (
                 <Stack gap="xs">
                   <Text c="#00d4ff" fw={600} size="sm" style={{ fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' }}>
-                    UPLOADED ({uploadedImages.filter((i) => i.status === 'done').length}/{uploadedImages.length})
+                    IMAGES ({uploadedImages.filter((i) => i.status === 'done').length})
                   </Text>
                   {uploadedImages.map((img, i) => (
                     <Group key={i} gap="xs">
@@ -606,6 +816,11 @@ export default function MissionNew() {
                       {img.status === 'uploading' && <Loader size={12} color="cyan" />}
                       {img.status === 'done' && <Badge size="xs" color="green">Done</Badge>}
                       {img.status === 'error' && <Badge size="xs" color="red">Failed</Badge>}
+                      {img.status === 'done' && (
+                        <ActionIcon variant="subtle" color="red" size="xs" onClick={() => handleDeleteImage(i)} title="Remove image">
+                          <IconTrash size={12} />
+                        </ActionIcon>
+                      )}
                     </Group>
                   ))}
                 </Stack>
@@ -637,7 +852,7 @@ export default function MissionNew() {
                 disabled={generating || !narrative}
                 styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}
               >
-                {generating ? 'GENERATING...' : 'GENERATE REPORT'}
+                {generating ? 'GENERATING...' : reportContent ? 'REGENERATE REPORT' : 'GENERATE REPORT'}
               </Button>
 
               {reportContent && (

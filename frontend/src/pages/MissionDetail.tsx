@@ -13,6 +13,7 @@ import {
 import { notifications } from '@mantine/notifications';
 import {
   IconDownload,
+  IconEdit,
   IconRobot,
   IconSend,
 } from '@tabler/icons-react';
@@ -120,6 +121,15 @@ export default function MissionDetail() {
             </Text>
           </Group>
         </div>
+        <Button
+          leftSection={<IconEdit size={16} />}
+          color="cyan"
+          variant="light"
+          onClick={() => navigate(`/missions/${id}/edit`)}
+          styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}
+        >
+          EDIT MISSION
+        </Button>
       </Group>
 
       {/* Aircraft */}

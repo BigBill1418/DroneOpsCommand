@@ -32,6 +32,7 @@ export default function App() {
         <Route path="/missions" element={<Missions />} />
         <Route path="/missions/new" element={<MissionNew />} />
         <Route path="/missions/:id" element={<MissionDetail />} />
+        <Route path="/missions/:id/edit" element={<MissionNew />} />
         <Route path="/customers" element={<Customers />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="*" element={<Navigate to="/" />} />

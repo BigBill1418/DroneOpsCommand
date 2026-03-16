@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
+  ActionIcon,
   Badge,
   Button,
   Card,
@@ -10,7 +11,7 @@ import {
   TextInput,
   Title,
 } from '@mantine/core';
-import { IconPlus, IconSearch } from '@tabler/icons-react';
+import { IconEdit, IconPlus, IconSearch } from '@tabler/icons-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
 import { Mission } from '../api/types';
@@ -78,6 +79,7 @@ export default function Missions() {
                 <Table.Th>DATE</Table.Th>
                 <Table.Th>STATUS</Table.Th>
                 <Table.Th>BILLABLE</Table.Th>
+                <Table.Th w={50}></Table.Th>
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
@@ -89,6 +91,17 @@ export default function Missions() {
                   <Table.Td c="#5a6478" style={{ fontFamily: "'Share Tech Mono', monospace" }}>{m.mission_date || '—'}</Table.Td>
                   <Table.Td><Badge color={statusColors[m.status]} variant="light" size="sm">{m.status}</Badge></Table.Td>
                   <Table.Td>{m.is_billable ? <Badge color="orange" variant="light" size="sm">$</Badge> : '—'}</Table.Td>
+                  <Table.Td>
+                    <ActionIcon
+                      variant="subtle"
+                      color="cyan"
+                      size="sm"
+                      onClick={(e) => { e.stopPropagation(); navigate(`/missions/${m.id}/edit`); }}
+                      title="Edit mission"
+                    >
+                      <IconEdit size={14} />
+                    </ActionIcon>
+                  </Table.Td>
                 </Table.Tr>
               ))}
             </Table.Tbody>
