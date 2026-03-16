@@ -143,11 +143,14 @@ async def update_report(
 ):
     result = await db.execute(select(Report).where(Report.mission_id == mission_id))
     report = result.scalar_one_or_none()
-    if not report:
-        raise HTTPException(status_code=404, detail="Report not found")
 
-    for key, value in data.model_dump(exclude_unset=True).items():
-        setattr(report, key, value)
+    if report:
+        for key, value in data.model_dump(exclude_unset=True).items():
+            setattr(report, key, value)
+    else:
+        # Create a new report record (draft save before generation)
+        report = Report(mission_id=mission_id, **data.model_dump(exclude_unset=True))
+        db.add(report)
 
     await db.flush()
     await db.refresh(report)

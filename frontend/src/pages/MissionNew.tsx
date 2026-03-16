@@ -35,6 +35,7 @@ import {
   IconUpload,
   IconPhoto,
   IconRefresh,
+  IconDeviceFloppy,
 } from '@tabler/icons-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import api from '../api/client';
@@ -122,6 +123,7 @@ export default function MissionNew() {
   const [narrative, setNarrative] = useState('');
   const [reportContent, setReportContent] = useState('');
   const [generating, setGenerating] = useState(false);
+  const [savingDraft, setSavingDraft] = useState(false);
 
   // Images
   const [uploadedImages, setUploadedImages] = useState<{ name: string; status: 'pending' | 'uploading' | 'done' | 'error'; imageId?: string }[]>([]);
@@ -521,6 +523,22 @@ export default function MissionNew() {
     }
   };
 
+  const handleSaveDraft = async () => {
+    if (!missionId) return;
+    setSavingDraft(true);
+    try {
+      await api.put(`/missions/${missionId}/report`, {
+        user_narrative: narrative || undefined,
+        final_content: reportContent || undefined,
+      });
+      notifications.show({ title: 'Draft Saved', message: 'Report draft has been saved', color: 'cyan' });
+    } catch {
+      notifications.show({ title: 'Error', message: 'Failed to save draft', color: 'red' });
+    } finally {
+      setSavingDraft(false);
+    }
+  };
+
   // Step 5: Invoice
   const addLineItem = () => {
     setLineItems((prev) => [
@@ -913,9 +931,21 @@ export default function MissionNew() {
                 </>
               )}
 
-              <Button color="cyan" onClick={() => setActive(4)} disabled={!reportContent} styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}>
-                CONTINUE
-              </Button>
+              <Group>
+                <Button
+                  leftSection={savingDraft ? <Loader size={16} color="white" /> : <IconDeviceFloppy size={16} />}
+                  color="gray"
+                  variant="light"
+                  onClick={handleSaveDraft}
+                  disabled={savingDraft || (!narrative && !reportContent)}
+                  styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}
+                >
+                  {savingDraft ? 'SAVING...' : 'SAVE DRAFT'}
+                </Button>
+                <Button color="cyan" onClick={() => setActive(4)} disabled={!reportContent} styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}>
+                  CONTINUE
+                </Button>
+              </Group>
             </Stack>
           </Card>
         </Stepper.Step>
