@@ -135,7 +135,7 @@ export default function AppLayout({ onLogout }: AppLayoutProps) {
           c="#5a6478"
           style={{
             fontFamily: "'Share Tech Mono', monospace",
-            fontSize: '10px',
+            fontSize: '12px',
             position: 'absolute',
             bottom: 12,
             left: 16,

@@ -771,7 +771,7 @@ export default function MissionNew() {
                   <Table verticalSpacing={6} styles={{
                     table: { color: '#e8edf2', fontSize: '12px' },
                     th: { color: '#00d4ff', fontFamily: "'Share Tech Mono', monospace", fontSize: '12px', borderBottom: '1px solid #1a1f2e', padding: '6px 8px', position: 'sticky', top: 0, background: '#0e1117', zIndex: 1 },
-                    td: { borderBottom: '1px solid #1a1f2e', padding: '6px 10px' },
+                    td: { borderBottom: '1px solid #1a1f2e', padding: '8px 12px' },
                   }}>
                     <Table.Thead>
                       <Table.Tr>

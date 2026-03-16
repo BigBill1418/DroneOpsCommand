@@ -208,7 +208,7 @@ function TopFlights({ flights, label, accessor, formatter }: {
       <Text size="11px" c="#5a6478" mb="sm" style={{ ...monoFont, letterSpacing: '1px' }} tt="uppercase">
         {label}
       </Text>
-      <Stack gap={6}>
+      <Stack gap={8}>
         {top.map((f, i) => (
           <Group key={f.id ?? i} justify="space-between">
             <Group gap="xs">
