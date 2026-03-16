@@ -502,7 +502,19 @@ export default function MissionNew() {
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  // Step 4: Generate report
+  // Step 4: Generate report (background task with polling)
+  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const stopPolling = useCallback(() => {
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
+    }
+  }, []);
+
+  // Clean up polling on unmount
+  useEffect(() => () => stopPolling(), [stopPolling]);
+
   const handleGenerate = async () => {
     if (!missionId) return;
     setGenerating(true);
@@ -510,15 +522,46 @@ export default function MissionNew() {
       const resp = await api.post(`/missions/${missionId}/report/generate`, {
         user_narrative: narrative,
       });
-      setReportContent(resp.data.final_content || '');
-      notifications.show({ title: 'Report Generated', message: 'LLM report is ready for review', color: 'cyan' });
+      const taskId = resp.data.task_id;
+      if (!taskId) {
+        // Fallback: synchronous response (shouldn't happen but be safe)
+        setReportContent(resp.data.final_content || '');
+        setGenerating(false);
+        return;
+      }
+
+      notifications.show({ title: 'Generating Report', message: 'The AI is writing your report. You can navigate away — it will keep going.', color: 'cyan' });
+
+      // Poll for completion
+      pollIntervalRef.current = setInterval(async () => {
+        try {
+          const status = await api.get(`/missions/${missionId}/report/status/${taskId}`);
+          if (status.data.status === 'complete') {
+            stopPolling();
+            // Fetch the finished report
+            try {
+              const reportResp = await api.get(`/missions/${missionId}/report`);
+              setReportContent(reportResp.data.final_content || '');
+              notifications.show({ title: 'Report Ready', message: 'Your AI report is ready for review', color: 'green' });
+            } catch {
+              notifications.show({ title: 'Report Generated', message: 'Report is ready — reload the page to view it', color: 'cyan' });
+            }
+            setGenerating(false);
+          } else if (status.data.status === 'failed') {
+            stopPolling();
+            notifications.show({ title: 'Generation Failed', message: status.data.detail || 'Report generation failed', color: 'red' });
+            setGenerating(false);
+          }
+        } catch {
+          // Network blip during poll — keep trying
+        }
+      }, 3000);
     } catch (err: any) {
       notifications.show({
         title: 'Generation Failed',
         message: err.response?.data?.detail || 'Could not generate report. Is Ollama running?',
         color: 'red',
       });
-    } finally {
       setGenerating(false);
     }
   };

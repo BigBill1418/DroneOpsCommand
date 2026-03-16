@@ -60,8 +60,8 @@ Generate the after-action report:"""
                 "system": SYSTEM_PROMPT,
                 "stream": False,
                 "options": {
-                    "temperature": 0.7,
-                    "num_predict": 2048,
+                    "temperature": 0.3,
+                    "num_predict": 1024,
                 },
             },
         )

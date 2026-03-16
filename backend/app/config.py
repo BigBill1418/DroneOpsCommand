@@ -38,6 +38,11 @@ class Settings(BaseSettings):
     upload_dir: str = "/data/uploads"
     reports_dir: str = "/data/reports"
 
+    @property
+    def database_url_sync(self) -> str:
+        """Synchronous database URL for Celery tasks."""
+        return self.database_url.replace("+asyncpg", "")
+
     class Config:
         env_file = ".env"
 

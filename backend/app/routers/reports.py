@@ -62,41 +62,28 @@ async def get_report(
     return report
 
 
-@router.post("/{mission_id}/report/generate", response_model=ReportResponse)
+@router.post("/{mission_id}/report/generate")
 async def generate_report(
     mission_id: UUID,
     data: ReportGenerateRequest,
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
-    """Generate report using LLM based on flight data and user narrative."""
+    """Kick off LLM report generation as a background task."""
+    from app.tasks.celery_tasks import generate_report_task
+
     result = await db.execute(select(Mission).where(Mission.id == mission_id))
     mission = result.scalar_one_or_none()
     if not mission:
         raise HTTPException(status_code=404, detail="Mission not found")
 
-    # Calculate area coverage
+    # Pre-compute everything we can before handing off to the worker
     flights = _flights_to_dicts(mission)
     tracks = extract_gps_tracks(flights)
     acres = calculate_area_acres(tracks)
-
-    # Build flight summaries for LLM
     flight_summaries = _build_flight_summaries(mission)
-
-    # Generate LLM report
-    llm_content = await llm_generate_report(
-        user_narrative=data.user_narrative,
-        mission_title=mission.title,
-        mission_type=mission.mission_type.value,
-        location=mission.location_name or "Not specified",
-        flight_summaries=flight_summaries,
-        ground_covered_acres=acres if acres > 0 else None,
-    )
-
-    # Render static map
     map_path = render_static_map(flights) if tracks else None
 
-    # Calculate total flight duration
     total_duration = 0
     for f in mission.flights:
         cache = f.flight_data_cache or {}
@@ -104,34 +91,60 @@ async def generate_report(
         if isinstance(dur, (int, float)):
             total_duration += dur
 
-    # Create or update report
+    # Ensure a report record exists so the frontend can poll GET /report
     existing = await db.execute(select(Report).where(Report.mission_id == mission_id))
     report = existing.scalar_one_or_none()
-
     if report:
         report.user_narrative = data.user_narrative
-        report.llm_generated_content = llm_content
-        report.final_content = llm_content
         report.ground_covered_acres = acres if acres > 0 else None
         report.flight_duration_total_seconds = total_duration if total_duration > 0 else None
         report.map_image_path = map_path
-        report.generated_at = datetime.utcnow()
     else:
         report = Report(
             mission_id=mission_id,
             user_narrative=data.user_narrative,
-            llm_generated_content=llm_content,
-            final_content=llm_content,
             ground_covered_acres=acres if acres > 0 else None,
             flight_duration_total_seconds=total_duration if total_duration > 0 else None,
             map_image_path=map_path,
-            generated_at=datetime.utcnow(),
         )
         db.add(report)
-
     await db.flush()
-    await db.refresh(report)
-    return report
+
+    # Dispatch to Celery worker
+    task = generate_report_task.delay(
+        mission_id=str(mission_id),
+        user_narrative=data.user_narrative,
+        mission_title=mission.title,
+        mission_type=mission.mission_type.value,
+        location=mission.location_name or "Not specified",
+        flight_summaries=flight_summaries,
+        ground_covered_acres=acres if acres > 0 else None,
+        total_duration=total_duration,
+        map_path=map_path,
+    )
+
+    return {"task_id": task.id, "status": "generating"}
+
+
+@router.get("/{mission_id}/report/status/{task_id}")
+async def get_generation_status(
+    mission_id: UUID,
+    task_id: str,
+    _user: User = Depends(get_current_user),
+):
+    """Poll the status of a background report generation task."""
+    from app.tasks.celery_tasks import celery_app
+
+    result = celery_app.AsyncResult(task_id)
+
+    if result.state == "PENDING":
+        return {"status": "generating"}
+    elif result.state == "SUCCESS":
+        return {"status": "complete"}
+    elif result.state == "FAILURE":
+        return {"status": "failed", "detail": str(result.result)}
+    else:
+        return {"status": "generating"}
 
 
 @router.put("/{mission_id}/report", response_model=ReportResponse)
