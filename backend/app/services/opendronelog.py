@@ -1,8 +1,14 @@
+import logging
+
 import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+
+logger = logging.getLogger(__name__)
+
+FLIGHT_ENDPOINTS = ["/api/flights", "/flights", "/api/v1/flights"]
 
 
 async def _get_opendronelog_url(db: AsyncSession | None = None) -> str:
@@ -22,6 +28,22 @@ async def _get_opendronelog_url(db: AsyncSession | None = None) -> str:
     return url.rstrip("/") if url else ""
 
 
+def _extract_flights(data: object) -> list[dict]:
+    """Extract a list of flights from an OpenDroneLog API response.
+
+    Handles plain arrays and common paginated wrappers like
+    { flights: [...] }, { data: [...] }, { results: [...] }, { items: [...] }.
+    """
+    if isinstance(data, list):
+        return data
+    if isinstance(data, dict):
+        for key in ("flights", "data", "results", "items"):
+            if key in data and isinstance(data[key], list):
+                return data[key]
+        # Single flight object — not useful for listing
+    return []
+
+
 class OpenDroneLogClient:
     """Client for the OpenDroneLog REST API."""
 
@@ -37,43 +59,41 @@ class OpenDroneLogClient:
         if not base_url:
             return []
 
-        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
-            # Try common OpenDroneLog API patterns
-            endpoints = [
-                f"{base_url}/api/flights",
-                f"{base_url}/flights",
-                f"{base_url}/api/v1/flights",
-            ]
+        async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
             last_error = None
-            for url in endpoints:
+            for suffix in FLIGHT_ENDPOINTS:
+                url = f"{base_url}{suffix}"
                 try:
                     resp = await client.get(url)
+                    if resp.status_code == 404:
+                        continue
                     if resp.status_code >= 400:
                         last_error = f"HTTP {resp.status_code} from {url}"
-                        if resp.status_code == 404:
-                            continue  # Try next endpoint
-                        continue  # Try next endpoint for any error
+                        logger.warning("OpenDroneLog %s returned %s", url, resp.status_code)
+                        continue
                     data = resp.json()
-                    # Handle both array and paginated responses
-                    if isinstance(data, list):
-                        return data
-                    if isinstance(data, dict):
-                        # Common patterns: { flights: [...] }, { data: [...] }, { results: [...] }
-                        for key in ("flights", "data", "results", "items"):
-                            if key in data and isinstance(data[key], list):
-                                return data[key]
-                        return [data]  # Single flight response
+                    flights = _extract_flights(data)
+                    logger.info("OpenDroneLog: %d flights from %s", len(flights), url)
+                    return flights
                 except httpx.ConnectError as e:
                     raise ConnectionError(
                         f"Cannot connect to OpenDroneLog at {base_url}. "
                         f"If OpenDroneLog is running on the host machine, use "
                         f"'http://host.docker.internal:<port>' as the URL. Error: {e}"
                     )
-                except Exception:
-                    continue  # Try next endpoint
+                except httpx.TimeoutException:
+                    last_error = f"Timeout fetching {url}"
+                    logger.warning("OpenDroneLog timeout: %s", url)
+                    continue
+                except Exception as exc:
+                    last_error = f"{type(exc).__name__}: {exc} from {url}"
+                    logger.warning("OpenDroneLog error fetching %s: %s", url, exc)
+                    continue
 
             if last_error:
-                raise ConnectionError(f"No working flights endpoint found at {base_url}. Last error: {last_error}")
+                raise ConnectionError(
+                    f"No working flights endpoint found at {base_url}. Last error: {last_error}"
+                )
             return []
 
     async def get_flight(self, flight_id: str, db: AsyncSession | None = None) -> dict:
@@ -127,11 +147,10 @@ class OpenDroneLogClient:
         if not base_url:
             return {"status": "error", "message": "OpenDroneLog URL is not configured"}
 
-        async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
+        async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
             # Try to reach the base URL first
             try:
                 resp = await client.get(base_url)
-                base_reachable = resp.status_code < 500
             except Exception as e:
                 return {
                     "status": "error",
@@ -141,16 +160,14 @@ class OpenDroneLogClient:
                 }
 
             # Now try to find the flights endpoint
-            for endpoint in [
-                f"{base_url}/api/flights",
-                f"{base_url}/flights",
-                f"{base_url}/api/v1/flights",
-            ]:
+            for suffix in FLIGHT_ENDPOINTS:
+                endpoint = f"{base_url}{suffix}"
                 try:
                     resp = await client.get(endpoint)
                     if resp.status_code < 400:
                         data = resp.json()
-                        count = len(data) if isinstance(data, list) else "unknown"
+                        flights = _extract_flights(data)
+                        count = len(flights) if flights else 0
                         return {
                             "status": "online",
                             "message": f"Connected. Found {count} flight(s).",

@@ -246,9 +246,21 @@ export default function MissionNew() {
     setFlightsLoading(true);
     try {
       const resp = await api.get('/flights');
-      setAvailableFlights(Array.isArray(resp.data) ? resp.data : []);
-    } catch {
-      notifications.show({ title: 'OpenDroneLog', message: 'Could not fetch flights. Check the OpenDroneLog URL in Settings and use Test Connection to verify.', color: 'yellow' });
+      // Backend returns a flat array; handle edge cases defensively
+      let flights: any[] = [];
+      if (Array.isArray(resp.data)) {
+        flights = resp.data;
+      } else if (resp.data && typeof resp.data === 'object') {
+        // Paginated wrapper — try common keys
+        flights = resp.data.flights || resp.data.data || resp.data.results || resp.data.items || [];
+      }
+      setAvailableFlights(flights);
+      if (flights.length === 0) {
+        notifications.show({ title: 'OpenDroneLog', message: 'Connection OK but no flights returned. Verify flights exist in OpenDroneLog.', color: 'yellow' });
+      }
+    } catch (err: any) {
+      const detail = err.response?.data?.detail || 'Could not fetch flights. Check the OpenDroneLog URL in Settings.';
+      notifications.show({ title: 'OpenDroneLog', message: detail, color: 'yellow' });
     } finally {
       setFlightsLoading(false);
     }
