@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { memo, useEffect, useState } from 'react';
 import { MapContainer, TileLayer, Polyline, CircleMarker, Polygon, Popup, useMap } from 'react-leaflet';
 import { Box, Text, Group, Badge, Stack } from '@mantine/core';
 import 'leaflet/dist/leaflet.css';
@@ -39,7 +39,7 @@ function FitBounds({ features }: { features: GeoJSONFeature[] }) {
   return null;
 }
 
-export default function FlightMap({ geojson, coverage, height = '400px' }: FlightMapProps) {
+function FlightMap({ geojson, coverage, height = '400px' }: FlightMapProps) {
   if (!geojson || !geojson.features || geojson.features.length === 0) {
     return (
       <Box
@@ -169,3 +169,5 @@ export default function FlightMap({ geojson, coverage, height = '400px' }: Fligh
     </Stack>
   );
 }
+
+export default memo(FlightMap);

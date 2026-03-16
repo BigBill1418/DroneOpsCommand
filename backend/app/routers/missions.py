@@ -163,6 +163,31 @@ async def update_flight(
     return flight
 
 
+@router.patch("/{mission_id}/flights/{flight_id}/aircraft")
+async def assign_aircraft(
+    mission_id: UUID,
+    flight_id: UUID,
+    data: dict,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """Lightweight endpoint to assign/unassign an aircraft to a flight."""
+    result = await db.execute(
+        select(MissionFlight).where(
+            MissionFlight.id == flight_id, MissionFlight.mission_id == mission_id
+        )
+    )
+    flight = result.scalar_one_or_none()
+    if not flight:
+        raise HTTPException(status_code=404, detail="Flight not found")
+
+    aircraft_id = data.get("aircraft_id")
+    flight.aircraft_id = UUID(aircraft_id) if aircraft_id else None
+    await db.flush()
+    await db.refresh(flight)
+    return {"id": str(flight.id), "aircraft_id": str(flight.aircraft_id) if flight.aircraft_id else None}
+
+
 @router.delete("/{mission_id}/flights/{flight_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def remove_flight(
     mission_id: UUID,

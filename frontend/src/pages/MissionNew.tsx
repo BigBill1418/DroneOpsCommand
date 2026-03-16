@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import {
   Button,
   Card,
@@ -298,17 +298,30 @@ export default function MissionNew() {
     }
   };
 
-  const loadMapData = async () => {
+  // Debounced map data loading — avoids hammering the server when clicking multiple flights
+  const mapDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const loadMapData = useCallback(() => {
     if (!missionId) return;
-    try {
-      const [mapResp, covResp] = await Promise.all([
-        api.get(`/missions/${missionId}/map`),
-        api.get(`/missions/${missionId}/map/coverage`),
-      ]);
-      setMapGeojson(mapResp.data);
-      setCoverage(covResp.data);
-    } catch {}
-  };
+    // Cancel any pending debounced load
+    if (mapDebounceRef.current) clearTimeout(mapDebounceRef.current);
+    mapDebounceRef.current = setTimeout(async () => {
+      try {
+        const [mapResp, covResp] = await Promise.all([
+          api.get(`/missions/${missionId}/map`),
+          api.get(`/missions/${missionId}/map/coverage`),
+        ]);
+        setMapGeojson(mapResp.data);
+        setCoverage(covResp.data);
+      } catch {}
+    }, 800);
+  }, [missionId]);
+
+  // Clean up debounce on unmount
+  useEffect(() => () => { if (mapDebounceRef.current) clearTimeout(mapDebounceRef.current); }, []);
+
+  // Lock to serialize flight add/remove operations
+  const flightOpLock = useRef(false);
 
   // Step 1: Create or update mission
   const handleCreateMission = async () => {
@@ -339,9 +352,10 @@ export default function MissionNew() {
     }
   };
 
-  // Step 2: Add flights
+  // Step 2: Add flights (serialized to prevent concurrent API calls)
   const handleAddFlight = async (flight: any, aircraftId?: string) => {
-    if (!missionId) return;
+    if (!missionId || flightOpLock.current) return;
+    flightOpLock.current = true;
     try {
       const resp = await api.post(`/missions/${missionId}/flights`, {
         opendronelog_flight_id: String(flight.id || flight.flight_id),
@@ -352,19 +366,24 @@ export default function MissionNew() {
       loadMapData();
     } catch {
       notifications.show({ title: 'Error', message: 'Failed to add flight', color: 'red' });
+    } finally {
+      flightOpLock.current = false;
     }
   };
 
   const handleRemoveFlight = async (flightIndex: number) => {
-    if (!missionId) return;
+    if (!missionId || flightOpLock.current) return;
+    flightOpLock.current = true;
     const flight = selectedFlights[flightIndex];
-    if (!flight?._flightId) return;
+    if (!flight?._flightId) { flightOpLock.current = false; return; }
     try {
       await api.delete(`/missions/${missionId}/flights/${flight._flightId}`);
       setSelectedFlights((prev) => prev.filter((_, i) => i !== flightIndex));
       loadMapData();
     } catch {
       notifications.show({ title: 'Error', message: 'Failed to remove flight', color: 'red' });
+    } finally {
+      flightOpLock.current = false;
     }
   };
 
@@ -372,18 +391,23 @@ export default function MissionNew() {
     if (!missionId) return;
     const flight = selectedFlights[flightIndex];
     if (!flight?._flightId) return;
+    // Optimistic update — immediately show the selection
+    setSelectedFlights((prev) => {
+      const updated = [...prev];
+      updated[flightIndex] = { ...updated[flightIndex], _aircraftId: aircraftId };
+      return updated;
+    });
     try {
-      await api.put(`/missions/${missionId}/flights/${flight._flightId}`, {
-        opendronelog_flight_id: String(flight.id || flight.flight_id),
+      await api.patch(`/missions/${missionId}/flights/${flight._flightId}/aircraft`, {
         aircraft_id: aircraftId,
-        flight_data_cache: flight,
-      });
-      setSelectedFlights((prev) => {
-        const updated = [...prev];
-        updated[flightIndex] = { ...updated[flightIndex], _aircraftId: aircraftId };
-        return updated;
       });
     } catch {
+      // Revert on failure
+      setSelectedFlights((prev) => {
+        const updated = [...prev];
+        updated[flightIndex] = { ...updated[flightIndex], _aircraftId: flight._aircraftId };
+        return updated;
+      });
       notifications.show({ title: 'Error', message: 'Failed to assign aircraft', color: 'red' });
     }
   };
