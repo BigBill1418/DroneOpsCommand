@@ -46,7 +46,7 @@ async def create_mission(
     _user: User = Depends(get_current_user),
 ):
     try:
-        mission = Mission(**data.model_dump())
+        mission = Mission(**data.model_dump(exclude_none=True))
         db.add(mission)
         await db.flush()
         # Re-query with explicit eager loads so relationships are populated for response

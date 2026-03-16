@@ -356,14 +356,22 @@ export default function MissionNew() {
   const handleCreateMission = async () => {
     const values = form.values;
     try {
-      const missionPayload = {
+      const missionPayload: Record<string, any> = {
         ...values,
         customer_id: values.customer_id || null,
         mission_date: values.mission_date?.toISOString().split('T')[0] || null,
-        unas_folder_path: unasFolderPath || null,
-        download_link_url: downloadLinkUrl || null,
-        download_link_expires_at: downloadLinkExpiresAt?.toISOString() || null,
       };
+
+      // Only include UNAS fields when they have actual values — avoids sending
+      // columns that may not exist yet in databases upgraded from older versions.
+      // Paths and URLs can contain any characters (special chars, unicode, spaces).
+      const trimmedPath = unasFolderPath.trim();
+      const trimmedUrl = downloadLinkUrl.trim();
+      if (trimmedPath) missionPayload.unas_folder_path = trimmedPath;
+      if (trimmedUrl) missionPayload.download_link_url = trimmedUrl;
+      if (trimmedUrl && downloadLinkExpiresAt) {
+        missionPayload.download_link_expires_at = downloadLinkExpiresAt.toISOString();
+      }
 
       if (isEditing && missionId) {
         // Update existing mission

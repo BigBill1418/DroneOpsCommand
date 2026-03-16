@@ -11,8 +11,12 @@ import app.models  # noqa: F401 — ensure all models registered with Base befor
 from app.routers import auth, customers, aircraft, missions, flights, maps, reports, invoices, rate_templates, llm, system_settings, financials, weather
 
 
-async def _add_missing_columns(conn):
-    """Add columns and enum values that create_all won't add to existing tables."""
+def _add_missing_columns(conn):
+    """Add columns and enum values that create_all won't add to existing tables.
+
+    NOTE: This is a synchronous function — it runs via conn.run_sync().
+    Do NOT make this async or the body will never execute.
+    """
     import logging
     from sqlalchemy import text, inspect as sa_inspect
 
@@ -103,7 +107,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="DroneOpsReport",
     description="Invoicing and after-action reporting tool for drone operations",
-    version="1.7.1",
+    version="1.7.2",
     lifespan=lifespan,
 )
 
