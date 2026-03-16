@@ -42,6 +42,9 @@ class MissionCreate(BaseModel):
     location_name: str | None = None
     area_coordinates: dict | None = None
     is_billable: bool = False
+    unas_folder_path: str | None = None
+    download_link_url: str | None = None
+    download_link_expires_at: datetime | None = None
 
 
 class MissionUpdate(BaseModel):

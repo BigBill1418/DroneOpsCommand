@@ -13,29 +13,38 @@ from app.routers import auth, customers, aircraft, missions, flights, maps, repo
 
 async def _add_missing_columns(conn):
     """Add columns that create_all won't add to existing tables."""
+    import logging
     from sqlalchemy import text, inspect as sa_inspect
 
-    inspector = sa_inspect(conn)
+    logger = logging.getLogger("droneops.migrations")
 
-    # Map of table -> columns to add (col_name, col_sql)
-    migrations = {
-        "reports": [
-            ("include_download_link", "ALTER TABLE reports ADD COLUMN include_download_link BOOLEAN DEFAULT FALSE"),
-        ],
-        "missions": [
-            ("unas_folder_path", "ALTER TABLE missions ADD COLUMN unas_folder_path VARCHAR(500)"),
-            ("download_link_url", "ALTER TABLE missions ADD COLUMN download_link_url VARCHAR(1000)"),
-            ("download_link_expires_at", "ALTER TABLE missions ADD COLUMN download_link_expires_at TIMESTAMP"),
-        ],
-    }
+    try:
+        inspector = sa_inspect(conn)
 
-    for table, columns in migrations.items():
-        if not inspector.has_table(table):
-            continue
-        existing = {c["name"] for c in inspector.get_columns(table)}
-        for col_name, alter_sql in columns:
-            if col_name not in existing:
-                conn.execute(text(alter_sql))
+        # Map of table -> columns to add (col_name, col_sql)
+        migrations = {
+            "reports": [
+                ("include_download_link", "ALTER TABLE reports ADD COLUMN include_download_link BOOLEAN DEFAULT FALSE"),
+            ],
+            "missions": [
+                ("unas_folder_path", "ALTER TABLE missions ADD COLUMN unas_folder_path VARCHAR(500)"),
+                ("download_link_url", "ALTER TABLE missions ADD COLUMN download_link_url VARCHAR(1000)"),
+                ("download_link_expires_at", "ALTER TABLE missions ADD COLUMN download_link_expires_at TIMESTAMP"),
+            ],
+        }
+
+        for table, columns in migrations.items():
+            if not inspector.has_table(table):
+                continue
+            existing = {c["name"] for c in inspector.get_columns(table)}
+            for col_name, alter_sql in columns:
+                if col_name not in existing:
+                    logger.info("Adding column %s.%s", table, col_name)
+                    conn.execute(text(alter_sql))
+
+        logger.info("Column migration check complete")
+    except Exception as exc:
+        logger.error("Column migration failed: %s", exc)
 
 
 @asynccontextmanager
@@ -62,7 +71,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="DroneOpsReport",
     description="Invoicing and after-action reporting tool for drone operations",
-    version="1.0.0",
+    version="1.5.0",
     lifespan=lifespan,
 )
 
