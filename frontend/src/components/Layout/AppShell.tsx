@@ -9,6 +9,7 @@ import {
   Tooltip,
 } from '@mantine/core';
 import {
+  IconChartBar,
   IconDashboard,
   IconDrone,
   IconUsers,
@@ -33,6 +34,7 @@ export default function AppLayout({ onLogout }: AppLayoutProps) {
     { icon: IconPlane, label: 'Flights', path: '/flights' },
     { icon: IconDrone, label: 'Missions', path: '/missions' },
     { icon: IconUsers, label: 'Customers', path: '/customers' },
+    { icon: IconChartBar, label: 'Financials', path: '/financials' },
     { icon: IconSettings, label: 'Settings', path: '/settings' },
   ];
 

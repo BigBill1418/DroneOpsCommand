@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from app.config import settings
 from app.database import Base, async_session, engine
 import app.models  # noqa: F401 — ensure all models registered with Base before create_all
-from app.routers import auth, customers, aircraft, missions, flights, maps, reports, invoices, rate_templates, llm, system_settings
+from app.routers import auth, customers, aircraft, missions, flights, maps, reports, invoices, rate_templates, llm, system_settings, financials
 
 
 @asynccontextmanager
@@ -68,6 +68,7 @@ app.include_router(invoices.router)
 app.include_router(rate_templates.router)
 app.include_router(llm.router)
 app.include_router(system_settings.router)
+app.include_router(financials.router)
 
 
 @app.get("/api/health")

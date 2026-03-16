@@ -9,6 +9,7 @@ import MissionNew from './pages/MissionNew';
 import MissionDetail from './pages/MissionDetail';
 import Customers from './pages/Customers';
 import Flights from './pages/Flights';
+import Financials from './pages/Financials';
 import Settings from './pages/Settings';
 
 export default function App() {
@@ -36,6 +37,7 @@ export default function App() {
         <Route path="/missions/:id/edit" element={<MissionNew />} />
         <Route path="/missions/:id" element={<MissionDetail />} />
         <Route path="/customers" element={<Customers />} />
+        <Route path="/financials" element={<Financials />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="*" element={<Navigate to="/" />} />
       </Route>
