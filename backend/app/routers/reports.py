@@ -5,9 +5,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.auth.jwt import get_current_user
 from app.database import get_db
+from app.models.invoice import Invoice
 from app.models.mission import Mission
 from app.models.report import Report
 from app.models.user import User
@@ -187,7 +189,14 @@ async def generate_report_pdf(
     _user: User = Depends(get_current_user),
 ):
     """Generate PDF from the report."""
-    result = await db.execute(select(Mission).where(Mission.id == mission_id))
+    result = await db.execute(
+        select(Mission)
+        .where(Mission.id == mission_id)
+        .options(
+            selectinload(Mission.customer),
+            selectinload(Mission.invoice).selectinload(Invoice.line_items),
+        )
+    )
     mission = result.scalar_one_or_none()
     if not mission:
         raise HTTPException(status_code=404, detail="Mission not found")

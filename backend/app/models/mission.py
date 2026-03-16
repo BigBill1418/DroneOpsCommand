@@ -52,8 +52,8 @@ class Mission(Base):
     customer = relationship("Customer", back_populates="missions", lazy="selectin")
     flights = relationship("MissionFlight", back_populates="mission", lazy="selectin", cascade="all, delete-orphan")
     images = relationship("MissionImage", back_populates="mission", lazy="selectin", cascade="all, delete-orphan")
-    report = relationship("Report", back_populates="mission", uselist=False, lazy="selectin", cascade="all, delete-orphan")
-    invoice = relationship("Invoice", back_populates="mission", uselist=False, lazy="selectin", cascade="all, delete-orphan")
+    report = relationship("Report", back_populates="mission", uselist=False, lazy="noload", cascade="all, delete-orphan")
+    invoice = relationship("Invoice", back_populates="mission", uselist=False, lazy="noload", cascade="all, delete-orphan")
 
 
 class MissionFlight(Base):

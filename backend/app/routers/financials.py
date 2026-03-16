@@ -3,6 +3,7 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.auth.jwt import get_current_user
 from app.database import get_db
@@ -20,7 +21,13 @@ async def financials_summary(
 ):
     """Aggregate financial data across all missions."""
     result = await db.execute(
-        select(Mission).where(Mission.is_billable == True)
+        select(Mission)
+        .where(Mission.is_billable == True)
+        .options(
+            selectinload(Mission.customer),
+            selectinload(Mission.flights),
+            selectinload(Mission.invoice).selectinload(Invoice.line_items),
+        )
     )
     missions = result.scalars().all()
 

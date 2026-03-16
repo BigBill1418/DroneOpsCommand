@@ -320,8 +320,25 @@ export default function MissionNew() {
   // Clean up debounce on unmount
   useEffect(() => () => { if (mapDebounceRef.current) clearTimeout(mapDebounceRef.current); }, []);
 
-  // Lock to serialize flight add/remove operations
-  const flightOpLock = useRef(false);
+  // Queue to serialize flight add/remove operations without dropping clicks
+  const flightOpQueue = useRef<Array<() => Promise<void>>>([]);
+  const flightOpRunning = useRef(false);
+
+  const enqueueFlightOp = (op: () => Promise<void>) => {
+    flightOpQueue.current.push(op);
+    if (!flightOpRunning.current) processFlightQueue();
+  };
+
+  const processFlightQueue = async () => {
+    if (flightOpRunning.current) return;
+    flightOpRunning.current = true;
+    while (flightOpQueue.current.length > 0) {
+      const op = flightOpQueue.current.shift()!;
+      try { await op(); } catch {}
+    }
+    flightOpRunning.current = false;
+    loadMapData();
+  };
 
   // Step 1: Create or update mission
   const handleCreateMission = async () => {
@@ -352,39 +369,27 @@ export default function MissionNew() {
     }
   };
 
-  // Step 2: Add flights (serialized to prevent concurrent API calls)
-  const handleAddFlight = async (flight: any, aircraftId?: string) => {
-    if (!missionId || flightOpLock.current) return;
-    flightOpLock.current = true;
-    try {
+  // Step 2: Add flights (queued to prevent concurrent API calls without dropping clicks)
+  const handleAddFlight = (flight: any, aircraftId?: string) => {
+    if (!missionId) return;
+    enqueueFlightOp(async () => {
       const resp = await api.post(`/missions/${missionId}/flights`, {
         opendronelog_flight_id: String(flight.id || flight.flight_id),
         aircraft_id: aircraftId || null,
         flight_data_cache: flight,
       });
       setSelectedFlights((prev) => [...prev, { ...flight, _flightId: resp.data.id, _aircraftId: aircraftId || null }]);
-      loadMapData();
-    } catch {
-      notifications.show({ title: 'Error', message: 'Failed to add flight', color: 'red' });
-    } finally {
-      flightOpLock.current = false;
-    }
+    });
   };
 
-  const handleRemoveFlight = async (flightIndex: number) => {
-    if (!missionId || flightOpLock.current) return;
-    flightOpLock.current = true;
+  const handleRemoveFlight = (flightIndex: number) => {
+    if (!missionId) return;
     const flight = selectedFlights[flightIndex];
-    if (!flight?._flightId) { flightOpLock.current = false; return; }
-    try {
+    if (!flight?._flightId) return;
+    enqueueFlightOp(async () => {
       await api.delete(`/missions/${missionId}/flights/${flight._flightId}`);
       setSelectedFlights((prev) => prev.filter((_, i) => i !== flightIndex));
-      loadMapData();
-    } catch {
-      notifications.show({ title: 'Error', message: 'Failed to remove flight', color: 'red' });
-    } finally {
-      flightOpLock.current = false;
-    }
+    });
   };
 
   const handleAssignAircraft = async (flightIndex: number, aircraftId: string | null) => {
