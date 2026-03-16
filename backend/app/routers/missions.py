@@ -2,6 +2,7 @@ import io
 import logging
 import os
 import uuid as uuid_mod
+from datetime import datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, status
@@ -46,7 +47,11 @@ async def create_mission(
     _user: User = Depends(get_current_user),
 ):
     try:
-        mission = Mission(**data.model_dump(exclude_none=True))
+        fields = data.model_dump(exclude_none=True)
+        # Strip timezone from expires_at — DB column is TIMESTAMP WITHOUT TIME ZONE
+        if isinstance(fields.get("download_link_expires_at"), datetime):
+            fields["download_link_expires_at"] = fields["download_link_expires_at"].replace(tzinfo=None)
+        mission = Mission(**fields)
         db.add(mission)
         await db.flush()
         # Re-query with explicit eager loads so relationships are populated for response
@@ -91,6 +96,9 @@ async def update_mission(
 
     try:
         for key, value in data.model_dump(exclude_unset=True).items():
+            # Strip timezone from expires_at — DB column is TIMESTAMP WITHOUT TIME ZONE
+            if key == "download_link_expires_at" and isinstance(value, datetime):
+                value = value.replace(tzinfo=None)
             setattr(mission, key, value)
 
         await db.flush()
