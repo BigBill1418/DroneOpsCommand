@@ -227,6 +227,7 @@ async def generate_report_pdf(
         "flight_duration_total_seconds": report.flight_duration_total_seconds,
         "flight_distance_total_meters": report.flight_distance_total_meters,
         "map_image_path": report.map_image_path,
+        "flight_count": len(mission.flights),
     }
 
     # Aircraft used

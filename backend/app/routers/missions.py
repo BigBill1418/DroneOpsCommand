@@ -89,20 +89,24 @@ async def update_mission(
     if not mission:
         raise HTTPException(status_code=404, detail="Mission not found")
 
-    for key, value in data.model_dump(exclude_unset=True).items():
-        setattr(mission, key, value)
+    try:
+        for key, value in data.model_dump(exclude_unset=True).items():
+            setattr(mission, key, value)
 
-    await db.flush()
-    # Re-query with explicit eager loads so relationships are populated for response
-    result = await db.execute(
-        select(Mission).where(Mission.id == mission_id).options(
-            selectinload(Mission.flights),
-            selectinload(Mission.images),
-            selectinload(Mission.customer),
+        await db.flush()
+        # Re-query with explicit eager loads so relationships are populated for response
+        result = await db.execute(
+            select(Mission).where(Mission.id == mission_id).options(
+                selectinload(Mission.flights),
+                selectinload(Mission.images),
+                selectinload(Mission.customer),
+            )
         )
-    )
-    mission = result.scalar_one()
-    return mission
+        mission = result.scalar_one()
+        return mission
+    except Exception as exc:
+        logger.exception("Failed to update mission: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @router.delete("/{mission_id}", status_code=status.HTTP_204_NO_CONTENT)

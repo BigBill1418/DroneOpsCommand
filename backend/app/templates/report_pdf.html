@@ -99,21 +99,41 @@
   .highlight-box {
     background: linear-gradient(135deg, #050608 0%, #0e1117 100%);
     color: #e8edf2;
-    padding: 15px 20px;
     border-radius: 6px;
     margin: 15px 0;
+    padding: 0;
+    overflow: hidden;
   }
 
-  .highlight-box .stat {
+  .stats-row {
+    display: flex;
+    width: 100%;
+  }
+
+  .stats-row .stat-cell {
+    flex: 1;
+    text-align: center;
+    padding: 18px 10px;
+    border-right: 1px solid rgba(255, 255, 255, 0.06);
+  }
+
+  .stats-row .stat-cell:last-child {
+    border-right: none;
+  }
+
+  .stat-cell .stat {
     font-family: 'Bebas Neue', sans-serif;
-    font-size: 24pt;
+    font-size: 26pt;
     color: #00d4ff;
+    line-height: 1.1;
   }
 
-  .highlight-box .stat-label {
+  .stat-cell .stat-label {
     font-family: 'Share Tech Mono', monospace;
-    font-size: 8pt;
+    font-size: 7pt;
     color: #5a6478;
+    letter-spacing: 1px;
+    margin-top: 4px;
   }
 
   /* Aircraft section */
@@ -351,23 +371,31 @@
     </div>
   </div>
 
-  {% if report.ground_covered_acres %}
+  {% if report.ground_covered_acres or report.flight_duration_total_seconds or report.flight_distance_total_meters %}
   <div class="highlight-box">
-    <div style="display: flex; gap: 40px;">
-      <div>
+    <div class="stats-row">
+      {% if report.ground_covered_acres %}
+      <div class="stat-cell">
         <div class="stat">{{ "%.2f"|format(report.ground_covered_acres) }}</div>
         <div class="stat-label">ACRES COVERED</div>
       </div>
+      {% endif %}
+      {% if report.flight_distance_total_meters %}
+      <div class="stat-cell">
+        <div class="stat">{{ "%.2f"|format(report.flight_distance_total_meters / 1609.344) }}</div>
+        <div class="stat-label">MILES FLOWN</div>
+      </div>
+      {% endif %}
       {% if report.flight_duration_total_seconds %}
-      <div>
+      <div class="stat-cell">
         <div class="stat">{{ "%.0f"|format(report.flight_duration_total_seconds / 60) }}</div>
         <div class="stat-label">MINUTES FLIGHT TIME</div>
       </div>
       {% endif %}
-      {% if report.flight_distance_total_meters %}
-      <div>
-        <div class="stat">{{ "%.2f"|format(report.flight_distance_total_meters / 1609.344) }}</div>
-        <div class="stat-label">MILES COVERED</div>
+      {% if report.flight_count %}
+      <div class="stat-cell">
+        <div class="stat">{{ report.flight_count }}</div>
+        <div class="stat-label">FLIGHTS</div>
       </div>
       {% endif %}
     </div>
