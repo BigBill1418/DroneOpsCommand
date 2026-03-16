@@ -45,6 +45,7 @@ async def _add_missing_columns(conn):
         logger.info("Column migration check complete")
     except Exception as exc:
         logger.error("Column migration failed: %s", exc)
+        raise
 
 
 @asynccontextmanager

@@ -44,11 +44,15 @@ async def create_mission(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
-    mission = Mission(**data.model_dump())
-    db.add(mission)
-    await db.flush()
-    await db.refresh(mission)
-    return mission
+    try:
+        mission = Mission(**data.model_dump())
+        db.add(mission)
+        await db.flush()
+        await db.refresh(mission, ["flights", "images", "customer"])
+        return mission
+    except Exception as exc:
+        logger.exception("Failed to create mission: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @router.get("/{mission_id}", response_model=MissionResponse)
@@ -80,7 +84,7 @@ async def update_mission(
         setattr(mission, key, value)
 
     await db.flush()
-    await db.refresh(mission)
+    await db.refresh(mission, ["flights", "images", "customer"])
     return mission
 
 
