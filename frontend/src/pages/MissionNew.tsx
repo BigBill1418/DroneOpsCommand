@@ -20,6 +20,7 @@ import {
   Progress,
   Image,
   SimpleGrid,
+  ScrollArea,
 } from '@mantine/core';
 import { DateInput } from '@mantine/dates';
 import { useForm } from '@mantine/form';
@@ -124,7 +125,7 @@ export default function MissionNew() {
       const resp = await api.get('/flights');
       setAvailableFlights(Array.isArray(resp.data) ? resp.data : []);
     } catch {
-      notifications.show({ title: 'Note', message: 'Could not connect to OpenDroneLog. You can still create the mission manually.', color: 'yellow' });
+      notifications.show({ title: 'OpenDroneLog', message: 'Could not fetch flights. Check the OpenDroneLog URL in Settings and use Test Connection to verify.', color: 'yellow' });
     } finally {
       setFlightsLoading(false);
     }
@@ -426,105 +427,105 @@ export default function MissionNew() {
         {/* Step 2: Flights & Aircraft */}
         <Stepper.Step label="Flights" description="Flights & aircraft">
           <Card padding="lg" radius="md" mt="md" style={cardStyle}>
-            <Stack gap="md">
-              {/* Aircraft selection for this mission */}
-              <Text c="#e8edf2" fw={600} style={{ fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' }}>
-                ASSIGN AIRCRAFT TO MISSION
-              </Text>
-              <Text c="#5a6478" size="xs">Select the aircraft used during this mission. You can also assign specific aircraft to individual flights below.</Text>
-              <Checkbox.Group value={missionAircraft} onChange={setMissionAircraft}>
-                <Group gap="sm">
-                  {aircraft.map((a) => (
-                    <Checkbox
-                      key={a.id}
-                      value={a.id}
-                      label={a.model_name}
-                      color="cyan"
-                      styles={{ label: { color: '#e8edf2' } }}
-                    />
-                  ))}
-                </Group>
-              </Checkbox.Group>
+            <Stack gap="sm">
+              {/* Aircraft selection — compact inline */}
+              <Group justify="space-between" align="center">
+                <Text c="#e8edf2" fw={600} style={{ fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' }}>
+                  AIRCRAFT USED
+                </Text>
+                <Checkbox.Group value={missionAircraft} onChange={setMissionAircraft}>
+                  <Group gap="xs">
+                    {aircraft.map((a) => (
+                      <Checkbox
+                        key={a.id}
+                        value={a.id}
+                        label={a.model_name}
+                        color="cyan"
+                        size="xs"
+                        styles={{ label: { color: '#e8edf2', fontSize: '12px' } }}
+                      />
+                    ))}
+                  </Group>
+                </Checkbox.Group>
+              </Group>
 
-              {/* Selected aircraft cards */}
-              {missionAircraft.length > 0 && (
-                <Group>
-                  {aircraft.filter((a) => missionAircraft.includes(a.id)).map((a) => (
-                    <AircraftCard key={a.id} aircraft={a} compact />
-                  ))}
-                </Group>
-              )}
+              {/* Flight logs — scrollable table */}
+              <Group justify="space-between" align="center">
+                <Text c="#e8edf2" fw={600} style={{ fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' }}>
+                  FLIGHT LOGS
+                </Text>
+                {selectedFlights.length > 0 && (
+                  <Badge color="cyan" variant="light" size="sm">{selectedFlights.length} selected</Badge>
+                )}
+              </Group>
 
-              {/* Flight logs from OpenDroneLog */}
-              <Text c="#e8edf2" fw={600} mt="md" style={{ fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' }}>
-                FLIGHT LOGS
-              </Text>
               {flightsLoading ? (
-                <Group justify="center"><Loader color="cyan" /></Group>
+                <Group justify="center" py="md"><Loader color="cyan" /></Group>
               ) : availableFlights.length === 0 ? (
-                <Text c="#5a6478">No flights found. Ensure OpenDroneLog is configured in Settings.</Text>
+                <Text c="#5a6478" size="sm">No flights found. Check OpenDroneLog URL in Settings.</Text>
               ) : (
-                <Table styles={{ table: { color: '#e8edf2' }, th: { color: '#00d4ff', fontFamily: "'Share Tech Mono', monospace", fontSize: '11px', borderBottom: '1px solid #1a1f2e' }, td: { borderBottom: '1px solid #1a1f2e' } }}>
-                  <Table.Thead>
-                    <Table.Tr>
-                      <Table.Th>SELECT</Table.Th>
-                      <Table.Th>DATE</Table.Th>
-                      <Table.Th>DRONE</Table.Th>
-                      <Table.Th>DURATION</Table.Th>
-                      <Table.Th>DISTANCE</Table.Th>
-                      <Table.Th>ASSIGNED AIRCRAFT</Table.Th>
-                    </Table.Tr>
-                  </Table.Thead>
-                  <Table.Tbody>
-                    {availableFlights.map((flight: any, i: number) => {
-                      const selectedIdx = selectedFlights.findIndex((f) => (f.id || f.flight_id) === (flight.id || flight.flight_id));
-                      const isSelected = selectedIdx >= 0;
-                      return (
-                        <Table.Tr key={i}>
-                          <Table.Td>
-                            <Checkbox
-                              color="cyan"
-                              checked={isSelected}
-                              onChange={() => !isSelected && handleAddFlight(flight, missionAircraft[0] || undefined)}
-                              disabled={isSelected}
-                            />
-                          </Table.Td>
-                          <Table.Td style={{ fontFamily: "'Share Tech Mono', monospace" }}>{flight.date || flight.start_time || '—'}</Table.Td>
-                          <Table.Td>{flight.drone || flight.aircraft || '—'}</Table.Td>
-                          <Table.Td>{flight.duration || flight.flight_time || '—'}</Table.Td>
-                          <Table.Td>{flight.distance || flight.total_distance || '—'}</Table.Td>
-                          <Table.Td>
-                            {isSelected ? (
-                              <Select
+                <ScrollArea h={280} type="auto" offsetScrollbars styles={{ viewport: { borderRadius: 4 } }}>
+                  <Table verticalSpacing={4} styles={{
+                    table: { color: '#e8edf2', fontSize: '12px' },
+                    th: { color: '#00d4ff', fontFamily: "'Share Tech Mono', monospace", fontSize: '10px', borderBottom: '1px solid #1a1f2e', padding: '6px 8px', position: 'sticky', top: 0, background: '#0e1117', zIndex: 1 },
+                    td: { borderBottom: '1px solid #1a1f2e', padding: '4px 8px' },
+                  }}>
+                    <Table.Thead>
+                      <Table.Tr>
+                        <Table.Th w={40}></Table.Th>
+                        <Table.Th>DATE</Table.Th>
+                        <Table.Th>DRONE</Table.Th>
+                        <Table.Th>DURATION</Table.Th>
+                        <Table.Th>AIRCRAFT</Table.Th>
+                      </Table.Tr>
+                    </Table.Thead>
+                    <Table.Tbody>
+                      {availableFlights.map((flight: any, i: number) => {
+                        const selectedIdx = selectedFlights.findIndex((f) => (f.id || f.flight_id) === (flight.id || flight.flight_id));
+                        const isSelected = selectedIdx >= 0;
+                        return (
+                          <Table.Tr key={i} style={{ background: isSelected ? 'rgba(0,212,255,0.05)' : undefined }}>
+                            <Table.Td>
+                              <Checkbox
+                                color="cyan"
                                 size="xs"
-                                placeholder="Select aircraft"
-                                data={aircraft.map((a) => ({ value: a.id, label: a.model_name }))}
-                                value={selectedFlights[selectedIdx]?._aircraftId || null}
-                                onChange={(val) => handleAssignAircraft(selectedIdx, val)}
-                                clearable
-                                styles={{ input: { background: '#050608', borderColor: '#1a1f2e', color: '#e8edf2', minWidth: 150 } }}
+                                checked={isSelected}
+                                onChange={() => !isSelected && handleAddFlight(flight, missionAircraft[0] || undefined)}
+                                disabled={isSelected}
                               />
-                            ) : (
-                              <Text c="#5a6478" size="xs">—</Text>
-                            )}
-                          </Table.Td>
-                        </Table.Tr>
-                      );
-                    })}
-                  </Table.Tbody>
-                </Table>
+                            </Table.Td>
+                            <Table.Td style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: '11px' }}>{flight.date || flight.start_time || '—'}</Table.Td>
+                            <Table.Td>{flight.drone || flight.aircraft || '—'}</Table.Td>
+                            <Table.Td>{flight.duration || flight.flight_time || '—'}</Table.Td>
+                            <Table.Td>
+                              {isSelected ? (
+                                <Select
+                                  size="xs"
+                                  placeholder="Assign..."
+                                  data={aircraft.map((a) => ({ value: a.id, label: a.model_name }))}
+                                  value={selectedFlights[selectedIdx]?._aircraftId || null}
+                                  onChange={(val) => handleAssignAircraft(selectedIdx, val)}
+                                  clearable
+                                  styles={{ input: { background: '#050608', borderColor: '#1a1f2e', color: '#e8edf2', minWidth: 130, height: 28, minHeight: 28, fontSize: '11px' } }}
+                                />
+                              ) : (
+                                <Text c="#5a6478" size="xs">—</Text>
+                              )}
+                            </Table.Td>
+                          </Table.Tr>
+                        );
+                      })}
+                    </Table.Tbody>
+                  </Table>
+                </ScrollArea>
               )}
 
-              {selectedFlights.length > 0 && (
-                <>
-                  <Text c="#00d4ff" fw={600} style={{ fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' }}>
-                    FLIGHT PATH MAP
-                  </Text>
-                  <FlightMap geojson={mapGeojson} coverage={coverage ?? undefined} height="400px" />
-                </>
+              {/* Map — only if flights selected */}
+              {selectedFlights.length > 0 && mapGeojson && (
+                <FlightMap geojson={mapGeojson} coverage={coverage ?? undefined} height="250px" />
               )}
 
-              <Button color="cyan" onClick={() => setActive(2)} styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}>
+              <Button color="cyan" onClick={() => setActive(2)} fullWidth styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}>
                 CONTINUE
               </Button>
             </Stack>

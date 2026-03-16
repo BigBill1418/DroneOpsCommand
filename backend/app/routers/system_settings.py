@@ -29,6 +29,10 @@ PAYMENT_KEYS = [
 ]
 
 
+class OpenDroneLogSettings(BaseModel):
+    opendronelog_url: str = ""
+
+
 class PaymentSettings(BaseModel):
     paypal_link: str = ""
     venmo_link: str = ""
@@ -123,6 +127,39 @@ async def test_smtp(
         return {"status": "ok", "message": f"Test email sent to {smtp['smtp_from_email']}"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
+
+@router.get("/opendronelog")
+async def get_opendronelog_settings(
+    _user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get OpenDroneLog URL."""
+    result = await db.execute(
+        select(SystemSetting).where(SystemSetting.key == "opendronelog_url")
+    )
+    row = result.scalar_one_or_none()
+    from app.config import settings as app_settings
+    return {"opendronelog_url": (row.value if row else "") or app_settings.opendronelog_url}
+
+
+@router.put("/opendronelog")
+async def update_opendronelog_settings(
+    payload: OpenDroneLogSettings,
+    _user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update OpenDroneLog URL."""
+    result = await db.execute(
+        select(SystemSetting).where(SystemSetting.key == "opendronelog_url")
+    )
+    existing = result.scalar_one_or_none()
+    if existing:
+        existing.value = payload.opendronelog_url
+    else:
+        db.add(SystemSetting(key="opendronelog_url", value=payload.opendronelog_url))
+    await db.commit()
+    return {"status": "ok"}
 
 
 @router.get("/payment")

@@ -19,7 +19,7 @@ import {
 } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
-import { IconCheck, IconX, IconPlus, IconEdit, IconTrash, IconCurrencyDollar, IconMail, IconSend, IconBrandPaypal, IconCash } from '@tabler/icons-react';
+import { IconCheck, IconX, IconPlus, IconEdit, IconTrash, IconCurrencyDollar, IconMail, IconSend, IconBrandPaypal, IconCash, IconDrone, IconPlugConnected } from '@tabler/icons-react';
 import api from '../api/client';
 import { Aircraft, RateTemplate } from '../api/types';
 
@@ -42,6 +42,9 @@ export default function Settings() {
   const [smtpSaving, setSmtpSaving] = useState(false);
   const [smtpTesting, setSmtpTesting] = useState(false);
   const [paymentSaving, setPaymentSaving] = useState(false);
+  const [odlSaving, setOdlSaving] = useState(false);
+  const [odlTesting, setOdlTesting] = useState(false);
+  const [odlStatus, setOdlStatus] = useState<any>(null);
 
   const aircraftForm = useForm({
     initialValues: { model_name: '', manufacturer: 'DJI', specs_json: '{}' },
@@ -67,12 +70,17 @@ export default function Settings() {
     initialValues: { paypal_link: '', venmo_link: '' },
   });
 
+  const odlForm = useForm({
+    initialValues: { opendronelog_url: '' },
+  });
+
   useEffect(() => {
     api.get('/llm/status').then((r) => setLlmStatus(r.data)).catch(() => setLlmStatus({ status: 'offline' })).finally(() => setLlmLoading(false));
     api.get('/aircraft').then((r) => setAircraft(r.data)).catch(() => {});
     api.get('/rate-templates').then((r) => setRateTemplates(r.data)).catch(() => {});
     api.get('/settings/smtp').then((r) => smtpForm.setValues(r.data)).catch(() => {});
     api.get('/settings/payment').then((r) => paymentForm.setValues(r.data)).catch(() => {});
+    api.get('/settings/opendronelog').then((r) => odlForm.setValues(r.data)).catch(() => {});
   }, []);
 
   const handleSaveAircraft = async (values: typeof aircraftForm.values) => {
@@ -180,6 +188,31 @@ export default function Settings() {
     }
   };
 
+  const handleSaveOdl = async (values: typeof odlForm.values) => {
+    setOdlSaving(true);
+    try {
+      await api.put('/settings/opendronelog', values);
+      notifications.show({ title: 'Saved', message: 'OpenDroneLog URL updated', color: 'cyan' });
+    } catch {
+      notifications.show({ title: 'Error', message: 'Failed to save', color: 'red' });
+    } finally {
+      setOdlSaving(false);
+    }
+  };
+
+  const handleTestOdl = async () => {
+    setOdlTesting(true);
+    setOdlStatus(null);
+    try {
+      const r = await api.get('/flights/test');
+      setOdlStatus(r.data);
+    } catch (err: any) {
+      setOdlStatus({ status: 'error', message: err.response?.data?.detail || 'Connection failed' });
+    } finally {
+      setOdlTesting(false);
+    }
+  };
+
   const handleSavePayment = async (values: typeof paymentForm.values) => {
     setPaymentSaving(true);
     try {
@@ -234,6 +267,52 @@ export default function Settings() {
             )}
           </Stack>
         )}
+      </Card>
+
+      {/* OpenDroneLog */}
+      <Card padding="lg" radius="md" style={cardStyle}>
+        <Group justify="space-between" mb="md">
+          <Group gap="sm">
+            <IconDrone size={20} color="#00d4ff" />
+            <Title order={3} c="#e8edf2" style={{ letterSpacing: '1px' }}>OPENDRONELOG</Title>
+          </Group>
+          <Button
+            leftSection={<IconPlugConnected size={14} />}
+            size="xs"
+            variant="light"
+            color="cyan"
+            loading={odlTesting}
+            onClick={handleTestOdl}
+          >
+            Test Connection
+          </Button>
+        </Group>
+        <form onSubmit={odlForm.onSubmit(handleSaveOdl)}>
+          <Stack gap="sm">
+            <TextInput
+              label="OpenDroneLog URL"
+              placeholder="http://host.docker.internal:8080 or http://192.168.x.x:8080"
+              {...odlForm.getInputProps('opendronelog_url')}
+              styles={inputStyles}
+            />
+            <Text c="#5a6478" size="xs" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+              If OpenDroneLog runs on the same machine as Docker, use http://host.docker.internal:PORT
+            </Text>
+            {odlStatus && (
+              <Group gap="xs">
+                <Badge color={odlStatus.status === 'online' ? 'green' : 'red'} size="sm">
+                  {odlStatus.status}
+                </Badge>
+                <Text c={odlStatus.status === 'online' ? '#e8edf2' : '#ff6b6b'} size="sm">
+                  {odlStatus.message}
+                </Text>
+              </Group>
+            )}
+            <Button type="submit" color="cyan" loading={odlSaving} styles={{ root: { fontFamily: "'Bebas Neue', sans-serif" } }}>
+              SAVE
+            </Button>
+          </Stack>
+        </form>
       </Card>
 
       {/* SMTP Settings */}
