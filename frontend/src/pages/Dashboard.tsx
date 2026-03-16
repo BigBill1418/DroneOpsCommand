@@ -96,11 +96,38 @@ interface TfrEntry {
   status?: string;
 }
 
+interface MetarData {
+  station?: string;
+  station_name?: string;
+  report_time?: string;
+  raw_metar?: string;
+  flight_category?: string;
+  flight_category_color?: string;
+  flight_category_desc?: string;
+  wind_dir_deg?: number;
+  wind_speed_kt?: number;
+  wind_gust_kt?: number;
+  visibility?: string;
+  clouds?: Array<{ cover: string; base: number }>;
+  error?: string;
+}
+
+interface NwsAlert {
+  event?: string;
+  severity?: string;
+  headline?: string;
+  description?: string;
+  expires?: string;
+}
+
 interface WeatherResponse {
   location: string;
+  airport: string;
   weather: WeatherData;
+  metar: MetarData;
   tfrs: TfrEntry[];
   notams: NotamEntry[];
+  alerts: NwsAlert[];
   fetched_at: string;
 }
 
@@ -277,23 +304,78 @@ export default function Dashboard() {
             </Group>
           ) : wx && !wx.error ? (
             <Stack gap="md">
-              {/* Wind status bar */}
-              {windSeverity && (
-                <div style={{
-                  padding: '8px 16px',
-                  borderRadius: '6px',
-                  background: `${windSeverity.color}15`,
-                  border: `1px solid ${windSeverity.color}40`,
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                }}>
-                  <IconWind size={16} color={windSeverity.color} />
-                  <Text size="xs" c={windSeverity.color} fw={700}
-                    style={{ fontFamily: "'Share Tech Mono', monospace", letterSpacing: '2px' }}>
-                    WIND STATUS: {windSeverity.label}
-                  </Text>
-                </div>
+              {/* Status banners */}
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                {/* METAR flight category */}
+                {wxData?.metar && !wxData.metar.error && wxData.metar.flight_category && (
+                  <Tooltip label={wxData.metar.flight_category_desc || ''} withArrow>
+                    <div style={{
+                      padding: '8px 16px',
+                      borderRadius: '6px',
+                      background: `${wxData.metar.flight_category_color}15`,
+                      border: `1px solid ${wxData.metar.flight_category_color}40`,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      cursor: 'help',
+                    }}>
+                      <IconPlane size={16} color={wxData.metar.flight_category_color} />
+                      <Text size="xs" c={wxData.metar.flight_category_color} fw={700}
+                        style={{ fontFamily: "'Share Tech Mono', monospace", letterSpacing: '2px' }}>
+                        {wxData.metar.flight_category} — {wxData.airport}
+                      </Text>
+                    </div>
+                  </Tooltip>
+                )}
+
+                {/* Wind status */}
+                {windSeverity && (
+                  <div style={{
+                    padding: '8px 16px',
+                    borderRadius: '6px',
+                    background: `${windSeverity.color}15`,
+                    border: `1px solid ${windSeverity.color}40`,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    flex: 1,
+                  }}>
+                    <IconWind size={16} color={windSeverity.color} />
+                    <Text size="xs" c={windSeverity.color} fw={700}
+                      style={{ fontFamily: "'Share Tech Mono', monospace", letterSpacing: '2px' }}>
+                      WIND: {windSeverity.label}
+                    </Text>
+                  </div>
+                )}
+              </div>
+
+              {/* NWS weather alerts */}
+              {wxData?.alerts && wxData.alerts.length > 0 && (
+                <Stack gap={6}>
+                  {wxData.alerts.map((alert, i) => (
+                    <Tooltip key={i} label={alert.description || ''} multiline w={400} withArrow position="bottom">
+                      <div style={{
+                        padding: '8px 16px',
+                        borderRadius: '6px',
+                        background: 'rgba(255,68,68,0.08)',
+                        border: '1px solid rgba(255,68,68,0.3)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        cursor: 'help',
+                      }}>
+                        <IconAlertTriangle size={16} color="#ff4444" />
+                        <Text size="xs" c="#ff4444" fw={700}
+                          style={{ fontFamily: "'Share Tech Mono', monospace", letterSpacing: '1px' }}>
+                          NWS: {alert.event}
+                        </Text>
+                        <Text size="xs" c="#5a6478" style={{ flex: 1 }} lineClamp={1}>
+                          {alert.headline}
+                        </Text>
+                      </div>
+                    </Tooltip>
+                  ))}
+                </Stack>
               )}
 
               {/* Weather stats grid */}
@@ -363,12 +445,26 @@ export default function Dashboard() {
                 </div>
               </SimpleGrid>
 
+              {/* Raw METAR */}
+              {wxData?.metar?.raw_metar && (
+                <div style={{ padding: '8px 12px', background: '#050608', borderRadius: '4px', border: '1px solid #1a1f2e' }}>
+                  <Text size="xs" c="#5a6478" mb={2}
+                    style={{ fontFamily: "'Share Tech Mono', monospace", letterSpacing: '1px', fontSize: '10px' }}>
+                    METAR {wxData.metar.station}
+                  </Text>
+                  <Text size="xs" c="#e8edf2"
+                    style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: '11px', wordBreak: 'break-all' }}>
+                    {wxData.metar.raw_metar}
+                  </Text>
+                </div>
+              )}
+
               {/* FAA Airspace — TFRs and NOTAMs */}
               <div style={{ marginTop: '4px' }}>
                 <Group gap="xs" mb="sm">
                   <IconAlertTriangle size={16} color="#ff6b1a" />
                   <Text size="sm" c="#e8edf2" fw={600} style={{ letterSpacing: '1px' }}>
-                    FAA AIRSPACE — KEUG
+                    FAA AIRSPACE — {wxData?.airport || 'KEUG'}
                   </Text>
                 </Group>
 

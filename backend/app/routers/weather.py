@@ -1,7 +1,8 @@
 """Weather and FAA airspace data for the operations dashboard."""
 
 import logging
-from datetime import datetime, timedelta
+import re
+from datetime import datetime
 
 import httpx
 from fastapi import APIRouter, Depends
@@ -17,6 +18,7 @@ router = APIRouter(prefix="/api/weather", tags=["weather"])
 DEFAULT_LAT = 44.05
 DEFAULT_LON = -123.09
 DEFAULT_LABEL = "Eugene, OR 97402"
+NEAREST_AIRPORT = "KEUG"  # Mahlon Sweet Field
 
 # Wind direction labels
 WIND_DIRS = [
@@ -42,21 +44,34 @@ WMO_CODES = {
     95: "Thunderstorm", 96: "Thunderstorm w/ slight hail", 99: "Thunderstorm w/ heavy hail",
 }
 
+# Flight category colors for the dashboard
+FLIGHT_CAT_INFO = {
+    "VFR": {"label": "VFR", "color": "#00ff88", "desc": "Visual Flight Rules — clear for ops"},
+    "MVFR": {"label": "MVFR", "color": "#00d4ff", "desc": "Marginal VFR — use caution"},
+    "IFR": {"label": "IFR", "color": "#ff6b1a", "desc": "Instrument Flight Rules — poor visibility"},
+    "LIFR": {"label": "LIFR", "color": "#ff4444", "desc": "Low IFR — do not fly"},
+}
+
 
 @router.get("/current")
 async def get_weather_and_airspace(
     _user: User = Depends(get_current_user),
 ):
-    """Fetch current weather (Open-Meteo) and FAA TFRs for the operations area."""
+    """Fetch current weather (Open-Meteo + METAR) and FAA data for ops area."""
     weather = await _fetch_weather()
+    metar = await _fetch_metar()
     tfrs = await _fetch_tfrs()
     notams = await _fetch_notams()
+    alerts = await _fetch_nws_alerts()
 
     return {
         "location": DEFAULT_LABEL,
+        "airport": NEAREST_AIRPORT,
         "weather": weather,
+        "metar": metar,
         "tfrs": tfrs,
         "notams": notams,
+        "alerts": alerts,
         "fetched_at": datetime.utcnow().isoformat(),
     }
 
@@ -101,38 +116,80 @@ async def _fetch_weather() -> dict:
         return {"error": str(exc)}
 
 
+async def _fetch_metar() -> dict:
+    """Fetch METAR from AviationWeather.gov (free, no key).
+
+    Provides official aviation obs including flight category (VFR/IFR).
+    """
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                "https://aviationweather.gov/api/data/metar",
+                params={"ids": NEAREST_AIRPORT, "format": "json"},
+            )
+            if resp.status_code != 200:
+                return {"error": f"HTTP {resp.status_code}"}
+
+            data = resp.json()
+            if not data or not isinstance(data, list) or len(data) == 0:
+                return {"error": "No METAR data returned"}
+
+            obs = data[0]
+            flt_cat = obs.get("fltCat", "")
+            cat_info = FLIGHT_CAT_INFO.get(flt_cat, {})
+
+            # Parse wind gusts from raw METAR if present (e.g. 16010G20KT)
+            raw = obs.get("rawOb", "")
+            gust_kt = None
+            gust_match = re.search(r'\d{3}\d{2,3}G(\d{2,3})KT', raw)
+            if gust_match:
+                gust_kt = int(gust_match.group(1))
+
+            return {
+                "station": obs.get("icaoId", NEAREST_AIRPORT),
+                "station_name": obs.get("name", ""),
+                "report_time": obs.get("reportTime", ""),
+                "raw_metar": raw,
+                "flight_category": flt_cat,
+                "flight_category_color": cat_info.get("color", "#5a6478"),
+                "flight_category_desc": cat_info.get("desc", ""),
+                "temp_c": obs.get("temp"),
+                "dewpoint_c": obs.get("dewp"),
+                "wind_dir_deg": obs.get("wdir"),
+                "wind_speed_kt": obs.get("wspd"),
+                "wind_gust_kt": gust_kt,
+                "visibility": obs.get("visib"),
+                "altimeter_hpa": obs.get("altim"),
+                "clouds": obs.get("clouds", []),
+            }
+    except Exception as exc:
+        logger.warning("Failed to fetch METAR: %s", exc)
+        return {"error": str(exc)}
+
+
 async def _fetch_tfrs() -> list[dict]:
-    """Fetch active FAA TFRs from the FAA's public GeoJSON feed."""
-    url = "https://tfr.faa.gov/tfr2/list.html"
-    # The FAA publishes TFR data as XML/HTML. We'll use their simpler endpoint.
-    # For reliability, we scrape the ADDS TFR feed which returns structured data.
+    """Fetch active FAA TFRs from the FAA's TFR feed."""
     try:
         async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
-            # Use the FAA's TFR API endpoint
             resp = await client.get(
                 "https://tfr.faa.gov/tfr_map_498/tfrQueryList.jsp",
                 headers={"Accept": "text/html"},
             )
             if resp.status_code != 200:
-                return []
+                return [{"status": "TFR feed returned non-200 — check tfr.faa.gov"}]
 
-            # Parse simple TFR listing — extract NOTAM IDs and descriptions
             text = resp.text
             tfrs = []
-            # Look for TFR entries — they contain FDC NOTAM identifiers
-            import re
-            # Match TFR table rows containing NOTAM info
             rows = re.findall(
                 r'<tr[^>]*>.*?notamId=([^"&]+).*?</tr>',
-                text, re.DOTALL
+                text, re.DOTALL,
             )
-            for notam_id in rows[:10]:  # Limit to 10
+            for notam_id in rows[:10]:
                 tfrs.append({
                     "notam_id": notam_id.strip(),
                     "type": "TFR",
                 })
 
-            # If parsing fails, return a status message
             if not tfrs:
                 return [{"status": "No active TFRs parsed — check tfr.faa.gov for current data"}]
 
@@ -143,17 +200,12 @@ async def _fetch_tfrs() -> list[dict]:
 
 
 async def _fetch_notams() -> list[dict]:
-    """Fetch NOTAMs for nearby airports from the FAA NOTAM API.
-
-    The closest airports to 97402 (Eugene, OR) are:
-    - KEUG (Mahlon Sweet Field / Eugene Airport)
-    """
+    """Fetch NOTAMs for KEUG from aviationapi.com (free, no key)."""
     try:
         async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
-            # Use the FAA's public NOTAM search
             resp = await client.get(
                 "https://api.aviationapi.com/v1/notams",
-                params={"apt": "KEUG"},
+                params={"apt": NEAREST_AIRPORT},
             )
             if resp.status_code != 200:
                 return [{"status": "NOTAM feed unavailable"}]
@@ -161,9 +213,8 @@ async def _fetch_notams() -> list[dict]:
             data = resp.json()
             notams = []
 
-            # aviationapi returns { "KEUG": [...] }
-            keug_notams = data.get("KEUG", data if isinstance(data, list) else [])
-            for notam in keug_notams[:8]:  # Limit to 8 most recent
+            keug_notams = data.get(NEAREST_AIRPORT, data if isinstance(data, list) else [])
+            for notam in keug_notams[:8]:
                 notams.append({
                     "id": notam.get("notam_id", notam.get("id", "")),
                     "type": notam.get("classification", notam.get("type", "NOTAM")),
@@ -179,3 +230,33 @@ async def _fetch_notams() -> list[dict]:
     except Exception as exc:
         logger.warning("Failed to fetch NOTAMs: %s", exc)
         return [{"status": f"NOTAM feed unavailable: {exc}"}]
+
+
+async def _fetch_nws_alerts() -> list[dict]:
+    """Fetch active NWS weather alerts for the area (free, no key)."""
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                "https://api.weather.gov/alerts/active",
+                params={"point": f"{DEFAULT_LAT},{DEFAULT_LON}"},
+                headers={"User-Agent": "(DroneOpsReport, ops@barnardhq.com)"},
+            )
+            if resp.status_code != 200:
+                return []
+
+            data = resp.json()
+            alerts = []
+            for feature in data.get("features", [])[:5]:
+                props = feature.get("properties", {})
+                alerts.append({
+                    "event": props.get("event", ""),
+                    "severity": props.get("severity", ""),
+                    "headline": props.get("headline", ""),
+                    "description": (props.get("description", "") or "")[:300],
+                    "expires": props.get("expires", ""),
+                })
+
+            return alerts
+    except Exception as exc:
+        logger.warning("Failed to fetch NWS alerts: %s", exc)
+        return []
