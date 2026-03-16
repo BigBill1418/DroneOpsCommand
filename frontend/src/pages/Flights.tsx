@@ -124,10 +124,10 @@ function StatCard({ icon: Icon, label, value, sub, color = '#00d4ff' }: {
       <Group gap="sm" wrap="nowrap">
         <Icon size={22} color={color} style={{ flexShrink: 0 }} />
         <div style={{ minWidth: 0 }}>
-          <Text size="10px" c="#5a6478" style={{ ...monoFont, letterSpacing: '1px' }} tt="uppercase">
+          <Text size="11px" c="#5a6478" style={{ ...monoFont, letterSpacing: '1px' }} tt="uppercase">
             {label}
           </Text>
-          <Text fw={700} c="#e8edf2" style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: '22px', lineHeight: 1.1 }}>
+          <Text fw={700} c="#e8edf2" style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: '26px', lineHeight: 1.1 }}>
             {value}
           </Text>
           {sub && (
@@ -163,17 +163,17 @@ function DroneBreakdown({ flights }: { flights: any[] }) {
 
   return (
     <Card padding="md" radius="md" style={cardStyle}>
-      <Text size="10px" c="#5a6478" mb="sm" style={{ ...monoFont, letterSpacing: '1px' }} tt="uppercase">
+      <Text size="11px" c="#5a6478" mb="sm" style={{ ...monoFont, letterSpacing: '1px' }} tt="uppercase">
         FLIGHT TIME BY DRONE
       </Text>
-      <Stack gap={6}>
+      <Stack gap={8}>
         {drones.map((d) => {
           const pct = total > 0 ? (d.duration / total) * 100 : 0;
           return (
             <div key={d.name}>
               <Group justify="space-between" mb={2}>
                 <Text size="xs" c="#e8edf2" fw={500}>{d.name}</Text>
-                <Group gap={6}>
+                <Group gap={8}>
                   <Text size="xs" c="#5a6478" style={monoFont}>{d.count} flights</Text>
                   <Text size="xs" c={d.color} style={monoFont}>{formatDurationLong(d.duration)}</Text>
                 </Group>
@@ -205,10 +205,10 @@ function TopFlights({ flights, label, accessor, formatter }: {
 
   return (
     <Card padding="md" radius="md" style={cardStyle}>
-      <Text size="10px" c="#5a6478" mb="sm" style={{ ...monoFont, letterSpacing: '1px' }} tt="uppercase">
+      <Text size="11px" c="#5a6478" mb="sm" style={{ ...monoFont, letterSpacing: '1px' }} tt="uppercase">
         {label}
       </Text>
-      <Stack gap={4}>
+      <Stack gap={6}>
         {top.map((f, i) => (
           <Group key={f.id ?? i} justify="space-between">
             <Group gap="xs">
@@ -413,13 +413,13 @@ export default function Flights() {
                   th: {
                     color: '#00d4ff',
                     fontFamily: "'Share Tech Mono', monospace",
-                    fontSize: '10px',
+                    fontSize: '12px',
                     letterSpacing: '1px',
                     borderBottom: '1px solid #1a1f2e',
-                    padding: '8px 10px',
+                    padding: '10px 12px',
                     whiteSpace: 'nowrap',
                   },
-                  td: { borderBottom: '1px solid #1a1f2e', padding: '6px 10px' },
+                  td: { borderBottom: '1px solid #1a1f2e', padding: '8px 12px' },
                 }}
               >
                 <Table.Thead>

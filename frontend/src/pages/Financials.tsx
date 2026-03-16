@@ -89,10 +89,10 @@ function StatCard({ icon: Icon, label, value, sub, color = '#00d4ff' }: {
       <Group gap="sm" wrap="nowrap">
         <Icon size={22} color={color} style={{ flexShrink: 0 }} />
         <div style={{ minWidth: 0 }}>
-          <Text size="10px" c="#5a6478" style={{ ...monoFont, letterSpacing: '1px' }} tt="uppercase">
+          <Text size="11px" c="#5a6478" style={{ ...monoFont, letterSpacing: '1px' }} tt="uppercase">
             {label}
           </Text>
-          <Text fw={700} c="#e8edf2" style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: '22px', lineHeight: 1.1 }}>
+          <Text fw={700} c="#e8edf2" style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: '26px', lineHeight: 1.1 }}>
             {value}
           </Text>
           {sub && (
@@ -116,10 +116,10 @@ function HorizontalBars({ title, items, colorKey }: {
 
   return (
     <Card padding="md" radius="md" style={cardStyle}>
-      <Text size="10px" c="#5a6478" mb="sm" style={{ ...monoFont, letterSpacing: '1px' }} tt="uppercase">
+      <Text size="11px" c="#5a6478" mb="sm" style={{ ...monoFont, letterSpacing: '1px' }} tt="uppercase">
         {title}
       </Text>
-      <Stack gap={6}>
+      <Stack gap={8}>
         {items.map((item, i) => {
           const pct = maxVal > 0 ? (item.value / maxVal) * 100 : 0;
           const color = DRONE_COLORS[i % DRONE_COLORS.length];
@@ -127,7 +127,7 @@ function HorizontalBars({ title, items, colorKey }: {
             <div key={item.label}>
               <Group justify="space-between" mb={2}>
                 <Text size="xs" c="#e8edf2" fw={500}>{item.label}</Text>
-                <Group gap={6}>
+                <Group gap={8}>
                   {item.sub && <Text size="xs" c="#5a6478" style={monoFont}>{item.sub}</Text>}
                   <Text size="xs" c={color} style={monoFont} fw={600}>{formatCurrency(item.value)}</Text>
                 </Group>
@@ -151,10 +151,10 @@ function MonthlyChart({ data }: { data: { month: string; revenue: number }[] }) 
 
   return (
     <Card padding="md" radius="md" style={cardStyle}>
-      <Text size="10px" c="#5a6478" mb="sm" style={{ ...monoFont, letterSpacing: '1px' }} tt="uppercase">
+      <Text size="11px" c="#5a6478" mb="sm" style={{ ...monoFont, letterSpacing: '1px' }} tt="uppercase">
         MONTHLY REVENUE
       </Text>
-      <Group gap={4} align="end" style={{ height: 120 }}>
+      <Group gap={6} align="end" style={{ height: 120 }}>
         {data.map((d, i) => {
           const pct = maxVal > 0 ? (d.revenue / maxVal) * 100 : 0;
           return (
@@ -170,7 +170,7 @@ function MonthlyChart({ data }: { data: { month: string; revenue: number }[] }) 
                 minWidth: 0,
               }}
             >
-              <Text size="9px" c="#00d4ff" style={monoFont} mb={2}>{formatCurrency(d.revenue)}</Text>
+              <Text size="xs" c="#00d4ff" style={monoFont} mb={2}>{formatCurrency(d.revenue)}</Text>
               <div
                 style={{
                   width: '100%',
@@ -181,7 +181,7 @@ function MonthlyChart({ data }: { data: { month: string; revenue: number }[] }) 
                   transition: 'height 0.3s',
                 }}
               />
-              <Text size="8px" c="#5a6478" style={monoFont} mt={4} ta="center" lineClamp={1}>
+              <Text size="11px" c="#5a6478" style={monoFont} mt={4} ta="center" lineClamp={1}>
                 {formatMonth(d.month)}
               </Text>
             </div>
@@ -199,10 +199,10 @@ function TopCustomers({ customers }: { customers: { name: string; company: strin
 
   return (
     <Card padding="md" radius="md" style={cardStyle}>
-      <Text size="10px" c="#5a6478" mb="sm" style={{ ...monoFont, letterSpacing: '1px' }} tt="uppercase">
+      <Text size="11px" c="#5a6478" mb="sm" style={{ ...monoFont, letterSpacing: '1px' }} tt="uppercase">
         TOP CUSTOMERS
       </Text>
-      <Stack gap={4}>
+      <Stack gap={6}>
         {customers.slice(0, 5).map((c, i) => (
           <Group key={c.name} justify="space-between">
             <Group gap="xs">
@@ -211,12 +211,12 @@ function TopCustomers({ customers }: { customers: { name: string; company: strin
               </Badge>
               <div>
                 <Text size="xs" c="#e8edf2" fw={500} lineClamp={1}>{c.name}</Text>
-                {c.company && <Text size="9px" c="#5a6478" style={monoFont}>{c.company}</Text>}
+                {c.company && <Text size="xs" c="#5a6478" style={monoFont}>{c.company}</Text>}
               </div>
             </Group>
             <div style={{ textAlign: 'right' }}>
               <Text size="xs" c="#00d4ff" style={monoFont} fw={600}>{formatCurrency(c.total)}</Text>
-              <Text size="9px" c="#5a6478" style={monoFont}>{c.missions} mission{c.missions !== 1 ? 's' : ''}</Text>
+              <Text size="xs" c="#5a6478" style={monoFont}>{c.missions} mission{c.missions !== 1 ? 's' : ''}</Text>
             </div>
           </Group>
         ))}
@@ -378,13 +378,13 @@ export default function Financials() {
                   th: {
                     color: '#00d4ff',
                     fontFamily: "'Share Tech Mono', monospace",
-                    fontSize: '10px',
+                    fontSize: '12px',
                     letterSpacing: '1px',
                     borderBottom: '1px solid #1a1f2e',
-                    padding: '8px 10px',
+                    padding: '10px 12px',
                     whiteSpace: 'nowrap',
                   },
-                  td: { borderBottom: '1px solid #1a1f2e', padding: '6px 10px' },
+                  td: { borderBottom: '1px solid #1a1f2e', padding: '8px 12px' },
                 }}
               >
                 <Table.Thead>
@@ -411,7 +411,7 @@ export default function Financials() {
                         <Table.Td>
                           <Text size="sm" fw={500} lineClamp={1}>{m.title}</Text>
                           {m.invoice_number && (
-                            <Text size="9px" c="#5a6478" style={monoFont}>#{m.invoice_number}</Text>
+                            <Text size="xs" c="#5a6478" style={monoFont}>#{m.invoice_number}</Text>
                           )}
                         </Table.Td>
                         <Table.Td>

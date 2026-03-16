@@ -60,7 +60,7 @@ export default function AircraftCard({ aircraft, compact = false }: AircraftCard
                 <Table.Tr key={key}>
                   <Table.Td
                     c="#5a6478"
-                    style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: '10px', textTransform: 'uppercase' }}
+                    style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: '12px', textTransform: 'uppercase' }}
                   >
                     {key.replace(/_/g, ' ')}
                   </Table.Td>

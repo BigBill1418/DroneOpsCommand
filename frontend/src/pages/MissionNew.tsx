@@ -46,7 +46,7 @@ import RichTextEditor from '../components/RichTextEditor/RichTextEditor';
 
 const inputStyles = {
   input: { background: '#050608', borderColor: '#1a1f2e', color: '#e8edf2' },
-  label: { color: '#5a6478', fontFamily: "'Share Tech Mono', monospace", fontSize: '11px', letterSpacing: '1px' },
+  label: { color: '#5a6478', fontFamily: "'Share Tech Mono', monospace", fontSize: '13px', letterSpacing: '1px' },
 };
 
 /** Format flight date from various possible field names */
@@ -768,10 +768,10 @@ export default function MissionNew() {
                 <Text c="#5a6478" size="sm">No flights found. Check OpenDroneLog URL in Settings.</Text>
               ) : (
                 <ScrollArea h={280} type="auto" offsetScrollbars styles={{ viewport: { borderRadius: 4 } }}>
-                  <Table verticalSpacing={4} styles={{
+                  <Table verticalSpacing={6} styles={{
                     table: { color: '#e8edf2', fontSize: '12px' },
-                    th: { color: '#00d4ff', fontFamily: "'Share Tech Mono', monospace", fontSize: '10px', borderBottom: '1px solid #1a1f2e', padding: '6px 8px', position: 'sticky', top: 0, background: '#0e1117', zIndex: 1 },
-                    td: { borderBottom: '1px solid #1a1f2e', padding: '4px 8px' },
+                    th: { color: '#00d4ff', fontFamily: "'Share Tech Mono', monospace", fontSize: '12px', borderBottom: '1px solid #1a1f2e', padding: '6px 8px', position: 'sticky', top: 0, background: '#0e1117', zIndex: 1 },
+                    td: { borderBottom: '1px solid #1a1f2e', padding: '6px 10px' },
                   }}>
                     <Table.Thead>
                       <Table.Tr>
@@ -798,10 +798,10 @@ export default function MissionNew() {
                                 onChange={() => handleRemoveFlight(i)}
                               />
                             </Table.Td>
-                            <Table.Td style={{ fontSize: '11px' }}>{flightName(flight)}</Table.Td>
-                            <Table.Td style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: '11px' }}>{flightDate(flight)}</Table.Td>
-                            <Table.Td style={{ fontSize: '11px' }}>{flightDrone(flight)}</Table.Td>
-                            <Table.Td style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: '11px' }}>{flightDuration(flight)}</Table.Td>
+                            <Table.Td style={{ fontSize: '13px' }}>{flightName(flight)}</Table.Td>
+                            <Table.Td style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: '13px' }}>{flightDate(flight)}</Table.Td>
+                            <Table.Td style={{ fontSize: '13px' }}>{flightDrone(flight)}</Table.Td>
+                            <Table.Td style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: '13px' }}>{flightDuration(flight)}</Table.Td>
                             <Table.Td>
                               <Select
                                 size="xs"
@@ -810,7 +810,7 @@ export default function MissionNew() {
                                 value={flight._aircraftId || null}
                                 onChange={(val) => handleAssignAircraft(i, val)}
                                 clearable
-                                styles={{ input: { background: '#050608', borderColor: '#1a1f2e', color: '#e8edf2', minWidth: 130, height: 28, minHeight: 28, fontSize: '11px' } }}
+                                styles={{ input: { background: '#050608', borderColor: '#1a1f2e', color: '#e8edf2', minWidth: 130, height: 28, minHeight: 28, fontSize: '13px' } }}
                               />
                             </Table.Td>
                           </Table.Tr>
@@ -829,10 +829,10 @@ export default function MissionNew() {
                                 onChange={() => isSelected ? handleRemoveFlight(selectedIdx) : handleAddFlight(flight, missionAircraft[0] || undefined)}
                               />
                             </Table.Td>
-                            <Table.Td style={{ fontSize: '11px' }}>{flightName(flight)}</Table.Td>
-                            <Table.Td style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: '11px' }}>{flightDate(flight)}</Table.Td>
-                            <Table.Td style={{ fontSize: '11px' }}>{flightDrone(flight)}</Table.Td>
-                            <Table.Td style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: '11px' }}>{flightDuration(flight)}</Table.Td>
+                            <Table.Td style={{ fontSize: '13px' }}>{flightName(flight)}</Table.Td>
+                            <Table.Td style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: '13px' }}>{flightDate(flight)}</Table.Td>
+                            <Table.Td style={{ fontSize: '13px' }}>{flightDrone(flight)}</Table.Td>
+                            <Table.Td style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: '13px' }}>{flightDuration(flight)}</Table.Td>
                             <Table.Td>
                               {isSelected ? (
                                 <Select
@@ -842,7 +842,7 @@ export default function MissionNew() {
                                   value={selectedFlights[selectedIdx]?._aircraftId || null}
                                   onChange={(val) => handleAssignAircraft(selectedIdx, val)}
                                   clearable
-                                  styles={{ input: { background: '#050608', borderColor: '#1a1f2e', color: '#e8edf2', minWidth: 130, height: 28, minHeight: 28, fontSize: '11px' } }}
+                                  styles={{ input: { background: '#050608', borderColor: '#1a1f2e', color: '#e8edf2', minWidth: 130, height: 28, minHeight: 28, fontSize: '13px' } }}
                                 />
                               ) : (
                                 <Text c="#5a6478" size="xs">—</Text>

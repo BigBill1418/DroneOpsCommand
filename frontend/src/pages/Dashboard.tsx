@@ -115,7 +115,7 @@ export default function Dashboard() {
               th: {
                 color: '#00d4ff',
                 fontFamily: "'Share Tech Mono', monospace",
-                fontSize: '11px',
+                fontSize: '13px',
                 letterSpacing: '1px',
                 borderBottom: '1px solid #1a1f2e',
               },

@@ -24,7 +24,7 @@ import { Customer } from '../api/types';
 
 const inputStyles = {
   input: { background: '#050608', borderColor: '#1a1f2e', color: '#e8edf2' },
-  label: { color: '#5a6478', fontFamily: "'Share Tech Mono', monospace", fontSize: '11px', letterSpacing: '1px' },
+  label: { color: '#5a6478', fontFamily: "'Share Tech Mono', monospace", fontSize: '13px', letterSpacing: '1px' },
 };
 
 export default function Customers() {
@@ -147,7 +147,7 @@ export default function Customers() {
         ) : (
           <Table highlightOnHover styles={{
             table: { color: '#e8edf2' },
-            th: { color: '#00d4ff', fontFamily: "'Share Tech Mono', monospace", fontSize: '11px', letterSpacing: '1px', borderBottom: '1px solid #1a1f2e' },
+            th: { color: '#00d4ff', fontFamily: "'Share Tech Mono', monospace", fontSize: '13px', letterSpacing: '1px', borderBottom: '1px solid #1a1f2e' },
             td: { borderBottom: '1px solid #1a1f2e' },
           }}>
             <Table.Thead>

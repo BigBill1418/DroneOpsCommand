@@ -46,6 +46,20 @@ export const theme = createTheme({
     ],
   },
   fontFamily: "'Rajdhani', sans-serif",
+  fontSizes: {
+    xs: '0.85rem',
+    sm: '0.95rem',
+    md: '1.05rem',
+    lg: '1.2rem',
+    xl: '1.4rem',
+  },
+  spacing: {
+    xs: '0.65rem',
+    sm: '0.85rem',
+    md: '1.1rem',
+    lg: '1.5rem',
+    xl: '2rem',
+  },
   headings: {
     fontFamily: "'Bebas Neue', sans-serif",
     sizes: {

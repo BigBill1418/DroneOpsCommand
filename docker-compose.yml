@@ -56,9 +56,7 @@ services:
         until curl -s http://ollama:11434/api/tags > /dev/null 2>&1; do sleep 2; done &&
         echo 'Pulling Mistral model...' &&
         curl -s http://ollama:11434/api/pull -d '{\"name\": \"mistral:7b-instruct-v0.3-q4_K_M\"}' &&
-        echo 'Warming up model (loading into RAM)...' &&
-        curl -s http://ollama:11434/api/generate -d '{\"model\": \"mistral:7b-instruct-v0.3-q4_K_M\", \"prompt\": \"hi\", \"options\": {\"num_predict\": 1}}' &&
-        echo 'Model pulled and loaded into RAM!'
+        echo 'Model pulled. Will load into RAM on first use.'
       "
 
   backend:

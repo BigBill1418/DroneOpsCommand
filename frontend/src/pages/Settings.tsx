@@ -25,7 +25,7 @@ import { Aircraft, RateTemplate } from '../api/types';
 
 const inputStyles = {
   input: { background: '#050608', borderColor: '#1a1f2e', color: '#e8edf2' },
-  label: { color: '#5a6478', fontFamily: "'Share Tech Mono', monospace", fontSize: '11px', letterSpacing: '1px' },
+  label: { color: '#5a6478', fontFamily: "'Share Tech Mono', monospace", fontSize: '13px', letterSpacing: '1px' },
 };
 
 const cardStyle = { background: '#0e1117', border: '1px solid #1a1f2e' };
@@ -352,7 +352,7 @@ export default function Settings() {
               checked={smtpForm.values.smtp_use_tls === 'true'}
               onChange={(e) => smtpForm.setFieldValue('smtp_use_tls', e.currentTarget.checked ? 'true' : 'false')}
               color="cyan"
-              styles={{ label: { color: '#5a6478', fontFamily: "'Share Tech Mono', monospace", fontSize: '11px', letterSpacing: '1px' } }}
+              styles={{ label: { color: '#5a6478', fontFamily: "'Share Tech Mono', monospace", fontSize: '13px', letterSpacing: '1px' } }}
             />
             <Button type="submit" color="cyan" loading={smtpSaving} styles={{ root: { fontFamily: "'Bebas Neue', sans-serif" } }}>
               SAVE SMTP SETTINGS
@@ -408,7 +408,7 @@ export default function Settings() {
 
         <Table styles={{
           table: { color: '#e8edf2' },
-          th: { color: '#00d4ff', fontFamily: "'Share Tech Mono', monospace", fontSize: '11px', borderBottom: '1px solid #1a1f2e' },
+          th: { color: '#00d4ff', fontFamily: "'Share Tech Mono', monospace", fontSize: '13px', borderBottom: '1px solid #1a1f2e' },
           td: { borderBottom: '1px solid #1a1f2e' },
         }}>
           <Table.Thead>
@@ -460,7 +460,7 @@ export default function Settings() {
 
         <Table styles={{
           table: { color: '#e8edf2' },
-          th: { color: '#00d4ff', fontFamily: "'Share Tech Mono', monospace", fontSize: '11px', borderBottom: '1px solid #1a1f2e' },
+          th: { color: '#00d4ff', fontFamily: "'Share Tech Mono', monospace", fontSize: '13px', borderBottom: '1px solid #1a1f2e' },
           td: { borderBottom: '1px solid #1a1f2e' },
         }}>
           <Table.Thead>
