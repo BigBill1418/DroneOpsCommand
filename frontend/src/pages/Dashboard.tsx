@@ -10,7 +10,7 @@ import {
   Button,
   Table,
 } from '@mantine/core';
-import { IconDrone, IconUsers, IconFileText, IconPlus } from '@tabler/icons-react';
+import { IconDrone, IconUsers, IconFileText, IconPlane, IconPlus } from '@tabler/icons-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
 import { Mission, Customer } from '../api/types';
@@ -55,11 +55,16 @@ const statusColors: Record<string, string> = {
 export default function Dashboard() {
   const [missions, setMissions] = useState<Mission[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [flightCount, setFlightCount] = useState<number | null>(null);
   const navigate = useNavigate();
 
   useEffect(() => {
     api.get('/missions').then((r) => setMissions(r.data)).catch(() => {});
     api.get('/customers').then((r) => setCustomers(r.data)).catch(() => {});
+    api.get('/flights').then((r) => {
+      const data = Array.isArray(r.data) ? r.data : r.data?.flights || r.data?.data || r.data?.results || r.data?.items || [];
+      setFlightCount(data.length);
+    }).catch(() => setFlightCount(0));
   }, []);
 
   const recentMissions = missions.slice(0, 5);
@@ -82,7 +87,8 @@ export default function Dashboard() {
         </Button>
       </Group>
 
-      <SimpleGrid cols={{ base: 1, sm: 3 }}>
+      <SimpleGrid cols={{ base: 1, sm: 4 }}>
+        <StatCard icon={IconPlane} label="FLIGHTS (ODL)" value={flightCount !== null ? String(flightCount) : '—'} color="#00d4ff" />
         <StatCard icon={IconDrone} label="TOTAL MISSIONS" value={String(missions.length)} color="#00d4ff" />
         <StatCard icon={IconFileText} label="DRAFTS PENDING" value={String(draftCount)} color="#ff6b1a" />
         <StatCard icon={IconUsers} label="CUSTOMERS" value={String(customers.length)} color="#00d4ff" />

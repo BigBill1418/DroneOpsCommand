@@ -14,6 +14,7 @@ import {
   IconUsers,
   IconSettings,
   IconLogout,
+  IconPlane,
   IconPlus,
 } from '@tabler/icons-react';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
@@ -29,6 +30,7 @@ export default function AppLayout({ onLogout }: AppLayoutProps) {
 
   const navItems = [
     { icon: IconDashboard, label: 'Dashboard', path: '/' },
+    { icon: IconPlane, label: 'Flights', path: '/flights' },
     { icon: IconDrone, label: 'Missions', path: '/missions' },
     { icon: IconUsers, label: 'Customers', path: '/customers' },
     { icon: IconSettings, label: 'Settings', path: '/settings' },

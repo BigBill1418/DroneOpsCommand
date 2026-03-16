@@ -8,6 +8,7 @@ import Missions from './pages/Missions';
 import MissionNew from './pages/MissionNew';
 import MissionDetail from './pages/MissionDetail';
 import Customers from './pages/Customers';
+import Flights from './pages/Flights';
 import Settings from './pages/Settings';
 
 export default function App() {
@@ -29,6 +30,7 @@ export default function App() {
     <Routes>
       <Route element={<AppLayout onLogout={logout} />}>
         <Route path="/" element={<Dashboard />} />
+        <Route path="/flights" element={<Flights />} />
         <Route path="/missions" element={<Missions />} />
         <Route path="/missions/new" element={<MissionNew />} />
         <Route path="/missions/:id/edit" element={<MissionNew />} />
