@@ -156,56 +156,48 @@ def generate_map_geojson(flights: list[dict]) -> dict:
 
 
 def render_static_map(flights: list[dict], width: int = 800, height: int = 600) -> str:
-    """Render a static map image with flight paths using folium and save as PNG.
+    """Render a static map PNG with flight paths scaled to show only relevant area.
 
-    Returns the file path of the saved image.
+    Uses the staticmap library to generate a real PNG image that can be embedded
+    directly in the PDF report. The map is auto-zoomed to fit all flight paths
+    with padding so only the relevant area is shown.
+
+    Returns the file path of the saved PNG image.
     """
-    import folium
+    from staticmap import StaticMap, Line, CircleMarker
 
     tracks = extract_gps_tracks(flights)
     if not tracks:
         return ""
 
-    # Calculate center and bounds
-    all_points = [p for track in tracks for p in track]
-    center_lat = sum(p[0] for p in all_points) / len(all_points)
-    center_lng = sum(p[1] for p in all_points) / len(all_points)
-
-    m = folium.Map(location=[center_lat, center_lng], zoom_start=14, tiles="OpenStreetMap")
-
     colors = ["#00d4ff", "#ff6b1a", "#00ff88", "#ff4444", "#ffaa00", "#aa44ff"]
+
+    m = StaticMap(width, height, url_template="https://tile.openstreetmap.org/{z}/{x}/{y}.png")
 
     for i, track in enumerate(tracks):
         color = colors[i % len(colors)]
-        folium.PolyLine(
-            locations=track,
-            color=color,
-            weight=3,
-            opacity=0.8,
-        ).add_to(m)
 
-        # Start marker
+        # Draw the flight path line — staticmap uses (lng, lat) order
+        if len(track) >= 2:
+            line_coords = [(lng, lat) for lat, lng in track]
+            m.add_line(Line(line_coords, color, 3))
+
+        # Start marker (green tint)
         if track:
-            folium.CircleMarker(
-                location=track[0],
-                radius=6,
-                color=color,
-                fill=True,
-                popup=f"Flight {i+1} Start",
-            ).add_to(m)
+            start_lat, start_lng = track[0]
+            m.add_marker(CircleMarker((start_lng, start_lat), color, 8))
 
-    # Fit bounds
-    if all_points:
-        min_lat = min(p[0] for p in all_points)
-        max_lat = max(p[0] for p in all_points)
-        min_lng = min(p[1] for p in all_points)
-        max_lng = max(p[1] for p in all_points)
-        m.fit_bounds([[min_lat, min_lng], [max_lat, max_lng]], padding=[20, 20])
+        # End marker (smaller)
+        if len(track) > 1:
+            end_lat, end_lng = track[-1]
+            m.add_marker(CircleMarker((end_lng, end_lat), color, 5))
 
-    # Save as HTML (we'll convert to image in PDF generation)
+    # Render the image — staticmap auto-calculates zoom and center to fit all elements
+    image = m.render()
+
     os.makedirs(settings.reports_dir, exist_ok=True)
-    map_filename = f"map_{uuid.uuid4().hex[:8]}.html"
+    map_filename = f"map_{uuid.uuid4().hex[:8]}.png"
     map_path = os.path.join(settings.reports_dir, map_filename)
-    m.save(map_path)
+    image.save(map_path)
 
     return map_path

@@ -172,25 +172,6 @@ export default function Dashboard() {
 
   return (
     <div style={{ position: 'relative', minHeight: '100%' }}>
-      {/* Background watermark */}
-      <div
-        style={{
-          position: 'fixed',
-          top: '50%',
-          left: '55%',
-          transform: 'translate(-50%, -50%)',
-          width: '700px',
-          height: '440px',
-          backgroundImage: 'url(/dashboard-bg.svg)',
-          backgroundSize: 'contain',
-          backgroundRepeat: 'no-repeat',
-          backgroundPosition: 'center',
-          opacity: 0.12,
-          pointerEvents: 'none',
-          zIndex: 0,
-        }}
-      />
-
       <Stack gap="lg" style={{ position: 'relative', zIndex: 1 }}>
         <Group justify="space-between">
           <Title order={2} c="#e8edf2" style={{ letterSpacing: '2px' }}>
@@ -536,6 +517,89 @@ export default function Dashboard() {
             </Text>
           )}
         </Card>
+
+        {/* Drone Hero Image */}
+        <div
+          style={{
+            position: 'relative',
+            overflow: 'hidden',
+            borderRadius: '12px',
+            border: '1px solid #1a1f2e',
+            background: 'linear-gradient(135deg, #050608 0%, #0a1628 40%, #0e1117 100%)',
+            padding: '40px 0 30px',
+          }}
+        >
+          {/* Animated scan lines */}
+          <div
+            style={{
+              position: 'absolute',
+              inset: 0,
+              background: 'repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,212,255,0.03) 2px, rgba(0,212,255,0.03) 4px)',
+              pointerEvents: 'none',
+            }}
+          />
+
+          {/* Glow pulse behind drone */}
+          <div
+            style={{
+              position: 'absolute',
+              top: '50%',
+              left: '50%',
+              transform: 'translate(-50%, -55%)',
+              width: '400px',
+              height: '250px',
+              background: 'radial-gradient(ellipse, rgba(0,212,255,0.15) 0%, rgba(0,212,255,0.05) 40%, transparent 70%)',
+              animation: 'droneGlow 3s ease-in-out infinite',
+              pointerEvents: 'none',
+            }}
+          />
+
+          {/* Drone SVG with hover/float animation */}
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'center',
+              alignItems: 'center',
+              position: 'relative',
+              animation: 'droneFloat 4s ease-in-out infinite',
+              filter: 'drop-shadow(0 20px 40px rgba(0,212,255,0.3)) drop-shadow(0 0 60px rgba(0,212,255,0.1))',
+            }}
+          >
+            <img
+              src="/dashboard-bg.svg"
+              alt="BarnardHQ Drone"
+              style={{
+                width: '500px',
+                maxWidth: '80%',
+                height: 'auto',
+              }}
+            />
+          </div>
+
+          {/* Bottom edge glow line */}
+          <div
+            style={{
+              position: 'absolute',
+              bottom: 0,
+              left: '10%',
+              right: '10%',
+              height: '1px',
+              background: 'linear-gradient(90deg, transparent, #00d4ff, transparent)',
+              opacity: 0.4,
+            }}
+          />
+
+          <style>{`
+            @keyframes droneFloat {
+              0%, 100% { transform: translateY(0px); }
+              50% { transform: translateY(-12px); }
+            }
+            @keyframes droneGlow {
+              0%, 100% { opacity: 0.6; }
+              50% { opacity: 1; }
+            }
+          `}</style>
+        </div>
       </Stack>
     </div>
   );
