@@ -40,8 +40,8 @@ services:
       - OLLAMA_MAX_LOADED_MODELS=1
       # Enable flash attention for faster inference
       - OLLAMA_FLASH_ATTENTION=1
-    # Pin all 8 hardware threads and reserve 8GB for the model + runtime
-    cpuset: "0-7"
+    # Pin 6 of 8 hardware threads — leaves 2 for OS, DB, and other services
+    cpuset: "0-5"
     mem_reservation: 8g
 
   ollama-setup:
