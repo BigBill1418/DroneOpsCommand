@@ -5,9 +5,8 @@ import { IconChevronLeft, IconChevronRight, IconDownload, IconZoomIn, IconZoomOu
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
 
-// Configure PDF.js worker — use local build bundled by Vite
-import pdfjsWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
-pdfjs.GlobalWorkerOptions.workerSrc = pdfjsWorkerUrl;
+// Configure PDF.js worker — use stable path (copied by Vite plugin, no content hash)
+pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
 
 interface PdfViewerProps {
   url: string;
