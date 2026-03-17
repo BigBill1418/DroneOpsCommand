@@ -4,6 +4,7 @@ import {
   Badge,
   Button,
   Card,
+  CopyButton,
   Group,
   Modal,
   ScrollArea,
@@ -13,12 +14,14 @@ import {
   TextInput,
   Textarea,
   Title,
+  Tooltip,
   Popover,
   Loader,
+  Image,
 } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
-import { IconPlus, IconEdit, IconTrash, IconSearch, IconMapPin } from '@tabler/icons-react';
+import { IconPlus, IconEdit, IconTrash, IconSearch, IconMapPin, IconSend, IconCheck, IconCopy, IconFileSignature, IconMail } from '@tabler/icons-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
 import { Customer } from '../api/types';
@@ -34,6 +37,16 @@ export default function Customers() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const navigate = useNavigate();
+
+  // Initiate Services modal
+  const [initiateModalOpen, setInitiateModalOpen] = useState(false);
+  const [initiateEmail, setInitiateEmail] = useState('');
+  const [initiateLoading, setInitiateLoading] = useState(false);
+  const [intakeResult, setIntakeResult] = useState<{ intake_url: string; customer_id?: string } | null>(null);
+
+  // Signature viewer
+  const [signatureModal, setSignatureModal] = useState(false);
+  const [viewingCustomer, setViewingCustomer] = useState<Customer | null>(null);
 
   const form = useForm({
     initialValues: { name: '', email: '', phone: '', address: '', company: '', notes: '' },
@@ -113,6 +126,76 @@ export default function Customers() {
     }
   };
 
+  const handleInitiateServices = async () => {
+    if (!initiateEmail.trim()) {
+      notifications.show({ title: 'Required', message: 'Enter an email address', color: 'red' });
+      return;
+    }
+    setInitiateLoading(true);
+    try {
+      const r = await api.post('/intake/initiate', { email: initiateEmail.trim() });
+      setIntakeResult(r.data);
+      loadCustomers();
+      notifications.show({ title: 'Link Generated', message: 'Intake form link ready', color: 'cyan' });
+    } catch (err: any) {
+      notifications.show({ title: 'Error', message: err.response?.data?.detail || 'Failed to generate link', color: 'red' });
+    } finally {
+      setInitiateLoading(false);
+    }
+  };
+
+  const handleSendTos = async (customer: Customer) => {
+    if (!customer.email) {
+      notifications.show({ title: 'Error', message: 'Customer needs an email address first', color: 'red' });
+      return;
+    }
+    try {
+      await api.post(`/intake/${customer.id}/send-email`);
+      loadCustomers();
+      notifications.show({ title: 'Sent', message: `TOS form sent to ${customer.email}`, color: 'cyan' });
+    } catch (err: any) {
+      notifications.show({ title: 'Error', message: err.response?.data?.detail || 'Failed to send', color: 'red' });
+    }
+  };
+
+  const handleSendIntakeEmail = async () => {
+    if (!intakeResult) return;
+    try {
+      // We need to find the customer to send to — reload then send
+      const customersResp = await api.get('/customers');
+      const found = customersResp.data.find((c: Customer) => c.intake_token && intakeResult.intake_url.includes(c.intake_token));
+      if (found) {
+        await api.post(`/intake/${found.id}/send-email`);
+        notifications.show({ title: 'Sent', message: `Intake email sent to ${found.email}`, color: 'green' });
+      }
+    } catch (err: any) {
+      notifications.show({ title: 'Error', message: err.response?.data?.detail || 'Failed to send email', color: 'red' });
+    }
+  };
+
+  const renderTosStatus = (c: Customer) => {
+    if (c.tos_signed) {
+      return (
+        <Tooltip label={`Signed ${c.tos_signed_at ? new Date(c.tos_signed_at).toLocaleDateString() : ''}`}>
+          <Badge
+            color="green"
+            variant="light"
+            size="sm"
+            leftSection={<IconCheck size={10} />}
+            style={{ cursor: 'pointer' }}
+            onClick={() => { setViewingCustomer(c); setSignatureModal(true); }}
+          >
+            TOS SIGNED
+          </Badge>
+        </Tooltip>
+      );
+    }
+    if (c.intake_token && !c.intake_completed_at) {
+      return <Badge color="yellow" variant="light" size="sm">PENDING</Badge>;
+    }
+    return <Text c="#5a6478" size="sm">—</Text>;
+  };
+
   const filtered = customers.filter(
     (c) =>
       c.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -124,14 +207,25 @@ export default function Customers() {
     <Stack gap="lg">
       <Group justify="space-between" wrap="wrap">
         <Title order={2} c="#e8edf2" style={{ letterSpacing: '2px' }}>CUSTOMERS</Title>
-        <Button
-          leftSection={<IconPlus size={16} />}
-          color="cyan"
-          onClick={() => { setEditingId(null); form.reset(); setModalOpen(true); }}
-          styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}
-        >
-          ADD CUSTOMER
-        </Button>
+        <Group gap="xs">
+          <Button
+            leftSection={<IconSend size={16} />}
+            color="cyan"
+            variant="light"
+            onClick={() => { setInitiateEmail(''); setIntakeResult(null); setInitiateModalOpen(true); }}
+            styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}
+          >
+            INITIATE SERVICES
+          </Button>
+          <Button
+            leftSection={<IconPlus size={16} />}
+            color="cyan"
+            onClick={() => { setEditingId(null); form.reset(); setModalOpen(true); }}
+            styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}
+          >
+            ADD CUSTOMER
+          </Button>
+        </Group>
       </Group>
 
       <TextInput
@@ -148,7 +242,7 @@ export default function Customers() {
         ) : (
           <ScrollArea type="auto">
           <Table highlightOnHover styles={{
-            table: { color: '#e8edf2', minWidth: 550 },
+            table: { color: '#e8edf2', minWidth: 700 },
             th: { color: '#00d4ff', fontFamily: "'Share Tech Mono', monospace", fontSize: '13px', letterSpacing: '1px', borderBottom: '1px solid #1a1f2e' },
             td: { borderBottom: '1px solid #1a1f2e' },
           }}>
@@ -158,6 +252,7 @@ export default function Customers() {
                 <Table.Th>COMPANY</Table.Th>
                 <Table.Th>EMAIL</Table.Th>
                 <Table.Th>PHONE</Table.Th>
+                <Table.Th>TOS</Table.Th>
                 <Table.Th>ACTIONS</Table.Th>
               </Table.Tr>
             </Table.Thead>
@@ -168,14 +263,26 @@ export default function Customers() {
                   <Table.Td c="#5a6478">{c.company || '—'}</Table.Td>
                   <Table.Td c="#5a6478">{c.email || '—'}</Table.Td>
                   <Table.Td c="#5a6478" style={{ fontFamily: "'Share Tech Mono', monospace" }}>{c.phone || '—'}</Table.Td>
+                  <Table.Td>{renderTosStatus(c)}</Table.Td>
                   <Table.Td>
                     <Group gap="xs">
-                      <ActionIcon variant="subtle" color="cyan" onClick={() => handleEdit(c)}>
-                        <IconEdit size={16} />
-                      </ActionIcon>
-                      <ActionIcon variant="subtle" color="red" onClick={() => handleDelete(c.id)}>
-                        <IconTrash size={16} />
-                      </ActionIcon>
+                      {!c.tos_signed && c.email && (
+                        <Tooltip label="Send TOS Form">
+                          <ActionIcon variant="subtle" color="orange" onClick={() => handleSendTos(c)}>
+                            <IconFileSignature size={16} />
+                          </ActionIcon>
+                        </Tooltip>
+                      )}
+                      <Tooltip label="Edit">
+                        <ActionIcon variant="subtle" color="cyan" onClick={() => handleEdit(c)}>
+                          <IconEdit size={16} />
+                        </ActionIcon>
+                      </Tooltip>
+                      <Tooltip label="Delete">
+                        <ActionIcon variant="subtle" color="red" onClick={() => handleDelete(c.id)}>
+                          <IconTrash size={16} />
+                        </ActionIcon>
+                      </Tooltip>
                     </Group>
                   </Table.Td>
                 </Table.Tr>
@@ -186,6 +293,7 @@ export default function Customers() {
         )}
       </Card>
 
+      {/* Add/Edit Customer Modal */}
       <Modal
         opened={modalOpen}
         onClose={() => { setModalOpen(false); setEditingId(null); }}
@@ -241,6 +349,122 @@ export default function Customers() {
             </Button>
           </Stack>
         </form>
+      </Modal>
+
+      {/* Initiate Services Modal */}
+      <Modal
+        opened={initiateModalOpen}
+        onClose={() => setInitiateModalOpen(false)}
+        title="Initiate Services"
+        styles={{
+          header: { background: '#0e1117' },
+          content: { background: '#0e1117' },
+          title: { color: '#e8edf2', fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' },
+        }}
+      >
+        {!intakeResult ? (
+          <Stack gap="md">
+            <Text c="#5a6478" size="sm" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+              Enter the customer's email to send them an onboarding form with TOS.
+            </Text>
+            <TextInput
+              label="Customer Email"
+              placeholder="customer@example.com"
+              value={initiateEmail}
+              onChange={(e) => setInitiateEmail(e.target.value)}
+              styles={inputStyles}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleInitiateServices(); } }}
+            />
+            <Button
+              color="cyan"
+              fullWidth
+              loading={initiateLoading}
+              onClick={handleInitiateServices}
+              styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}
+            >
+              GENERATE INTAKE LINK
+            </Button>
+          </Stack>
+        ) : (
+          <Stack gap="md">
+            <Badge color="green" variant="light" size="lg" leftSection={<IconCheck size={12} />}>
+              LINK GENERATED
+            </Badge>
+            <Text c="#5a6478" size="xs" style={{ fontFamily: "'Share Tech Mono', monospace", letterSpacing: '1px' }}>
+              INTAKE LINK
+            </Text>
+            <Group gap="xs">
+              <TextInput
+                value={intakeResult.intake_url}
+                readOnly
+                style={{ flex: 1 }}
+                styles={inputStyles}
+              />
+              <CopyButton value={intakeResult.intake_url}>
+                {({ copied, copy }) => (
+                  <Tooltip label={copied ? 'Copied!' : 'Copy'}>
+                    <ActionIcon color={copied ? 'green' : 'cyan'} variant="light" onClick={copy}>
+                      {copied ? <IconCheck size={16} /> : <IconCopy size={16} />}
+                    </ActionIcon>
+                  </Tooltip>
+                )}
+              </CopyButton>
+            </Group>
+            <Button
+              leftSection={<IconMail size={16} />}
+              color="cyan"
+              variant="light"
+              fullWidth
+              onClick={handleSendIntakeEmail}
+              styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}
+            >
+              SEND VIA EMAIL
+            </Button>
+            <Text c="#5a6478" size="xs" ta="center" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+              Link expires in 7 days
+            </Text>
+          </Stack>
+        )}
+      </Modal>
+
+      {/* Signature Viewer Modal */}
+      <Modal
+        opened={signatureModal}
+        onClose={() => { setSignatureModal(false); setViewingCustomer(null); }}
+        title="Customer Signature"
+        size="lg"
+        styles={{
+          header: { background: '#0e1117' },
+          content: { background: '#0e1117' },
+          title: { color: '#e8edf2', fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' },
+        }}
+      >
+        {viewingCustomer && (
+          <Stack gap="md">
+            <Group>
+              <Badge color="green" variant="light" leftSection={<IconCheck size={10} />}>TOS SIGNED</Badge>
+              {viewingCustomer.tos_signed_at && (
+                <Text c="#5a6478" size="sm" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+                  {new Date(viewingCustomer.tos_signed_at).toLocaleString()}
+                </Text>
+              )}
+            </Group>
+            <Text c="#5a6478" size="xs" style={{ fontFamily: "'Share Tech Mono', monospace", letterSpacing: '1px' }}>
+              DIGITAL SIGNATURE
+            </Text>
+            {viewingCustomer.signature_data ? (
+              <div style={{ background: '#050608', borderRadius: 6, border: '1px solid #1a1f2e', padding: 8, textAlign: 'center' }}>
+                <img
+                  src={viewingCustomer.signature_data}
+                  alt="Customer signature"
+                  style={{ maxWidth: '100%', maxHeight: 200 }}
+                />
+              </div>
+            ) : (
+              <Text c="#5a6478" size="sm">No signature image available</Text>
+            )}
+          </Stack>
+        )}
       </Modal>
     </Stack>
   );

@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import String, Text, DateTime
+from sqlalchemy import String, Text, DateTime, Boolean
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -20,5 +20,14 @@ class Customer(Base):
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Intake / TOS fields
+    intake_token: Mapped[str | None] = mapped_column(String(64), unique=True, nullable=True)
+    intake_token_expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    intake_completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    tos_signed: Mapped[bool] = mapped_column(Boolean, default=False)
+    tos_signed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    signature_data: Mapped[str | None] = mapped_column(Text, nullable=True)
+    tos_pdf_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     missions = relationship("Mission", back_populates="customer", lazy="noload")

@@ -124,3 +124,63 @@ async def send_report_email(
         raise
 
     return True
+
+
+async def send_intake_email(
+    to_email: str,
+    customer_name: str | None,
+    intake_url: str,
+    expires_at: object,
+    is_existing_customer: bool = False,
+    db: AsyncSession | None = None,
+) -> bool:
+    """Send intake form link to customer via email."""
+    logger.info("Preparing intake email to %s (existing=%s)", to_email, is_existing_customer)
+
+    if db:
+        smtp = await get_smtp_settings(db)
+    else:
+        smtp = {
+            "smtp_host": settings.smtp_host,
+            "smtp_port": str(settings.smtp_port),
+            "smtp_user": settings.smtp_user,
+            "smtp_password": settings.smtp_password,
+            "smtp_from_email": settings.smtp_from_email,
+            "smtp_from_name": settings.smtp_from_name,
+            "smtp_use_tls": settings.smtp_use_tls,
+        }
+
+    if not smtp["smtp_host"]:
+        logger.error("SMTP not configured — cannot send intake email")
+        raise ValueError("SMTP not configured. Set SMTP_HOST in settings.")
+
+    template = jinja_env.get_template("intake_email.html")
+    html_body = template.render(
+        customer_name=customer_name,
+        intake_url=intake_url,
+        expires_at=expires_at.strftime("%B %d, %Y") if hasattr(expires_at, "strftime") else str(expires_at),
+        is_existing_customer=is_existing_customer,
+    )
+
+    msg = MIMEMultipart()
+    msg["From"] = f"{smtp['smtp_from_name']} <{smtp['smtp_from_email']}>"
+    msg["To"] = to_email
+    subject = "Complete Your Customer Profile — BarnardHQ" if is_existing_customer else "Welcome to BarnardHQ — Complete Your Onboarding"
+    msg["Subject"] = subject
+    msg.attach(MIMEText(html_body, "html"))
+
+    try:
+        await aiosmtplib.send(
+            msg,
+            hostname=smtp["smtp_host"],
+            port=int(smtp["smtp_port"]),
+            username=smtp["smtp_user"] or None,
+            password=smtp["smtp_password"] or None,
+            use_tls=smtp["smtp_use_tls"] if isinstance(smtp["smtp_use_tls"], bool) else _parse_bool(str(smtp["smtp_use_tls"]), True),
+        )
+        logger.info("Intake email sent to %s", to_email)
+    except Exception as exc:
+        logger.error("Intake email SMTP send failed to %s: %s", to_email, exc, exc_info=True)
+        raise
+
+    return True

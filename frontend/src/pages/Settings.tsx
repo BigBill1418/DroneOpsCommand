@@ -19,7 +19,7 @@ import {
 } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
-import { IconCheck, IconX, IconPlus, IconEdit, IconTrash, IconCurrencyDollar, IconMail, IconSend, IconBrandPaypal, IconCash, IconDrone, IconPlugConnected, IconMapPin, IconSearch } from '@tabler/icons-react';
+import { IconCheck, IconX, IconPlus, IconEdit, IconTrash, IconCurrencyDollar, IconMail, IconSend, IconBrandPaypal, IconCash, IconDrone, IconPlugConnected, IconMapPin, IconSearch, IconFileSignature, IconUpload } from '@tabler/icons-react';
 import api from '../api/client';
 import { Aircraft, RateTemplate } from '../api/types';
 
@@ -48,6 +48,8 @@ export default function Settings() {
   const [weatherSaving, setWeatherSaving] = useState(false);
   const [weatherLooking, setWeatherLooking] = useState(false);
   const [weatherQuery, setWeatherQuery] = useState('');
+  const [tosUploaded, setTosUploaded] = useState(false);
+  const [tosUploading, setTosUploading] = useState(false);
 
   const aircraftForm = useForm({
     initialValues: { model_name: '', manufacturer: 'DJI', specs_json: '{}' },
@@ -89,6 +91,7 @@ export default function Settings() {
     api.get('/settings/payment').then((r) => paymentForm.setValues(r.data)).catch(() => {});
     api.get('/settings/opendronelog').then((r) => odlForm.setValues(r.data)).catch(() => {});
     api.get('/settings/weather').then((r) => weatherForm.setValues(r.data)).catch(() => {});
+    api.get('/intake/default-tos-status').then((r) => setTosUploaded(r.data.uploaded)).catch(() => {});
   }, []);
 
   const handleSaveAircraft = async (values: typeof aircraftForm.values) => {
@@ -450,6 +453,53 @@ export default function Settings() {
             </Button>
           </Stack>
         </form>
+      </Card>
+
+      {/* Terms of Service PDF */}
+      <Card padding="lg" radius="md" style={cardStyle}>
+        <Group gap="sm" mb="md">
+          <IconFileSignature size={20} color="#00d4ff" />
+          <Title order={3} c="#e8edf2" style={{ letterSpacing: '1px' }}>TERMS OF SERVICE</Title>
+        </Group>
+        <Text c="#5a6478" size="xs" mb="sm" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+          Upload the default TOS PDF that customers will review and sign during onboarding.
+        </Text>
+        <Group>
+          <Badge color={tosUploaded ? 'green' : 'orange'} variant="light">
+            {tosUploaded ? 'TOS PDF UPLOADED' : 'NO TOS PDF'}
+          </Badge>
+          <Button
+            leftSection={<IconUpload size={14} />}
+            color="cyan"
+            variant="light"
+            size="xs"
+            loading={tosUploading}
+            onClick={() => {
+              const input = document.createElement('input');
+              input.type = 'file';
+              input.accept = '.pdf';
+              input.onchange = async (e: any) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                setTosUploading(true);
+                try {
+                  const formData = new FormData();
+                  formData.append('file', file);
+                  await api.post('/intake/upload-default-tos', formData);
+                  setTosUploaded(true);
+                  notifications.show({ title: 'Uploaded', message: 'Default TOS PDF uploaded', color: 'cyan' });
+                } catch {
+                  notifications.show({ title: 'Error', message: 'Failed to upload TOS PDF', color: 'red' });
+                } finally {
+                  setTosUploading(false);
+                }
+              };
+              input.click();
+            }}
+          >
+            Upload PDF
+          </Button>
+        </Group>
       </Card>
 
       {/* Payment Links */}

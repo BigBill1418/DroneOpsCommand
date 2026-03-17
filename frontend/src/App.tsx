@@ -11,6 +11,7 @@ import Customers from './pages/Customers';
 import Flights from './pages/Flights';
 import Financials from './pages/Financials';
 import Settings from './pages/Settings';
+import CustomerIntake from './pages/CustomerIntake';
 
 export default function App() {
   const { isAuthenticated, loading, login, logout } = useAuth();
@@ -23,24 +24,30 @@ export default function App() {
     );
   }
 
-  if (!isAuthenticated) {
-    return <Login onLogin={login} />;
-  }
-
   return (
     <Routes>
-      <Route element={<AppLayout onLogout={logout} />}>
-        <Route path="/" element={<Dashboard />} />
-        <Route path="/flights" element={<Flights />} />
-        <Route path="/missions" element={<Missions />} />
-        <Route path="/missions/new" element={<MissionNew />} />
-        <Route path="/missions/:id/edit" element={<MissionNew />} />
-        <Route path="/missions/:id" element={<MissionDetail />} />
-        <Route path="/customers" element={<Customers />} />
-        <Route path="/financials" element={<Financials />} />
-        <Route path="/settings" element={<Settings />} />
-        <Route path="*" element={<Navigate to="/" />} />
-      </Route>
+      {/* Public route — no auth required */}
+      <Route path="/intake/:token" element={<CustomerIntake />} />
+
+      {/* All other routes require authentication */}
+      <Route path="*" element={
+        !isAuthenticated ? <Login onLogin={login} /> : (
+          <Routes>
+            <Route element={<AppLayout onLogout={logout} />}>
+              <Route path="/" element={<Dashboard />} />
+              <Route path="/flights" element={<Flights />} />
+              <Route path="/missions" element={<Missions />} />
+              <Route path="/missions/new" element={<MissionNew />} />
+              <Route path="/missions/:id/edit" element={<MissionNew />} />
+              <Route path="/missions/:id" element={<MissionDetail />} />
+              <Route path="/customers" element={<Customers />} />
+              <Route path="/financials" element={<Financials />} />
+              <Route path="/settings" element={<Settings />} />
+              <Route path="*" element={<Navigate to="/" />} />
+            </Route>
+          </Routes>
+        )
+      } />
     </Routes>
   );
 }

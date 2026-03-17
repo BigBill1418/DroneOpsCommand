@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from app.config import settings
 from app.database import Base, async_session, engine
 import app.models  # noqa: F401 — ensure all models registered with Base before create_all
-from app.routers import auth, customers, aircraft, missions, flights, maps, reports, invoices, rate_templates, llm, system_settings, financials, weather
+from app.routers import auth, customers, aircraft, missions, flights, maps, reports, invoices, rate_templates, llm, system_settings, financials, weather, intake
 
 # Configure root logger for the app
 logging.basicConfig(
@@ -76,6 +76,15 @@ def _add_missing_columns(conn):
                 ("download_link_url", "ALTER TABLE missions ADD COLUMN download_link_url VARCHAR(1000)"),
                 ("download_link_expires_at", "ALTER TABLE missions ADD COLUMN download_link_expires_at TIMESTAMP"),
             ],
+            "customers": [
+                ("intake_token", "ALTER TABLE customers ADD COLUMN intake_token VARCHAR(64) UNIQUE"),
+                ("intake_token_expires_at", "ALTER TABLE customers ADD COLUMN intake_token_expires_at TIMESTAMP"),
+                ("intake_completed_at", "ALTER TABLE customers ADD COLUMN intake_completed_at TIMESTAMP"),
+                ("tos_signed", "ALTER TABLE customers ADD COLUMN tos_signed BOOLEAN DEFAULT FALSE"),
+                ("tos_signed_at", "ALTER TABLE customers ADD COLUMN tos_signed_at TIMESTAMP"),
+                ("signature_data", "ALTER TABLE customers ADD COLUMN signature_data TEXT"),
+                ("tos_pdf_path", "ALTER TABLE customers ADD COLUMN tos_pdf_path VARCHAR(500)"),
+            ],
         }
 
         for table, columns in migrations.items():
@@ -117,7 +126,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="DroneOpsReport",
     description="Invoicing and after-action reporting tool for drone operations",
-    version="1.9.0",
+    version="1.10.0",
     lifespan=lifespan,
 )
 
@@ -153,6 +162,7 @@ app.include_router(llm.router)
 app.include_router(system_settings.router)
 app.include_router(financials.router)
 app.include_router(weather.router)
+app.include_router(intake.router)
 
 
 @app.middleware("http")

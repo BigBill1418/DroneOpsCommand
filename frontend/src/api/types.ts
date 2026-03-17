@@ -6,6 +6,10 @@ export interface Customer {
   address: string | null;
   company: string | null;
   notes: string | null;
+  tos_signed: boolean;
+  tos_signed_at: string | null;
+  intake_completed_at: string | null;
+  intake_token: string | null;
   created_at: string;
   updated_at: string;
 }

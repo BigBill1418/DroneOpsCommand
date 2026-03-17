@@ -38,6 +38,10 @@ class Settings(BaseSettings):
     upload_dir: str = "/data/uploads"
     reports_dir: str = "/data/reports"
 
+    # Customer intake
+    frontend_url: str = "https://droneops.barnardhq.com"
+    intake_token_expire_days: int = 7
+
     @property
     def database_url_sync(self) -> str:
         """Synchronous database URL for Celery tasks."""
