@@ -138,8 +138,7 @@ services:
 
   # ── Cloudflare Tunnel ─────────────────────────────────────────────
   # Exposes the app securely without opening router ports.
-  # Set CLOUDFLARE_TUNNEL_TOKEN in .env to enable.
-  # See docs/cloudflare-tunnel-setup.md for setup instructions.
+  # Set CLOUDFLARE_TUNNEL_TOKEN in .env — service is a no-op without it.
   cloudflared:
     image: cloudflare/cloudflared:latest
     restart: unless-stopped
@@ -148,8 +147,7 @@ services:
       - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN:-}
     depends_on:
       - frontend
-    profiles:
-      - tunnel
+      - backend
 
 volumes:
   postgres_data:
