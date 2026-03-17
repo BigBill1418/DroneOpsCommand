@@ -84,6 +84,9 @@ def _add_missing_columns(conn):
                 ("tos_signed_at", "ALTER TABLE customers ADD COLUMN tos_signed_at TIMESTAMP"),
                 ("signature_data", "ALTER TABLE customers ADD COLUMN signature_data TEXT"),
                 ("tos_pdf_path", "ALTER TABLE customers ADD COLUMN tos_pdf_path VARCHAR(500)"),
+                ("city", "ALTER TABLE customers ADD COLUMN city VARCHAR(255)"),
+                ("state", "ALTER TABLE customers ADD COLUMN state VARCHAR(100)"),
+                ("zip_code", "ALTER TABLE customers ADD COLUMN zip_code VARCHAR(20)"),
             ],
         }
 
@@ -126,7 +129,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="DroneOpsReport",
     description="Invoicing and after-action reporting tool for drone operations",
-    version="1.10.12",
+    version="1.11.0",
     lifespan=lifespan,
 )
 

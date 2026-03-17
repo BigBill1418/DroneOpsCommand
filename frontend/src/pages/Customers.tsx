@@ -75,10 +75,23 @@ export default function Customers() {
   const [signedTosLoading, setSignedTosLoading] = useState(false);
 
   const form = useForm({
-    initialValues: { name: '', email: '', phone: '', address: '', company: '', notes: '' },
+    initialValues: { name: '', email: '', phone: '', address: '', city: '', state: '', zip_code: '', company: '', notes: '' },
   });
 
-  const [addressSuggestions, setAddressSuggestions] = useState<{ display_name: string }[]>([]);
+  interface NominatimResult {
+    display_name: string;
+    address?: {
+      house_number?: string;
+      road?: string;
+      city?: string;
+      town?: string;
+      village?: string;
+      state?: string;
+      postcode?: string;
+    };
+  }
+
+  const [addressSuggestions, setAddressSuggestions] = useState<NominatimResult[]>([]);
   const [addressLoading, setAddressLoading] = useState(false);
   const [addressPopover, setAddressPopover] = useState(false);
   const addressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -90,10 +103,10 @@ export default function Customers() {
       setAddressLoading(true);
       try {
         const resp = await fetch(
-          `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&limit=5&q=${encodeURIComponent(query)}`,
+          `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&limit=5&countrycodes=us&q=${encodeURIComponent(query)}`,
           { headers: { 'Accept-Language': 'en' } }
         );
-        const data = await resp.json();
+        const data: NominatimResult[] = await resp.json();
         setAddressSuggestions(data);
         setAddressPopover(data.length > 0);
       } catch {
@@ -103,6 +116,20 @@ export default function Customers() {
       }
     }, 400);
   }, []);
+
+  const selectAddressSuggestion = (result: NominatimResult) => {
+    const addr = result.address;
+    if (addr) {
+      const street = [addr.house_number, addr.road].filter(Boolean).join(' ');
+      if (street) form.setFieldValue('address', street);
+      form.setFieldValue('city', addr.city || addr.town || addr.village || '');
+      form.setFieldValue('state', addr.state || '');
+      form.setFieldValue('zip_code', addr.postcode || '');
+    } else {
+      form.setFieldValue('address', result.display_name);
+    }
+    setAddressPopover(false);
+  };
 
   const loadCustomers = () => {
     api.get('/customers').then((r) => setCustomers(r.data)).catch(() => {});
@@ -135,6 +162,9 @@ export default function Customers() {
       email: customer.email || '',
       phone: customer.phone || '',
       address: customer.address || '',
+      city: customer.city || '',
+      state: customer.state || '',
+      zip_code: customer.zip_code || '',
       company: customer.company || '',
       notes: customer.notes || '',
     });
@@ -353,7 +383,7 @@ export default function Customers() {
             <Popover opened={addressPopover} onClose={() => setAddressPopover(false)} position="bottom-start" width="target">
               <Popover.Target>
                 <TextInput
-                  label="Address"
+                  label="Street Address"
                   leftSection={addressLoading ? <Loader size={14} color="cyan" /> : <IconMapPin size={14} />}
                   {...form.getInputProps('address')}
                   onChange={(e) => {
@@ -373,16 +403,18 @@ export default function Customers() {
                     p="xs"
                     style={{ cursor: 'pointer', borderBottom: '1px solid #1a1f2e' }}
                     onMouseDown={(e) => { e.preventDefault(); }}
-                    onClick={() => {
-                      form.setFieldValue('address', s.display_name);
-                      setAddressPopover(false);
-                    }}
+                    onClick={() => selectAddressSuggestion(s)}
                   >
                     {s.display_name}
                   </Text>
                 ))}
               </Popover.Dropdown>
             </Popover>
+            <Group grow>
+              <TextInput label="City" {...form.getInputProps('city')} styles={inputStyles} />
+              <TextInput label="State" {...form.getInputProps('state')} styles={inputStyles} />
+              <TextInput label="Zip Code" {...form.getInputProps('zip_code')} styles={inputStyles} />
+            </Group>
             <Textarea label="Notes" {...form.getInputProps('notes')} styles={inputStyles} />
             <Button type="submit" color="cyan" fullWidth styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}>
               {editingId ? 'UPDATE' : 'CREATE'}

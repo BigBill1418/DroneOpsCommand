@@ -281,6 +281,9 @@ async def get_intake_form(
         customer_email=customer.email,
         customer_phone=customer.phone,
         customer_address=customer.address,
+        customer_city=customer.city,
+        customer_state=customer.state,
+        customer_zip_code=customer.zip_code,
         customer_company=customer.company,
         tos_pdf_url=tos_pdf_url,
         already_completed=customer.intake_completed_at is not None,
@@ -372,6 +375,12 @@ async def submit_intake_form(
         changes.append(f"phone updated")
     if customer.address != data.address:
         changes.append(f"address updated")
+    if customer.city != data.city:
+        changes.append(f"city: '{customer.city}' -> '{data.city}'")
+    if customer.state != data.state:
+        changes.append(f"state: '{customer.state}' -> '{data.state}'")
+    if customer.zip_code != data.zip_code:
+        changes.append(f"zip_code: '{customer.zip_code}' -> '{data.zip_code}'")
     if customer.company != data.company:
         changes.append(f"company: '{customer.company}' -> '{data.company}'")
 
@@ -380,6 +389,9 @@ async def submit_intake_form(
     customer.email = data.email
     customer.phone = data.phone
     customer.address = data.address
+    customer.city = data.city
+    customer.state = data.state
+    customer.zip_code = data.zip_code
     customer.company = data.company
     customer.tos_signed = True
     customer.tos_signed_at = datetime.utcnow()

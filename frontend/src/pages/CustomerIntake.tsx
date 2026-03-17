@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Box,
   Button,
@@ -7,17 +7,25 @@ import {
   Checkbox,
   Group,
   Loader,
+  Popover,
+  Select,
   Stack,
   Text,
   TextInput,
   Title,
 } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { IconCheck, IconAlertTriangle, IconArrowLeft, IconArrowRight } from '@tabler/icons-react';
+import { IconCheck, IconAlertTriangle, IconArrowLeft, IconArrowRight, IconMapPin } from '@tabler/icons-react';
 import { useParams } from 'react-router-dom';
 import SignatureCanvas from 'react-signature-canvas';
 import axios from 'axios';
 import PdfViewer from '../components/PDFPreview/PdfViewer';
+
+const US_STATES = [
+  'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA','KS','KY','LA','ME','MD',
+  'MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ','NM','NY','NC','ND','OH','OK','OR','PA','RI','SC',
+  'SD','TN','TX','UT','VT','VA','WA','WV','WI','WY','DC',
+];
 
 const inputStyles = {
   input: { background: '#050608', borderColor: '#1a1f2e', color: '#e8edf2' },
@@ -29,9 +37,25 @@ interface IntakeData {
   customer_email: string | null;
   customer_phone: string | null;
   customer_address: string | null;
+  customer_city: string | null;
+  customer_state: string | null;
+  customer_zip_code: string | null;
   customer_company: string | null;
   tos_pdf_url: string | null;
   already_completed: boolean;
+}
+
+interface NominatimResult {
+  display_name: string;
+  address?: {
+    house_number?: string;
+    road?: string;
+    city?: string;
+    town?: string;
+    village?: string;
+    state?: string;
+    postcode?: string;
+  };
 }
 
 type PageState = 'loading' | 'form' | 'completed' | 'already_done' | 'error' | 'expired';
@@ -47,12 +71,60 @@ export default function CustomerIntake() {
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [address, setAddress] = useState('');
+  const [city, setCity] = useState('');
+  const [stateVal, setStateVal] = useState('');
+  const [zipCode, setZipCode] = useState('');
   const [company, setCompany] = useState('');
   const [tosAccepted, setTosAccepted] = useState(false);
   const [tosPdfUrl, setTosPdfUrl] = useState<string | null>(null);
   const [tosPdfBlobUrl, setTosPdfBlobUrl] = useState<string | null>(null);
 
+  // Address autofill (Nominatim / OpenStreetMap)
+  const [addressSuggestions, setAddressSuggestions] = useState<NominatimResult[]>([]);
+  const [addressLoading, setAddressLoading] = useState(false);
+  const [addressPopover, setAddressPopover] = useState(false);
+  const addressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const sigRef = useRef<SignatureCanvas>(null);
+
+  const searchAddress = useCallback((query: string) => {
+    if (addressTimerRef.current) clearTimeout(addressTimerRef.current);
+    if (query.length < 4) {
+      setAddressSuggestions([]);
+      setAddressPopover(false);
+      return;
+    }
+    addressTimerRef.current = setTimeout(async () => {
+      setAddressLoading(true);
+      try {
+        const resp = await fetch(
+          `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&limit=5&countrycodes=us&q=${encodeURIComponent(query)}`,
+          { headers: { 'Accept-Language': 'en' } }
+        );
+        const data: NominatimResult[] = await resp.json();
+        setAddressSuggestions(data);
+        setAddressPopover(data.length > 0);
+      } catch {
+        setAddressSuggestions([]);
+      } finally {
+        setAddressLoading(false);
+      }
+    }, 400);
+  }, []);
+
+  const selectAddress = (result: NominatimResult) => {
+    const addr = result.address;
+    if (addr) {
+      const street = [addr.house_number, addr.road].filter(Boolean).join(' ');
+      if (street) setAddress(street);
+      setCity(addr.city || addr.town || addr.village || '');
+      setStateVal(addr.state || '');
+      setZipCode(addr.postcode || '');
+    } else {
+      setAddress(result.display_name);
+    }
+    setAddressPopover(false);
+  };
 
   useEffect(() => {
     if (!token) { setState('error'); setErrorMsg('Invalid link'); return; }
@@ -68,6 +140,9 @@ export default function CustomerIntake() {
         setEmail(d.customer_email || '');
         setPhone(d.customer_phone || '');
         setAddress(d.customer_address || '');
+        setCity(d.customer_city || '');
+        setStateVal(d.customer_state || '');
+        setZipCode(d.customer_zip_code || '');
         setCompany(d.customer_company || '');
         setTosPdfUrl(d.tos_pdf_url);
         setState('form');
@@ -115,6 +190,10 @@ export default function CustomerIntake() {
       notifications.show({ title: 'Required', message: 'Name and email are required.', color: 'red' });
       return;
     }
+    if (!address.trim() || !city.trim() || !stateVal.trim() || !zipCode.trim()) {
+      notifications.show({ title: 'Required', message: 'Full mailing address is required (street, city, state, zip).', color: 'red' });
+      return;
+    }
     setStep(2);
     // Scroll to top of card
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -141,6 +220,9 @@ export default function CustomerIntake() {
         email: email.trim(),
         phone: phone.trim() || null,
         address: address.trim() || null,
+        city: city.trim() || null,
+        state: stateVal.trim() || null,
+        zip_code: zipCode.trim() || null,
         company: company.trim() || null,
         signature_data: signatureData,
         tos_accepted: true,
@@ -240,7 +322,61 @@ export default function CustomerIntake() {
           <TextInput label="Email" required type="email" value={email} onChange={(e) => setEmail(e.target.value)} styles={inputStyles} />
           <TextInput label="Phone" value={phone} onChange={(e) => setPhone(e.target.value)} styles={inputStyles} />
           <TextInput label="Company" value={company} onChange={(e) => setCompany(e.target.value)} styles={inputStyles} />
-          <TextInput label="Mailing Address" value={address} onChange={(e) => setAddress(e.target.value)} styles={inputStyles} />
+
+          <Text c="#5a6478" size="sm" mt="xs" style={{ fontFamily: "'Share Tech Mono', monospace", letterSpacing: '1px' }}>
+            MAILING ADDRESS *
+          </Text>
+
+          <Popover opened={addressPopover} onClose={() => setAddressPopover(false)} position="bottom-start" width="target">
+            <Popover.Target>
+              <TextInput
+                label="Street Address"
+                required
+                leftSection={addressLoading ? <Loader size={14} color="cyan" /> : <IconMapPin size={14} />}
+                value={address}
+                onChange={(e) => {
+                  setAddress(e.target.value);
+                  searchAddress(e.target.value);
+                }}
+                onFocus={() => { if (addressSuggestions.length > 0) setAddressPopover(true); }}
+                styles={inputStyles}
+              />
+            </Popover.Target>
+            <Popover.Dropdown style={{ background: '#0e1117', border: '1px solid #1a1f2e', padding: 0, maxHeight: 200, overflow: 'auto' }}>
+              {addressSuggestions.map((s, i) => (
+                <Text
+                  key={i}
+                  size="sm"
+                  c="#e8edf2"
+                  p="xs"
+                  style={{ cursor: 'pointer', borderBottom: '1px solid #1a1f2e' }}
+                  onMouseDown={(e) => { e.preventDefault(); }}
+                  onClick={() => selectAddress(s)}
+                >
+                  {s.display_name}
+                </Text>
+              ))}
+            </Popover.Dropdown>
+          </Popover>
+
+          <Group grow>
+            <TextInput label="City" required value={city} onChange={(e) => setCity(e.target.value)} styles={inputStyles} />
+            <Select
+              label="State"
+              required
+              data={US_STATES}
+              value={stateVal || null}
+              onChange={(val) => setStateVal(val || '')}
+              searchable
+              styles={{
+                input: { background: '#050608', borderColor: '#1a1f2e', color: '#e8edf2' },
+                label: { color: '#5a6478', fontFamily: "'Share Tech Mono', monospace", fontSize: '13px', letterSpacing: '1px' },
+                dropdown: { background: '#0e1117', borderColor: '#1a1f2e' },
+                option: { color: '#e8edf2', '&[data-selected]': { background: '#00d4ff' } },
+              }}
+            />
+            <TextInput label="Zip Code" required value={zipCode} onChange={(e) => setZipCode(e.target.value)} styles={inputStyles} />
+          </Group>
 
           <Button
             color="cyan"

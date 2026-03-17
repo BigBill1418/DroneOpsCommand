@@ -9,6 +9,9 @@ class CustomerCreate(BaseModel):
     email: str | None = None
     phone: str | None = None
     address: str | None = None
+    city: str | None = None
+    state: str | None = None
+    zip_code: str | None = None
     company: str | None = None
     notes: str | None = None
 
@@ -18,6 +21,9 @@ class CustomerUpdate(BaseModel):
     email: str | None = None
     phone: str | None = None
     address: str | None = None
+    city: str | None = None
+    state: str | None = None
+    zip_code: str | None = None
     company: str | None = None
     notes: str | None = None
 
@@ -28,6 +34,9 @@ class CustomerResponse(BaseModel):
     email: str | None
     phone: str | None
     address: str | None
+    city: str | None
+    state: str | None
+    zip_code: str | None
     company: str | None
     notes: str | None
     tos_signed: bool = False
@@ -52,6 +61,9 @@ class IntakePublicResponse(BaseModel):
     customer_email: str | None
     customer_phone: str | None
     customer_address: str | None
+    customer_city: str | None
+    customer_state: str | None
+    customer_zip_code: str | None
     customer_company: str | None
     tos_pdf_url: str | None
     already_completed: bool
@@ -62,6 +74,9 @@ class IntakeFormData(BaseModel):
     email: str
     phone: str | None = None
     address: str | None = None
+    city: str | None = None
+    state: str | None = None
+    zip_code: str | None = None
     company: str | None = None
     signature_data: str  # base64 PNG
     tos_accepted: bool
