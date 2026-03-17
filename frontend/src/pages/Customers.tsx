@@ -22,13 +22,9 @@ import { notifications } from '@mantine/notifications';
 import { IconPlus, IconEdit, IconTrash, IconSearch, IconMapPin, IconSend, IconCheck, IconCopy, IconSignature, IconMail } from '@tabler/icons-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
-import { Customer } from '../api/types';
+import { Customer, NominatimResult } from '../api/types';
 import PdfViewer from '../components/PDFPreview/PdfViewer';
-
-const inputStyles = {
-  input: { background: '#050608', borderColor: '#1a1f2e', color: '#e8edf2' },
-  label: { color: '#5a6478', fontFamily: "'Share Tech Mono', monospace", fontSize: '13px', letterSpacing: '1px' },
-};
+import { inputStyles } from '../components/shared/styles';
 
 export default function Customers() {
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -78,19 +74,6 @@ export default function Customers() {
     initialValues: { name: '', email: '', phone: '', address: '', city: '', state: '', zip_code: '', company: '', notes: '' },
   });
 
-  interface NominatimResult {
-    display_name: string;
-    address?: {
-      house_number?: string;
-      road?: string;
-      city?: string;
-      town?: string;
-      village?: string;
-      state?: string;
-      postcode?: string;
-    };
-  }
-
   const [addressSuggestions, setAddressSuggestions] = useState<NominatimResult[]>([]);
   const [addressLoading, setAddressLoading] = useState(false);
   const [addressPopover, setAddressPopover] = useState(false);
@@ -132,7 +115,7 @@ export default function Customers() {
   };
 
   const loadCustomers = () => {
-    api.get('/customers').then((r) => setCustomers(r.data)).catch(() => {});
+    api.get('/customers').then((r) => setCustomers(r.data)).catch(() => setCustomers([]));
   };
 
   useEffect(() => { loadCustomers(); }, []);
@@ -193,8 +176,9 @@ export default function Customers() {
       setIntakeResult(r.data);
       loadCustomers();
       notifications.show({ title: 'Link Generated', message: 'Intake form link ready', color: 'cyan' });
-    } catch (err: any) {
-      notifications.show({ title: 'Error', message: err.response?.data?.detail || 'Failed to generate link', color: 'red' });
+    } catch (err: unknown) {
+      const axiosErr = err as { response?: { data?: { detail?: string } } };
+      notifications.show({ title: 'Error', message: axiosErr.response?.data?.detail || 'Failed to generate link', color: 'red' });
     } finally {
       setInitiateLoading(false);
     }
@@ -209,8 +193,9 @@ export default function Customers() {
       await api.post(`/intake/${customer.id}/send-email`);
       loadCustomers();
       notifications.show({ title: 'Sent', message: `TOS form sent to ${customer.email}`, color: 'cyan' });
-    } catch (err: any) {
-      notifications.show({ title: 'Error', message: err.response?.data?.detail || 'Failed to send', color: 'red' });
+    } catch (err: unknown) {
+      const axiosErr = err as { response?: { data?: { detail?: string } } };
+      notifications.show({ title: 'Error', message: axiosErr.response?.data?.detail || 'Failed to send', color: 'red' });
     }
   };
 
@@ -224,8 +209,9 @@ export default function Customers() {
         await api.post(`/intake/${found.id}/send-email`);
         notifications.show({ title: 'Sent', message: `Intake email sent to ${found.email}`, color: 'green' });
       }
-    } catch (err: any) {
-      notifications.show({ title: 'Error', message: err.response?.data?.detail || 'Failed to send email', color: 'red' });
+    } catch (err: unknown) {
+      const axiosErr = err as { response?: { data?: { detail?: string } } };
+      notifications.show({ title: 'Error', message: axiosErr.response?.data?.detail || 'Failed to send email', color: 'red' });
     }
   };
 
@@ -338,18 +324,18 @@ export default function Customers() {
                     <Group gap="xs">
                       {!c.tos_signed && c.email && (
                         <Tooltip label="Send TOS Form">
-                          <ActionIcon variant="subtle" color="orange" onClick={() => handleSendTos(c)}>
+                          <ActionIcon variant="subtle" color="orange" onClick={() => handleSendTos(c)} aria-label={`Send TOS form to ${c.name}`}>
                             <IconSignature size={16} />
                           </ActionIcon>
                         </Tooltip>
                       )}
                       <Tooltip label="Edit">
-                        <ActionIcon variant="subtle" color="cyan" onClick={() => handleEdit(c)}>
+                        <ActionIcon variant="subtle" color="cyan" onClick={() => handleEdit(c)} aria-label={`Edit customer: ${c.name}`}>
                           <IconEdit size={16} />
                         </ActionIcon>
                       </Tooltip>
                       <Tooltip label="Delete">
-                        <ActionIcon variant="subtle" color="red" onClick={() => handleDelete(c.id)}>
+                        <ActionIcon variant="subtle" color="red" onClick={() => handleDelete(c.id)} aria-label={`Delete customer: ${c.name}`}>
                           <IconTrash size={16} />
                         </ActionIcon>
                       </Tooltip>

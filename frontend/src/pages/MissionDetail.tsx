@@ -26,23 +26,13 @@ import { Mission, Report, Aircraft, CoverageData } from '../api/types';
 import FlightMap from '../components/FlightMap/FlightMap';
 import AircraftCard from '../components/AircraftCard/AircraftCard';
 import RichTextEditor from '../components/RichTextEditor/RichTextEditor';
-
-const inputStyles = {
-  input: { background: '#050608', borderColor: '#1a1f2e', color: '#e8edf2' },
-  label: { color: '#5a6478', fontFamily: "'Share Tech Mono', monospace", fontSize: '13px', letterSpacing: '1px' },
-};
-
-const statusColors: Record<string, string> = {
-  draft: 'yellow',
-  completed: 'cyan',
-  sent: 'green',
-};
+import { inputStyles, statusColors } from '../components/shared/styles';
 
 export default function MissionDetail() {
   const { id } = useParams<{ id: string }>();
   const [mission, setMission] = useState<Mission | null>(null);
   const [report, setReport] = useState<Report | null>(null);
-  const [mapGeojson, setMapGeojson] = useState<any>(null);
+  const [mapGeojson, setMapGeojson] = useState<{ type: string; features: Array<{ type: string; geometry: { type: string; coordinates: number[][] }; properties: Record<string, unknown> }> } | null>(null);
   const [coverage, setCoverage] = useState<CoverageData | null>(null);
   const [aircraftList, setAircraftList] = useState<Aircraft[]>([]);
   const [narrative, setNarrative] = useState('');
@@ -85,8 +75,9 @@ export default function MissionDetail() {
     try {
       await api.put(`/missions/${id}/report`, { final_content: reportContent });
       notifications.show({ title: 'Saved', message: 'Report updated', color: 'cyan' });
-    } catch (err: any) {
-      notifications.show({ title: 'Error', message: err.response?.data?.detail || 'Failed to save report', color: 'red' });
+    } catch (err: unknown) {
+      const axiosErr = err as { response?: { data?: { detail?: string } } };
+      notifications.show({ title: 'Error', message: axiosErr.response?.data?.detail || 'Failed to save report', color: 'red' });
     }
   };
 
@@ -107,8 +98,9 @@ export default function MissionDetail() {
     try {
       await api.post(`/missions/${id}/report/send`);
       notifications.show({ title: 'Sent', message: 'Report emailed to customer', color: 'green' });
-    } catch (err: any) {
-      notifications.show({ title: 'Error', message: err.response?.data?.detail || 'Send failed', color: 'red' });
+    } catch (err: unknown) {
+      const axiosErr = err as { response?: { data?: { detail?: string } } };
+      notifications.show({ title: 'Error', message: axiosErr.response?.data?.detail || 'Send failed', color: 'red' });
     }
   };
 
@@ -126,7 +118,7 @@ export default function MissionDetail() {
           <Group gap="xs" mt={4}>
             <Badge color={statusColors[mission.status]} variant="light">{mission.status}</Badge>
             <Text c="#5a6478" size="sm" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
-              {mission.mission_type.replace('_', ' ').toUpperCase()} | {mission.location_name || 'No location'} | {mission.mission_date || 'No date'}
+              {mission.mission_type.replace(/_/g, ' ').toUpperCase()} | {mission.location_name || 'No location'} | {mission.mission_date || 'No date'}
             </Text>
           </Group>
         </div>

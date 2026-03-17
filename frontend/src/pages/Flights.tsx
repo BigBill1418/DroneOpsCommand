@@ -31,6 +31,9 @@ import {
 } from '@tabler/icons-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
+import { FlightRecord } from '../api/types';
+import StatCard from '../components/shared/StatCard';
+import { cardStyle, monoFont } from '../components/shared/styles';
 
 // --- Formatters ---
 
@@ -86,64 +89,36 @@ function formatDate(dateStr: string | null | undefined): string {
 
 // --- Field accessors (handle both camelCase ODL and normalized snake_case) ---
 
-function getDurationSecs(f: any): number {
+function getDurationSecs(f: FlightRecord): number {
   return Number(f.duration_secs || f.durationSecs || f.duration || f.duration_seconds || 0);
 }
-function getTotalDistance(f: any): number {
+function getTotalDistance(f: FlightRecord): number {
   return Number(f.total_distance || f.totalDistance || f.distance || f.distance_meters || 0);
 }
-function getMaxAltitude(f: any): number {
+function getMaxAltitude(f: FlightRecord): number {
   return Number(f.max_altitude || f.maxAltitude || f.max_alt || 0);
 }
-function getMaxSpeed(f: any): number {
+function getMaxSpeed(f: FlightRecord): number {
   return Number(f.max_speed || f.maxSpeed || 0);
 }
-function getDroneModel(f: any): string {
+function getDroneModel(f: FlightRecord): string {
   return f.drone_model || f.droneModel || f.drone || f.aircraft || f.model || '';
 }
-function getStartTime(f: any): string {
+function getStartTime(f: FlightRecord): string {
   return f.start_time || f.startTime || f.date || f.created_at || '';
 }
-function getDisplayName(f: any): string {
+function getDisplayName(f: FlightRecord): string {
   return f.display_name || f.displayName || f.name || f.title || f.file_name || f.fileName || `Flight ${f.id ?? ''}`;
 }
-function getPointCount(f: any): number {
+function getPointCount(f: FlightRecord): number {
   return Number(f.point_count || f.pointCount || 0);
-}
-
-// --- Stat Card ---
-
-const cardStyle = { background: '#0e1117', border: '1px solid #1a1f2e' };
-const monoFont = { fontFamily: "'Share Tech Mono', monospace" };
-
-function StatCard({ icon: Icon, label, value, sub, color = '#00d4ff' }: {
-  icon: any; label: string; value: string; sub?: string; color?: string;
-}) {
-  return (
-    <Card padding="md" radius="md" style={cardStyle}>
-      <Group gap="sm" wrap="nowrap">
-        <Icon size={22} color={color} style={{ flexShrink: 0 }} />
-        <div style={{ minWidth: 0 }}>
-          <Text size="11px" c="#5a6478" style={{ ...monoFont, letterSpacing: '1px' }} tt="uppercase">
-            {label}
-          </Text>
-          <Text fw={700} c="#e8edf2" style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: '26px', lineHeight: 1.1 }}>
-            {value}
-          </Text>
-          {sub && (
-            <Text size="xs" c="#5a6478" style={monoFont}>{sub}</Text>
-          )}
-        </div>
-      </Group>
-    </Card>
-  );
 }
 
 // --- Drone breakdown mini-chart ---
 
 const DRONE_COLORS = ['#00d4ff', '#ff6b1a', '#2ecc40', '#ff6b6b', '#b57edc', '#ffd43b', '#20c997', '#ff8787'];
 
-function DroneBreakdown({ flights }: { flights: any[] }) {
+function DroneBreakdown({ flights }: { flights: FlightRecord[] }) {
   const drones = useMemo(() => {
     const map: Record<string, { count: number; duration: number }> = {};
     for (const f of flights) {
@@ -192,7 +167,7 @@ function DroneBreakdown({ flights }: { flights: any[] }) {
 // --- Top Flights ---
 
 function TopFlights({ flights, label, accessor, formatter }: {
-  flights: any[]; label: string; accessor: (f: any) => number; formatter: (v: number) => string;
+  flights: FlightRecord[]; label: string; accessor: (f: FlightRecord) => number; formatter: (v: number) => string;
 }) {
   const top = useMemo(() => {
     return [...flights]
@@ -228,7 +203,7 @@ function TopFlights({ flights, label, accessor, formatter }: {
 // === Main Component ===
 
 export default function Flights() {
-  const [flights, setFlights] = useState<any[]>([]);
+  const [flights, setFlights] = useState<FlightRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -239,7 +214,7 @@ export default function Flights() {
     setError(null);
     try {
       const resp = await api.get('/flights');
-      let data: any[] = [];
+      let data: FlightRecord[] = [];
       if (Array.isArray(resp.data)) {
         data = resp.data;
       } else if (resp.data && typeof resp.data === 'object') {
@@ -249,8 +224,9 @@ export default function Flights() {
       if (data.length === 0) {
         setError('Connected to OpenDroneLog but no flights found. Upload flight logs to OpenDroneLog first.');
       }
-    } catch (err: any) {
-      const detail = err.response?.data?.detail || 'Could not fetch flights. Check the OpenDroneLog URL in Settings.';
+    } catch (err: unknown) {
+      const axiosErr = err as { response?: { data?: { detail?: string } } };
+      const detail = axiosErr.response?.data?.detail || 'Could not fetch flights. Check the OpenDroneLog URL in Settings.';
       setError(detail);
       notifications.show({ title: 'OpenDroneLog', message: detail, color: 'red' });
     } finally {

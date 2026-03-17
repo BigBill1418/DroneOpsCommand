@@ -17,12 +17,7 @@ import { notifications } from '@mantine/notifications';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
 import { Mission } from '../api/types';
-
-const statusColors: Record<string, string> = {
-  draft: 'yellow',
-  completed: 'cyan',
-  sent: 'green',
-};
+import { statusColors } from '../components/shared/styles';
 
 export default function Missions() {
   const [missions, setMissions] = useState<Mission[]>([]);
@@ -30,7 +25,7 @@ export default function Missions() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    api.get('/missions').then((r) => setMissions(r.data)).catch(() => {});
+    api.get('/missions').then((r) => setMissions(r.data)).catch(() => setMissions([]));
   }, []);
 
   const handleDelete = async (missionId: string, title: string) => {
@@ -98,9 +93,9 @@ export default function Missions() {
             </Table.Thead>
             <Table.Tbody>
               {filtered.map((m) => (
-                <Table.Tr key={m.id} style={{ cursor: 'pointer' }} onClick={() => navigate(`/missions/${m.id}`)}>
+                <Table.Tr key={m.id} style={{ cursor: 'pointer' }} onClick={() => navigate(`/missions/${m.id}`)} aria-label={`View mission: ${m.title}`}>
                   <Table.Td fw={600}>{m.title}</Table.Td>
-                  <Table.Td c="#5a6478" tt="capitalize">{m.mission_type.replace('_', ' ')}</Table.Td>
+                  <Table.Td c="#5a6478" tt="capitalize">{m.mission_type.replace(/_/g, ' ')}</Table.Td>
                   <Table.Td c="#5a6478">{m.location_name || '—'}</Table.Td>
                   <Table.Td c="#5a6478" style={{ fontFamily: "'Share Tech Mono', monospace" }}>{m.mission_date || '—'}</Table.Td>
                   <Table.Td><Badge color={statusColors[m.status]} variant="light" size="sm">{m.status}</Badge></Table.Td>
@@ -113,6 +108,7 @@ export default function Missions() {
                         size="sm"
                         onClick={(e) => { e.stopPropagation(); navigate(`/missions/${m.id}/edit`); }}
                         title="Edit mission"
+                        aria-label={`Edit mission: ${m.title}`}
                       >
                         <IconEdit size={14} />
                       </ActionIcon>
@@ -122,6 +118,7 @@ export default function Missions() {
                         size="sm"
                         onClick={(e) => { e.stopPropagation(); handleDelete(m.id, m.title); }}
                         title="Delete mission"
+                        aria-label={`Delete mission: ${m.title}`}
                       >
                         <IconTrash size={14} />
                       </ActionIcon>

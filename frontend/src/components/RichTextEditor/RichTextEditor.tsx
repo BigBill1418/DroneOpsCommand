@@ -33,7 +33,7 @@ export default function RichTextEditor({ content, onChange, minHeight = '300px' 
     if (editor && content !== editor.getHTML()) {
       editor.commands.setContent(content);
     }
-  }, [content]);
+  }, [content, editor]);
 
   return (
     <MantineRTE

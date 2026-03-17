@@ -23,13 +23,7 @@ import { notifications } from '@mantine/notifications';
 import { IconCheck, IconX, IconPlus, IconEdit, IconTrash, IconCurrencyDollar, IconMail, IconSend, IconBrandPaypal, IconCash, IconDrone, IconPlugConnected, IconMapPin, IconSearch, IconSignature, IconUpload, IconSettings, IconReceipt, IconPlane } from '@tabler/icons-react';
 import api from '../api/client';
 import { Aircraft, RateTemplate } from '../api/types';
-
-const inputStyles = {
-  input: { background: '#050608', borderColor: '#1a1f2e', color: '#e8edf2' },
-  label: { color: '#5a6478', fontFamily: "'Share Tech Mono', monospace", fontSize: '13px', letterSpacing: '1px' },
-};
-
-const cardStyle = { background: '#0e1117', border: '1px solid #1a1f2e' };
+import { inputStyles, cardStyle } from '../components/shared/styles';
 
 const tabStyles = {
   tab: {
@@ -43,7 +37,7 @@ const tabStyles = {
 };
 
 export default function Settings() {
-  const [llmStatus, setLlmStatus] = useState<any>(null);
+  const [llmStatus, setLlmStatus] = useState<{ status: string; configured_model?: string; model_available?: boolean; models?: string[] } | null>(null);
   const [llmLoading, setLlmLoading] = useState(true);
   const [aircraft, setAircraft] = useState<Aircraft[]>([]);
   const [aircraftModal, setAircraftModal] = useState(false);
@@ -56,7 +50,7 @@ export default function Settings() {
   const [paymentSaving, setPaymentSaving] = useState(false);
   const [odlSaving, setOdlSaving] = useState(false);
   const [odlTesting, setOdlTesting] = useState(false);
-  const [odlStatus, setOdlStatus] = useState<any>(null);
+  const [odlStatus, setOdlStatus] = useState<{ status: string; message?: string } | null>(null);
   const [weatherSaving, setWeatherSaving] = useState(false);
   const [weatherLooking, setWeatherLooking] = useState(false);
   const [weatherQuery, setWeatherQuery] = useState('');
@@ -97,8 +91,8 @@ export default function Settings() {
 
   useEffect(() => {
     api.get('/llm/status').then((r) => setLlmStatus(r.data)).catch(() => setLlmStatus({ status: 'offline' })).finally(() => setLlmLoading(false));
-    api.get('/aircraft').then((r) => setAircraft(r.data)).catch(() => {});
-    api.get('/rate-templates').then((r) => setRateTemplates(r.data)).catch(() => {});
+    api.get('/aircraft').then((r) => setAircraft(r.data)).catch(() => setAircraft([]));
+    api.get('/rate-templates').then((r) => setRateTemplates(r.data)).catch(() => setRateTemplates([]));
     api.get('/settings/smtp').then((r) => smtpForm.setValues(r.data)).catch(() => {});
     api.get('/settings/payment').then((r) => paymentForm.setValues(r.data)).catch(() => {});
     api.get('/settings/opendronelog').then((r) => odlForm.setValues(r.data)).catch(() => {});
@@ -140,8 +134,12 @@ export default function Settings() {
 
   const handleDeleteAircraft = async (id: string) => {
     if (!confirm('Delete this aircraft?')) return;
-    await api.delete(`/aircraft/${id}`);
-    setAircraft((prev) => prev.filter((a) => a.id !== id));
+    try {
+      await api.delete(`/aircraft/${id}`);
+      setAircraft((prev) => prev.filter((a) => a.id !== id));
+    } catch {
+      notifications.show({ title: 'Error', message: 'Failed to delete aircraft', color: 'red' });
+    }
   };
 
   const handleSaveRate = async (values: typeof rateForm.values) => {
@@ -228,8 +226,9 @@ export default function Settings() {
     try {
       const r = await api.get('/flights/test');
       setOdlStatus(r.data);
-    } catch (err: any) {
-      setOdlStatus({ status: 'error', message: err.response?.data?.detail || 'Connection failed' });
+    } catch (err: unknown) {
+      const axiosErr = err as { response?: { data?: { detail?: string } } };
+      setOdlStatus({ status: 'error', message: axiosErr.response?.data?.detail || 'Connection failed' });
     } finally {
       setOdlTesting(false);
     }
@@ -510,8 +509,8 @@ export default function Settings() {
                     const input = document.createElement('input');
                     input.type = 'file';
                     input.accept = '.pdf';
-                    input.onchange = async (e: any) => {
-                      const file = e.target.files[0];
+                    input.onchange = async (e: Event) => {
+                      const file = (e.target as HTMLInputElement).files?.[0];
                       if (!file) return;
                       setTosUploading(true);
                       try {
@@ -608,10 +607,10 @@ export default function Settings() {
                       </Table.Td>
                       <Table.Td>
                         <Group gap="xs">
-                          <ActionIcon variant="subtle" color="cyan" onClick={() => handleEditAircraft(a)}>
+                          <ActionIcon variant="subtle" color="cyan" onClick={() => handleEditAircraft(a)} aria-label={`Edit aircraft: ${a.model_name}`}>
                             <IconEdit size={14} />
                           </ActionIcon>
-                          <ActionIcon variant="subtle" color="red" onClick={() => handleDeleteAircraft(a.id)}>
+                          <ActionIcon variant="subtle" color="red" onClick={() => handleDeleteAircraft(a.id)} aria-label={`Delete aircraft: ${a.model_name}`}>
                             <IconTrash size={14} />
                           </ActionIcon>
                         </Group>
@@ -659,10 +658,10 @@ export default function Settings() {
                       <Table.Td c="#5a6478">{t.default_unit || '—'}</Table.Td>
                       <Table.Td>
                         <Group gap="xs">
-                          <ActionIcon variant="subtle" color="cyan" onClick={() => handleEditRate(t)}>
+                          <ActionIcon variant="subtle" color="cyan" onClick={() => handleEditRate(t)} aria-label={`Edit rate template: ${t.name}`}>
                             <IconEdit size={14} />
                           </ActionIcon>
-                          <ActionIcon variant="subtle" color="red" onClick={() => handleDeleteRate(t.id)}>
+                          <ActionIcon variant="subtle" color="red" onClick={() => handleDeleteRate(t.id)} aria-label={`Delete rate template: ${t.name}`}>
                             <IconTrash size={14} />
                           </ActionIcon>
                         </Group>

@@ -121,3 +121,53 @@ export interface CoverageData {
   num_flights: number;
   total_points: number;
 }
+
+export interface NominatimResult {
+  display_name: string;
+  address?: {
+    house_number?: string;
+    road?: string;
+    city?: string;
+    town?: string;
+    village?: string;
+    state?: string;
+    postcode?: string;
+  };
+}
+
+export interface FlightRecord {
+  id?: number | string;
+  display_name?: string;
+  displayName?: string;
+  name?: string;
+  title?: string;
+  file_name?: string;
+  fileName?: string;
+  duration_secs?: number;
+  durationSecs?: number;
+  duration?: number;
+  duration_seconds?: number;
+  total_distance?: number;
+  totalDistance?: number;
+  distance?: number;
+  distance_meters?: number;
+  max_altitude?: number;
+  maxAltitude?: number;
+  max_alt?: number;
+  max_speed?: number;
+  maxSpeed?: number;
+  drone_model?: string;
+  droneModel?: string;
+  drone?: string;
+  aircraft?: string;
+  model?: string;
+  start_time?: string;
+  startTime?: string;
+  date?: string;
+  created_at?: string;
+  point_count?: number;
+  pointCount?: number;
+  notes?: string;
+  drone_serial?: string;
+  droneSerial?: string;
+}

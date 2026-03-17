@@ -29,42 +29,8 @@ import {
 import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
 import { Mission, Customer } from '../api/types';
-
-function StatCard({ icon: Icon, label, value, color }: { icon: any; label: string; value: string; color: string }) {
-  return (
-    <Card
-      padding="sm"
-      radius="md"
-      style={{ background: '#0e1117', border: '1px solid #1a1f2e' }}
-    >
-      <Group gap="sm">
-        <Icon size={24} color={color} />
-        <div>
-          <Text
-            size="xs"
-            c="#5a6478"
-            style={{ fontFamily: "'Share Tech Mono', monospace", letterSpacing: '1px', fontSize: '10px' }}
-          >
-            {label}
-          </Text>
-          <Text
-            fw={700}
-            c="#e8edf2"
-            style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: '22px', lineHeight: 1.1 }}
-          >
-            {value}
-          </Text>
-        </div>
-      </Group>
-    </Card>
-  );
-}
-
-const statusColors: Record<string, string> = {
-  draft: 'yellow',
-  completed: 'cyan',
-  sent: 'green',
-};
+import StatCard from '../components/shared/StatCard';
+import { statusColors } from '../components/shared/styles';
 
 interface WeatherData {
   temperature_f: number | null;
@@ -155,13 +121,13 @@ export default function Dashboard() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    api.get('/missions').then((r) => setMissions(r.data)).catch(() => {});
-    api.get('/customers').then((r) => setCustomers(r.data)).catch(() => {});
+    api.get('/missions').then((r) => setMissions(r.data)).catch(() => setMissions([]));
+    api.get('/customers').then((r) => setCustomers(r.data)).catch(() => setCustomers([]));
     api.get('/flights').then((r) => {
       const data = Array.isArray(r.data) ? r.data : r.data?.flights || r.data?.data || r.data?.results || r.data?.items || [];
       setFlightCount(data.length);
     }).catch(() => setFlightCount(0));
-    api.get('/weather/current').then((r) => setWxData(r.data)).catch(() => {}).finally(() => setWxLoading(false));
+    api.get('/weather/current').then((r) => setWxData(r.data)).catch(() => setWxData(null)).finally(() => setWxLoading(false));
   }, []);
 
   const recentMissions = missions.slice(0, 5);
@@ -242,11 +208,12 @@ export default function Dashboard() {
                     key={mission.id}
                     style={{ cursor: 'pointer' }}
                     onClick={() => navigate(`/missions/${mission.id}`)}
+                    aria-label={`View mission: ${mission.title}`}
                   >
                     <Table.Td>{mission.title}</Table.Td>
                     <Table.Td>
                       <Text size="xs" c="#5a6478" tt="capitalize">
-                        {mission.mission_type.replace('_', ' ')}
+                        {mission.mission_type.replace(/_/g, ' ')}
                       </Text>
                     </Table.Td>
                     <Table.Td>
