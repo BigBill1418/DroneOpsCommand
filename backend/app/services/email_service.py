@@ -135,10 +135,16 @@ async def send_intake_email(
     db: AsyncSession | None = None,
 ) -> bool:
     """Send intake form link to customer via email."""
-    logger.info("Preparing intake email to %s (existing=%s)", to_email, is_existing_customer)
+    import time as _time
+    start = _time.perf_counter()
+
+    logger.info("[EMAIL-INTAKE] Preparing intake email to=%s, customer_name=%s, existing=%s, expires=%s",
+                to_email, customer_name, is_existing_customer, expires_at)
 
     if db:
         smtp = await get_smtp_settings(db)
+        logger.debug("[EMAIL-INTAKE] Loaded SMTP settings from DB: host=%s port=%s user=%s tls=%s",
+                      smtp["smtp_host"], smtp["smtp_port"], smtp["smtp_user"], smtp["smtp_use_tls"])
     else:
         smtp = {
             "smtp_host": settings.smtp_host,
@@ -149,11 +155,13 @@ async def send_intake_email(
             "smtp_from_name": settings.smtp_from_name,
             "smtp_use_tls": settings.smtp_use_tls,
         }
+        logger.debug("[EMAIL-INTAKE] Using env SMTP settings: host=%s port=%s", smtp["smtp_host"], smtp["smtp_port"])
 
     if not smtp["smtp_host"]:
-        logger.error("SMTP not configured — cannot send intake email")
+        logger.error("[EMAIL-INTAKE] SMTP not configured — cannot send intake email to %s", to_email)
         raise ValueError("SMTP not configured. Set SMTP_HOST in settings.")
 
+    logger.debug("[EMAIL-INTAKE] Rendering intake_email.html template")
     template = jinja_env.get_template("intake_email.html")
     html_body = template.render(
         customer_name=customer_name,
@@ -161,6 +169,7 @@ async def send_intake_email(
         expires_at=expires_at.strftime("%B %d, %Y") if hasattr(expires_at, "strftime") else str(expires_at),
         is_existing_customer=is_existing_customer,
     )
+    logger.debug("[EMAIL-INTAKE] Template rendered, html_length=%d", len(html_body))
 
     msg = MIMEMultipart()
     msg["From"] = f"{smtp['smtp_from_name']} <{smtp['smtp_from_email']}>"
@@ -168,6 +177,8 @@ async def send_intake_email(
     subject = "Complete Your Customer Profile — BarnardHQ" if is_existing_customer else "Welcome to BarnardHQ — Complete Your Onboarding"
     msg["Subject"] = subject
     msg.attach(MIMEText(html_body, "html"))
+
+    logger.info("[EMAIL-INTAKE] Sending via SMTP host=%s:%s to=%s subject='%s'", smtp["smtp_host"], smtp["smtp_port"], to_email, subject)
 
     try:
         await aiosmtplib.send(
@@ -178,9 +189,11 @@ async def send_intake_email(
             password=smtp["smtp_password"] or None,
             use_tls=smtp["smtp_use_tls"] if isinstance(smtp["smtp_use_tls"], bool) else _parse_bool(str(smtp["smtp_use_tls"]), True),
         )
-        logger.info("Intake email sent to %s", to_email)
+        elapsed = _time.perf_counter() - start
+        logger.info("[EMAIL-INTAKE] SUCCESS — Sent to %s in %.3fs", to_email, elapsed)
     except Exception as exc:
-        logger.error("Intake email SMTP send failed to %s: %s", to_email, exc, exc_info=True)
+        elapsed = _time.perf_counter() - start
+        logger.error("[EMAIL-INTAKE] FAILED — SMTP send to %s failed after %.3fs: %s", to_email, elapsed, exc, exc_info=True)
         raise
 
     return True
