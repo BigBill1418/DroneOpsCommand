@@ -294,23 +294,31 @@ export default function CustomerIntake() {
                 border: '1px solid #1a1f2e',
                 borderRadius: 6,
                 overflow: 'hidden',
-                background: '#1a1f2e',
               }}
             >
               {tosPdfBlobUrl ? (
-                <object
-                  data={`${tosPdfBlobUrl}#toolbar=0&navpanes=0&scrollbar=1`}
-                  type="application/pdf"
-                  style={{ width: '100%', height: 500, display: 'block' }}
-                >
+                <>
                   <iframe
-                    src={`${tosPdfBlobUrl}#toolbar=0&navpanes=0&scrollbar=1`}
+                    src={`${tosPdfBlobUrl}#toolbar=0&navpanes=0&scrollbar=1&view=FitH`}
                     style={{ width: '100%', height: 500, border: 'none', display: 'block' }}
                     title="Terms of Service"
                   />
-                </object>
+                  <Group justify="center" py="xs" style={{ background: '#050608', borderTop: '1px solid #1a1f2e' }}>
+                    <Button
+                      variant="subtle"
+                      color="cyan"
+                      size="xs"
+                      component="a"
+                      href={tosPdfBlobUrl}
+                      download="Terms_of_Service.pdf"
+                      styles={{ root: { fontFamily: "'Share Tech Mono', monospace" } }}
+                    >
+                      DOWNLOAD PDF
+                    </Button>
+                  </Group>
+                </>
               ) : (
-                <Center py={40}>
+                <Center py={40} style={{ background: '#050608' }}>
                   <Loader color="cyan" size="sm" />
                   <Text c="#5a6478" size="sm" ml="sm" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
                     Loading document...
@@ -328,7 +336,7 @@ export default function CustomerIntake() {
               }}
             >
               <Text c="#5a6478" size="sm" ta="center">
-                Terms of Service document will be provided by BarnardHQ.
+                Terms of Service document not yet available.
               </Text>
             </Box>
           )}

@@ -45,27 +45,25 @@ export default function Customers() {
   const [linkCopied, setLinkCopied] = useState(false);
   const linkInputRef = useRef<HTMLInputElement>(null);
 
-  const copyIntakeLink = () => {
+  const copyIntakeLink = async () => {
     if (!intakeResult) return;
-    const input = linkInputRef.current;
-    if (input) {
-      input.focus();
-      input.select();
-      input.setSelectionRange(0, input.value.length);
-    }
     try {
-      const ok = document.execCommand('copy');
-      if (!ok) throw new Error('execCommand returned false');
+      await navigator.clipboard.writeText(intakeResult.intake_url);
       setLinkCopied(true);
       setTimeout(() => setLinkCopied(false), 2000);
     } catch {
-      // Last resort: try clipboard API anyway
-      if (navigator.clipboard) {
-        navigator.clipboard.writeText(intakeResult.intake_url)
-          .then(() => { setLinkCopied(true); setTimeout(() => setLinkCopied(false), 2000); })
-          .catch(() => notifications.show({ title: 'Copy failed', message: 'Please select the link and copy manually (Ctrl+C / Cmd+C).', color: 'orange' }));
-      } else {
-        notifications.show({ title: 'Copy failed', message: 'Please select the link and copy manually (Ctrl+C / Cmd+C).', color: 'orange' });
+      // Fallback for older browsers or insecure contexts
+      const input = linkInputRef.current;
+      if (input) {
+        input.focus();
+        input.select();
+        try {
+          document.execCommand('copy');
+          setLinkCopied(true);
+          setTimeout(() => setLinkCopied(false), 2000);
+        } catch {
+          notifications.show({ title: 'Copy failed', message: 'Please select the link and copy manually (Ctrl+C / Cmd+C).', color: 'orange' });
+        }
       }
     }
   };
