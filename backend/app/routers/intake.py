@@ -63,19 +63,32 @@ async def initiate_services(
         await db.flush()
         logger.info("[INTAKE-INIT] Created new customer stub id=%s for email=%s", customer.id, email)
 
-    # Generate token
-    token = secrets.token_urlsafe(32)
-    expires_at = datetime.utcnow() + timedelta(days=settings.intake_token_expire_days)
-    customer.intake_token = token
-    customer.intake_token_expires_at = expires_at
-    await db.flush()
+    # Reuse existing valid token if present and not expired
+    if (
+        customer.intake_token
+        and customer.intake_token_expires_at
+        and customer.intake_token_expires_at > datetime.utcnow()
+        and not customer.intake_completed_at
+    ):
+        token = customer.intake_token
+        expires_at = customer.intake_token_expires_at
+        logger.info("[INTAKE-INIT] Reusing existing valid token for customer %s, expires=%s", customer.id, expires_at)
+    else:
+        token = secrets.token_urlsafe(32)
+        expires_at = datetime.utcnow() + timedelta(days=settings.intake_token_expire_days)
+        customer.intake_token = token
+        customer.intake_token_expires_at = expires_at
+        if customer.intake_completed_at:
+            customer.intake_completed_at = None  # reset for re-enrollment
+        await db.flush()
+        logger.info("[INTAKE-INIT] New token generated for customer %s, expires=%s", customer.id, expires_at)
 
     # Build the intake URL
     frontend_url = settings.frontend_url.rstrip("/")
     intake_url = f"{frontend_url}/intake/{token}"
 
     elapsed = time.perf_counter() - start
-    logger.info("[INTAKE-INIT] Token generated for customer %s, expires=%s, url=%s (%.3fs)", customer.id, expires_at, intake_url, elapsed)
+    logger.info("[INTAKE-INIT] Token ready for customer %s, url=%s (%.3fs)", customer.id, intake_url, elapsed)
 
     return IntakeTokenResponse(
         intake_token=token,
