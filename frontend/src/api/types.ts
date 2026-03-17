@@ -8,6 +8,7 @@ export interface Customer {
   notes: string | null;
   tos_signed: boolean;
   tos_signed_at: string | null;
+  signature_data: string | null;
   intake_completed_at: string | null;
   intake_token: string | null;
   created_at: string;

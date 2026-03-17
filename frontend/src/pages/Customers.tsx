@@ -21,7 +21,7 @@ import {
 } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
-import { IconPlus, IconEdit, IconTrash, IconSearch, IconMapPin, IconSend, IconCheck, IconCopy, IconFileSignature, IconMail } from '@tabler/icons-react';
+import { IconPlus, IconEdit, IconTrash, IconSearch, IconMapPin, IconSend, IconCheck, IconCopy, IconSignature, IconMail } from '@tabler/icons-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
 import { Customer } from '../api/types';
@@ -269,7 +269,7 @@ export default function Customers() {
                       {!c.tos_signed && c.email && (
                         <Tooltip label="Send TOS Form">
                           <ActionIcon variant="subtle" color="orange" onClick={() => handleSendTos(c)}>
-                            <IconFileSignature size={16} />
+                            <IconSignature size={16} />
                           </ActionIcon>
                         </Tooltip>
                       )}
