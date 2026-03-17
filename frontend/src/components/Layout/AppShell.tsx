@@ -79,7 +79,7 @@ export default function AppLayout({ onLogout }: AppLayoutProps) {
               style={{ fontFamily: "'Share Tech Mono', monospace", letterSpacing: '2px' }}
               visibleFrom="sm"
             >
-              DRONE OPS REPORT
+              FLIGHT OPERATIONS COMMAND CENTER
             </Text>
           </Group>
           <Group>
@@ -142,7 +142,7 @@ export default function AppLayout({ onLogout }: AppLayoutProps) {
             left: 16,
           }}
         >
-          v1.12.0
+          v1.13.0
         </Text>
       </AppShell.Navbar>
 

@@ -1,13 +1,28 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { Document, Page, pdfjs } from 'react-pdf';
-import { Box, Group, ActionIcon, Text, Loader, Center, Button } from '@mantine/core';
-import { IconChevronLeft, IconChevronRight, IconDownload, IconZoomIn, IconZoomOut } from '@tabler/icons-react';
+import { Box, Group, ActionIcon, Text, Loader, Center, Button, Stack } from '@mantine/core';
+import { IconChevronLeft, IconChevronRight, IconDownload, IconZoomIn, IconZoomOut, IconRefresh } from '@tabler/icons-react';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
 
-// Use Vite ?url import for reliable worker resolution in both dev and production builds
-import pdfjsWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
-pdfjs.GlobalWorkerOptions.workerSrc = pdfjsWorkerUrl;
+// Configure PDF.js worker — use local build with CDN fallback
+const PDFJS_VERSION = pdfjs.version;
+
+function initWorker() {
+  // Try local worker first (Vite ?url import resolved at build time)
+  try {
+    const workerUrl = new URL(
+      'pdfjs-dist/build/pdf.worker.min.mjs',
+      import.meta.url
+    ).toString();
+    pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
+  } catch {
+    // Fallback: use unpkg CDN
+    pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${PDFJS_VERSION}/build/pdf.worker.min.mjs`;
+  }
+}
+
+initWorker();
 
 interface PdfViewerProps {
   url: string;
@@ -21,6 +36,8 @@ export default function PdfViewer({ url, height = 500, showToolbar = true, downl
   const [pageNumber, setPageNumber] = useState(1);
   const [scale, setScale] = useState(1.0);
   const [containerWidth, setContainerWidth] = useState(0);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [retryKey, setRetryKey] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -37,9 +54,28 @@ export default function PdfViewer({ url, height = 500, showToolbar = true, downl
   const onDocumentLoadSuccess = ({ numPages }: { numPages: number }) => {
     setNumPages(numPages);
     setPageNumber(1);
+    setLoadError(null);
   };
 
+  const onDocumentLoadError = useCallback((error: Error) => {
+    console.error('[PdfViewer] Load error:', error.message);
+    setLoadError(error.message || 'Failed to load PDF document');
+  }, []);
+
+  const handleRetry = useCallback(() => {
+    setLoadError(null);
+    setNumPages(0);
+    setRetryKey((k) => k + 1);
+  }, []);
+
   const pageWidth = containerWidth > 0 ? (containerWidth - 2) * scale : undefined;
+
+  // PDF.js document options for broader compatibility
+  const documentOptions = {
+    cMapUrl: `//unpkg.com/pdfjs-dist@${PDFJS_VERSION}/cmaps/`,
+    cMapPacked: true,
+    standardFontDataUrl: `//unpkg.com/pdfjs-dist@${PDFJS_VERSION}/standard_fonts/`,
+  };
 
   return (
     <Box
@@ -60,8 +96,11 @@ export default function PdfViewer({ url, height = 500, showToolbar = true, downl
         }}
       >
         <Document
+          key={retryKey}
           file={url}
           onLoadSuccess={onDocumentLoadSuccess}
+          onLoadError={onDocumentLoadError}
+          options={documentOptions}
           loading={
             <Center style={{ height }}>
               <Loader color="cyan" size="sm" />
@@ -71,32 +110,46 @@ export default function PdfViewer({ url, height = 500, showToolbar = true, downl
             </Center>
           }
           error={
-            <Center style={{ height, flexDirection: 'column', gap: 12 }}>
-              <Text c="#5a6478" size="sm" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
-                Unable to display PDF inline.
-              </Text>
-              {downloadFilename && (
-                <Button
-                  variant="light"
-                  color="cyan"
-                  size="xs"
-                  component="a"
-                  href={url}
-                  download={downloadFilename}
-                  leftSection={<IconDownload size={14} />}
-                  styles={{ root: { fontFamily: "'Share Tech Mono', monospace" } }}
-                >
-                  DOWNLOAD PDF
-                </Button>
-              )}
+            <Center style={{ height, flexDirection: 'column', gap: 12, padding: 20 }}>
+              <Stack align="center" gap="sm">
+                <Text c="#5a6478" size="sm" ta="center" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+                  {loadError || 'Could not render PDF.'}
+                </Text>
+                <Group gap="xs">
+                  <Button
+                    variant="light"
+                    color="cyan"
+                    size="xs"
+                    leftSection={<IconRefresh size={14} />}
+                    onClick={handleRetry}
+                    styles={{ root: { fontFamily: "'Share Tech Mono', monospace" } }}
+                  >
+                    RETRY
+                  </Button>
+                  {downloadFilename && (
+                    <Button
+                      variant="light"
+                      color="cyan"
+                      size="xs"
+                      component="a"
+                      href={url}
+                      download={downloadFilename}
+                      leftSection={<IconDownload size={14} />}
+                      styles={{ root: { fontFamily: "'Share Tech Mono', monospace" } }}
+                    >
+                      DOWNLOAD PDF
+                    </Button>
+                  )}
+                </Group>
+              </Stack>
             </Center>
           }
         >
           <Page
             pageNumber={pageNumber}
             width={pageWidth}
-            renderTextLayer={false}
-            renderAnnotationLayer={false}
+            renderTextLayer={true}
+            renderAnnotationLayer={true}
           />
         </Document>
       </Box>

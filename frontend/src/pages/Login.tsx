@@ -79,7 +79,7 @@ export default function Login({ onLogin }: LoginProps) {
                   c="#5a6478"
                   style={{ fontFamily: "'Share Tech Mono', monospace", letterSpacing: '3px' }}
                 >
-                  DRONE OPS REPORT
+                  FLIGHT OPERATIONS COMMAND CENTER
                 </Text>
               </div>
             </Center>

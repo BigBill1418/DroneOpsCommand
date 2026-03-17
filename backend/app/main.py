@@ -138,9 +138,9 @@ async def lifespan(app: FastAPI):
 limiter = Limiter(key_func=get_remote_address)
 
 app = FastAPI(
-    title="DroneOpsReport",
+    title="Flight Operations Command Center",
     description="Invoicing and after-action reporting tool for drone operations",
-    version="1.12.0",
+    version="1.13.0",
     lifespan=lifespan,
 )
 
@@ -207,4 +207,4 @@ async def log_requests(request: Request, call_next):
 
 @app.get("/api/health")
 async def health_check():
-    return {"status": "healthy", "service": "DroneOpsReport"}
+    return {"status": "healthy", "service": "Flight Operations Command Center"}
