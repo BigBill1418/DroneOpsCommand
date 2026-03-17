@@ -130,7 +130,7 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     ports:
-      - "${FRONTEND_PORT:-3080}:80"
+      - "${FRONTEND_PORT:-3080}:8080"
     depends_on:
       - backend
 
