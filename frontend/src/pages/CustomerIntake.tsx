@@ -17,6 +17,7 @@ import { IconCheck, IconAlertTriangle, IconArrowLeft, IconArrowRight } from '@ta
 import { useParams } from 'react-router-dom';
 import SignatureCanvas from 'react-signature-canvas';
 import axios from 'axios';
+import PdfViewer from '../components/PDFPreview/PdfViewer';
 
 const inputStyles = {
   input: { background: '#050608', borderColor: '#1a1f2e', color: '#e8edf2' },
@@ -52,7 +53,6 @@ export default function CustomerIntake() {
   const [tosPdfBlobUrl, setTosPdfBlobUrl] = useState<string | null>(null);
 
   const sigRef = useRef<SignatureCanvas>(null);
-  const tosContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!token) { setState('error'); setErrorMsg('Invalid link'); return; }
@@ -287,45 +287,19 @@ export default function CustomerIntake() {
           </Text>
 
           {/* TOS PDF viewer */}
-          {tosPdfUrl ? (
-            <Box
-              ref={tosContainerRef}
-              style={{
-                border: '1px solid #1a1f2e',
-                borderRadius: 6,
-                overflow: 'hidden',
-              }}
-            >
-              {tosPdfBlobUrl ? (
-                <>
-                  <iframe
-                    src={`${tosPdfBlobUrl}#toolbar=0&navpanes=0&scrollbar=1&view=FitH`}
-                    style={{ width: '100%', height: 500, border: 'none', display: 'block' }}
-                    title="Terms of Service"
-                  />
-                  <Group justify="center" py="xs" style={{ background: '#050608', borderTop: '1px solid #1a1f2e' }}>
-                    <Button
-                      variant="subtle"
-                      color="cyan"
-                      size="xs"
-                      component="a"
-                      href={tosPdfBlobUrl}
-                      download="Terms_of_Service.pdf"
-                      styles={{ root: { fontFamily: "'Share Tech Mono', monospace" } }}
-                    >
-                      DOWNLOAD PDF
-                    </Button>
-                  </Group>
-                </>
-              ) : (
-                <Center py={40} style={{ background: '#050608' }}>
-                  <Loader color="cyan" size="sm" />
-                  <Text c="#5a6478" size="sm" ml="sm" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
-                    Loading document...
-                  </Text>
-                </Center>
-              )}
-            </Box>
+          {tosPdfUrl && tosPdfBlobUrl ? (
+            <PdfViewer
+              url={tosPdfBlobUrl}
+              height={500}
+              downloadFilename="Terms_of_Service.pdf"
+            />
+          ) : tosPdfUrl ? (
+            <Center py={40} style={{ background: '#050608', border: '1px solid #1a1f2e', borderRadius: 6 }}>
+              <Loader color="cyan" size="sm" />
+              <Text c="#5a6478" size="sm" ml="sm" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+                Loading document...
+              </Text>
+            </Center>
           ) : (
             <Box
               p="md"

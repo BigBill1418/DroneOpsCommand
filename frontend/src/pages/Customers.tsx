@@ -16,14 +16,14 @@ import {
   Tooltip,
   Popover,
   Loader,
-  Image,
 } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
-import { IconPlus, IconEdit, IconTrash, IconSearch, IconMapPin, IconSend, IconCheck, IconCopy, IconSignature, IconMail, IconDownload } from '@tabler/icons-react';
+import { IconPlus, IconEdit, IconTrash, IconSearch, IconMapPin, IconSend, IconCheck, IconCopy, IconSignature, IconMail } from '@tabler/icons-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
 import { Customer } from '../api/types';
+import PdfViewer from '../components/PDFPreview/PdfViewer';
 
 const inputStyles = {
   input: { background: '#050608', borderColor: '#1a1f2e', color: '#e8edf2' },
@@ -492,20 +492,6 @@ export default function Customers() {
                   </Text>
                 )}
               </Group>
-              {signedTosBlobUrl && (
-                <Button
-                  variant="light"
-                  color="cyan"
-                  size="xs"
-                  leftSection={<IconDownload size={14} />}
-                  component="a"
-                  href={signedTosBlobUrl}
-                  download={`BarnardHQ_TOS_Signed_${(viewingCustomer.name || 'customer').replace(/\s+/g, '_')}.pdf`}
-                  styles={{ root: { fontFamily: "'Share Tech Mono', monospace" } }}
-                >
-                  SAVE PDF
-                </Button>
-              )}
             </Group>
 
             {signedTosLoading ? (
@@ -516,19 +502,11 @@ export default function Customers() {
                 </Text>
               </div>
             ) : signedTosBlobUrl ? (
-              <div style={{ border: '1px solid #1a1f2e', borderRadius: 6, overflow: 'hidden', background: '#1a1f2e' }}>
-                <object
-                  data={`${signedTosBlobUrl}#toolbar=1&navpanes=0&scrollbar=1`}
-                  type="application/pdf"
-                  style={{ width: '100%', height: 600, display: 'block' }}
-                >
-                  <iframe
-                    src={`${signedTosBlobUrl}#toolbar=1&navpanes=0&scrollbar=1`}
-                    style={{ width: '100%', height: 600, border: 'none', display: 'block' }}
-                    title="Signed Terms of Service"
-                  />
-                </object>
-              </div>
+              <PdfViewer
+                url={signedTosBlobUrl}
+                height={600}
+                downloadFilename={`TOS_Signed_${(viewingCustomer.name || 'customer').replace(/\s+/g, '_')}.pdf`}
+              />
             ) : (
               <Text c="#5a6478" size="sm" ta="center" py={40}>
                 Could not load the signed TOS document.
