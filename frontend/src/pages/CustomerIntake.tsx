@@ -72,9 +72,17 @@ export default function CustomerIntake() {
       .catch((err) => {
         if (err.response?.status === 410) {
           setState('expired');
+        } else if (err.response?.status === 404) {
+          setState('error');
+          setErrorMsg('This link is invalid or has expired. Please request a new one.');
+        } else if (!err.response) {
+          // Network error or non-JSON response (e.g., Cloudflare Access redirect)
+          setState('error');
+          setErrorMsg('Unable to reach the server. If this keeps happening, try clearing your browser cookies and revisiting the link.');
+          console.error('[Intake] Network/parse error — likely Cloudflare Access intercepted the API call:', err.message);
         } else {
           setState('error');
-          setErrorMsg(err.response?.data?.detail || 'This link is invalid or has expired.');
+          setErrorMsg(err.response?.data?.detail || 'Something went wrong. Please try again or contact BarnardHQ.');
         }
       });
   }, [token]);
