@@ -2,7 +2,7 @@
 
 Invoicing and after-action reporting tool for drone operations. Built for [BarnardHQ](https://barnardhq.com).
 
-**Version 1.10.9**
+**Version 1.10.10**
 
 ---
 

@@ -43,26 +43,30 @@ export default function Customers() {
   const [initiateLoading, setInitiateLoading] = useState(false);
   const [intakeResult, setIntakeResult] = useState<{ intake_url: string; customer_id?: string } | null>(null);
   const [linkCopied, setLinkCopied] = useState(false);
+  const linkInputRef = useRef<HTMLInputElement>(null);
 
-  const copyIntakeLink = async () => {
+  const copyIntakeLink = () => {
     if (!intakeResult) return;
+    const input = linkInputRef.current;
+    if (input) {
+      input.focus();
+      input.select();
+      input.setSelectionRange(0, input.value.length);
+    }
     try {
-      if (navigator.clipboard && window.isSecureContext) {
-        await navigator.clipboard.writeText(intakeResult.intake_url);
-      } else {
-        const ta = document.createElement('textarea');
-        ta.value = intakeResult.intake_url;
-        ta.style.position = 'fixed';
-        ta.style.opacity = '0';
-        document.body.appendChild(ta);
-        ta.select();
-        document.execCommand('copy');
-        document.body.removeChild(ta);
-      }
+      const ok = document.execCommand('copy');
+      if (!ok) throw new Error('execCommand returned false');
       setLinkCopied(true);
       setTimeout(() => setLinkCopied(false), 2000);
     } catch {
-      notifications.show({ title: 'Copy failed', message: 'Please select and copy the link manually.', color: 'red' });
+      // Last resort: try clipboard API anyway
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(intakeResult.intake_url)
+          .then(() => { setLinkCopied(true); setTimeout(() => setLinkCopied(false), 2000); })
+          .catch(() => notifications.show({ title: 'Copy failed', message: 'Please select the link and copy manually (Ctrl+C / Cmd+C).', color: 'orange' }));
+      } else {
+        notifications.show({ title: 'Copy failed', message: 'Please select the link and copy manually (Ctrl+C / Cmd+C).', color: 'orange' });
+      }
     }
   };
 
@@ -433,8 +437,10 @@ export default function Customers() {
             </Text>
             <Group gap="xs">
               <TextInput
+                ref={linkInputRef}
                 value={intakeResult.intake_url}
                 readOnly
+                onClick={(e) => (e.target as HTMLInputElement).select()}
                 style={{ flex: 1 }}
                 styles={inputStyles}
               />
