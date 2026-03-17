@@ -12,25 +12,30 @@ Cloudflare Tunnel lets customers reach intake forms at `https://droneops.barnard
 
 ## Step 1: Create the Tunnel in Cloudflare Dashboard
 
-1. Go to [Cloudflare Zero Trust](https://one.dash.cloudflare.com)
-2. Navigate to **Networks → Tunnels**
-3. Click **Create a tunnel**
-4. Choose **Cloudflared** as the connector type
-5. Name it something like `droneops-nas`
-6. **Copy the tunnel token** — it looks like `eyJhIjoiN2...` (a long base64 string)
+You can use either dashboard — both work:
 
-## Step 2: Configure the Public Hostname
+| Dashboard | Navigation |
+|-----------|------------|
+| **Main Cloudflare** ([dash.cloudflare.com](https://dash.cloudflare.com)) | **Networking → Tunnels** |
+| **Zero Trust** ([one.dash.cloudflare.com](https://one.dash.cloudflare.com)) | **Networks → Connectors → Cloudflare Tunnels** |
 
-Still in the tunnel setup wizard:
+1. Click **Create a tunnel**
+2. Choose **Cloudflared** as the connector type
+3. Name it something like `droneops-nas`
+4. **Copy the tunnel token** — it looks like `eyJhIjoiN2...` (a long base64 string)
+
+## Step 2: Add a Public Hostname Route
+
+When adding a route you'll see two options — **Public Hostname** and **Private Network (CIDR)**. Choose **Public Hostname** (CIDR is for routing entire IP subnets through WARP clients, which is not what we need).
 
 1. Click **Add a public hostname**
 2. Set:
    - **Subdomain**: `droneops`
    - **Domain**: `barnardhq.com`
-   - **Type**: `HTTP`
+   - **Service type**: `HTTP`
    - **URL**: `frontend:80`
 
-   > This tells Cloudflare to route `https://droneops.barnardhq.com` → your frontend nginx container, which already proxies `/api/*` to the backend.
+   > This tells Cloudflare to route `https://droneops.barnardhq.com` → your frontend nginx container, which already proxies `/api/*` to the backend. Cloudflare automatically creates the DNS CNAME record if it manages your domain's nameservers.
 
 3. Click **Save**
 
