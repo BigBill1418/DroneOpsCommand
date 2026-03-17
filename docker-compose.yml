@@ -85,6 +85,7 @@ services:
       - SMTP_USE_TLS=${SMTP_USE_TLS:-true}
       - UPLOAD_DIR=/data/uploads
       - REPORTS_DIR=/data/reports
+      - FRONTEND_URL=${FRONTEND_URL:-https://droneops.barnardhq.com}
     volumes:
       - app_data:/data
     ports:
@@ -131,9 +132,24 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     ports:
-      - "3080:80"
+      - "${FRONTEND_PORT:-3080}:80"
     depends_on:
       - backend
+
+  # ── Cloudflare Tunnel ─────────────────────────────────────────────
+  # Exposes the app securely without opening router ports.
+  # Set CLOUDFLARE_TUNNEL_TOKEN in .env to enable.
+  # See docs/cloudflare-tunnel-setup.md for setup instructions.
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel run
+    environment:
+      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN:-}
+    depends_on:
+      - frontend
+    profiles:
+      - tunnel
 
 volumes:
   postgres_data:

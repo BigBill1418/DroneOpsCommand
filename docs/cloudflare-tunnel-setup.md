@@ -1,0 +1,182 @@
+# Cloudflare Tunnel Setup for DroneOpsReport
+
+Cloudflare Tunnel lets customers reach intake forms at `https://droneops.barnardhq.com` without opening any ports on your router or exposing your NAS IP.
+
+## Prerequisites
+
+- A Cloudflare account (free tier works)
+- Your domain (`barnardhq.com`) added to Cloudflare (DNS managed by Cloudflare)
+- Docker Compose already running on your Synology NAS
+
+---
+
+## Step 1: Create the Tunnel in Cloudflare Dashboard
+
+1. Go to [Cloudflare Zero Trust](https://one.dash.cloudflare.com)
+2. Navigate to **Networks → Tunnels**
+3. Click **Create a tunnel**
+4. Choose **Cloudflared** as the connector type
+5. Name it something like `droneops-nas`
+6. **Copy the tunnel token** — it looks like `eyJhIjoiN2...` (a long base64 string)
+
+## Step 2: Configure the Public Hostname
+
+Still in the tunnel setup wizard:
+
+1. Click **Add a public hostname**
+2. Set:
+   - **Subdomain**: `droneops`
+   - **Domain**: `barnardhq.com`
+   - **Type**: `HTTP`
+   - **URL**: `frontend:80`
+
+   > This tells Cloudflare to route `https://droneops.barnardhq.com` → your frontend nginx container, which already proxies `/api/*` to the backend.
+
+3. Click **Save**
+
+## Step 3: Add the Token to Your .env
+
+On your NAS, edit your `.env` file:
+
+```bash
+# Cloudflare Tunnel
+CLOUDFLARE_TUNNEL_TOKEN=eyJhIjoiN2...your_token_here
+```
+
+Also make sure `FRONTEND_URL` matches:
+
+```bash
+FRONTEND_URL=https://droneops.barnardhq.com
+```
+
+## Step 4: Start the Tunnel
+
+The tunnel service uses a Docker Compose **profile** so it doesn't start by default:
+
+```bash
+# Start everything INCLUDING the tunnel
+docker compose --profile tunnel up -d
+
+# Or if your stack is already running, just add the tunnel
+docker compose --profile tunnel up -d cloudflared
+```
+
+To stop the tunnel without affecting other services:
+```bash
+docker compose --profile tunnel stop cloudflared
+```
+
+## Step 5: Verify
+
+1. Check the tunnel is connected:
+   ```bash
+   docker compose logs cloudflared
+   ```
+   You should see: `Connection ... registered`
+
+2. In the Cloudflare dashboard, the tunnel status should show **Healthy**
+
+3. Open `https://droneops.barnardhq.com` in your browser — you should see the DroneOpsReport login page
+
+4. Test an intake link: `https://droneops.barnardhq.com/intake/<token>`
+
+---
+
+## Optional: Lock Down Admin with Cloudflare Access
+
+This is the recommended security step — it makes intake forms public but locks the admin dashboard behind authentication.
+
+### Create an Access Application
+
+1. In Cloudflare Zero Trust, go to **Access → Applications**
+2. Click **Add an application → Self-hosted**
+3. Configure:
+   - **Application name**: `DroneOps Admin`
+   - **Session duration**: 24 hours
+   - **Subdomain**: `droneops` / **Domain**: `barnardhq.com`
+   - **Path**: leave empty (protects the whole site)
+4. Under **Policies**, create an "Allow" policy:
+   - **Policy name**: `Admin Only`
+   - **Selector**: `Emails` → enter your email address(es)
+   - **Authentication method**: One-time PIN (sent to your email) or Google/GitHub SSO
+
+### Bypass Intake Routes
+
+Still in the same application settings:
+
+1. Add a second policy **above** the Allow policy:
+   - **Policy name**: `Public Intake`
+   - **Action**: **Bypass**
+   - **Selector**: `Everyone`
+2. Under **Additional settings** for this bypass policy:
+   - **Path**: `/intake/*`
+
+3. Add another Bypass policy:
+   - **Path**: `/api/intake/form/*`
+
+4. And another:
+   - **Path**: `/api/intake/tos-pdf/*`
+
+This results in:
+- `/intake/*` (frontend form) → **Public** (no login needed)
+- `/api/intake/form/*` (form GET/POST) → **Public**
+- `/api/intake/tos-pdf/*` (TOS PDF download) → **Public**
+- **Everything else** → Requires Cloudflare Access login
+
+---
+
+## Optional: Restrict to Localhost When Tunnel Is Active
+
+If you only want to access the app through the tunnel (not via LAN), change the frontend port binding in `.env`:
+
+```bash
+# Only accessible from the NAS itself (and via tunnel)
+FRONTEND_PORT=127.0.0.1:3080
+```
+
+To keep LAN access as well (for admin use on your local network):
+```bash
+# Accessible from any device on your LAN + via tunnel
+FRONTEND_PORT=3080
+```
+
+---
+
+## Architecture Overview
+
+```
+Customer's Browser
+        │
+        ▼
+ Cloudflare Edge (TLS, DDoS, WAF)
+        │
+        ▼ (encrypted tunnel, outbound-only from NAS)
+   cloudflared container
+        │
+        ▼
+   frontend (nginx:80)
+     ├── /intake/*         → React SPA
+     ├── /api/intake/*     → proxy to backend:8000
+     └── /api/*            → proxy to backend:8000
+        │
+        ▼
+   backend (FastAPI:8000)
+        │
+        ├── PostgreSQL
+        ├── Redis
+        └── Ollama
+```
+
+**No inbound ports are opened on your router. The tunnel connection is outbound-only from your NAS to Cloudflare.**
+
+---
+
+## Troubleshooting
+
+| Symptom | Fix |
+|---------|-----|
+| `cloudflared` exits immediately | Check `CLOUDFLARE_TUNNEL_TOKEN` is set in `.env` |
+| Tunnel shows "Inactive" in dashboard | Run `docker compose --profile tunnel logs cloudflared` to check errors |
+| Intake form loads but API calls fail | Make sure the tunnel hostname points to `frontend:80`, not `backend:8000` |
+| "Access Denied" on intake form | Check your Cloudflare Access bypass policies include `/intake/*` and `/api/intake/form/*` |
+| TOS PDF won't load | Add bypass for `/api/intake/tos-pdf/*` in Access policies |
