@@ -4,7 +4,6 @@ import {
   Badge,
   Button,
   Card,
-  CopyButton,
   Group,
   Modal,
   ScrollArea,
@@ -43,6 +42,29 @@ export default function Customers() {
   const [initiateEmail, setInitiateEmail] = useState('');
   const [initiateLoading, setInitiateLoading] = useState(false);
   const [intakeResult, setIntakeResult] = useState<{ intake_url: string; customer_id?: string } | null>(null);
+  const [linkCopied, setLinkCopied] = useState(false);
+
+  const copyIntakeLink = async () => {
+    if (!intakeResult) return;
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(intakeResult.intake_url);
+      } else {
+        const ta = document.createElement('textarea');
+        ta.value = intakeResult.intake_url;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 2000);
+    } catch {
+      notifications.show({ title: 'Copy failed', message: 'Please select and copy the link manually.', color: 'red' });
+    }
+  };
 
   // Signature viewer
   const [signatureModal, setSignatureModal] = useState(false);
@@ -400,15 +422,11 @@ export default function Customers() {
                 style={{ flex: 1 }}
                 styles={inputStyles}
               />
-              <CopyButton value={intakeResult.intake_url}>
-                {({ copied, copy }) => (
-                  <Tooltip label={copied ? 'Copied!' : 'Copy'}>
-                    <ActionIcon color={copied ? 'green' : 'cyan'} variant="light" onClick={copy}>
-                      {copied ? <IconCheck size={16} /> : <IconCopy size={16} />}
-                    </ActionIcon>
-                  </Tooltip>
-                )}
-              </CopyButton>
+              <Tooltip label={linkCopied ? 'Copied!' : 'Copy'}>
+                <ActionIcon color={linkCopied ? 'green' : 'cyan'} variant="light" onClick={copyIntakeLink}>
+                  {linkCopied ? <IconCheck size={16} /> : <IconCopy size={16} />}
+                </ActionIcon>
+              </Tooltip>
             </Group>
             <Button
               leftSection={<IconMail size={16} />}
