@@ -307,6 +307,11 @@ async def upload_image(
     os.makedirs(upload_dir, exist_ok=True)
 
     content = await file.read()
+    if len(content) > 50_000_000:
+        raise HTTPException(status_code=413, detail="Image too large (50MB max)")
+    ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp", "image/tiff"}
+    if file.content_type and file.content_type not in ALLOWED_IMAGE_TYPES:
+        raise HTTPException(status_code=400, detail="Only JPEG, PNG, WebP, and TIFF images are allowed")
     logger.info("Image upload for mission %s: %s (%d bytes)", mission_id, file.filename, len(content))
 
     # Resize large images in thread executor to avoid blocking

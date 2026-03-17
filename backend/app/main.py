@@ -6,6 +6,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 
 from app.config import settings
 from app.database import Base, async_session, engine
@@ -107,6 +110,12 @@ def _add_missing_columns(conn):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Warn about insecure default credentials
+    if settings.jwt_secret_key == "changeme_generate_a_random_secret":
+        logger.warning("SECURITY: JWT_SECRET_KEY is using the default value — change it in production!")
+    if settings.admin_password == "changeme_in_production":
+        logger.warning("SECURITY: ADMIN_PASSWORD is using the default value — change it in production!")
+
     # Create tables
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -126,20 +135,29 @@ async def lifespan(app: FastAPI):
     await engine.dispose()
 
 
+limiter = Limiter(key_func=get_remote_address)
+
 app = FastAPI(
     title="DroneOpsReport",
     description="Invoicing and after-action reporting tool for drone operations",
-    version="1.11.1",
+    version="1.12.0",
     lifespan=lifespan,
 )
 
-# CORS - allow all origins for development, restrict in production
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# CORS - restrict to configured frontend URL
+_cors_origins = [settings.frontend_url.rstrip("/")]
+# Also allow localhost for local development
+if not any("localhost" in o for o in _cors_origins):
+    _cors_origins.append("http://localhost:3080")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization"],
 )
 
 # Static files for aircraft images

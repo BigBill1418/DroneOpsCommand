@@ -16,10 +16,11 @@ import {
   Textarea,
   NumberInput,
   PasswordInput,
+  Tabs,
 } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
-import { IconCheck, IconX, IconPlus, IconEdit, IconTrash, IconCurrencyDollar, IconMail, IconSend, IconBrandPaypal, IconCash, IconDrone, IconPlugConnected, IconMapPin, IconSearch, IconSignature, IconUpload } from '@tabler/icons-react';
+import { IconCheck, IconX, IconPlus, IconEdit, IconTrash, IconCurrencyDollar, IconMail, IconSend, IconBrandPaypal, IconCash, IconDrone, IconPlugConnected, IconMapPin, IconSearch, IconSignature, IconUpload, IconSettings, IconReceipt, IconPlane } from '@tabler/icons-react';
 import api from '../api/client';
 import { Aircraft, RateTemplate } from '../api/types';
 
@@ -29,6 +30,17 @@ const inputStyles = {
 };
 
 const cardStyle = { background: '#0e1117', border: '1px solid #1a1f2e' };
+
+const tabStyles = {
+  tab: {
+    color: '#5a6478',
+    fontFamily: "'Share Tech Mono', monospace",
+    letterSpacing: '1px',
+    fontSize: '12px',
+    '&[data-active]': { color: '#00d4ff', borderColor: '#00d4ff' },
+  },
+  list: { borderColor: '#1a1f2e' },
+};
 
 export default function Settings() {
   const [llmStatus, setLlmStatus] = useState<any>(null);
@@ -173,7 +185,6 @@ export default function Settings() {
     try {
       await api.put('/settings/smtp', values);
       notifications.show({ title: 'Saved', message: 'SMTP settings updated', color: 'cyan' });
-      // Reload to get masked password
       const r = await api.get('/settings/smtp');
       smtpForm.setValues(r.data);
     } catch {
@@ -281,360 +292,389 @@ export default function Settings() {
   };
 
   return (
-    <Stack gap="lg">
+    <Stack gap="md">
       <Title order={2} c="#e8edf2" style={{ letterSpacing: '2px' }}>SETTINGS</Title>
 
-      {/* LLM Status */}
-      <Card padding="lg" radius="md" style={cardStyle}>
-        <Title order={3} c="#e8edf2" mb="md" style={{ letterSpacing: '1px' }}>LLM STATUS</Title>
-        {llmLoading ? (
-          <Loader color="cyan" size="sm" />
-        ) : (
-          <Stack gap="sm">
-            <Group>
-              <Text c="#5a6478" style={{ fontFamily: "'Share Tech Mono', monospace" }}>STATUS:</Text>
-              <Badge
-                color={llmStatus?.status === 'online' ? 'green' : 'red'}
-                leftSection={llmStatus?.status === 'online' ? <IconCheck size={12} /> : <IconX size={12} />}
-              >
-                {llmStatus?.status || 'unknown'}
-              </Badge>
-            </Group>
-            <Group>
-              <Text c="#5a6478" style={{ fontFamily: "'Share Tech Mono', monospace" }}>MODEL:</Text>
-              <Text c="#e8edf2">{llmStatus?.configured_model || 'Not set'}</Text>
-              {llmStatus?.model_available && <Badge color="green" size="xs">Available</Badge>}
-            </Group>
-            {llmStatus?.models && (
+      <Tabs defaultValue="general" styles={tabStyles}>
+        <Tabs.List>
+          <Tabs.Tab value="general" leftSection={<IconSettings size={14} />}>
+            GENERAL
+          </Tabs.Tab>
+          <Tabs.Tab value="email" leftSection={<IconMail size={14} />}>
+            EMAIL & BILLING
+          </Tabs.Tab>
+          <Tabs.Tab value="fleet" leftSection={<IconPlane size={14} />}>
+            FLEET & RATES
+          </Tabs.Tab>
+        </Tabs.List>
+
+        {/* ═══ GENERAL TAB ═══ */}
+        <Tabs.Panel value="general" pt="md">
+          <Stack gap="md">
+            {/* LLM Status */}
+            <Card padding="lg" radius="md" style={cardStyle}>
+              <Title order={3} c="#e8edf2" mb="md" style={{ letterSpacing: '1px' }}>LLM STATUS</Title>
+              {llmLoading ? (
+                <Loader color="cyan" size="sm" />
+              ) : (
+                <Stack gap="sm">
+                  <Group>
+                    <Text c="#5a6478" style={{ fontFamily: "'Share Tech Mono', monospace" }}>STATUS:</Text>
+                    <Badge
+                      color={llmStatus?.status === 'online' ? 'green' : 'red'}
+                      leftSection={llmStatus?.status === 'online' ? <IconCheck size={12} /> : <IconX size={12} />}
+                    >
+                      {llmStatus?.status || 'unknown'}
+                    </Badge>
+                  </Group>
+                  <Group>
+                    <Text c="#5a6478" style={{ fontFamily: "'Share Tech Mono', monospace" }}>MODEL:</Text>
+                    <Text c="#e8edf2">{llmStatus?.configured_model || 'Not set'}</Text>
+                    {llmStatus?.model_available && <Badge color="green" size="xs">Available</Badge>}
+                  </Group>
+                  {llmStatus?.models && (
+                    <Group>
+                      <Text c="#5a6478" style={{ fontFamily: "'Share Tech Mono', monospace" }}>INSTALLED:</Text>
+                      {llmStatus.models.map((m: string) => <Badge key={m} color="cyan" variant="light" size="sm">{m}</Badge>)}
+                    </Group>
+                  )}
+                </Stack>
+              )}
+            </Card>
+
+            {/* OpenDroneLog */}
+            <Card padding="lg" radius="md" style={cardStyle}>
+              <Group justify="space-between" mb="md">
+                <Group gap="sm">
+                  <IconDrone size={20} color="#00d4ff" />
+                  <Title order={3} c="#e8edf2" style={{ letterSpacing: '1px' }}>OPENDRONELOG</Title>
+                </Group>
+                <Button
+                  leftSection={<IconPlugConnected size={14} />}
+                  size="xs"
+                  variant="light"
+                  color="cyan"
+                  loading={odlTesting}
+                  onClick={handleTestOdl}
+                >
+                  Test Connection
+                </Button>
+              </Group>
+              <form onSubmit={odlForm.onSubmit(handleSaveOdl)}>
+                <Stack gap="sm">
+                  <TextInput
+                    label="OpenDroneLog URL"
+                    placeholder="http://host.docker.internal:8080 or http://192.168.x.x:8080"
+                    {...odlForm.getInputProps('opendronelog_url')}
+                    styles={inputStyles}
+                  />
+                  <Text c="#5a6478" size="xs" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+                    If OpenDroneLog runs on the same machine as Docker, use http://host.docker.internal:PORT
+                  </Text>
+                  {odlStatus && (
+                    <Group gap="xs">
+                      <Badge color={odlStatus.status === 'online' ? 'green' : 'red'} size="sm">
+                        {odlStatus.status}
+                      </Badge>
+                      <Text c={odlStatus.status === 'online' ? '#e8edf2' : '#ff6b6b'} size="sm">
+                        {odlStatus.message}
+                      </Text>
+                    </Group>
+                  )}
+                  <Button type="submit" color="cyan" loading={odlSaving} styles={{ root: { fontFamily: "'Bebas Neue', sans-serif" } }}>
+                    SAVE
+                  </Button>
+                </Stack>
+              </form>
+            </Card>
+
+            {/* Weather / Airspace Location */}
+            <Card padding="lg" radius="md" style={cardStyle}>
+              <Group gap="sm" mb="md">
+                <IconMapPin size={20} color="#00d4ff" />
+                <Title order={3} c="#e8edf2" style={{ letterSpacing: '1px' }}>WEATHER & AIRSPACE LOCATION</Title>
+              </Group>
+              <Text c="#5a6478" size="xs" mb="sm" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+                Set the location for dashboard weather, METAR, TFR, and NOTAM monitoring. Enter a zip code or city name to auto-fill.
+              </Text>
+              <Group mb="md" align="end">
+                <TextInput
+                  label="Search by Zip Code or City"
+                  placeholder="97402 or Eugene, OR"
+                  value={weatherQuery}
+                  onChange={(e) => setWeatherQuery(e.currentTarget.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleLookupLocation(); } }}
+                  styles={inputStyles}
+                  style={{ flex: 1 }}
+                />
+                <Button
+                  leftSection={<IconSearch size={14} />}
+                  color="cyan"
+                  variant="light"
+                  loading={weatherLooking}
+                  onClick={handleLookupLocation}
+                  styles={{ root: { fontFamily: "'Bebas Neue', sans-serif" } }}
+                >
+                  LOOKUP
+                </Button>
+              </Group>
+              <form onSubmit={weatherForm.onSubmit(handleSaveWeather)}>
+                <Stack gap="sm">
+                  <TextInput label="Location Label" placeholder="Eugene, OR" {...weatherForm.getInputProps('weather_label')} styles={inputStyles} />
+                  <Group grow>
+                    <TextInput label="Latitude" placeholder="44.0500" {...weatherForm.getInputProps('weather_lat')} styles={inputStyles} />
+                    <TextInput label="Longitude" placeholder="-123.0900" {...weatherForm.getInputProps('weather_lon')} styles={inputStyles} />
+                  </Group>
+                  <TextInput label="Nearest Airport (ICAO)" placeholder="KEUG" {...weatherForm.getInputProps('weather_airport_icao')} styles={inputStyles} />
+                  <Text c="#5a6478" size="xs" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+                    ICAO airport code is used for METAR, TFR, and NOTAM data. The lookup fills this automatically.
+                  </Text>
+                  <Button type="submit" color="cyan" loading={weatherSaving} styles={{ root: { fontFamily: "'Bebas Neue', sans-serif" } }}>
+                    SAVE WEATHER LOCATION
+                  </Button>
+                </Stack>
+              </form>
+            </Card>
+          </Stack>
+        </Tabs.Panel>
+
+        {/* ═══ EMAIL & BILLING TAB ═══ */}
+        <Tabs.Panel value="email" pt="md">
+          <Stack gap="md">
+            {/* SMTP Settings */}
+            <Card padding="lg" radius="md" style={cardStyle}>
+              <Group justify="space-between" mb="md">
+                <Group gap="sm">
+                  <IconMail size={20} color="#00d4ff" />
+                  <Title order={3} c="#e8edf2" style={{ letterSpacing: '1px' }}>SMTP / EMAIL</Title>
+                </Group>
+                <Button
+                  leftSection={<IconSend size={14} />}
+                  size="xs"
+                  variant="light"
+                  color="cyan"
+                  loading={smtpTesting}
+                  onClick={handleTestSmtp}
+                >
+                  Send Test
+                </Button>
+              </Group>
+              <form onSubmit={smtpForm.onSubmit(handleSaveSmtp)}>
+                <Stack gap="sm">
+                  <Group grow>
+                    <TextInput label="SMTP Host" placeholder="smtp.gmail.com" {...smtpForm.getInputProps('smtp_host')} styles={inputStyles} />
+                    <TextInput label="SMTP Port" placeholder="587" {...smtpForm.getInputProps('smtp_port')} styles={inputStyles} />
+                  </Group>
+                  <Group grow>
+                    <TextInput label="Username" placeholder="user@example.com" {...smtpForm.getInputProps('smtp_user')} styles={inputStyles} />
+                    <PasswordInput label="Password" placeholder="App password or SMTP key" {...smtpForm.getInputProps('smtp_password')} styles={inputStyles} />
+                  </Group>
+                  <Group grow>
+                    <TextInput label="From Email" placeholder="reports@barnardhq.com" {...smtpForm.getInputProps('smtp_from_email')} styles={inputStyles} />
+                    <TextInput label="From Name" placeholder="BarnardHQ Drone Operations" {...smtpForm.getInputProps('smtp_from_name')} styles={inputStyles} />
+                  </Group>
+                  <Switch
+                    label="Use TLS"
+                    checked={smtpForm.values.smtp_use_tls === 'true'}
+                    onChange={(e) => smtpForm.setFieldValue('smtp_use_tls', e.currentTarget.checked ? 'true' : 'false')}
+                    color="cyan"
+                    styles={{ label: { color: '#5a6478', fontFamily: "'Share Tech Mono', monospace", fontSize: '13px', letterSpacing: '1px' } }}
+                  />
+                  <Button type="submit" color="cyan" loading={smtpSaving} styles={{ root: { fontFamily: "'Bebas Neue', sans-serif" } }}>
+                    SAVE SMTP SETTINGS
+                  </Button>
+                </Stack>
+              </form>
+            </Card>
+
+            {/* Terms of Service PDF */}
+            <Card padding="lg" radius="md" style={cardStyle}>
+              <Group gap="sm" mb="md">
+                <IconSignature size={20} color="#00d4ff" />
+                <Title order={3} c="#e8edf2" style={{ letterSpacing: '1px' }}>TERMS OF SERVICE</Title>
+              </Group>
+              <Text c="#5a6478" size="xs" mb="sm" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+                Upload the default TOS PDF that customers will review and sign during onboarding.
+              </Text>
               <Group>
-                <Text c="#5a6478" style={{ fontFamily: "'Share Tech Mono', monospace" }}>INSTALLED:</Text>
-                {llmStatus.models.map((m: string) => <Badge key={m} color="cyan" variant="light" size="sm">{m}</Badge>)}
-              </Group>
-            )}
-          </Stack>
-        )}
-      </Card>
-
-      {/* OpenDroneLog */}
-      <Card padding="lg" radius="md" style={cardStyle}>
-        <Group justify="space-between" mb="md">
-          <Group gap="sm">
-            <IconDrone size={20} color="#00d4ff" />
-            <Title order={3} c="#e8edf2" style={{ letterSpacing: '1px' }}>OPENDRONELOG</Title>
-          </Group>
-          <Button
-            leftSection={<IconPlugConnected size={14} />}
-            size="xs"
-            variant="light"
-            color="cyan"
-            loading={odlTesting}
-            onClick={handleTestOdl}
-          >
-            Test Connection
-          </Button>
-        </Group>
-        <form onSubmit={odlForm.onSubmit(handleSaveOdl)}>
-          <Stack gap="sm">
-            <TextInput
-              label="OpenDroneLog URL"
-              placeholder="http://host.docker.internal:8080 or http://192.168.x.x:8080"
-              {...odlForm.getInputProps('opendronelog_url')}
-              styles={inputStyles}
-            />
-            <Text c="#5a6478" size="xs" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
-              If OpenDroneLog runs on the same machine as Docker, use http://host.docker.internal:PORT
-            </Text>
-            {odlStatus && (
-              <Group gap="xs">
-                <Badge color={odlStatus.status === 'online' ? 'green' : 'red'} size="sm">
-                  {odlStatus.status}
+                <Badge color={tosUploaded ? 'green' : 'orange'} variant="light">
+                  {tosUploaded ? 'TOS PDF UPLOADED' : 'NO TOS PDF'}
                 </Badge>
-                <Text c={odlStatus.status === 'online' ? '#e8edf2' : '#ff6b6b'} size="sm">
-                  {odlStatus.message}
-                </Text>
+                <Button
+                  leftSection={<IconUpload size={14} />}
+                  color="cyan"
+                  variant="light"
+                  size="xs"
+                  loading={tosUploading}
+                  onClick={() => {
+                    const input = document.createElement('input');
+                    input.type = 'file';
+                    input.accept = '.pdf';
+                    input.onchange = async (e: any) => {
+                      const file = e.target.files[0];
+                      if (!file) return;
+                      setTosUploading(true);
+                      try {
+                        const formData = new FormData();
+                        formData.append('file', file);
+                        await api.post('/intake/upload-default-tos', formData);
+                        setTosUploaded(true);
+                        notifications.show({ title: 'Uploaded', message: 'Default TOS PDF uploaded', color: 'cyan' });
+                      } catch {
+                        notifications.show({ title: 'Error', message: 'Failed to upload TOS PDF', color: 'red' });
+                      } finally {
+                        setTosUploading(false);
+                      }
+                    };
+                    input.click();
+                  }}
+                >
+                  Upload PDF
+                </Button>
               </Group>
-            )}
-            <Button type="submit" color="cyan" loading={odlSaving} styles={{ root: { fontFamily: "'Bebas Neue', sans-serif" } }}>
-              SAVE
-            </Button>
+            </Card>
+
+            {/* Payment Links */}
+            <Card padding="lg" radius="md" style={cardStyle}>
+              <Group gap="sm" mb="md">
+                <IconCash size={20} color="#00d4ff" />
+                <Title order={3} c="#e8edf2" style={{ letterSpacing: '1px' }}>PAYMENT LINKS</Title>
+              </Group>
+              <Text c="#5a6478" size="xs" mb="sm" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+                These links appear on invoices that are not marked as paid in full.
+              </Text>
+              <form onSubmit={paymentForm.onSubmit(handleSavePayment)}>
+                <Stack gap="sm">
+                  <TextInput
+                    label="PayPal Link"
+                    placeholder="https://paypal.me/yourname"
+                    leftSection={<IconBrandPaypal size={14} />}
+                    {...paymentForm.getInputProps('paypal_link')}
+                    styles={inputStyles}
+                  />
+                  <TextInput
+                    label="Venmo Link"
+                    placeholder="https://venmo.com/yourname"
+                    {...paymentForm.getInputProps('venmo_link')}
+                    styles={inputStyles}
+                  />
+                  <Button type="submit" color="cyan" loading={paymentSaving} styles={{ root: { fontFamily: "'Bebas Neue', sans-serif" } }}>
+                    SAVE PAYMENT LINKS
+                  </Button>
+                </Stack>
+              </form>
+            </Card>
           </Stack>
-        </form>
-      </Card>
+        </Tabs.Panel>
 
-      {/* Weather / Airspace Location */}
-      <Card padding="lg" radius="md" style={cardStyle}>
-        <Group gap="sm" mb="md">
-          <IconMapPin size={20} color="#00d4ff" />
-          <Title order={3} c="#e8edf2" style={{ letterSpacing: '1px' }}>WEATHER & AIRSPACE LOCATION</Title>
-        </Group>
-        <Text c="#5a6478" size="xs" mb="sm" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
-          Set the location for dashboard weather, METAR, TFR, and NOTAM monitoring. Enter a zip code or city name to auto-fill.
-        </Text>
-        <Group mb="md" align="end">
-          <TextInput
-            label="Search by Zip Code or City"
-            placeholder="97402 or Eugene, OR"
-            value={weatherQuery}
-            onChange={(e) => setWeatherQuery(e.currentTarget.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleLookupLocation(); } }}
-            styles={inputStyles}
-            style={{ flex: 1 }}
-          />
-          <Button
-            leftSection={<IconSearch size={14} />}
-            color="cyan"
-            variant="light"
-            loading={weatherLooking}
-            onClick={handleLookupLocation}
-            styles={{ root: { fontFamily: "'Bebas Neue', sans-serif" } }}
-          >
-            LOOKUP
-          </Button>
-        </Group>
-        <form onSubmit={weatherForm.onSubmit(handleSaveWeather)}>
-          <Stack gap="sm">
-            <TextInput label="Location Label" placeholder="Eugene, OR" {...weatherForm.getInputProps('weather_label')} styles={inputStyles} />
-            <Group grow>
-              <TextInput label="Latitude" placeholder="44.0500" {...weatherForm.getInputProps('weather_lat')} styles={inputStyles} />
-              <TextInput label="Longitude" placeholder="-123.0900" {...weatherForm.getInputProps('weather_lon')} styles={inputStyles} />
-            </Group>
-            <TextInput label="Nearest Airport (ICAO)" placeholder="KEUG" {...weatherForm.getInputProps('weather_airport_icao')} styles={inputStyles} />
-            <Text c="#5a6478" size="xs" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
-              ICAO airport code is used for METAR, TFR, and NOTAM data. The lookup fills this automatically.
-            </Text>
-            <Button type="submit" color="cyan" loading={weatherSaving} styles={{ root: { fontFamily: "'Bebas Neue', sans-serif" } }}>
-              SAVE WEATHER LOCATION
-            </Button>
+        {/* ═══ FLEET & RATES TAB ═══ */}
+        <Tabs.Panel value="fleet" pt="md">
+          <Stack gap="md">
+            {/* Aircraft Manager */}
+            <Card padding="lg" radius="md" style={cardStyle}>
+              <Group justify="space-between" mb="md">
+                <Title order={3} c="#e8edf2" style={{ letterSpacing: '1px' }}>AIRCRAFT FLEET</Title>
+                <Button
+                  leftSection={<IconPlus size={14} />}
+                  size="xs"
+                  color="cyan"
+                  onClick={() => { setEditingAircraftId(null); aircraftForm.reset(); setAircraftModal(true); }}
+                >
+                  Add Aircraft
+                </Button>
+              </Group>
+
+              <Table styles={{
+                table: { color: '#e8edf2' },
+                th: { color: '#00d4ff', fontFamily: "'Share Tech Mono', monospace", fontSize: '13px', borderBottom: '1px solid #1a1f2e' },
+                td: { borderBottom: '1px solid #1a1f2e' },
+              }}>
+                <Table.Thead>
+                  <Table.Tr>
+                    <Table.Th>MODEL</Table.Th>
+                    <Table.Th>MANUFACTURER</Table.Th>
+                    <Table.Th>KEY SPECS</Table.Th>
+                    <Table.Th>ACTIONS</Table.Th>
+                  </Table.Tr>
+                </Table.Thead>
+                <Table.Tbody>
+                  {aircraft.map((a) => (
+                    <Table.Tr key={a.id}>
+                      <Table.Td fw={600}>{a.model_name}</Table.Td>
+                      <Table.Td c="#5a6478">{a.manufacturer}</Table.Td>
+                      <Table.Td c="#5a6478" style={{ fontSize: '12px' }}>
+                        {a.specs.max_flight_time && `${a.specs.max_flight_time}`}
+                        {a.specs.camera && ` | ${a.specs.camera.substring(0, 30)}...`}
+                      </Table.Td>
+                      <Table.Td>
+                        <Group gap="xs">
+                          <ActionIcon variant="subtle" color="cyan" onClick={() => handleEditAircraft(a)}>
+                            <IconEdit size={14} />
+                          </ActionIcon>
+                          <ActionIcon variant="subtle" color="red" onClick={() => handleDeleteAircraft(a.id)}>
+                            <IconTrash size={14} />
+                          </ActionIcon>
+                        </Group>
+                      </Table.Td>
+                    </Table.Tr>
+                  ))}
+                </Table.Tbody>
+              </Table>
+            </Card>
+
+            {/* Rate Templates */}
+            <Card padding="lg" radius="md" style={cardStyle}>
+              <Group justify="space-between" mb="md">
+                <Title order={3} c="#e8edf2" style={{ letterSpacing: '1px' }}>RATE TEMPLATES</Title>
+                <Button
+                  leftSection={<IconPlus size={14} />}
+                  size="xs"
+                  color="cyan"
+                  onClick={() => { setEditingRateId(null); rateForm.reset(); setRateModal(true); }}
+                >
+                  Add Template
+                </Button>
+              </Group>
+
+              <Table styles={{
+                table: { color: '#e8edf2' },
+                th: { color: '#00d4ff', fontFamily: "'Share Tech Mono', monospace", fontSize: '13px', borderBottom: '1px solid #1a1f2e' },
+                td: { borderBottom: '1px solid #1a1f2e' },
+              }}>
+                <Table.Thead>
+                  <Table.Tr>
+                    <Table.Th>NAME</Table.Th>
+                    <Table.Th>CATEGORY</Table.Th>
+                    <Table.Th>DEFAULT RATE</Table.Th>
+                    <Table.Th>UNIT</Table.Th>
+                    <Table.Th>ACTIONS</Table.Th>
+                  </Table.Tr>
+                </Table.Thead>
+                <Table.Tbody>
+                  {rateTemplates.map((t) => (
+                    <Table.Tr key={t.id}>
+                      <Table.Td fw={600}>{t.name}</Table.Td>
+                      <Table.Td><Badge color="cyan" variant="light" size="sm">{categoryLabels[t.category] || t.category}</Badge></Table.Td>
+                      <Table.Td c="#00d4ff" style={{ fontFamily: "'Share Tech Mono', monospace" }}>${Number(t.default_rate).toFixed(2)}</Table.Td>
+                      <Table.Td c="#5a6478">{t.default_unit || '—'}</Table.Td>
+                      <Table.Td>
+                        <Group gap="xs">
+                          <ActionIcon variant="subtle" color="cyan" onClick={() => handleEditRate(t)}>
+                            <IconEdit size={14} />
+                          </ActionIcon>
+                          <ActionIcon variant="subtle" color="red" onClick={() => handleDeleteRate(t.id)}>
+                            <IconTrash size={14} />
+                          </ActionIcon>
+                        </Group>
+                      </Table.Td>
+                    </Table.Tr>
+                  ))}
+                </Table.Tbody>
+              </Table>
+            </Card>
           </Stack>
-        </form>
-      </Card>
-
-      {/* SMTP Settings */}
-      <Card padding="lg" radius="md" style={cardStyle}>
-        <Group justify="space-between" mb="md">
-          <Group gap="sm">
-            <IconMail size={20} color="#00d4ff" />
-            <Title order={3} c="#e8edf2" style={{ letterSpacing: '1px' }}>SMTP / EMAIL</Title>
-          </Group>
-          <Button
-            leftSection={<IconSend size={14} />}
-            size="xs"
-            variant="light"
-            color="cyan"
-            loading={smtpTesting}
-            onClick={handleTestSmtp}
-          >
-            Send Test
-          </Button>
-        </Group>
-        <form onSubmit={smtpForm.onSubmit(handleSaveSmtp)}>
-          <Stack gap="sm">
-            <Group grow>
-              <TextInput label="SMTP Host" placeholder="smtp.gmail.com" {...smtpForm.getInputProps('smtp_host')} styles={inputStyles} />
-              <TextInput label="SMTP Port" placeholder="587" {...smtpForm.getInputProps('smtp_port')} styles={inputStyles} />
-            </Group>
-            <Group grow>
-              <TextInput label="Username" placeholder="user@example.com" {...smtpForm.getInputProps('smtp_user')} styles={inputStyles} />
-              <PasswordInput label="Password" placeholder="App password or SMTP key" {...smtpForm.getInputProps('smtp_password')} styles={inputStyles} />
-            </Group>
-            <Group grow>
-              <TextInput label="From Email" placeholder="reports@barnardhq.com" {...smtpForm.getInputProps('smtp_from_email')} styles={inputStyles} />
-              <TextInput label="From Name" placeholder="BarnardHQ Drone Operations" {...smtpForm.getInputProps('smtp_from_name')} styles={inputStyles} />
-            </Group>
-            <Switch
-              label="Use TLS"
-              checked={smtpForm.values.smtp_use_tls === 'true'}
-              onChange={(e) => smtpForm.setFieldValue('smtp_use_tls', e.currentTarget.checked ? 'true' : 'false')}
-              color="cyan"
-              styles={{ label: { color: '#5a6478', fontFamily: "'Share Tech Mono', monospace", fontSize: '13px', letterSpacing: '1px' } }}
-            />
-            <Button type="submit" color="cyan" loading={smtpSaving} styles={{ root: { fontFamily: "'Bebas Neue', sans-serif" } }}>
-              SAVE SMTP SETTINGS
-            </Button>
-          </Stack>
-        </form>
-      </Card>
-
-      {/* Terms of Service PDF */}
-      <Card padding="lg" radius="md" style={cardStyle}>
-        <Group gap="sm" mb="md">
-          <IconSignature size={20} color="#00d4ff" />
-          <Title order={3} c="#e8edf2" style={{ letterSpacing: '1px' }}>TERMS OF SERVICE</Title>
-        </Group>
-        <Text c="#5a6478" size="xs" mb="sm" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
-          Upload the default TOS PDF that customers will review and sign during onboarding.
-        </Text>
-        <Group>
-          <Badge color={tosUploaded ? 'green' : 'orange'} variant="light">
-            {tosUploaded ? 'TOS PDF UPLOADED' : 'NO TOS PDF'}
-          </Badge>
-          <Button
-            leftSection={<IconUpload size={14} />}
-            color="cyan"
-            variant="light"
-            size="xs"
-            loading={tosUploading}
-            onClick={() => {
-              const input = document.createElement('input');
-              input.type = 'file';
-              input.accept = '.pdf';
-              input.onchange = async (e: any) => {
-                const file = e.target.files[0];
-                if (!file) return;
-                setTosUploading(true);
-                try {
-                  const formData = new FormData();
-                  formData.append('file', file);
-                  await api.post('/intake/upload-default-tos', formData);
-                  setTosUploaded(true);
-                  notifications.show({ title: 'Uploaded', message: 'Default TOS PDF uploaded', color: 'cyan' });
-                } catch {
-                  notifications.show({ title: 'Error', message: 'Failed to upload TOS PDF', color: 'red' });
-                } finally {
-                  setTosUploading(false);
-                }
-              };
-              input.click();
-            }}
-          >
-            Upload PDF
-          </Button>
-        </Group>
-      </Card>
-
-      {/* Payment Links */}
-      <Card padding="lg" radius="md" style={cardStyle}>
-        <Group gap="sm" mb="md">
-          <IconCash size={20} color="#00d4ff" />
-          <Title order={3} c="#e8edf2" style={{ letterSpacing: '1px' }}>PAYMENT LINKS</Title>
-        </Group>
-        <Text c="#5a6478" size="xs" mb="sm" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
-          These links appear on invoices that are not marked as paid in full.
-        </Text>
-        <form onSubmit={paymentForm.onSubmit(handleSavePayment)}>
-          <Stack gap="sm">
-            <TextInput
-              label="PayPal Link"
-              placeholder="https://paypal.me/yourname"
-              leftSection={<IconBrandPaypal size={14} />}
-              {...paymentForm.getInputProps('paypal_link')}
-              styles={inputStyles}
-            />
-            <TextInput
-              label="Venmo Link"
-              placeholder="https://venmo.com/yourname"
-              {...paymentForm.getInputProps('venmo_link')}
-              styles={inputStyles}
-            />
-            <Button type="submit" color="cyan" loading={paymentSaving} styles={{ root: { fontFamily: "'Bebas Neue', sans-serif" } }}>
-              SAVE PAYMENT LINKS
-            </Button>
-          </Stack>
-        </form>
-      </Card>
-
-      {/* Aircraft Manager */}
-      <Card padding="lg" radius="md" style={cardStyle}>
-        <Group justify="space-between" mb="md">
-          <Title order={3} c="#e8edf2" style={{ letterSpacing: '1px' }}>AIRCRAFT FLEET</Title>
-          <Button
-            leftSection={<IconPlus size={14} />}
-            size="xs"
-            color="cyan"
-            onClick={() => { setEditingAircraftId(null); aircraftForm.reset(); setAircraftModal(true); }}
-          >
-            Add Aircraft
-          </Button>
-        </Group>
-
-        <Table styles={{
-          table: { color: '#e8edf2' },
-          th: { color: '#00d4ff', fontFamily: "'Share Tech Mono', monospace", fontSize: '13px', borderBottom: '1px solid #1a1f2e' },
-          td: { borderBottom: '1px solid #1a1f2e' },
-        }}>
-          <Table.Thead>
-            <Table.Tr>
-              <Table.Th>MODEL</Table.Th>
-              <Table.Th>MANUFACTURER</Table.Th>
-              <Table.Th>KEY SPECS</Table.Th>
-              <Table.Th>ACTIONS</Table.Th>
-            </Table.Tr>
-          </Table.Thead>
-          <Table.Tbody>
-            {aircraft.map((a) => (
-              <Table.Tr key={a.id}>
-                <Table.Td fw={600}>{a.model_name}</Table.Td>
-                <Table.Td c="#5a6478">{a.manufacturer}</Table.Td>
-                <Table.Td c="#5a6478" style={{ fontSize: '12px' }}>
-                  {a.specs.max_flight_time && `${a.specs.max_flight_time}`}
-                  {a.specs.camera && ` | ${a.specs.camera.substring(0, 30)}...`}
-                </Table.Td>
-                <Table.Td>
-                  <Group gap="xs">
-                    <ActionIcon variant="subtle" color="cyan" onClick={() => handleEditAircraft(a)}>
-                      <IconEdit size={14} />
-                    </ActionIcon>
-                    <ActionIcon variant="subtle" color="red" onClick={() => handleDeleteAircraft(a.id)}>
-                      <IconTrash size={14} />
-                    </ActionIcon>
-                  </Group>
-                </Table.Td>
-              </Table.Tr>
-            ))}
-          </Table.Tbody>
-        </Table>
-      </Card>
-
-      {/* Rate Templates */}
-      <Card padding="lg" radius="md" style={cardStyle}>
-        <Group justify="space-between" mb="md">
-          <Title order={3} c="#e8edf2" style={{ letterSpacing: '1px' }}>RATE TEMPLATES</Title>
-          <Button
-            leftSection={<IconPlus size={14} />}
-            size="xs"
-            color="cyan"
-            onClick={() => { setEditingRateId(null); rateForm.reset(); setRateModal(true); }}
-          >
-            Add Template
-          </Button>
-        </Group>
-
-        <Table styles={{
-          table: { color: '#e8edf2' },
-          th: { color: '#00d4ff', fontFamily: "'Share Tech Mono', monospace", fontSize: '13px', borderBottom: '1px solid #1a1f2e' },
-          td: { borderBottom: '1px solid #1a1f2e' },
-        }}>
-          <Table.Thead>
-            <Table.Tr>
-              <Table.Th>NAME</Table.Th>
-              <Table.Th>CATEGORY</Table.Th>
-              <Table.Th>DEFAULT RATE</Table.Th>
-              <Table.Th>UNIT</Table.Th>
-              <Table.Th>ACTIONS</Table.Th>
-            </Table.Tr>
-          </Table.Thead>
-          <Table.Tbody>
-            {rateTemplates.map((t) => (
-              <Table.Tr key={t.id}>
-                <Table.Td fw={600}>{t.name}</Table.Td>
-                <Table.Td><Badge color="cyan" variant="light" size="sm">{categoryLabels[t.category] || t.category}</Badge></Table.Td>
-                <Table.Td c="#00d4ff" style={{ fontFamily: "'Share Tech Mono', monospace" }}>${Number(t.default_rate).toFixed(2)}</Table.Td>
-                <Table.Td c="#5a6478">{t.default_unit || '—'}</Table.Td>
-                <Table.Td>
-                  <Group gap="xs">
-                    <ActionIcon variant="subtle" color="cyan" onClick={() => handleEditRate(t)}>
-                      <IconEdit size={14} />
-                    </ActionIcon>
-                    <ActionIcon variant="subtle" color="red" onClick={() => handleDeleteRate(t.id)}>
-                      <IconTrash size={14} />
-                    </ActionIcon>
-                  </Group>
-                </Table.Td>
-              </Table.Tr>
-            ))}
-          </Table.Tbody>
-        </Table>
-      </Card>
+        </Tabs.Panel>
+      </Tabs>
 
       {/* Rate Template Modal */}
       <Modal

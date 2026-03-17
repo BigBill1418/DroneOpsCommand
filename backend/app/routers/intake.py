@@ -8,6 +8,8 @@ from datetime import datetime, timedelta
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Request
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,6 +23,7 @@ from app.schemas.customer import IntakeFormData, IntakePublicResponse, IntakeTok
 logger = logging.getLogger("droneops.intake")
 
 router = APIRouter(prefix="/api/intake", tags=["intake"])
+limiter = Limiter(key_func=get_remote_address)
 
 
 def _client_ip(request: Request) -> str:
@@ -181,12 +184,18 @@ async def upload_tos_pdf(
         logger.warning("[INTAKE-TOS-UPLOAD] Customer not found: %s", customer_id)
         raise HTTPException(status_code=404, detail="Customer not found")
 
+    # Validate file
+    content = await file.read()
+    if len(content) > 10_000_000:
+        raise HTTPException(status_code=413, detail="File too large (10MB max)")
+    if not content[:5].startswith(b"%PDF"):
+        raise HTTPException(status_code=400, detail="Invalid PDF file")
+
     # Save the file
     tos_dir = os.path.join(settings.upload_dir, "tos")
     os.makedirs(tos_dir, exist_ok=True)
     tos_path = os.path.join(tos_dir, f"tos_{customer.id}.pdf")
 
-    content = await file.read()
     with open(tos_path, "wb") as f:
         f.write(content)
 
@@ -207,11 +216,16 @@ async def upload_default_tos(
     client_ip = _client_ip(request)
     logger.info("[INTAKE-TOS-DEFAULT] Default TOS upload, filename=%s from ip=%s", file.filename, client_ip)
 
+    content = await file.read()
+    if len(content) > 10_000_000:
+        raise HTTPException(status_code=413, detail="File too large (10MB max)")
+    if not content[:5].startswith(b"%PDF"):
+        raise HTTPException(status_code=400, detail="Invalid PDF file")
+
     tos_dir = os.path.join(settings.upload_dir, "tos")
     os.makedirs(tos_dir, exist_ok=True)
     tos_path = os.path.join(tos_dir, "default_tos.pdf")
 
-    content = await file.read()
     with open(tos_path, "wb") as f:
         f.write(content)
 
@@ -233,6 +247,7 @@ async def default_tos_status(
 # --- Public endpoints (no auth required) ---
 
 @router.get("/form/{token}", response_model=IntakePublicResponse)
+@limiter.limit("30/minute")
 async def get_intake_form(
     token: str,
     request: Request,
@@ -329,6 +344,7 @@ async def serve_tos_pdf(
 
 
 @router.post("/form/{token}")
+@limiter.limit("5/minute")
 async def submit_intake_form(
     token: str,
     data: IntakeFormData,
@@ -364,6 +380,10 @@ async def submit_intake_form(
     if not data.signature_data or len(data.signature_data) < 100:
         logger.warning("[INTAKE-SUBMIT] Invalid signature from ip=%s for customer %s (length=%d)", client_ip, customer.id, len(data.signature_data) if data.signature_data else 0)
         raise HTTPException(status_code=400, detail="A valid signature is required")
+
+    if len(data.signature_data) > 500_000:
+        logger.warning("[INTAKE-SUBMIT] Signature too large from ip=%s for customer %s (length=%d)", client_ip, customer.id, len(data.signature_data))
+        raise HTTPException(status_code=400, detail="Signature data exceeds maximum allowed size")
 
     # Log data changes for audit trail
     changes = []

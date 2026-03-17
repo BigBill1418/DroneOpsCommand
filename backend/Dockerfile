@@ -21,8 +21,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# Create data directories
-RUN mkdir -p /data/uploads /data/reports
+# Create data directories and non-root user
+RUN mkdir -p /data/uploads /data/reports \
+    && useradd -m -u 1000 droneops \
+    && chown -R droneops:droneops /data /app
+
+USER droneops
 
 EXPOSE 8000
 
