@@ -159,7 +159,7 @@ async def send_intake_email_endpoint(
     except Exception as exc:
         elapsed = time.perf_counter() - start
         logger.error("[INTAKE-EMAIL] FAILED to send to %s for customer %s: %s (%.3fs)", customer.email, customer.id, exc, elapsed, exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Email send failed: {exc}")
+        raise HTTPException(status_code=500, detail="Email delivery failed")
 
     elapsed = time.perf_counter() - start
     logger.info("[INTAKE-EMAIL] Successfully sent to %s for customer %s (%.3fs)", customer.email, customer.id, elapsed)

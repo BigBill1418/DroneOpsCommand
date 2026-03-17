@@ -42,8 +42,6 @@ class CustomerResponse(BaseModel):
     tos_signed: bool = False
     tos_signed_at: datetime | None = None
     intake_completed_at: datetime | None = None
-    intake_token: str | None = None
-    signature_data: str | None = None
     created_at: datetime
     updated_at: datetime
 

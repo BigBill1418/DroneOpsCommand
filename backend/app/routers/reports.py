@@ -104,7 +104,7 @@ async def generate_report(
 
     # Pre-compute geo data in thread executor to avoid blocking event loop
     flights = _flights_to_dicts(mission)
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
 
     try:
         tracks = await loop.run_in_executor(None, extract_gps_tracks, flights)
@@ -339,7 +339,7 @@ async def generate_report_pdf(
         }
 
     # Run WeasyPrint in thread executor — it's CPU-intensive and blocks
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     try:
         pdf_path = await loop.run_in_executor(
             None,
@@ -356,7 +356,7 @@ async def generate_report_pdf(
         )
     except Exception as exc:
         logger.error("Mission %s PDF generation failed: %s", mission_id, exc, exc_info=True)
-        raise HTTPException(status_code=500, detail=f"PDF generation failed: {exc}")
+        raise HTTPException(status_code=500, detail="PDF generation failed")
 
     report.pdf_path = pdf_path
     await db.flush()
@@ -407,7 +407,7 @@ async def send_report(
         )
     except Exception as exc:
         logger.error("Mission %s email send failed: %s", mission_id, exc, exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Email send failed: {exc}")
+        raise HTTPException(status_code=500, detail="Email delivery failed")
 
     report.sent_at = datetime.utcnow()
     mission.status = "sent"

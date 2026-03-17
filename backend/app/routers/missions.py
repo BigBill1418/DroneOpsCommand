@@ -75,7 +75,7 @@ async def create_mission(
         return mission
     except Exception as exc:
         logger.exception("Failed to create mission: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="An internal error occurred")
 
 
 @router.get("/{mission_id}", response_model=MissionResponse)
@@ -129,7 +129,7 @@ async def update_mission(
         return mission
     except Exception as exc:
         logger.exception("Failed to update mission: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="An internal error occurred")
 
 
 @router.delete("/{mission_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -315,7 +315,7 @@ async def upload_image(
     logger.info("Image upload for mission %s: %s (%d bytes)", mission_id, file.filename, len(content))
 
     # Resize large images in thread executor to avoid blocking
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     resized_content, forced_ext = await loop.run_in_executor(None, _resize_image, content)
     ext = forced_ext or (os.path.splitext(file.filename)[1] if file.filename else ".jpg")
     filename = f"{uuid_mod.uuid4()}{ext}"

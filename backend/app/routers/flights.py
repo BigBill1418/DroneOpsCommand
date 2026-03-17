@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -5,6 +7,8 @@ from app.auth.jwt import get_current_user
 from app.database import get_db
 from app.models.user import User
 from app.services.opendronelog import opendronelog_client
+
+logger = logging.getLogger("droneops.flights")
 
 router = APIRouter(prefix="/api/flights", tags=["flights"])
 
@@ -20,9 +24,11 @@ async def list_flights(
     try:
         return await opendronelog_client.list_flights(db)
     except ConnectionError as e:
-        raise HTTPException(status_code=502, detail=str(e))
+        logger.error("Failed to reach flight data service: %s", e)
+        raise HTTPException(status_code=502, detail="Failed to reach flight data service")
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Failed to reach OpenDroneLog: {str(e)}")
+        logger.error("Failed to reach flight data service: %s", e)
+        raise HTTPException(status_code=502, detail="Failed to reach flight data service")
 
 
 @router.get("/test")
@@ -46,7 +52,8 @@ async def get_flight(
     try:
         return await opendronelog_client.get_flight(flight_id, db)
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Failed to reach OpenDroneLog: {str(e)}")
+        logger.error("Failed to reach flight data service for flight %s: %s", flight_id, e)
+        raise HTTPException(status_code=502, detail="Failed to reach flight data service")
 
 
 @router.get("/{flight_id}/track")
@@ -61,4 +68,5 @@ async def get_flight_track(
     try:
         return await opendronelog_client.get_flight_track(flight_id, db)
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Failed to reach OpenDroneLog: {str(e)}")
+        logger.error("Failed to reach flight data service for flight track %s: %s", flight_id, e)
+        raise HTTPException(status_code=502, detail="Failed to reach flight data service")

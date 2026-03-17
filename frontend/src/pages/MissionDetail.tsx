@@ -94,8 +94,10 @@ export default function MissionDetail() {
     await handleSaveReport();
     try {
       const resp = await api.post(`/missions/${id}/report/pdf`, {}, { responseType: 'blob' });
-      const url = URL.createObjectURL(new Blob([resp.data], { type: 'application/pdf' }));
-      window.open(url, '_blank');
+      const blobUrl = URL.createObjectURL(new Blob([resp.data], { type: 'application/pdf' }));
+      window.open(blobUrl, '_blank');
+      // Revoke after browser has had time to open the tab
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
     } catch {
       notifications.show({ title: 'Error', message: 'PDF generation failed', color: 'red' });
     }

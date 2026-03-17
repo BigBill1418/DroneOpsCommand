@@ -1,6 +1,7 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { Loader, Center } from '@mantine/core';
 import { useAuth } from './hooks/useAuth';
+import ErrorBoundary from './components/ErrorBoundary';
 import AppLayout from './components/Layout/AppShell';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
@@ -25,29 +26,31 @@ export default function App() {
   }
 
   return (
-    <Routes>
-      {/* Public route — no auth required */}
-      <Route path="/intake/:token" element={<CustomerIntake />} />
+    <ErrorBoundary>
+      <Routes>
+        {/* Public route — no auth required */}
+        <Route path="/intake/:token" element={<CustomerIntake />} />
 
-      {/* All other routes require authentication */}
-      <Route path="*" element={
-        !isAuthenticated ? <Login onLogin={login} /> : (
-          <Routes>
-            <Route element={<AppLayout onLogout={logout} />}>
-              <Route path="/" element={<Dashboard />} />
-              <Route path="/flights" element={<Flights />} />
-              <Route path="/missions" element={<Missions />} />
-              <Route path="/missions/new" element={<MissionNew />} />
-              <Route path="/missions/:id/edit" element={<MissionNew />} />
-              <Route path="/missions/:id" element={<MissionDetail />} />
-              <Route path="/customers" element={<Customers />} />
-              <Route path="/financials" element={<Financials />} />
-              <Route path="/settings" element={<Settings />} />
-              <Route path="*" element={<Navigate to="/" />} />
-            </Route>
-          </Routes>
-        )
-      } />
-    </Routes>
+        {/* All other routes require authentication */}
+        <Route path="*" element={
+          !isAuthenticated ? <Login onLogin={login} /> : (
+            <Routes>
+              <Route element={<AppLayout onLogout={logout} />}>
+                <Route path="/" element={<Dashboard />} />
+                <Route path="/flights" element={<Flights />} />
+                <Route path="/missions" element={<Missions />} />
+                <Route path="/missions/new" element={<MissionNew />} />
+                <Route path="/missions/:id/edit" element={<MissionNew />} />
+                <Route path="/missions/:id" element={<MissionDetail />} />
+                <Route path="/customers" element={<Customers />} />
+                <Route path="/financials" element={<Financials />} />
+                <Route path="/settings" element={<Settings />} />
+                <Route path="*" element={<Navigate to="/" />} />
+              </Route>
+            </Routes>
+          )
+        } />
+      </Routes>
+    </ErrorBoundary>
   );
 }

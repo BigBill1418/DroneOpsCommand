@@ -5,24 +5,9 @@ import { IconChevronLeft, IconChevronRight, IconDownload, IconZoomIn, IconZoomOu
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
 
-// Configure PDF.js worker — use local build with CDN fallback
-const PDFJS_VERSION = pdfjs.version;
-
-function initWorker() {
-  // Try local worker first (Vite ?url import resolved at build time)
-  try {
-    const workerUrl = new URL(
-      'pdfjs-dist/build/pdf.worker.min.mjs',
-      import.meta.url
-    ).toString();
-    pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
-  } catch {
-    // Fallback: use unpkg CDN
-    pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${PDFJS_VERSION}/build/pdf.worker.min.mjs`;
-  }
-}
-
-initWorker();
+// Configure PDF.js worker — use local build bundled by Vite
+import pdfjsWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+pdfjs.GlobalWorkerOptions.workerSrc = pdfjsWorkerUrl;
 
 interface PdfViewerProps {
   url: string;
@@ -70,13 +55,6 @@ export default function PdfViewer({ url, height = 500, showToolbar = true, downl
 
   const pageWidth = containerWidth > 0 ? (containerWidth - 2) * scale : undefined;
 
-  // PDF.js document options for broader compatibility
-  const documentOptions = {
-    cMapUrl: `//unpkg.com/pdfjs-dist@${PDFJS_VERSION}/cmaps/`,
-    cMapPacked: true,
-    standardFontDataUrl: `//unpkg.com/pdfjs-dist@${PDFJS_VERSION}/standard_fonts/`,
-  };
-
   return (
     <Box
       ref={containerRef}
@@ -100,7 +78,6 @@ export default function PdfViewer({ url, height = 500, showToolbar = true, downl
           file={url}
           onLoadSuccess={onDocumentLoadSuccess}
           onLoadError={onDocumentLoadError}
-          options={documentOptions}
           loading={
             <Center style={{ height }}>
               <Loader color="cyan" size="sm" />

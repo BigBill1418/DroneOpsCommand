@@ -701,8 +701,9 @@ export default function MissionNew() {
       }
       // Generate PDF
       const resp = await api.post(`/missions/${missionId}/report/pdf`, {}, { responseType: 'blob' });
-      const url = URL.createObjectURL(new Blob([resp.data], { type: 'application/pdf' }));
-      window.open(url, '_blank');
+      const blobUrl = URL.createObjectURL(new Blob([resp.data], { type: 'application/pdf' }));
+      window.open(blobUrl, '_blank');
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
       notifications.show({ title: 'PDF Generated', message: 'Opening PDF preview', color: 'cyan' });
     } catch {
       notifications.show({ title: 'Error', message: 'Failed to generate PDF', color: 'red' });

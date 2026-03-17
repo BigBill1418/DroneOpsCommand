@@ -65,14 +65,14 @@ async def get_map_data(
     start = time.perf_counter()
     mission = await _load_mission(db, mission_id)
     flights = _flights_to_dicts(mission)
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     try:
         result = await loop.run_in_executor(None, generate_map_geojson, flights)
         logger.info("Map GeoJSON for mission %s: %.2fs", mission_id, time.perf_counter() - start)
         return result
     except Exception as exc:
         logger.error("Map GeoJSON failed for mission %s: %s", mission_id, exc, exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Map generation failed: {exc}")
+        raise HTTPException(status_code=500, detail="Map generation failed")
 
 
 @router.get("/{mission_id}/map/coverage")
@@ -87,7 +87,7 @@ async def get_coverage(
     mission = await _load_mission(db, mission_id)
     flights = _flights_to_dicts(mission)
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     try:
         tracks = await loop.run_in_executor(None, extract_gps_tracks, flights)
         acres = await loop.run_in_executor(
@@ -95,7 +95,7 @@ async def get_coverage(
         )
     except Exception as exc:
         logger.error("Coverage calculation failed for mission %s: %s", mission_id, exc, exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Coverage calculation failed: {exc}")
+        raise HTTPException(status_code=500, detail="Coverage calculation failed")
 
     logger.info("Coverage for mission %s: %.2f acres, %d tracks (%.2fs)",
                 mission_id, acres, len(tracks), time.perf_counter() - start)
@@ -118,13 +118,13 @@ async def render_map(
     start = time.perf_counter()
     mission = await _load_mission(db, mission_id)
     flights = _flights_to_dicts(mission)
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     try:
         map_path = await loop.run_in_executor(None, render_static_map, flights)
         logger.info("Map rendered for mission %s: %s (%.2fs)",
                      mission_id, map_path, time.perf_counter() - start)
     except Exception as exc:
         logger.error("Map render failed for mission %s: %s", mission_id, exc, exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Map render failed: {exc}")
+        raise HTTPException(status_code=500, detail="Map render failed")
 
     return {"map_path": map_path}
