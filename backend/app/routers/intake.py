@@ -1,3 +1,5 @@
+import base64
+import io
 import logging
 import os
 import secrets
@@ -390,3 +392,124 @@ async def submit_intake_form(
     logger.info("[INTAKE-SUBMIT] SUCCESS — Customer %s (%s) completed intake from ip=%s — TOS signed, signature_length=%d, changes=[%s] (%.3fs)",
                 customer.id, customer.email, client_ip, len(data.signature_data), ", ".join(changes) if changes else "none", elapsed)
     return {"message": "Thank you! Your information has been submitted successfully."}
+
+
+@router.get("/{customer_id}/signed-tos")
+async def get_signed_tos(
+    customer_id: UUID,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """Admin endpoint: Serve the TOS PDF with the customer's signature composited onto it."""
+    from fastapi.responses import StreamingResponse
+    from PIL import Image
+    from pypdf import PdfReader, PdfWriter
+    from reportlab.lib.pagesizes import letter
+    from reportlab.lib.utils import ImageReader
+    from reportlab.pdfgen import canvas
+
+    client_ip = _client_ip(request)
+    logger.info("[SIGNED-TOS] Requested for customer_id=%s from ip=%s", customer_id, client_ip)
+
+    result = await db.execute(select(Customer).where(Customer.id == customer_id))
+    customer = result.scalar_one_or_none()
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+
+    if not customer.tos_signed or not customer.signature_data:
+        raise HTTPException(status_code=404, detail="Customer has not signed the TOS")
+
+    # Find the TOS PDF
+    tos_path = None
+    if customer.tos_pdf_path and os.path.exists(customer.tos_pdf_path):
+        tos_path = customer.tos_pdf_path
+    else:
+        default_path = os.path.join(settings.upload_dir, "tos", "default_tos.pdf")
+        if os.path.exists(default_path):
+            tos_path = default_path
+
+    if not tos_path:
+        raise HTTPException(status_code=404, detail="TOS PDF not found on disk")
+
+    # Decode the signature from base64 data URL
+    sig_data = customer.signature_data
+    if "," in sig_data:
+        sig_data = sig_data.split(",", 1)[1]
+    sig_bytes = base64.b64decode(sig_data)
+    sig_image = Image.open(io.BytesIO(sig_bytes)).convert("RGBA")
+
+    # Crop transparent padding from signature
+    bbox = sig_image.getbbox()
+    if bbox:
+        sig_image = sig_image.crop(bbox)
+
+    # Read the original TOS PDF
+    reader = PdfReader(tos_path)
+    writer = PdfWriter()
+
+    # Copy all pages, adding signature overlay to the last page
+    last_idx = len(reader.pages) - 1
+    for i, page in enumerate(reader.pages):
+        if i == last_idx:
+            # Get page dimensions
+            media_box = page.mediabox
+            page_width = float(media_box.width)
+            page_height = float(media_box.height)
+
+            # Create the signature overlay with reportlab
+            overlay_buf = io.BytesIO()
+            c = canvas.Canvas(overlay_buf, pagesize=(page_width, page_height))
+
+            # Scale signature to fit nicely (max 200pt wide, proportional height)
+            sig_w, sig_h = sig_image.size
+            max_sig_width = 200
+            scale = min(max_sig_width / sig_w, 60 / sig_h)
+            draw_w = sig_w * scale
+            draw_h = sig_h * scale
+
+            # Position: bottom-right area, above the bottom margin
+            sig_x = page_width - draw_w - 72  # 1 inch from right
+            sig_y = 72  # 1 inch from bottom
+
+            # Draw a signature line
+            c.setStrokeColorRGB(0.5, 0.5, 0.5)
+            c.setLineWidth(0.5)
+            line_x = sig_x - 10
+            line_w = draw_w + 20
+            c.line(line_x, sig_y - 2, line_x + line_w, sig_y - 2)
+
+            # Draw the signature image
+            sig_buf = io.BytesIO()
+            sig_image.save(sig_buf, format="PNG")
+            sig_buf.seek(0)
+            c.drawImage(ImageReader(sig_buf), sig_x, sig_y, width=draw_w, height=draw_h, mask='auto')
+
+            # Add signed date text below the line
+            c.setFont("Helvetica", 8)
+            c.setFillColorRGB(0.4, 0.4, 0.4)
+            signed_at = customer.tos_signed_at.strftime("%B %d, %Y at %I:%M %p") if customer.tos_signed_at else "Date unknown"
+            c.drawString(line_x, sig_y - 14, f"Digitally signed by {customer.name or customer.email} — {signed_at}")
+
+            c.save()
+            overlay_buf.seek(0)
+
+            # Merge the overlay onto the last page
+            overlay_reader = PdfReader(overlay_buf)
+            page.merge_page(overlay_reader.pages[0])
+
+        writer.add_page(page)
+
+    # Write the final PDF to a buffer
+    output_buf = io.BytesIO()
+    writer.write(output_buf)
+    output_buf.seek(0)
+
+    filename = f"BarnardHQ_TOS_Signed_{(customer.name or 'customer').replace(' ', '_')}.pdf"
+    logger.info("[SIGNED-TOS] Serving signed TOS for customer %s (%s)", customer.id, customer.email)
+
+    return StreamingResponse(
+        output_buf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )

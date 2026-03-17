@@ -20,7 +20,7 @@ import {
 } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
-import { IconPlus, IconEdit, IconTrash, IconSearch, IconMapPin, IconSend, IconCheck, IconCopy, IconSignature, IconMail } from '@tabler/icons-react';
+import { IconPlus, IconEdit, IconTrash, IconSearch, IconMapPin, IconSend, IconCheck, IconCopy, IconSignature, IconMail, IconDownload } from '@tabler/icons-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
 import { Customer } from '../api/types';
@@ -66,9 +66,11 @@ export default function Customers() {
     }
   };
 
-  // Signature viewer
+  // Signed TOS viewer
   const [signatureModal, setSignatureModal] = useState(false);
   const [viewingCustomer, setViewingCustomer] = useState<Customer | null>(null);
+  const [signedTosBlobUrl, setSignedTosBlobUrl] = useState<string | null>(null);
+  const [signedTosLoading, setSignedTosLoading] = useState(false);
 
   const form = useForm({
     initialValues: { name: '', email: '', phone: '', address: '', company: '', notes: '' },
@@ -205,7 +207,21 @@ export default function Customers() {
             size="sm"
             leftSection={<IconCheck size={10} />}
             style={{ cursor: 'pointer' }}
-            onClick={() => { setViewingCustomer(c); setSignatureModal(true); }}
+            onClick={() => {
+              setViewingCustomer(c);
+              setSignedTosBlobUrl(null);
+              setSignedTosLoading(true);
+              setSignatureModal(true);
+              api.get(`/intake/${c.id}/signed-tos`, { responseType: 'blob' })
+                .then((r) => {
+                  const blob = new Blob([r.data], { type: 'application/pdf' });
+                  setSignedTosBlobUrl(URL.createObjectURL(blob));
+                })
+                .catch(() => {
+                  notifications.show({ title: 'Error', message: 'Could not load signed TOS document.', color: 'red' });
+                })
+                .finally(() => setSignedTosLoading(false));
+            }}
           >
             TOS SIGNED
           </Badge>
@@ -445,12 +461,16 @@ export default function Customers() {
         )}
       </Modal>
 
-      {/* Signature Viewer Modal */}
+      {/* Signed TOS Viewer Modal */}
       <Modal
         opened={signatureModal}
-        onClose={() => { setSignatureModal(false); setViewingCustomer(null); }}
-        title="Customer Signature"
-        size="lg"
+        onClose={() => {
+          setSignatureModal(false);
+          setViewingCustomer(null);
+          if (signedTosBlobUrl) { URL.revokeObjectURL(signedTosBlobUrl); setSignedTosBlobUrl(null); }
+        }}
+        title="Signed Terms of Service"
+        size="xl"
         styles={{
           header: { background: '#0e1117' },
           content: { background: '#0e1117' },
@@ -459,27 +479,56 @@ export default function Customers() {
       >
         {viewingCustomer && (
           <Stack gap="md">
-            <Group>
-              <Badge color="green" variant="light" leftSection={<IconCheck size={10} />}>TOS SIGNED</Badge>
-              {viewingCustomer.tos_signed_at && (
-                <Text c="#5a6478" size="sm" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
-                  {new Date(viewingCustomer.tos_signed_at).toLocaleString()}
-                </Text>
+            <Group justify="space-between">
+              <Group>
+                <Badge color="green" variant="light" leftSection={<IconCheck size={10} />}>TOS SIGNED</Badge>
+                {viewingCustomer.tos_signed_at && (
+                  <Text c="#5a6478" size="sm" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+                    {new Date(viewingCustomer.tos_signed_at).toLocaleString()}
+                  </Text>
+                )}
+              </Group>
+              {signedTosBlobUrl && (
+                <Button
+                  variant="light"
+                  color="cyan"
+                  size="xs"
+                  leftSection={<IconDownload size={14} />}
+                  component="a"
+                  href={signedTosBlobUrl}
+                  download={`BarnardHQ_TOS_Signed_${(viewingCustomer.name || 'customer').replace(/\s+/g, '_')}.pdf`}
+                  styles={{ root: { fontFamily: "'Share Tech Mono', monospace" } }}
+                >
+                  SAVE PDF
+                </Button>
               )}
             </Group>
-            <Text c="#5a6478" size="xs" style={{ fontFamily: "'Share Tech Mono', monospace", letterSpacing: '1px' }}>
-              DIGITAL SIGNATURE
-            </Text>
-            {viewingCustomer.signature_data ? (
-              <div style={{ background: '#050608', borderRadius: 6, border: '1px solid #1a1f2e', padding: 8, textAlign: 'center' }}>
-                <img
-                  src={viewingCustomer.signature_data}
-                  alt="Customer signature"
-                  style={{ maxWidth: '100%', maxHeight: 200 }}
-                />
+
+            {signedTosLoading ? (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 60 }}>
+                <Loader color="cyan" size="md" />
+                <Text c="#5a6478" size="sm" ml="sm" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+                  Generating signed document...
+                </Text>
+              </div>
+            ) : signedTosBlobUrl ? (
+              <div style={{ border: '1px solid #1a1f2e', borderRadius: 6, overflow: 'hidden', background: '#1a1f2e' }}>
+                <object
+                  data={`${signedTosBlobUrl}#toolbar=1&navpanes=0&scrollbar=1`}
+                  type="application/pdf"
+                  style={{ width: '100%', height: 600, display: 'block' }}
+                >
+                  <iframe
+                    src={`${signedTosBlobUrl}#toolbar=1&navpanes=0&scrollbar=1`}
+                    style={{ width: '100%', height: 600, border: 'none', display: 'block' }}
+                    title="Signed Terms of Service"
+                  />
+                </object>
               </div>
             ) : (
-              <Text c="#5a6478" size="sm">No signature image available</Text>
+              <Text c="#5a6478" size="sm" ta="center" py={40}>
+                Could not load the signed TOS document.
+              </Text>
             )}
           </Stack>
         )}

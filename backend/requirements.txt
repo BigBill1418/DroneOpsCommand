@@ -21,6 +21,8 @@ redis==5.2.1
 # PDF Generation
 weasyprint==63.1
 jinja2==3.1.4
+pypdf==5.1.0
+reportlab==4.2.5
 
 # Geospatial (flight path maps + area calc)
 shapely==2.0.6
