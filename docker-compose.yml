@@ -124,6 +124,15 @@ services:
       redis:
         condition: service_healthy
 
+  flight-parser:
+    build:
+      context: ./flight-parser
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      - DJI_API_KEY=${DJI_API_KEY:-}
+      - PARSER_PORT=8100
+
   frontend:
     build:
       context: ./frontend

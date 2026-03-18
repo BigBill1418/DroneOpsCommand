@@ -465,6 +465,25 @@ export default function Settings() {
                   <Button type="submit" color="cyan" loading={odlSaving} styles={{ root: { fontFamily: "'Bebas Neue', sans-serif" } }}>
                     SAVE
                   </Button>
+                  {odlStatus?.status === 'online' && (
+                    <Button
+                      variant="light"
+                      color="orange"
+                      leftSection={<IconDrone size={14} />}
+                      onClick={async () => {
+                        try {
+                          notifications.show({ title: 'Importing...', message: 'Migrating flights from OpenDroneLog...', color: 'cyan', autoClose: false, id: 'odl-import' });
+                          const resp = await api.post('/flight-library/import/opendronelog');
+                          notifications.update({ id: 'odl-import', title: 'Import Complete', message: `${resp.data.imported} flights imported, ${resp.data.skipped} skipped`, color: 'green', autoClose: 5000 });
+                        } catch (err: any) {
+                          notifications.update({ id: 'odl-import', title: 'Import Failed', message: err.response?.data?.detail || 'Migration failed', color: 'red', autoClose: 5000 });
+                        }
+                      }}
+                      styles={{ root: { fontFamily: "'Bebas Neue', sans-serif" } }}
+                    >
+                      IMPORT ALL FLIGHTS TO LOCAL LIBRARY
+                    </Button>
+                  )}
                 </Stack>
               </form>
             </Card>

@@ -289,22 +289,27 @@ export default function MissionNew() {
   const loadFlights = async () => {
     setFlightsLoading(true);
     try {
-      const resp = await api.get('/flights');
-      // Backend returns a flat array; handle edge cases defensively
+      // Try native flight library first
       let flights: any[] = [];
-      if (Array.isArray(resp.data)) {
-        flights = resp.data;
-      } else if (resp.data && typeof resp.data === 'object') {
-        // Paginated wrapper — try common keys
-        flights = resp.data.flights || resp.data.data || resp.data.results || resp.data.items || [];
+      try {
+        const resp = await api.get('/flight-library');
+        flights = Array.isArray(resp.data) ? resp.data : [];
+      } catch {
+        // Fallback to legacy OpenDroneLog
+        const resp = await api.get('/flights');
+        if (Array.isArray(resp.data)) {
+          flights = resp.data;
+        } else if (resp.data && typeof resp.data === 'object') {
+          flights = resp.data.flights || resp.data.data || resp.data.results || resp.data.items || [];
+        }
       }
       setAvailableFlights(flights);
       if (flights.length === 0) {
-        notifications.show({ title: 'OpenDroneLog', message: 'Connection OK but no flights returned. Verify flights exist in OpenDroneLog.', color: 'yellow' });
+        notifications.show({ title: 'Flights', message: 'No flights found. Upload flight logs on the Flights page first.', color: 'yellow' });
       }
     } catch (err: any) {
-      const detail = err.response?.data?.detail || 'Could not fetch flights. Check the OpenDroneLog URL in Settings.';
-      notifications.show({ title: 'OpenDroneLog', message: detail, color: 'yellow' });
+      const detail = err.response?.data?.detail || 'Could not fetch flights.';
+      notifications.show({ title: 'Flights', message: detail, color: 'yellow' });
     } finally {
       setFlightsLoading(false);
     }
@@ -392,9 +397,12 @@ export default function MissionNew() {
 
     trackOp(async () => {
       try {
+        // Determine if this is a native flight (UUID) or legacy ODL flight
+        const isNativeFlight = typeof flight.id === 'string' && flight.id.includes('-') && flight.source;
         const resp = await api.post(`/missions/${missionId}/flights`, {
-          opendronelog_flight_id: String(flight.id || flight.flight_id),
-          aircraft_id: aircraftId || null,
+          flight_id: isNativeFlight ? flight.id : null,
+          opendronelog_flight_id: isNativeFlight ? null : String(flight.id || flight.flight_id),
+          aircraft_id: aircraftId || flight.aircraft_id || null,
           flight_data_cache: flight,
         });
         // Replace temp ID with real one

@@ -15,7 +15,7 @@ from slowapi.util import get_remote_address
 from app.config import settings
 from app.database import Base, async_session, engine, get_db
 import app.models  # noqa: F401 — ensure all models registered with Base before create_all
-from app.routers import auth, customers, aircraft, missions, flights, maps, reports, invoices, rate_templates, llm, system_settings, financials, weather, intake
+from app.routers import auth, customers, aircraft, missions, flights, maps, reports, invoices, rate_templates, llm, system_settings, financials, weather, intake, flight_library, batteries, maintenance
 
 # Configure root logger for the app
 logging.basicConfig(
@@ -93,7 +93,16 @@ def _add_missing_columns(conn):
                 ("state", "ALTER TABLE customers ADD COLUMN state VARCHAR(100)"),
                 ("zip_code", "ALTER TABLE customers ADD COLUMN zip_code VARCHAR(20)"),
             ],
+            "mission_flights": [
+                ("flight_id", "ALTER TABLE mission_flights ADD COLUMN flight_id UUID REFERENCES flights(id) ON DELETE SET NULL"),
+            ],
         }
+
+        # Make opendronelog_flight_id nullable for existing tables (new flights use flight_id)
+        try:
+            conn.execute(text("ALTER TABLE mission_flights ALTER COLUMN opendronelog_flight_id DROP NOT NULL"))
+        except Exception:
+            pass  # already nullable or column doesn't exist
 
         for table, columns in migrations.items():
             if not inspector.has_table(table):
@@ -142,7 +151,7 @@ limiter = Limiter(key_func=get_remote_address)
 app = FastAPI(
     title="Flight Operations Command Center",
     description="Invoicing and after-action reporting tool for drone operations",
-    version="2.1.0",
+    version="2.2.0",
     lifespan=lifespan,
 )
 
@@ -186,6 +195,9 @@ app.include_router(system_settings.router)
 app.include_router(financials.router)
 app.include_router(weather.router)
 app.include_router(intake.router)
+app.include_router(flight_library.router)
+app.include_router(batteries.router)
+app.include_router(maintenance.router)
 
 
 @app.middleware("http")

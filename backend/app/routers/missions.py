@@ -158,26 +158,51 @@ async def add_flight(
     if not result.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Mission not found")
 
-    # Enrich flight_data_cache with GPS track from OpenDroneLog
-    cache = data.flight_data_cache or {}
-    has_track = any(
-        key in cache and isinstance(cache[key], list) and len(cache[key]) > 0
-        for key in ("track", "gps_data", "coordinates")
-    )
-    if not has_track and data.opendronelog_flight_id:
-        try:
-            track = await opendronelog_client.get_flight_track(
-                data.opendronelog_flight_id, db
-            )
-            if track:
-                cache["track"] = track
-                data.flight_data_cache = cache
-        except Exception as exc:
-            logger.warning(
-                "Could not fetch GPS track for flight %s: %s",
-                data.opendronelog_flight_id,
-                exc,
-            )
+    # If linking a local flight, populate cache from Flight record
+    if data.flight_id:
+        from app.models.flight import Flight as FlightModel
+        flt_result = await db.execute(select(FlightModel).where(FlightModel.id == data.flight_id))
+        local_flight = flt_result.scalar_one_or_none()
+        if local_flight:
+            cache = data.flight_data_cache or {}
+            cache.update({
+                "id": str(local_flight.id),
+                "name": local_flight.name,
+                "display_name": local_flight.name,
+                "drone_model": local_flight.drone_model,
+                "drone_serial": local_flight.drone_serial,
+                "start_time": local_flight.start_time.isoformat() if local_flight.start_time else None,
+                "duration_secs": local_flight.duration_secs,
+                "total_distance": local_flight.total_distance,
+                "max_altitude": local_flight.max_altitude,
+                "max_speed": local_flight.max_speed,
+                "home_lat": local_flight.home_lat,
+                "home_lon": local_flight.home_lon,
+                "point_count": local_flight.point_count,
+                "track": local_flight.gps_track or [],
+            })
+            data.flight_data_cache = cache
+    else:
+        # Legacy: enrich flight_data_cache with GPS track from OpenDroneLog
+        cache = data.flight_data_cache or {}
+        has_track = any(
+            key in cache and isinstance(cache[key], list) and len(cache[key]) > 0
+            for key in ("track", "gps_data", "coordinates")
+        )
+        if not has_track and data.opendronelog_flight_id:
+            try:
+                track = await opendronelog_client.get_flight_track(
+                    data.opendronelog_flight_id, db
+                )
+                if track:
+                    cache["track"] = track
+                    data.flight_data_cache = cache
+            except Exception as exc:
+                logger.warning(
+                    "Could not fetch GPS track for flight %s: %s",
+                    data.opendronelog_flight_id,
+                    exc,
+                )
 
     flight = MissionFlight(mission_id=mission_id, **data.model_dump())
     db.add(flight)
