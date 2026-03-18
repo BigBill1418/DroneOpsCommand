@@ -57,6 +57,10 @@ class OpenDroneLogSettings(BaseModel):
     opendronelog_url: str = ""
 
 
+class DjiSettings(BaseModel):
+    dji_api_key: str = ""
+
+
 class PaymentSettings(BaseModel):
     paypal_link: str = ""
     venmo_link: str = ""
@@ -240,6 +244,47 @@ async def update_opendronelog_settings(
         existing.value = payload.opendronelog_url
     else:
         db.add(SystemSetting(key="opendronelog_url", value=payload.opendronelog_url))
+    await db.commit()
+    return {"status": "ok"}
+
+
+@router.get("/dji")
+async def get_dji_settings(
+    _user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get DJI API key (masked)."""
+    result = await db.execute(
+        select(SystemSetting).where(SystemSetting.key == "dji_api_key")
+    )
+    row = result.scalar_one_or_none()
+    value = row.value if row else ""
+    # Mask the key for frontend display
+    if value:
+        value = value[:4] + "••••••••" + value[-4:] if len(value) > 8 else "••••••••"
+    return {"dji_api_key": value}
+
+
+@router.put("/dji")
+async def update_dji_settings(
+    payload: DjiSettings,
+    _user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update DJI API key."""
+    value = payload.dji_api_key
+    # Don't overwrite with masked value
+    if "••••" in value:
+        return {"status": "ok"}
+
+    result = await db.execute(
+        select(SystemSetting).where(SystemSetting.key == "dji_api_key")
+    )
+    existing = result.scalar_one_or_none()
+    if existing:
+        existing.value = value
+    else:
+        db.add(SystemSetting(key="dji_api_key", value=value))
     await db.commit()
     return {"status": "ok"}
 

@@ -330,9 +330,25 @@ async def import_from_opendronelog(
 
             # Check if already imported by name + start_time combo
             name = odl.get("display_name") or odl.get("name") or f"ODL Flight {odl_id}"
-            start = odl.get("start_time")
+            start_raw = odl.get("start_time")
 
-            if start:
+            # Parse start_time string into a datetime object
+            start_dt = None
+            if start_raw:
+                from datetime import datetime as _dt
+                if isinstance(start_raw, str):
+                    for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M:%S.%f",
+                                "%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S.%fZ",
+                                "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+                        try:
+                            start_dt = _dt.strptime(start_raw.rstrip("Z"), fmt.rstrip("Z"))
+                            break
+                        except ValueError:
+                            continue
+                elif isinstance(start_raw, _dt):
+                    start_dt = start_raw
+
+            if start_raw:
                 existing = await db.execute(
                     select(Flight).where(Flight.name == name, Flight.source == "opendronelog_import")
                 )
@@ -347,24 +363,37 @@ async def import_from_opendronelog(
             except Exception:
                 pass
 
+            # Safely convert numeric fields (ODL may return strings or None)
+            def _float(val: object, default: float = 0.0) -> float:
+                try:
+                    return float(val) if val is not None else default
+                except (ValueError, TypeError):
+                    return default
+
+            def _int(val: object, default: int = 0) -> int:
+                try:
+                    return int(val) if val is not None else default
+                except (ValueError, TypeError):
+                    return default
+
             flight = Flight(
                 name=name,
-                drone_model=odl.get("drone_model"),
-                drone_serial=odl.get("drone_serial"),
-                battery_serial=odl.get("battery_serial"),
-                start_time=start,
-                duration_secs=float(odl.get("duration_secs", 0)),
-                total_distance=float(odl.get("total_distance", 0)),
-                max_altitude=float(odl.get("max_altitude", 0)),
-                max_speed=float(odl.get("max_speed", 0)),
-                home_lat=odl.get("home_lat"),
-                home_lon=odl.get("home_lon"),
-                point_count=int(odl.get("point_count", 0)) or len(track),
+                drone_model=odl.get("drone_model") or None,
+                drone_serial=odl.get("drone_serial") or None,
+                battery_serial=odl.get("battery_serial") or None,
+                start_time=start_dt,
+                duration_secs=_float(odl.get("duration_secs")),
+                total_distance=_float(odl.get("total_distance")),
+                max_altitude=_float(odl.get("max_altitude")),
+                max_speed=_float(odl.get("max_speed")),
+                home_lat=_float(odl.get("home_lat"), None) if odl.get("home_lat") else None,
+                home_lon=_float(odl.get("home_lon"), None) if odl.get("home_lon") else None,
+                point_count=_int(odl.get("point_count")) or len(track),
                 gps_track=track if track else None,
-                notes=odl.get("notes"),
-                tags=odl.get("tags"),
+                notes=odl.get("notes") or None,
+                tags=odl.get("tags") if odl.get("tags") else None,
                 source="opendronelog_import",
-                original_filename=odl.get("file_name"),
+                original_filename=odl.get("file_name") or None,
             )
             db.add(flight)
             await db.flush()
@@ -399,6 +428,50 @@ async def flight_stats(
     )
     row = result.one()
     total = row[0] or 0
+
+    # Longest flight by duration
+    longest = None
+    longest_result = await db.execute(
+        select(Flight).where(Flight.duration_secs > 0).order_by(desc(Flight.duration_secs)).limit(1)
+    )
+    longest_flight = longest_result.scalar_one_or_none()
+    if longest_flight:
+        longest = {
+            "name": longest_flight.name,
+            "duration_secs": longest_flight.duration_secs,
+            "drone_model": longest_flight.drone_model,
+        }
+
+    # Farthest from home (max total_distance in a single flight)
+    farthest = None
+    farthest_result = await db.execute(
+        select(Flight).where(Flight.total_distance > 0).order_by(desc(Flight.total_distance)).limit(1)
+    )
+    farthest_flight = farthest_result.scalar_one_or_none()
+    if farthest_flight:
+        farthest = {
+            "name": farthest_flight.name,
+            "total_distance": farthest_flight.total_distance,
+            "drone_model": farthest_flight.drone_model,
+        }
+
+    # Recent flights (last 5)
+    recent_result = await db.execute(
+        select(Flight).order_by(desc(Flight.start_time)).limit(5)
+    )
+    recent_flights = [
+        {
+            "id": str(f.id),
+            "name": f.name,
+            "start_time": f.start_time.isoformat() if f.start_time else None,
+            "duration_secs": f.duration_secs,
+            "total_distance": f.total_distance,
+            "max_altitude": f.max_altitude,
+            "drone_model": f.drone_model,
+        }
+        for f in recent_result.scalars().all()
+    ]
+
     return {
         "total_flights": total,
         "total_duration": row[1] or 0,
@@ -408,6 +481,9 @@ async def flight_stats(
         "total_points": row[5] or 0,
         "avg_duration": (row[1] or 0) / total if total > 0 else 0,
         "avg_distance": (row[2] or 0) / total if total > 0 else 0,
+        "longest_flight": longest,
+        "farthest_flight": farthest,
+        "recent_flights": recent_flights,
     }
 
 
