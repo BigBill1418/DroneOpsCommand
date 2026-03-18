@@ -8,6 +8,7 @@ venv/
 # Build output
 frontend/dist/
 *.egg-info/
+flight-parser/target/
 
 # Environment
 .env
