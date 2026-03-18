@@ -23,7 +23,14 @@ if [ -f "$DEPLOY_MARKER" ]; then
 fi
 
 echo "=== Fetching latest from $BRANCH ==="
-git fetch origin "$BRANCH"
+if ! git fetch origin "$BRANCH"; then
+  echo "ERROR: git fetch failed. Check your remote URL:"
+  git remote -v
+  echo ""
+  echo "If the repo was renamed, fix it with:"
+  echo "  git remote set-url origin https://github.com/BigBill1418/DroneOpsCommand.git"
+  exit 1
+fi
 
 echo "=== Syncing to $BRANCH ==="
 git checkout main 2>/dev/null || git checkout -b main origin/main
