@@ -263,11 +263,28 @@ export default function Dashboard() {
     }
   };
 
-  const copyIntakeLink = () => {
+  const copyIntakeLink = async () => {
     if (!intakeResult) return;
-    navigator.clipboard.writeText(intakeResult.intake_url);
-    setLinkCopied(true);
-    setTimeout(() => setLinkCopied(false), 2000);
+    const text = intakeResult.intake_url;
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        // Fallback for non-HTTPS / older browsers
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.left = '-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 2000);
+    } catch {
+      notifications.show({ title: 'Copy failed', message: 'Could not copy to clipboard', color: 'red' });
+    }
   };
 
   return (
