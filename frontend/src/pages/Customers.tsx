@@ -70,6 +70,13 @@ export default function Customers() {
   const [signedTosBlobUrl, setSignedTosBlobUrl] = useState<string | null>(null);
   const [signedTosLoading, setSignedTosLoading] = useState(false);
 
+  const formatPhone = (value: string) => {
+    const digits = value.replace(/\D/g, '').slice(0, 10);
+    if (digits.length <= 3) return digits;
+    if (digits.length <= 6) return `${digits.slice(0, 3)}-${digits.slice(3)}`;
+    return `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}`;
+  };
+
   const form = useForm({
     initialValues: { name: '', email: '', phone: '', address: '', city: '', state: '', zip_code: '', company: '', notes: '' },
   });
@@ -122,11 +129,12 @@ export default function Customers() {
 
   const handleSubmit = async (values: typeof form.values) => {
     try {
+      const payload = { ...values, phone: values.phone.replace(/\D/g, '') || null };
       if (editingId) {
-        await api.put(`/customers/${editingId}`, values);
+        await api.put(`/customers/${editingId}`, payload);
         notifications.show({ title: 'Updated', message: 'Customer updated', color: 'cyan' });
       } else {
-        await api.post('/customers', values);
+        await api.post('/customers', payload);
         notifications.show({ title: 'Created', message: 'Customer created', color: 'cyan' });
       }
       setModalOpen(false);
@@ -143,7 +151,7 @@ export default function Customers() {
     form.setValues({
       name: customer.name,
       email: customer.email || '',
-      phone: customer.phone || '',
+      phone: formatPhone(customer.phone || ''),
       address: customer.address || '',
       city: customer.city || '',
       state: customer.state || '',
@@ -318,7 +326,7 @@ export default function Customers() {
                   <Table.Td fw={600}>{c.name}</Table.Td>
                   <Table.Td c="#5a6478">{c.company || '—'}</Table.Td>
                   <Table.Td c="#5a6478">{c.email || '—'}</Table.Td>
-                  <Table.Td c="#5a6478" style={{ fontFamily: "'Share Tech Mono', monospace" }}>{c.phone || '—'}</Table.Td>
+                  <Table.Td c="#5a6478" style={{ fontFamily: "'Share Tech Mono', monospace" }}>{c.phone ? formatPhone(c.phone) : '—'}</Table.Td>
                   <Table.Td>{renderTosStatus(c)}</Table.Td>
                   <Table.Td>
                     <Group gap="xs">
@@ -364,7 +372,7 @@ export default function Customers() {
           <Stack gap="sm">
             <TextInput label="Name" required {...form.getInputProps('name')} styles={inputStyles} />
             <TextInput label="Email" {...form.getInputProps('email')} styles={inputStyles} />
-            <TextInput label="Phone" {...form.getInputProps('phone')} styles={inputStyles} />
+            <TextInput label="Phone" placeholder="xxx-xxx-xxxx" value={form.values.phone} onChange={(e) => form.setFieldValue('phone', formatPhone(e.target.value))} styles={inputStyles} />
             <TextInput label="Company" {...form.getInputProps('company')} styles={inputStyles} />
             <Popover opened={addressPopover} onClose={() => setAddressPopover(false)} position="bottom-start" width="target">
               <Popover.Target>

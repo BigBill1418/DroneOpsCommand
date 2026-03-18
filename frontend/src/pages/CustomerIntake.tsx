@@ -83,6 +83,13 @@ export default function CustomerIntake() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
+
+  const formatPhone = (value: string) => {
+    const digits = value.replace(/\D/g, '').slice(0, 10);
+    if (digits.length <= 3) return digits;
+    if (digits.length <= 6) return `${digits.slice(0, 3)}-${digits.slice(3)}`;
+    return `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}`;
+  };
   const [address, setAddress] = useState('');
   const [city, setCity] = useState('');
   const [stateVal, setStateVal] = useState('');
@@ -154,7 +161,7 @@ export default function CustomerIntake() {
         }
         setName(d.customer_name || '');
         setEmail(d.customer_email || '');
-        setPhone(d.customer_phone || '');
+        setPhone(formatPhone(d.customer_phone || ''));
         setAddress(d.customer_address || '');
         setCity(d.customer_city || '');
         setStateVal(d.customer_state || '');
@@ -234,7 +241,7 @@ export default function CustomerIntake() {
       await axios.post(`/api/intake/form/${token}`, {
         name: name.trim(),
         email: email.trim(),
-        phone: phone.trim() || null,
+        phone: phone.replace(/\D/g, '').trim() || null,
         address: address.trim() || null,
         city: city.trim() || null,
         state: stateVal.trim() || null,
@@ -336,7 +343,7 @@ export default function CustomerIntake() {
 
           <TextInput label="Full Name" required value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" styles={inputStyles} />
           <TextInput label="Email" required type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" styles={inputStyles} />
-          <TextInput label="Phone" value={phone} onChange={(e) => setPhone(e.target.value)} autoComplete="tel" styles={inputStyles} />
+          <TextInput label="Phone" placeholder="xxx-xxx-xxxx" value={phone} onChange={(e) => setPhone(formatPhone(e.target.value))} autoComplete="tel" styles={inputStyles} />
           <TextInput label="Company" value={company} onChange={(e) => setCompany(e.target.value)} autoComplete="organization" styles={inputStyles} />
 
           <Text c="#5a6478" size="sm" mt="xs" style={{ fontFamily: "'Share Tech Mono', monospace", letterSpacing: '1px' }}>
