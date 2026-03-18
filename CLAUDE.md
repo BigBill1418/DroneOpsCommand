@@ -15,14 +15,10 @@ Include the version tag in the commit message (e.g. `— v1.7.8`).
 
 ## Tech Stack
 
-- **Backend**: Python / FastAPI, SQLAlchemy, SQLite
+- **Backend**: Python / FastAPI, SQLAlchemy, PostgreSQL
 - **Frontend**: React / TypeScript, Mantine UI, Vite
-- **Infrastructure**: Docker Compose on Synology NAS (UNAS)
-- **Deploy**: `update.sh` fetches feature branch, merges into main, rebuilds changed services
-
-## Development Branch
-
-Active development branch: `claude/drone-report-generator-qk9UM`
+- **Infrastructure**: Docker Compose (self-hosted)
+- **Deploy**: `update.sh` pulls latest, rebuilds changed services
 
 ## Conventions
 

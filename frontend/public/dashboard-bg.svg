@@ -46,13 +46,13 @@
     <line x1="30" y1="40" x2="50" y2="40" stroke="#0088bb" stroke-width="3" stroke-linecap="round"/>
   </g>
 
-  <!-- BarnardHQ text -->
+  <!-- Brand text -->
   <text x="400" y="290" text-anchor="middle" font-family="Arial Black, Helvetica, sans-serif" font-size="56" font-weight="900" letter-spacing="3" opacity="0.8">
-    <tspan fill="#e8edf2">Barnard</tspan><tspan fill="#00d4ff">HQ</tspan>
+    <tspan fill="#e8edf2">Drone</tspan><tspan fill="#00d4ff">Ops</tspan>
   </text>
 
   <!-- Subtitle -->
   <text x="400" y="320" text-anchor="middle" font-family="monospace" font-size="14" fill="#5a6478" letter-spacing="5" opacity="0.6">
-    PROFESSIONAL AERIAL OPERATIONS
+    FLIGHT OPERATIONS COMMAND CENTER
   </text>
 </svg>

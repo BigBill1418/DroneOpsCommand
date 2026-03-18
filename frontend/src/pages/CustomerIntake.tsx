@@ -20,6 +20,7 @@ import { useParams } from 'react-router-dom';
 import SignatureCanvas from 'react-signature-canvas';
 import axios from 'axios';
 import PdfViewer from '../components/PDFPreview/PdfViewer';
+import { useBranding } from '../hooks/useBranding';
 
 const US_STATES = [
   'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA','KS','KY','LA','ME','MD',
@@ -98,6 +99,7 @@ export default function CustomerIntake() {
   const addressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const sigRef = useRef<SignatureCanvas>(null);
+  const branding = useBranding();
 
   const searchAddress = useCallback((query: string) => {
     if (addressTimerRef.current) clearTimeout(addressTimerRef.current);
@@ -173,7 +175,7 @@ export default function CustomerIntake() {
           console.error('[Intake] Network/parse error:', err.message);
         } else {
           setState('error');
-          setErrorMsg(err.response?.data?.detail || 'Something went wrong. Please try again or contact BarnardHQ.');
+          setErrorMsg(err.response?.data?.detail || 'Something went wrong. Please try again.');
         }
       });
   }, [token]);
@@ -277,7 +279,7 @@ export default function CustomerIntake() {
         <Stack align="center" gap="md" py={40}>
           <IconAlertTriangle size={48} color="#ff6b1a" />
           <Title order={3} c="#e8edf2" style={{ letterSpacing: '1px' }}>LINK EXPIRED</Title>
-          <Text c="#5a6478" ta="center">This intake link has expired. Please contact BarnardHQ for a new one.</Text>
+          <Text c="#5a6478" ta="center">This intake link has expired. Please contact us for a new one.</Text>
         </Stack>
       );
     }
@@ -299,7 +301,7 @@ export default function CustomerIntake() {
           <Title order={3} c="#e8edf2" style={{ letterSpacing: '1px' }}>THANK YOU!</Title>
           <Text c="#5a6478" ta="center" maw={400}>
             Your information has been submitted and your Terms of Service agreement has been signed.
-            The BarnardHQ team will be in touch.
+            Our team will be in touch.
           </Text>
         </Stack>
       );
@@ -575,7 +577,7 @@ export default function CustomerIntake() {
                 }}
                 c="#e8edf2"
               >
-                BARNARD<span style={{ color: '#00d4ff' }}>HQ</span>
+                {branding.company_name.toUpperCase()}
               </Title>
               <Text
                 ta="center"
@@ -583,7 +585,7 @@ export default function CustomerIntake() {
                 c="#5a6478"
                 style={{ fontFamily: "'Share Tech Mono', monospace", letterSpacing: '3px' }}
               >
-                CUSTOMER ONBOARDING
+                {branding.company_tagline.toUpperCase()}
               </Text>
             </div>
           </Center>

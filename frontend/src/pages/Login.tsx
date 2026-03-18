@@ -11,6 +11,7 @@ import {
   Title,
 } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
+import { useBranding } from '../hooks/useBranding';
 
 interface LoginProps {
   onLogin: (username: string, password: string) => Promise<void>;
@@ -20,6 +21,7 @@ export default function Login({ onLogin }: LoginProps) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const branding = useBranding();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -71,7 +73,7 @@ export default function Login({ onLogin }: LoginProps) {
                   }}
                   c="#e8edf2"
                 >
-                  BARNARD<span style={{ color: '#00d4ff' }}>HQ</span>
+                  {branding.company_name.toUpperCase()}
                 </Title>
                 <Text
                   ta="center"
@@ -79,7 +81,7 @@ export default function Login({ onLogin }: LoginProps) {
                   c="#5a6478"
                   style={{ fontFamily: "'Share Tech Mono', monospace", letterSpacing: '3px' }}
                 >
-                  FLIGHT OPERATIONS COMMAND CENTER
+                  {branding.company_tagline.toUpperCase()}
                 </Text>
               </div>
             </Center>

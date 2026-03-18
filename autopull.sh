@@ -1,12 +1,12 @@
 #!/bin/bash
 # Polls the remote branch for new commits and auto-deploys.
-# Run via cron: * * * * * /volume1/docker/droneops/autopull.sh
+# Run via cron: * * * * * /path/to/droneops/autopull.sh
 #
-# Logs to /volume1/docker/droneops/autopull.log
+# Logs to autopull.log in the install directory.
 
 set -e
-DIR="/volume1/docker/droneops"
-BRANCH="claude/drone-report-generator-qk9UM"
+DIR="${DRONEOPS_DIR:-$(cd "$(dirname "$0")" && pwd)}"
+BRANCH="${DRONEOPS_BRANCH:-main}"
 LOGFILE="$DIR/autopull.log"
 LOCKFILE="$DIR/.autopull.lock"
 
@@ -41,7 +41,7 @@ log "Deploying $REMOTE..."
 
 # Run the update script
 if bash "$DIR/update.sh" >> "$LOGFILE" 2>&1; then
-  log "Deploy complete ✓"
+  log "Deploy complete"
 else
   log "ERROR: Deploy failed (exit $?)"
 fi

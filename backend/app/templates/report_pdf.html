@@ -334,9 +334,9 @@
 <!-- Header -->
 <div class="header">
   <div>
-    <div class="logo">BARNARD<span class="hq">HQ</span></div>
+    <div class="logo">{{ company_name | upper }}</div>
     <div style="font-family: 'Share Tech Mono', monospace; font-size: 8pt; color: #5a6478; letter-spacing: 2px;">
-      PROFESSIONAL AERIAL OPERATIONS
+      {{ company_tagline | upper }}
     </div>
   </div>
   <div class="header-right">
@@ -579,10 +579,10 @@
       CONFIDENTIALITY NOTICE
     </div>
     <p style="font-size: 9pt; color: #333; line-height: 1.7; margin: 0;">
-      This report and all accompanying materials are proprietary to BarnardHQ and are provided solely for the use of the intended recipient.
+      This report and all accompanying materials are proprietary to {{ company_name }} and are provided solely for the use of the intended recipient.
       The contents of this report, including all data, imagery, analysis, and findings, are confidential and may not be reproduced,
-      distributed, or shared with any third party without the prior written consent of BarnardHQ.
-      This report is prepared exclusively for the client named herein under contract with BarnardHQ.
+      distributed, or shared with any third party without the prior written consent of {{ company_name }}.
+      This report is prepared exclusively for the client named herein under contract with {{ company_name }}.
       Any unauthorized use, disclosure, or distribution is strictly prohibited.
     </p>
   </div>
@@ -590,14 +590,21 @@
 
 <!-- Footer -->
 <div class="footer">
-  <div class="logo-small">BARNARD<span class="hq">HQ</span></div>
+  <div class="logo-small">{{ company_name | upper }}</div>
+  {% if company_website or company_social_url %}
   <div class="social-links">
-    <a href="https://barnardhq.com">barnardhq.com</a> &nbsp;|&nbsp;
-    <a href="https://facebook.com/barnardHQ">facebook.com/barnardHQ</a>
+    {% if company_website %}
+    <a href="{{ company_website }}">{{ company_website | replace('https://', '') | replace('http://', '') }}</a>
+    {% endif %}
+    {% if company_website and company_social_url %} &nbsp;|&nbsp; {% endif %}
+    {% if company_social_url %}
+    <a href="{{ company_social_url }}">{{ company_social_url | replace('https://', '') | replace('http://', '') }}</a>
+    {% endif %}
   </div>
+  {% endif %}
   <div style="margin-top: 6px;">
-    FAA Part 107 Certified &nbsp;|&nbsp; Professional Aerial Operations<br>
-    &copy; {{ year }} BarnardHQ. All rights reserved.
+    FAA Part 107 Certified &nbsp;|&nbsp; {{ company_tagline }}<br>
+    &copy; {{ year }} {{ company_name }}. All rights reserved.
   </div>
 </div>
 

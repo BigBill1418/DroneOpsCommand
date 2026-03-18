@@ -163,6 +163,10 @@ async def generate_report(
         db.add(report)
     await db.flush()
 
+    # Load company name for LLM prompt
+    from app.routers.system_settings import get_branding as _get_brand
+    _brand = await _get_brand(db)
+
     # Dispatch to Celery worker
     task = generate_report_task.delay(
         mission_id=str(mission_id),
@@ -176,6 +180,7 @@ async def generate_report(
         total_duration=total_duration,
         total_distance=total_distance,
         map_path=map_path,
+        company_name=_brand.get("company_name", "DroneOps"),
     )
 
     elapsed = time.perf_counter() - start
@@ -338,6 +343,10 @@ async def generate_report_pdf(
             else "N/A",
         }
 
+    # Load branding for PDF template
+    from app.routers.system_settings import get_branding
+    branding = await get_branding(db)
+
     # Run WeasyPrint in thread executor — it's CPU-intensive and blocks
     loop = asyncio.get_running_loop()
     try:
@@ -352,6 +361,7 @@ async def generate_report_pdf(
                 image_paths=image_list,
                 payment_links=payment_links,
                 download_link=download_link,
+                branding=branding,
             ),
         )
     except Exception as exc:

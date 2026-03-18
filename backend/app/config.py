@@ -30,8 +30,8 @@ class Settings(BaseSettings):
     smtp_port: int = 587
     smtp_user: str = ""
     smtp_password: str = ""
-    smtp_from_email: str = "reports@barnardhq.com"
-    smtp_from_name: str = "BarnardHQ Drone Operations"
+    smtp_from_email: str = ""
+    smtp_from_name: str = ""
     smtp_use_tls: bool = True
 
     # File storage
@@ -39,7 +39,7 @@ class Settings(BaseSettings):
     reports_dir: str = "/data/reports"
 
     # Customer intake
-    frontend_url: str = "https://droneops.barnardhq.com"
+    frontend_url: str = "http://localhost:3080"
     intake_token_expire_days: int = 7
 
     @property

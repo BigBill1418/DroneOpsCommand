@@ -6,7 +6,7 @@ from app.config import settings
 
 logger = logging.getLogger("droneops.ollama")
 
-SYSTEM_PROMPT = """You are a professional drone operations report writer for BarnardHQ, \
+SYSTEM_PROMPT_TEMPLATE = """You are a professional drone operations report writer for {company_name}, \
 an FAA Part 107 certified drone operations company. Generate a detailed, client-facing \
 after-action report based on the following mission data and operator notes.
 
@@ -31,6 +31,7 @@ async def generate_report(
     total_duration_seconds: float = 0,
     total_distance_meters: float = 0,
     mission_date: str | None = None,
+    company_name: str = "DroneOps",
 ) -> str:
     """Generate a report narrative using Ollama."""
 
@@ -78,7 +79,7 @@ Generate the after-action report:"""
                 json={
                     "model": settings.ollama_model,
                     "prompt": user_prompt,
-                    "system": SYSTEM_PROMPT,
+                    "system": SYSTEM_PROMPT_TEMPLATE.format(company_name=company_name),
                     "stream": False,
                     "options": {
                         "temperature": 0.3,

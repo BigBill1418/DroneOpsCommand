@@ -1,8 +1,8 @@
 # DroneOpsReport
 
-Invoicing and after-action reporting tool for drone operations. Built for [BarnardHQ](https://barnardhq.com).
+Self-hosted invoicing and after-action reporting platform for commercial drone operations.
 
-**Version 1.15.0**
+**Version 2.0.0**
 
 ---
 
@@ -84,7 +84,7 @@ All services run in Docker containers on your own hardware — no cloud dependen
 - Aircraft cards displayed in mission detail and PDF reports
 
 ### PDF Export
-- Branded PDF reports with BarnardHQ styling via WeasyPrint
+- Branded PDF reports with custom company branding via WeasyPrint
 - Includes: mission metadata, report narrative, flight map, aircraft specs, mission images with captions
 - Invoice section with line items, totals, tax calculation
 - Payment links (PayPal/Venmo) for unpaid invoices
@@ -135,7 +135,7 @@ All services run in Docker containers on your own hardware — no cloud dependen
 - NOTAMs (Notices to Airmen) with classification and effective dates
 - National Weather Service alerts with severity levels
 - Wind severity indicator: favorable, caution, hazardous
-- Default location: Eugene, OR (configurable)
+- Configurable location from Settings page
 
 ### Financial Dashboard
 - Total billed revenue, average per mission, billable mission count
@@ -288,8 +288,8 @@ All settings are configured via environment variables in the `.env` file.
 | `SMTP_PORT` | `587` | SMTP port |
 | `SMTP_USER` | *(empty)* | SMTP username |
 | `SMTP_PASSWORD` | *(empty)* | SMTP password |
-| `SMTP_FROM_EMAIL` | `reports@barnardhq.com` | Sender email address |
-| `SMTP_FROM_NAME` | `BarnardHQ Drone Operations` | Sender display name |
+| `SMTP_FROM_EMAIL` | *(empty)* | Sender email address |
+| `SMTP_FROM_NAME` | *(empty)* | Sender display name |
 | `SMTP_USE_TLS` | `true` | Enable TLS encryption |
 
 SMTP settings can also be configured from the Settings page in the web UI (stored in database, overrides env vars).
@@ -365,6 +365,7 @@ System configuration:
 - **Payment Links** — PayPal and Venmo URLs for invoices
 - **Aircraft Fleet** — Add/edit/delete aircraft with specifications
 - **Rate Templates** — Add/edit/delete billing rate presets
+- **Branding** — Company name, tagline, website, social media, contact email — used in PDF reports, emails, login page, and customer-facing pages
 
 ---
 
@@ -386,7 +387,7 @@ REST client that fetches flight data from a self-hosted OpenDroneLog instance. H
 Generates GeoJSON FeatureCollections with flight path LineStrings, start/end markers, and convex hull polygons. Calculates coverage area in acres using UTM projection and Shapely geometry with configurable buffer distance. Renders static PNG maps using OpenStreetMap tiles.
 
 ### Weather Service
-Aggregates data from 4 external APIs: Open-Meteo (current conditions), AviationWeather.gov (METAR, TFRs), aviationapi.com (NOTAMs fallback), and NWS (weather alerts). Default location Eugene, OR.
+Aggregates data from 4 external APIs: Open-Meteo (current conditions), AviationWeather.gov (METAR, TFRs), aviationapi.com (NOTAMs fallback), and NWS (weather alerts). Location configurable from Settings.
 
 ---
 
@@ -468,4 +469,4 @@ docker compose up -d
 
 ## License
 
-Private — BarnardHQ
+MIT License — see [LICENSE](LICENSE) for details.

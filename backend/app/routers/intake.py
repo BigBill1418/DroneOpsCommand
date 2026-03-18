@@ -270,7 +270,7 @@ async def get_intake_form(
     if customer.intake_token_expires_at and customer.intake_token_expires_at < datetime.utcnow():
         hours_expired = (datetime.utcnow() - customer.intake_token_expires_at).total_seconds() / 3600
         logger.warning("[INTAKE-FORM-GET] EXPIRED TOKEN for customer %s from ip=%s — expired %.1f hours ago", customer.id, client_ip, hours_expired)
-        raise HTTPException(status_code=410, detail="This link has expired. Please contact BarnardHQ for a new one.")
+        raise HTTPException(status_code=410, detail="This link has expired. Please contact us for a new one.")
 
     if customer.intake_completed_at:
         logger.info("[INTAKE-FORM-GET] Already completed form accessed for customer %s from ip=%s (completed %s)", customer.id, client_ip, customer.intake_completed_at)
@@ -340,7 +340,7 @@ async def serve_tos_pdf(
         logger.error("[INTAKE-TOS-SERVE] No TOS PDF found for customer %s — file missing from disk", customer.id)
         raise HTTPException(status_code=404, detail="Terms of Service document not available")
 
-    return FileResponse(tos_path, media_type="application/pdf", filename="BarnardHQ_Terms_of_Service.pdf")
+    return FileResponse(tos_path, media_type="application/pdf", filename="Terms_of_Service.pdf")
 
 
 @router.post("/form/{token}")
@@ -368,7 +368,7 @@ async def submit_intake_form(
     if customer.intake_token_expires_at and customer.intake_token_expires_at < datetime.utcnow():
         hours_expired = (datetime.utcnow() - customer.intake_token_expires_at).total_seconds() / 3600
         logger.warning("[INTAKE-SUBMIT] EXPIRED TOKEN submission from ip=%s for customer %s — expired %.1f hours ago", client_ip, customer.id, hours_expired)
-        raise HTTPException(status_code=410, detail="This link has expired. Please contact BarnardHQ for a new one.")
+        raise HTTPException(status_code=410, detail="This link has expired. Please contact us for a new one.")
 
     if customer.intake_completed_at:
         logger.warning("[INTAKE-SUBMIT] DUPLICATE submission attempt from ip=%s for customer %s — already completed on %s", client_ip, customer.id, customer.intake_completed_at)
@@ -537,7 +537,7 @@ async def get_signed_tos(
     writer.write(output_buf)
     output_buf.seek(0)
 
-    filename = f"BarnardHQ_TOS_Signed_{(customer.name or 'customer').replace(' ', '_')}.pdf"
+    filename = f"TOS_Signed_{(customer.name or 'customer').replace(' ', '_')}.pdf"
     logger.info("[SIGNED-TOS] Serving signed TOS for customer %s (%s)", customer.id, customer.email)
 
     return StreamingResponse(

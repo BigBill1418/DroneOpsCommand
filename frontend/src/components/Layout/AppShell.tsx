@@ -19,6 +19,7 @@ import {
   IconPlus,
 } from '@tabler/icons-react';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
+import { useBranding } from '../../hooks/useBranding';
 
 interface AppLayoutProps {
   onLogout: () => void;
@@ -28,6 +29,7 @@ export default function AppLayout({ onLogout }: AppLayoutProps) {
   const [opened, setOpened] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
+  const branding = useBranding();
 
   const navItems = [
     { icon: IconDashboard, label: 'Dashboard', path: '/' },
@@ -71,7 +73,7 @@ export default function AppLayout({ onLogout }: AppLayoutProps) {
               c="#e8edf2"
               onClick={() => navigate('/')}
             >
-              BARNARD<span style={{ color: '#00d4ff' }}>HQ</span>
+              {branding.company_name.toUpperCase()}
             </Text>
             <Text
               size="xs"
@@ -79,7 +81,7 @@ export default function AppLayout({ onLogout }: AppLayoutProps) {
               style={{ fontFamily: "'Share Tech Mono', monospace", letterSpacing: '2px' }}
               visibleFrom="sm"
             >
-              FLIGHT OPERATIONS COMMAND CENTER
+              {branding.company_tagline.toUpperCase()}
             </Text>
           </Group>
           <Group>
@@ -142,7 +144,7 @@ export default function AppLayout({ onLogout }: AppLayoutProps) {
             left: 16,
           }}
         >
-          v1.15.0
+          v2.0.0
         </Text>
       </AppShell.Navbar>
 

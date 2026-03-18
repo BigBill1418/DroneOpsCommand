@@ -3,15 +3,17 @@ import os
 import time
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi.staticfiles import StaticFiles
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 from app.config import settings
-from app.database import Base, async_session, engine
+from app.database import Base, async_session, engine, get_db
 import app.models  # noqa: F401 — ensure all models registered with Base before create_all
 from app.routers import auth, customers, aircraft, missions, flights, maps, reports, invoices, rate_templates, llm, system_settings, financials, weather, intake
 
@@ -140,7 +142,7 @@ limiter = Limiter(key_func=get_remote_address)
 app = FastAPI(
     title="Flight Operations Command Center",
     description="Invoicing and after-action reporting tool for drone operations",
-    version="1.15.0",
+    version="2.0.0",
     lifespan=lifespan,
 )
 
@@ -208,3 +210,16 @@ async def log_requests(request: Request, call_next):
 @app.get("/api/health")
 async def health_check():
     return {"status": "healthy", "service": "Flight Operations Command Center"}
+
+
+@app.get("/api/branding")
+async def get_public_branding(db: AsyncSession = Depends(get_db)):
+    """Public endpoint: returns branding settings (no auth required)."""
+    from app.models.system_settings import SystemSetting
+    from app.routers.system_settings import BRANDING_KEYS, BRANDING_DEFAULTS
+
+    result = await db.execute(
+        select(SystemSetting).where(SystemSetting.key.in_(BRANDING_KEYS))
+    )
+    rows = {r.key: r.value for r in result.scalars().all()}
+    return {key: rows.get(key, BRANDING_DEFAULTS.get(key, "")) for key in BRANDING_KEYS}

@@ -78,12 +78,12 @@ services:
       - SMTP_PORT=${SMTP_PORT:-587}
       - SMTP_USER=${SMTP_USER:-}
       - SMTP_PASSWORD=${SMTP_PASSWORD:-}
-      - SMTP_FROM_EMAIL=${SMTP_FROM_EMAIL:-reports@barnardhq.com}
-      - SMTP_FROM_NAME=${SMTP_FROM_NAME:-BarnardHQ Drone Operations}
+      - SMTP_FROM_EMAIL=${SMTP_FROM_EMAIL:-}
+      - SMTP_FROM_NAME=${SMTP_FROM_NAME:-}
       - SMTP_USE_TLS=${SMTP_USE_TLS:-true}
       - UPLOAD_DIR=/data/uploads
       - REPORTS_DIR=/data/reports
-      - FRONTEND_URL=${FRONTEND_URL:-https://droneops.barnardhq.com}
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3080}
     volumes:
       - app_data:/data
     ports:
@@ -111,8 +111,8 @@ services:
       - SMTP_PORT=${SMTP_PORT:-587}
       - SMTP_USER=${SMTP_USER:-}
       - SMTP_PASSWORD=${SMTP_PASSWORD:-}
-      - SMTP_FROM_EMAIL=${SMTP_FROM_EMAIL:-reports@barnardhq.com}
-      - SMTP_FROM_NAME=${SMTP_FROM_NAME:-BarnardHQ Drone Operations}
+      - SMTP_FROM_EMAIL=${SMTP_FROM_EMAIL:-}
+      - SMTP_FROM_NAME=${SMTP_FROM_NAME:-}
       - SMTP_USE_TLS=${SMTP_USE_TLS:-true}
       - UPLOAD_DIR=/data/uploads
       - REPORTS_DIR=/data/reports

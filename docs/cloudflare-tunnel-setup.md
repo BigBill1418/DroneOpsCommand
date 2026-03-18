@@ -1,12 +1,12 @@
 # Cloudflare Tunnel Setup for DroneOpsReport
 
-Cloudflare Tunnel lets customers reach intake forms at `https://droneops.barnardhq.com` without opening any ports on your router or exposing your NAS IP.
+Cloudflare Tunnel lets customers reach intake forms at `https://droneops.example.com` without opening any ports on your router or exposing your server IP.
 
 ## Prerequisites
 
 - A Cloudflare account (free tier works)
-- Your domain (`barnardhq.com`) added to Cloudflare (DNS managed by Cloudflare)
-- Docker Compose already running on your Synology NAS
+- Your domain (e.g. `example.com`) added to Cloudflare (DNS managed by Cloudflare)
+- Docker Compose already running on your server
 
 ---
 
@@ -21,7 +21,7 @@ You can use either dashboard — both work:
 
 1. Click **Create a tunnel**
 2. Choose **Cloudflared** as the connector type
-3. Name it something like `droneops-nas`
+3. Name it something like `droneops-server`
 4. **Copy the tunnel token** — it looks like `eyJhIjoiN2...` (a long base64 string)
 
 ## Step 2: Add a Public Hostname Route
@@ -31,17 +31,17 @@ When adding a route you'll see two options — **Public Hostname** and **Private
 1. Click **Add a public hostname**
 2. Set:
    - **Subdomain**: `droneops`
-   - **Domain**: `barnardhq.com`
+   - **Domain**: `example.com`
    - **Service type**: `HTTP`
    - **URL**: `frontend:80`
 
-   > This tells Cloudflare to route `https://droneops.barnardhq.com` → your frontend nginx container, which already proxies `/api/*` to the backend. Cloudflare automatically creates the DNS CNAME record if it manages your domain's nameservers.
+   > This tells Cloudflare to route `https://droneops.example.com` → your frontend nginx container, which already proxies `/api/*` to the backend. Cloudflare automatically creates the DNS CNAME record if it manages your domain's nameservers.
 
 3. Click **Save**
 
 ## Step 3: Add the Token to Your .env
 
-On your NAS, edit your `.env` file:
+On your server, edit your `.env` file:
 
 ```bash
 # Cloudflare Tunnel
@@ -51,7 +51,7 @@ CLOUDFLARE_TUNNEL_TOKEN=eyJhIjoiN2...your_token_here
 Also make sure `FRONTEND_URL` matches:
 
 ```bash
-FRONTEND_URL=https://droneops.barnardhq.com
+FRONTEND_URL=https://droneops.example.com  # Replace with your actual domain
 ```
 
 ## Step 4: Start the Tunnel
@@ -81,9 +81,9 @@ docker compose --profile tunnel stop cloudflared
 
 2. In the Cloudflare dashboard, the tunnel status should show **Healthy**
 
-3. Open `https://droneops.barnardhq.com` in your browser — you should see the DroneOpsReport login page
+3. Open `https://droneops.example.com` in your browser — you should see the DroneOpsReport login page
 
-4. Test an intake link: `https://droneops.barnardhq.com/intake/<token>`
+4. Test an intake link: `https://droneops.example.com/intake/<token>`
 
 ---
 
@@ -98,7 +98,7 @@ This is the recommended security step — it makes intake forms public but locks
 3. Configure:
    - **Application name**: `DroneOps Admin`
    - **Session duration**: 24 hours
-   - **Subdomain**: `droneops` / **Domain**: `barnardhq.com`
+   - **Subdomain**: `droneops` / **Domain**: `example.com`
    - **Path**: leave empty (protects the whole site)
 4. Under **Policies**, create an "Allow" policy:
    - **Policy name**: `Admin Only`
@@ -135,7 +135,7 @@ This results in:
 If you only want to access the app through the tunnel (not via LAN), change the frontend port binding in `.env`:
 
 ```bash
-# Only accessible from the NAS itself (and via tunnel)
+# Only accessible from the server itself (and via tunnel)
 FRONTEND_PORT=127.0.0.1:3080
 ```
 
@@ -155,7 +155,7 @@ Customer's Browser
         ▼
  Cloudflare Edge (TLS, DDoS, WAF)
         │
-        ▼ (encrypted tunnel, outbound-only from NAS)
+        ▼ (encrypted tunnel, outbound-only from server)
    cloudflared container
         │
         ▼
@@ -172,7 +172,7 @@ Customer's Browser
         └── Ollama
 ```
 
-**No inbound ports are opened on your router. The tunnel connection is outbound-only from your NAS to Cloudflare.**
+**No inbound ports are opened on your router. The tunnel connection is outbound-only from your server to Cloudflare.**
 
 ---
 

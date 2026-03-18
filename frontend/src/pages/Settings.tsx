@@ -20,10 +20,11 @@ import {
 } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
-import { IconCheck, IconX, IconPlus, IconEdit, IconTrash, IconCurrencyDollar, IconMail, IconSend, IconBrandPaypal, IconCash, IconDrone, IconPlugConnected, IconMapPin, IconSearch, IconSignature, IconUpload, IconSettings, IconReceipt, IconPlane } from '@tabler/icons-react';
+import { IconCheck, IconX, IconPlus, IconEdit, IconTrash, IconCurrencyDollar, IconMail, IconSend, IconBrandPaypal, IconCash, IconDrone, IconPlugConnected, IconMapPin, IconSearch, IconSignature, IconUpload, IconSettings, IconReceipt, IconPlane, IconPalette, IconWorldWww } from '@tabler/icons-react';
 import api from '../api/client';
 import { Aircraft, RateTemplate } from '../api/types';
 import { inputStyles, cardStyle } from '../components/shared/styles';
+import { invalidateBrandingCache } from '../hooks/useBranding';
 
 const tabStyles = {
   tab: {
@@ -56,6 +57,7 @@ export default function Settings() {
   const [weatherQuery, setWeatherQuery] = useState('');
   const [tosUploaded, setTosUploaded] = useState(false);
   const [tosUploading, setTosUploading] = useState(false);
+  const [brandingSaving, setBrandingSaving] = useState(false);
 
   const aircraftForm = useForm({
     initialValues: { model_name: '', manufacturer: 'DJI', specs_json: '{}' },
@@ -89,6 +91,16 @@ export default function Settings() {
     initialValues: { weather_lat: '', weather_lon: '', weather_label: '', weather_airport_icao: '' },
   });
 
+  const brandingForm = useForm({
+    initialValues: {
+      company_name: '',
+      company_tagline: '',
+      company_website: '',
+      company_social_url: '',
+      company_contact_email: '',
+    },
+  });
+
   useEffect(() => {
     api.get('/llm/status').then((r) => setLlmStatus(r.data)).catch(() => setLlmStatus({ status: 'offline' })).finally(() => setLlmLoading(false));
     api.get('/aircraft').then((r) => setAircraft(r.data)).catch(() => setAircraft([]));
@@ -98,6 +110,7 @@ export default function Settings() {
     api.get('/settings/opendronelog').then((r) => odlForm.setValues(r.data)).catch(() => {});
     api.get('/settings/weather').then((r) => weatherForm.setValues(r.data)).catch(() => {});
     api.get('/intake/default-tos-status').then((r) => setTosUploaded(r.data.uploaded)).catch(() => {});
+    api.get('/settings/branding').then((r) => brandingForm.setValues(r.data)).catch(() => {});
   }, []);
 
   const handleSaveAircraft = async (values: typeof aircraftForm.values) => {
@@ -281,6 +294,19 @@ export default function Settings() {
     }
   };
 
+  const handleSaveBranding = async (values: typeof brandingForm.values) => {
+    setBrandingSaving(true);
+    try {
+      await api.put('/settings/branding', values);
+      invalidateBrandingCache();
+      notifications.show({ title: 'Saved', message: 'Branding settings updated — reload to see changes in header', color: 'cyan' });
+    } catch {
+      notifications.show({ title: 'Error', message: 'Failed to save branding settings', color: 'red' });
+    } finally {
+      setBrandingSaving(false);
+    }
+  };
+
   const categoryLabels: Record<string, string> = {
     travel: 'Travel',
     billed_time: 'Billed Time',
@@ -294,8 +320,11 @@ export default function Settings() {
     <Stack gap="md">
       <Title order={2} c="#e8edf2" style={{ letterSpacing: '2px' }}>SETTINGS</Title>
 
-      <Tabs defaultValue="general" styles={tabStyles}>
+      <Tabs defaultValue="branding" styles={tabStyles}>
         <Tabs.List>
+          <Tabs.Tab value="branding" leftSection={<IconPalette size={14} />}>
+            BRANDING
+          </Tabs.Tab>
           <Tabs.Tab value="general" leftSection={<IconSettings size={14} />}>
             GENERAL
           </Tabs.Tab>
@@ -306,6 +335,59 @@ export default function Settings() {
             FLEET & RATES
           </Tabs.Tab>
         </Tabs.List>
+
+        {/* ═══ BRANDING TAB ═══ */}
+        <Tabs.Panel value="branding" pt="md">
+          <Stack gap="md">
+            <Card padding="lg" radius="md" style={cardStyle}>
+              <Group gap="sm" mb="md">
+                <IconPalette size={20} color="#00d4ff" />
+                <Title order={3} c="#e8edf2" style={{ letterSpacing: '1px' }}>COMPANY BRANDING</Title>
+              </Group>
+              <Text c="#5a6478" size="xs" mb="md" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+                These settings control how your company appears throughout the app, in emails, PDF reports, and customer-facing pages.
+              </Text>
+              <form onSubmit={brandingForm.onSubmit(handleSaveBranding)}>
+                <Stack gap="sm">
+                  <TextInput
+                    label="Company Name"
+                    placeholder="Your Company Name"
+                    {...brandingForm.getInputProps('company_name')}
+                    styles={inputStyles}
+                  />
+                  <TextInput
+                    label="Tagline"
+                    placeholder="Professional Aerial Operations"
+                    {...brandingForm.getInputProps('company_tagline')}
+                    styles={inputStyles}
+                  />
+                  <TextInput
+                    label="Website"
+                    placeholder="https://yourcompany.com"
+                    leftSection={<IconWorldWww size={14} />}
+                    {...brandingForm.getInputProps('company_website')}
+                    styles={inputStyles}
+                  />
+                  <TextInput
+                    label="Social Media URL"
+                    placeholder="https://facebook.com/yourcompany"
+                    {...brandingForm.getInputProps('company_social_url')}
+                    styles={inputStyles}
+                  />
+                  <TextInput
+                    label="Contact Email"
+                    placeholder="info@yourcompany.com"
+                    {...brandingForm.getInputProps('company_contact_email')}
+                    styles={inputStyles}
+                  />
+                  <Button type="submit" color="cyan" loading={brandingSaving} styles={{ root: { fontFamily: "'Bebas Neue', sans-serif" } }}>
+                    SAVE BRANDING
+                  </Button>
+                </Stack>
+              </form>
+            </Card>
+          </Stack>
+        </Tabs.Panel>
 
         {/* ═══ GENERAL TAB ═══ */}
         <Tabs.Panel value="general" pt="md">
@@ -469,8 +551,8 @@ export default function Settings() {
                     <PasswordInput label="Password" placeholder="App password or SMTP key" {...smtpForm.getInputProps('smtp_password')} styles={inputStyles} />
                   </Group>
                   <Group grow>
-                    <TextInput label="From Email" placeholder="reports@barnardhq.com" {...smtpForm.getInputProps('smtp_from_email')} styles={inputStyles} />
-                    <TextInput label="From Name" placeholder="BarnardHQ Drone Operations" {...smtpForm.getInputProps('smtp_from_name')} styles={inputStyles} />
+                    <TextInput label="From Email" placeholder="reports@yourcompany.com" {...smtpForm.getInputProps('smtp_from_email')} styles={inputStyles} />
+                    <TextInput label="From Name" placeholder="Your Company Drone Operations" {...smtpForm.getInputProps('smtp_from_name')} styles={inputStyles} />
                   </Group>
                   <Switch
                     label="Use TLS"

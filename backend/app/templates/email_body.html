@@ -11,10 +11,10 @@
   <tr>
     <td style="background: linear-gradient(135deg, #050608 0%, #0e1117 100%); padding: 30px; text-align: center;">
       <div style="font-family: 'Arial Black', Arial, sans-serif; font-size: 28px; letter-spacing: 3px; color: #e8edf2;">
-        BARNARD<span style="color: #00d4ff;">HQ</span>
+        {{ company_name | upper }}
       </div>
       <div style="font-size: 10px; color: #5a6478; letter-spacing: 3px; margin-top: 4px;">
-        PROFESSIONAL AERIAL OPERATIONS
+        {{ company_tagline | upper }}
       </div>
     </td>
   </tr>
@@ -27,7 +27,7 @@
       </p>
 
       <p style="font-size: 14px; color: #333; line-height: 1.6; margin: 0 0 15px 0;">
-        Thank you for choosing BarnardHQ for your drone operations needs.
+        Thank you for choosing {{ company_name }} for your drone operations needs.
         Please find attached the detailed operations report for:
       </p>
 
@@ -64,16 +64,16 @@
 
       <p style="font-size: 14px; color: #333; margin: 25px 0 5px 0;">
         Best regards,<br>
-        <strong>BarnardHQ Professional Aerial Operations</strong>
+        <strong>{{ company_name }} {{ company_tagline }}</strong>
       </p>
 
       <div style="margin-top: 25px; padding: 15px 18px; background: #f8f9fb; border-left: 4px solid #0e1117; border-radius: 0 4px 4px 0;">
         <p style="font-size: 11px; color: #555; line-height: 1.6; margin: 0;">
           <strong style="color: #1a1a2e;">CONFIDENTIALITY NOTICE:</strong>
-          This report and all accompanying materials are proprietary to BarnardHQ and are provided solely for the use of the intended recipient.
+          This report and all accompanying materials are proprietary to {{ company_name }} and are provided solely for the use of the intended recipient.
           The contents of this report, including all data, imagery, analysis, and findings, are confidential and may not be reproduced,
-          distributed, or shared with any third party without the prior written consent of BarnardHQ.
-          This report is prepared exclusively for the client named herein under contract with BarnardHQ.
+          distributed, or shared with any third party without the prior written consent of {{ company_name }}.
+          This report is prepared exclusively for the client named herein under contract with {{ company_name }}.
           Any unauthorized use, disclosure, or distribution is strictly prohibited.
         </p>
       </div>
@@ -84,15 +84,23 @@
   <tr>
     <td style="background: #050608; padding: 20px; text-align: center;">
       <div style="font-family: 'Arial Black', Arial, sans-serif; font-size: 16px; letter-spacing: 2px; color: #e8edf2; margin-bottom: 8px;">
-        BARNARD<span style="color: #00d4ff;">HQ</span>
+        {{ company_name | upper }}
       </div>
+      {% if company_website or company_social_url %}
       <div style="margin: 8px 0;">
-        <a href="https://barnardhq.com" style="color: #00d4ff; text-decoration: none; font-size: 12px;">barnardhq.com</a>
+        {% if company_website %}
+        <a href="{{ company_website }}" style="color: #00d4ff; text-decoration: none; font-size: 12px;">{{ company_website | replace('https://', '') | replace('http://', '') }}</a>
+        {% endif %}
+        {% if company_website and company_social_url %}
         &nbsp;&nbsp;|&nbsp;&nbsp;
-        <a href="https://facebook.com/barnardHQ" style="color: #00d4ff; text-decoration: none; font-size: 12px;">facebook.com/barnardHQ</a>
+        {% endif %}
+        {% if company_social_url %}
+        <a href="{{ company_social_url }}" style="color: #00d4ff; text-decoration: none; font-size: 12px;">{{ company_social_url | replace('https://', '') | replace('http://', '') }}</a>
+        {% endif %}
       </div>
+      {% endif %}
       <div style="color: #5a6478; font-size: 10px; margin-top: 8px;">
-        FAA Part 107 Certified | Professional Aerial Operations
+        FAA Part 107 Certified | {{ company_tagline }}
       </div>
     </td>
   </tr>

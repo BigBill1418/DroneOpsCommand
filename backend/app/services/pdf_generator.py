@@ -23,10 +23,15 @@ def generate_pdf(
     image_paths: list[dict] | None = None,
     payment_links: dict | None = None,
     download_link: dict | None = None,
+    branding: dict | None = None,
 ) -> str:
     """Generate a PDF report and return the file path."""
+    from app.routers.system_settings import BRANDING_DEFAULTS
+
     mission_id = mission.get("id", "unknown")
     logger.info("Starting PDF generation for mission %s", mission_id)
+
+    brand = branding or dict(BRANDING_DEFAULTS)
 
     try:
         template = jinja_env.get_template("report_pdf.html")
@@ -45,6 +50,7 @@ def generate_pdf(
             download_link=download_link,
             generated_at=datetime.utcnow().strftime("%B %d, %Y"),
             year=datetime.utcnow().year,
+            **brand,
         )
     except Exception as exc:
         logger.error("PDF template render failed for mission %s: %s", mission_id, exc)

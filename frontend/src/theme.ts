@@ -1,6 +1,6 @@
 import { createTheme, MantineColorsTuple } from '@mantine/core';
 
-// BarnardHQ brand colors
+// Brand colors
 const cyan: MantineColorsTuple = [
   '#e0fbff',
   '#b3f3ff',

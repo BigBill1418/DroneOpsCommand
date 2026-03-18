@@ -28,6 +28,18 @@ SMTP_KEYS = [
 ]
 
 
+async def _get_branding(db: AsyncSession | None) -> dict:
+    """Load branding settings from DB, with defaults."""
+    from app.routers.system_settings import BRANDING_DEFAULTS
+    if not db:
+        return dict(BRANDING_DEFAULTS)
+    try:
+        from app.routers.system_settings import get_branding
+        return await get_branding(db)
+    except Exception:
+        return dict(BRANDING_DEFAULTS)
+
+
 async def get_smtp_settings(db: AsyncSession) -> dict:
     """Load SMTP settings from DB, falling back to env-based config."""
     result = await db.execute(
@@ -82,11 +94,15 @@ async def send_report_email(
         logger.error("SMTP not configured — cannot send email")
         raise ValueError("SMTP not configured. Set SMTP_HOST in settings.")
 
+    # Load branding for template
+    branding = await _get_branding(db)
+
     template = jinja_env.get_template("email_body.html")
     html_body = template.render(
         customer_name=customer_name,
         mission_title=mission_title,
         download_link=download_link,
+        **branding,
     )
 
     msg = MIMEMultipart()
@@ -161,6 +177,9 @@ async def send_intake_email(
         logger.error("[EMAIL-INTAKE] SMTP not configured — cannot send intake email to %s", to_email)
         raise ValueError("SMTP not configured. Set SMTP_HOST in settings.")
 
+    # Load branding for template
+    branding = await _get_branding(db)
+
     logger.debug("[EMAIL-INTAKE] Rendering intake_email.html template")
     template = jinja_env.get_template("intake_email.html")
     html_body = template.render(
@@ -168,13 +187,15 @@ async def send_intake_email(
         intake_url=intake_url,
         expires_at=expires_at.strftime("%B %d, %Y") if hasattr(expires_at, "strftime") else str(expires_at),
         is_existing_customer=is_existing_customer,
+        **branding,
     )
     logger.debug("[EMAIL-INTAKE] Template rendered, html_length=%d", len(html_body))
 
     msg = MIMEMultipart()
     msg["From"] = f"{smtp['smtp_from_name']} <{smtp['smtp_from_email']}>"
     msg["To"] = to_email
-    subject = "Complete Your Customer Profile — BarnardHQ" if is_existing_customer else "Welcome to BarnardHQ — Complete Your Onboarding"
+    cn = branding.get("company_name", "DroneOps")
+    subject = f"Complete Your Customer Profile — {cn}" if is_existing_customer else f"Welcome to {cn} — Complete Your Onboarding"
     msg["Subject"] = subject
     msg.attach(MIMEText(html_body, "html"))
 

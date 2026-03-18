@@ -1,6 +1,13 @@
 #!/bin/bash
 set -e
-cd /volume1/docker/droneops
+
+# ── Configuration ──────────────────────────────────────────────────
+# Override these with environment variables or edit for your setup.
+INSTALL_DIR="${DRONEOPS_DIR:-$(cd "$(dirname "$0")" && pwd)}"
+BRANCH="${DRONEOPS_BRANCH:-main}"
+# ───────────────────────────────────────────────────────────────────
+
+cd "$INSTALL_DIR"
 
 # Use sudo for docker if not running as root and not in docker group
 DOCKER="docker compose"
@@ -15,12 +22,10 @@ if [ -f "$DEPLOY_MARKER" ]; then
   PREV_COMMIT=$(cat "$DEPLOY_MARKER")
 fi
 
-BRANCH="claude/drone-report-generator-qk9UM"
-
 echo "=== Fetching latest from $BRANCH ==="
 git fetch origin "$BRANCH"
 
-echo "=== Syncing main to $BRANCH ==="
+echo "=== Syncing to $BRANCH ==="
 git checkout main 2>/dev/null || git checkout -b main origin/main
 # Feature branch is source of truth — force main to match it
 git reset --hard "origin/$BRANCH"

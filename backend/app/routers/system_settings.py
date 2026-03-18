@@ -35,6 +35,23 @@ WEATHER_KEYS = [
     "weather_airport_icao",
 ]
 
+BRANDING_KEYS = [
+    "company_name",
+    "company_tagline",
+    "company_website",
+    "company_social_url",
+    "company_contact_email",
+]
+
+# Defaults used when no branding is configured
+BRANDING_DEFAULTS = {
+    "company_name": "DroneOps",
+    "company_tagline": "Professional Aerial Operations",
+    "company_website": "",
+    "company_social_url": "",
+    "company_contact_email": "",
+}
+
 
 class OpenDroneLogSettings(BaseModel):
     opendronelog_url: str = ""
@@ -52,6 +69,23 @@ class WeatherLocationSettings(BaseModel):
     weather_airport_icao: str = ""
 
 
+async def get_branding(db: AsyncSession) -> dict:
+    """Load branding settings from DB with defaults. Used by templates and services."""
+    result = await db.execute(
+        select(SystemSetting).where(SystemSetting.key.in_(BRANDING_KEYS))
+    )
+    rows = {r.key: r.value for r in result.scalars().all()}
+    return {key: rows.get(key, "") or BRANDING_DEFAULTS.get(key, "") for key in BRANDING_KEYS}
+
+
+class BrandingSettings(BaseModel):
+    company_name: str = ""
+    company_tagline: str = ""
+    company_website: str = ""
+    company_social_url: str = ""
+    company_contact_email: str = ""
+
+
 class SmtpSettings(BaseModel):
     smtp_host: str = ""
     smtp_port: str = "587"
@@ -60,6 +94,40 @@ class SmtpSettings(BaseModel):
     smtp_from_email: str = ""
     smtp_from_name: str = ""
     smtp_use_tls: str = "true"
+
+
+@router.get("/branding")
+async def get_branding_settings(
+    _user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get branding settings (authenticated)."""
+    result = await db.execute(
+        select(SystemSetting).where(SystemSetting.key.in_(BRANDING_KEYS))
+    )
+    rows = {r.key: r.value for r in result.scalars().all()}
+    return {key: rows.get(key, BRANDING_DEFAULTS.get(key, "")) for key in BRANDING_KEYS}
+
+
+@router.put("/branding")
+async def update_branding_settings(
+    payload: BrandingSettings,
+    _user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update branding settings."""
+    for key, value in payload.model_dump().items():
+        result = await db.execute(
+            select(SystemSetting).where(SystemSetting.key == key)
+        )
+        existing = result.scalar_one_or_none()
+        if existing:
+            existing.value = value
+        else:
+            db.add(SystemSetting(key=key, value=value))
+
+    await db.commit()
+    return {"status": "ok"}
 
 
 @router.get("/smtp")
