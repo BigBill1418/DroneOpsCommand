@@ -343,7 +343,7 @@ export default function Financials() {
 
           {/* ===== Mission Invoices Table ===== */}
           <Card padding="lg" radius="md" style={cardStyle}>
-            <Group justify="space-between" mb="md">
+            <Group justify="space-between" mb="md" wrap="wrap">
               <Text size="sm" c="#5a6478" style={monoFont}>
                 {filtered.length} INVOICE{filtered.length !== 1 ? 'S' : ''}
               </Text>
@@ -354,7 +354,7 @@ export default function Financials() {
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 styles={{
-                  input: { background: '#050608', borderColor: '#1a1f2e', color: '#e8edf2', width: 260 },
+                  input: { background: '#050608', borderColor: '#1a1f2e', color: '#e8edf2', minWidth: 200, maxWidth: 300 },
                 }}
               />
             </Group>
@@ -379,10 +379,10 @@ export default function Financials() {
                 <Table.Thead>
                   <Table.Tr>
                     <Table.Th>MISSION</Table.Th>
-                    <Table.Th>DATE</Table.Th>
-                    <Table.Th>TYPE</Table.Th>
+                    <Table.Th className="hide-mobile">DATE</Table.Th>
+                    <Table.Th className="hide-mobile">TYPE</Table.Th>
                     <Table.Th>CUSTOMER</Table.Th>
-                    <Table.Th>LOCATION</Table.Th>
+                    <Table.Th className="hide-mobile">LOCATION</Table.Th>
                     <Table.Th style={{ textAlign: 'right' }}>AMOUNT</Table.Th>
                   </Table.Tr>
                 </Table.Thead>
@@ -402,16 +402,16 @@ export default function Financials() {
                             <Text size="xs" c="#5a6478" style={monoFont}>#{m.invoice_number}</Text>
                           )}
                         </Table.Td>
-                        <Table.Td>
+                        <Table.Td className="hide-mobile">
                           <Text size="xs" c="#5a6478" style={monoFont}>{formatDate(m.mission_date)}</Text>
                         </Table.Td>
-                        <Table.Td>
+                        <Table.Td className="hide-mobile">
                           <Text size="xs" c="#e8edf2">{TYPE_LABELS[m.mission_type] || m.mission_type}</Text>
                         </Table.Td>
                         <Table.Td>
                           <Text size="xs" c="#e8edf2">{m.customer_name || '—'}</Text>
                         </Table.Td>
-                        <Table.Td>
+                        <Table.Td className="hide-mobile">
                           <Text size="xs" c="#5a6478" lineClamp={1}>{m.location || '—'}</Text>
                         </Table.Td>
                         <Table.Td style={{ textAlign: 'right' }}>

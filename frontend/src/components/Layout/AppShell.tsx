@@ -98,43 +98,38 @@ export default function AppLayout({ onLogout }: AppLayoutProps) {
         </Group>
       </AppShell.Header>
 
-      <AppShell.Navbar p="xs">
-        {navItems.map((item) => (
-          <NavLink
-            key={item.path}
-            label={item.label}
-            leftSection={<item.icon size={18} />}
-            active={location.pathname === item.path || (item.path !== '/' && location.pathname.startsWith(item.path))}
-            onClick={() => {
-              navigate(item.path);
-              setOpened(false);
-            }}
-            styles={{
-              root: {
-                borderRadius: 6,
-                marginBottom: 4,
-                color: '#e8edf2',
-                '&[dataActive]': {
-                  backgroundColor: 'rgba(0, 212, 255, 0.1)',
-                  color: '#00d4ff',
+      <AppShell.Navbar p="xs" style={{ display: 'flex', flexDirection: 'column' }}>
+        <div style={{ flex: 1 }}>
+          {navItems.map((item) => (
+            <NavLink
+              key={item.path}
+              label={item.label}
+              leftSection={<item.icon size={18} />}
+              active={location.pathname === item.path || (item.path !== '/' && location.pathname.startsWith(item.path))}
+              onClick={() => {
+                navigate(item.path);
+                setOpened(false);
+              }}
+              styles={{
+                root: {
+                  borderRadius: 6,
+                  marginBottom: 4,
+                  color: '#e8edf2',
+                  '&[dataActive]': {
+                    backgroundColor: 'rgba(0, 212, 255, 0.1)',
+                    color: '#00d4ff',
+                  },
                 },
-              },
-              label: {
-                fontFamily: "'Rajdhani', sans-serif",
-                fontWeight: 600,
-                letterSpacing: '0.5px',
-              },
-            }}
-          />
-        ))}
-        <Group
-          gap={8}
-          style={{
-            position: 'absolute',
-            bottom: 12,
-            left: 16,
-          }}
-        >
+                label: {
+                  fontFamily: "'Rajdhani', sans-serif",
+                  fontWeight: 600,
+                  letterSpacing: '0.5px',
+                },
+              }}
+            />
+          ))}
+        </div>
+        <Group gap={8} px={4} pb={4}>
           <Text
             size="xs"
             c="#5a6478"
@@ -143,7 +138,7 @@ export default function AppLayout({ onLogout }: AppLayoutProps) {
               fontSize: '15px',
             }}
           >
-            v2.15.0
+            v2.16.0
           </Text>
           <Tooltip label="Star on GitHub" position="right">
             <ActionIcon

@@ -236,9 +236,9 @@ export default function Batteries() {
 
   return (
     <Stack gap="lg">
-      <Group justify="space-between">
+      <Group justify="space-between" wrap="wrap">
         <Title order={2} c="#e8edf2" style={{ letterSpacing: '2px' }}>BATTERIES</Title>
-        <Group>
+        <Group wrap="wrap">
           <Button leftSection={<IconPlus size={16} />} color="cyan" onClick={() => setAddOpen(true)}
             styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}>
             ADD BATTERY
@@ -278,7 +278,7 @@ export default function Batteries() {
               {batteries.length} BATTER{batteries.length !== 1 ? 'IES' : 'Y'} — {grouped.length} DRONE TYPE{grouped.length !== 1 ? 'S' : ''}
             </Text>
 
-            <ScrollArea>
+            <ScrollArea type="auto">
               <Table
                 highlightOnHover
                 styles={{

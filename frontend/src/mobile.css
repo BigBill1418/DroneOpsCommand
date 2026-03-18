@@ -1,0 +1,222 @@
+/* ═══════════════════════════════════════════════════════════════════════
+   MOBILE & TABLET RESPONSIVE OVERRIDES
+   Field-ready UI: large touch targets, readable text, usable forms.
+   Only activates at ≤768px (sm breakpoint). Desktop is untouched.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* ── Global: Touch targets & spacing ──────────────────────────────── */
+@media (max-width: 768px) {
+  /* Ensure buttons meet 44px minimum touch target */
+  .mantine-Button-root {
+    min-height: 44px;
+  }
+
+  .mantine-ActionIcon-root {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  /* Navbar items — bigger touch targets */
+  .mantine-NavLink-root {
+    min-height: 48px;
+    padding: 10px 12px !important;
+    margin-bottom: 2px !important;
+  }
+
+  .mantine-NavLink-label {
+    font-size: 16px !important;
+  }
+
+  .mantine-NavLink-section {
+    margin-right: 12px;
+  }
+
+  /* Reduce page padding on mobile */
+  .mantine-AppShell-main {
+    padding: 8px !important;
+  }
+
+  /* Tables: ensure scroll areas show scrollbar */
+  .mantine-ScrollArea-root {
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .mantine-ScrollArea-scrollbar {
+    opacity: 0.6 !important;
+  }
+
+  /* Table cells — more compact on mobile */
+  .mantine-Table-th {
+    padding: 8px 6px !important;
+    font-size: 11px !important;
+  }
+
+  .mantine-Table-td {
+    padding: 10px 6px !important;
+  }
+
+  /* Make table rows taller for easier tapping */
+  .mantine-Table-tr {
+    min-height: 48px;
+  }
+
+  /* Cards — less padding on mobile */
+  .mantine-Card-root {
+    padding: 10px !important;
+  }
+
+  /* Modals — fullscreen on mobile for forms */
+  .mantine-Modal-content {
+    min-height: 60vh;
+  }
+
+  .mantine-Modal-body {
+    padding: 12px !important;
+  }
+
+  /* Drawers — full width on mobile */
+  .mantine-Drawer-content {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
+  /* Inputs — adequate size for touch */
+  .mantine-TextInput-input,
+  .mantine-Textarea-input,
+  .mantine-Select-input,
+  .mantine-PasswordInput-input,
+  .mantine-NumberInput-input,
+  .mantine-DateInput-input {
+    min-height: 44px !important;
+    font-size: 16px !important; /* prevents iOS zoom on focus */
+  }
+
+  /* Select dropdowns — bigger items for touch */
+  .mantine-Select-option {
+    min-height: 44px !important;
+    padding: 10px 12px !important;
+  }
+
+  /* Search inputs — full width */
+  .mantine-TextInput-root:has([placeholder*="Search"]) {
+    width: 100% !important;
+  }
+
+  .mantine-TextInput-root:has([placeholder*="Search"]) .mantine-TextInput-input {
+    width: 100% !important;
+  }
+
+  /* Page titles — slightly smaller */
+  .mantine-Title-root[data-order="2"] {
+    font-size: 1.5rem !important;
+  }
+
+  /* Notification positioning for mobile */
+  .mantine-Notifications-root {
+    top: 8px !important;
+    right: 8px !important;
+    left: 8px !important;
+    width: auto !important;
+  }
+
+  /* Menu dropdowns — wider on mobile */
+  .mantine-Menu-dropdown {
+    min-width: 200px !important;
+  }
+
+  .mantine-Menu-item {
+    min-height: 44px !important;
+    padding: 10px 14px !important;
+  }
+
+  /* Badge — readable on mobile */
+  .mantine-Badge-root {
+    font-size: 11px !important;
+  }
+
+  /* Tabs — scrollable and tappable */
+  .mantine-Tabs-tab {
+    min-height: 44px !important;
+    padding: 8px 12px !important;
+  }
+
+  .mantine-Tabs-list {
+    flex-wrap: nowrap !important;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Popover — constrain to viewport */
+  .mantine-Popover-dropdown {
+    max-width: calc(100vw - 16px) !important;
+  }
+
+  /* Tooltip — hide on touch devices since they need hover */
+  .mantine-Tooltip-tooltip {
+    display: none !important;
+  }
+}
+
+/* ── Tablet-specific (769px - 1024px) ─────────────────────────────── */
+@media (min-width: 769px) and (max-width: 1024px) {
+  .mantine-ActionIcon-root {
+    min-width: 40px;
+    min-height: 40px;
+  }
+
+  .mantine-Button-root {
+    min-height: 40px;
+  }
+
+  /* Tables slightly more compact */
+  .mantine-Table-th {
+    padding: 8px !important;
+  }
+
+  .mantine-Table-td {
+    padding: 8px !important;
+  }
+}
+
+/* ── Forms: side-by-side fields → stack on mobile ────────────────── */
+@media (max-width: 768px) {
+  /* Mantine Group with grow uses flex-wrap: wrap with children flex: 1 */
+  /* Force all form Groups to stack vertically */
+  .mantine-Modal-body .mantine-Group-root,
+  .mantine-Drawer-body .mantine-Group-root {
+    flex-wrap: wrap !important;
+  }
+
+  /* Children within grow groups need full width */
+  .mantine-Modal-body .mantine-Group-root > .mantine-TextInput-root,
+  .mantine-Modal-body .mantine-Group-root > .mantine-PasswordInput-root,
+  .mantine-Modal-body .mantine-Group-root > .mantine-NumberInput-root,
+  .mantine-Modal-body .mantine-Group-root > .mantine-Select-root,
+  .mantine-Modal-body .mantine-Group-root > .mantine-DateInput-root,
+  .mantine-Drawer-body .mantine-Group-root > .mantine-TextInput-root {
+    min-width: 100% !important;
+    flex: 1 1 100% !important;
+  }
+}
+
+/* ── Column hiding on mobile ──────────────────────────────────────── */
+@media (max-width: 768px) {
+  .hide-mobile {
+    display: none !important;
+  }
+}
+
+/* ── Dashboard 2x2 grid → stacked on mobile ──────────────────────── */
+@media (max-width: 768px) {
+  .dashboard-grid {
+    grid-template-columns: 1fr !important;
+    max-height: none !important;
+    grid-template-rows: auto !important;
+  }
+
+  /* Dashboard cards need auto height when stacked */
+  .dashboard-grid > .mantine-Card-root {
+    min-height: 250px;
+    max-height: 400px;
+  }
+}

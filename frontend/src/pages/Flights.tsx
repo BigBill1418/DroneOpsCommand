@@ -434,9 +434,9 @@ export default function Flights() {
   return (
     <Stack gap="lg">
       {/* ── Header ──────────────────────────────────────────────────── */}
-      <Group justify="space-between">
+      <Group justify="space-between" wrap="wrap">
         <Title order={2} c="#e8edf2" style={{ letterSpacing: '2px' }}>FLIGHTS</Title>
-        <Group>
+        <Group wrap="wrap">
           <FileButton onChange={(files) => handleUpload(files)} accept=".txt,.csv" multiple>
             {(props) => (
               <Button
@@ -527,7 +527,7 @@ export default function Flights() {
 
           {/* ── Flight Table ────────────────────────────────────────── */}
           <Card padding="lg" radius="md" style={cardStyle}>
-            <Group justify="space-between" mb="md">
+            <Group justify="space-between" mb="md" wrap="wrap">
               <Text size="sm" c="#5a6478" style={monoFont}>
                 {filtered.length} FLIGHT{filtered.length !== 1 ? 'S' : ''}
               </Text>
@@ -537,7 +537,7 @@ export default function Flights() {
                 size="xs"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                styles={{ input: { background: '#050608', borderColor: '#1a1f2e', color: '#e8edf2', width: 260 } }}
+                styles={{ input: { background: '#050608', borderColor: '#1a1f2e', color: '#e8edf2', minWidth: 200, maxWidth: 300 } }}
               />
             </Group>
 
@@ -552,8 +552,8 @@ export default function Flights() {
               >
                 <Table.Thead>
                   <Table.Tr>
-                    {([['source', 'SOURCE'], ['name', 'NAME'], ['date', 'DATE'], ['drone', 'DRONE'], ['duration', 'DURATION'], ['distance', 'DISTANCE'], ['altitude', 'MAX ALT'], ['speed', 'MAX SPEED']] as const).map(([col, label]) => (
-                      <Table.Th key={col} onClick={() => toggleSort(col)} style={{ cursor: 'pointer', userSelect: 'none' }}>
+                    {([['source', 'SOURCE', false], ['name', 'NAME', false], ['date', 'DATE', false], ['drone', 'DRONE', false], ['duration', 'DURATION', false], ['distance', 'DISTANCE', true], ['altitude', 'MAX ALT', true], ['speed', 'MAX SPEED', true]] as const).map(([col, label, hideMobile]) => (
+                      <Table.Th key={col} onClick={() => toggleSort(col)} style={{ cursor: 'pointer', userSelect: 'none' }} className={hideMobile ? 'hide-mobile' : ''}>
                         <Group gap={4} wrap="nowrap">
                           {label}<SortIcon col={col} />
                         </Group>
@@ -589,13 +589,13 @@ export default function Flights() {
                       <Table.Td>
                         <Text size="xs" c="#5a6478" style={monoFont}>{formatDuration(getDurationSecs(f))}</Text>
                       </Table.Td>
-                      <Table.Td>
+                      <Table.Td className="hide-mobile">
                         <Text size="xs" c="#5a6478" style={monoFont}>{formatDistance(getTotalDistance(f))}</Text>
                       </Table.Td>
-                      <Table.Td>
+                      <Table.Td className="hide-mobile">
                         <Text size="xs" c="#5a6478" style={monoFont}>{formatAltitude(getMaxAltitude(f))}</Text>
                       </Table.Td>
-                      <Table.Td>
+                      <Table.Td className="hide-mobile">
                         <Text size="xs" c="#5a6478" style={monoFont}>{formatSpeed(getMaxSpeed(f))}</Text>
                       </Table.Td>
                       <Table.Td>
@@ -641,7 +641,7 @@ export default function Flights() {
         onClose={() => setDetailFlight(null)}
         title={<Text fw={700} size="lg" c="#e8edf2" style={{ fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '2px' }}>{detailFlight ? getDisplayName(detailFlight).toUpperCase() : ''}</Text>}
         position="right"
-        size="lg"
+        size="xl"
         styles={{ header: { background: '#0e1117', borderBottom: '1px solid #1a1f2e' }, body: { background: '#050608' }, content: { background: '#050608' } }}
       >
         {detailFlight && (
@@ -805,7 +805,7 @@ export default function Flights() {
             onChange={(v) => setManualForm({ ...manualForm, start_time: v })}
             styles={inputStyles}
           />
-          <SimpleGrid cols={2}>
+          <SimpleGrid cols={{ base: 1, xs: 2 }}>
             <NumberInput
               label="Duration (minutes)"
               value={manualForm.duration_secs / 60}

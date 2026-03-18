@@ -323,8 +323,8 @@ export default function Dashboard() {
         <StatCard icon={IconUsers} label="CUSTOMERS" value={String(customers.length)} color="#00d4ff" />
       </SimpleGrid>
 
-      {/* Main grid: 2 columns */}
-      <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', minHeight: 0, gridTemplateRows: 'minmax(0, 1fr) minmax(0, 1fr)', maxHeight: 'calc(100vh - 220px)' }}>
+      {/* Main grid: 2 columns on desktop, single column on mobile */}
+      <div className="dashboard-grid" style={{ flex: 1, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', minHeight: 0, gridTemplateRows: 'minmax(0, 1fr) minmax(0, 1fr)', maxHeight: 'calc(100vh - 220px)' }}>
 
         {/* ═══ RECENT MISSIONS ═══ */}
         <Card padding="sm" radius="md" style={panelStyle}>
