@@ -70,7 +70,7 @@ pub fn parse_airdata_csv(
             Err(_) => continue,
         };
 
-        let lat: f64 = match record.get(lat_idx).and_then(|v| v.parse().ok()) {
+        let lat: f64 = match record.get(lat_idx).and_then(|v| v.parse::<f64>().ok()) {
             Some(v) if v.abs() > 0.001 => v,
             _ => continue,
         };
