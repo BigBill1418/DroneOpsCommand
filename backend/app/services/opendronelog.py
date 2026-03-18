@@ -52,14 +52,22 @@ def _extract_flights(data: object) -> list[dict]:
 def _normalize_flight(raw: dict) -> dict:
     """Normalize an OpenDroneLog flight object to a consistent schema.
 
-    OpenDroneLog uses camelCase (id, fileName, displayName, droneModel,
-    durationSecs, totalDistance, maxAltitude, maxSpeed, startTime, homeLat,
-    homeLon, pointCount, notes, color, tags, droneSerial, batterySerial).
+    ODL actual schema (from source):
+      GET /api/flights returns camelCase: id, fileName, displayName, droneModel,
+      droneSerial, aircraftName, batterySerial, startTime (ISO 8601), durationSecs,
+      totalDistance, maxAltitude, maxSpeed, homeLat, homeLon, pointCount, notes,
+      color, tags, cycleCount, rcSerial, batteryLife.
 
-    We produce a flat dict with both the original keys and normalized aliases
-    so the frontend can use predictable field names.
+    Custom names in ODL:
+      - aircraftName = custom drone nickname (stored in equipment_names table)
+      - displayName  = custom flight name (stored in flight_customizations table)
+      - battery names are in a separate equipment_names table, not on flights
+
+    We map these to our schema:
+      - drone_model  = hardware model (droneModel)
+      - drone_name   = custom nickname (aircraftName)
+      - name/display_name = custom flight name (displayName, fallback to fileName)
     """
-    # Helper: return first truthy value from a list of keys (None-safe)
     def _first(keys: list[str], default=None):
         for k in keys:
             v = raw.get(k)
@@ -70,21 +78,24 @@ def _normalize_flight(raw: dict) -> dict:
     return {
         # Preserve all original keys
         **raw,
-        # Normalized aliases for frontend consumption
+        # Normalized aliases
         "id": raw.get("id"),
-        "name": _first(["displayName", "display_name", "customName", "custom_name", "fileName", "file_name", "name", "title", "label"], ""),
+        "name": _first(["displayName", "display_name", "fileName", "file_name", "name"], ""),
         "file_name": _first(["fileName", "file_name", "filename"], ""),
-        "display_name": _first(["displayName", "display_name", "displayname", "customName", "custom_name", "flightName", "flight_name", "label"], ""),
-        "drone_model": _first(["droneModel", "drone_model", "dronemodel", "drone", "aircraft", "aircraftModel", "aircraft_model"], ""),
-        "drone_name": _first(["droneName", "drone_name", "dronename", "droneDisplayName", "drone_display_name", "droneNickname", "drone_nickname"], ""),
-        "drone_serial": _first(["droneSerial", "drone_serial", "droneserial"], ""),
-        "battery_serial": _first(["batterySerial", "battery_serial", "batteryserial", "batterySn", "battery_sn"], ""),
-        "battery_name": _first(["batteryName", "battery_name", "batteryname", "batteryDisplayName", "battery_display_name", "batteryNickname", "battery_nickname", "batteryLabel", "battery_label"], ""),
-        "start_time": _first(["startTime", "start_time", "dateTime", "date_time", "flightDate", "flight_date", "timestamp", "recordedAt", "recorded_at", "date", "created_at", "createdAt"], ""),
-        "duration_secs": _first(["durationSecs", "duration_secs", "duration", "duration_seconds", "flight_duration", "flightDuration"], 0),
-        "total_distance": _first(["totalDistance", "total_distance", "distance", "distance_meters", "distanceMeters"], 0),
-        "max_altitude": _first(["maxAltitude", "max_altitude", "max_alt", "altitude_max", "altitudeMax"], 0),
-        "max_speed": _first(["maxSpeed", "max_speed", "speedMax", "speed_max"], 0),
+        "display_name": _first(["displayName", "display_name"], ""),
+        # drone_model = hardware model (e.g. "DJI Matrice 300 RTK")
+        "drone_model": _first(["droneModel", "drone_model"], ""),
+        # drone_name = custom nickname (ODL calls this aircraftName)
+        "drone_name": _first(["aircraftName", "aircraft_name", "droneName", "drone_name"], ""),
+        "drone_serial": _first(["droneSerial", "drone_serial"], ""),
+        "battery_serial": _first(["batterySerial", "battery_serial"], ""),
+        # battery_name populated later from equipment_names endpoint
+        "battery_name": _first(["batteryName", "battery_name"], ""),
+        "start_time": _first(["startTime", "start_time"], ""),
+        "duration_secs": _first(["durationSecs", "duration_secs", "duration"], 0),
+        "total_distance": _first(["totalDistance", "total_distance"], 0),
+        "max_altitude": _first(["maxAltitude", "max_altitude"], 0),
+        "max_speed": _first(["maxSpeed", "max_speed"], 0),
         "home_lat": _first(["homeLat", "home_lat"], None),
         "home_lon": _first(["homeLon", "home_lon"], None),
         "point_count": _first(["pointCount", "point_count"], 0),
@@ -250,6 +261,28 @@ class OpenDroneLogClient:
                     for pt in track
                 ]
             return track
+
+    async def get_equipment_names(self, db: AsyncSession | None = None) -> dict:
+        """Fetch custom equipment names from ODL.
+
+        ODL stores custom names for drones and batteries in a separate table.
+        Returns: { "battery_names": {"SERIAL": "Custom Name"}, "aircraft_names": {"SERIAL": "Custom Name"} }
+        """
+        base_url = await self.get_url(db)
+        if not base_url:
+            return {"battery_names": {}, "aircraft_names": {}}
+        async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+            try:
+                resp = await client.get(f"{base_url}/api/equipment_names")
+                if resp.status_code < 400:
+                    data = resp.json()
+                    return {
+                        "battery_names": data.get("battery_names", {}),
+                        "aircraft_names": data.get("aircraft_names", {}),
+                    }
+            except Exception as exc:
+                logger.warning("OpenDroneLog equipment_names error: %s", exc)
+        return {"battery_names": {}, "aircraft_names": {}}
 
     async def test_connection(self, db: AsyncSession | None = None) -> dict:
         """Test connection to OpenDroneLog and return status info."""

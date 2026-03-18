@@ -47,7 +47,11 @@ _DATE_FORMATS = (
 
 
 def _parse_datetime(value: object) -> _dt | None:
-    """Parse a datetime from string, numeric epoch, or datetime object."""
+    """Parse a datetime from string, numeric epoch, or datetime object.
+
+    Handles ISO 8601 (OpenDroneLog's format), epoch timestamps, and common
+    date strings.  Returns a naive UTC datetime suitable for DB storage.
+    """
     if value is None or value == "":
         return None
     if isinstance(value, _dt):
@@ -55,7 +59,6 @@ def _parse_datetime(value: object) -> _dt | None:
     # Numeric epoch (seconds since 1970)
     if isinstance(value, (int, float)):
         try:
-            # Epoch in milliseconds (Java/JS style) vs seconds
             if value > 1e12:
                 return _dt.utcfromtimestamp(value / 1000)
             return _dt.utcfromtimestamp(value)
@@ -73,10 +76,26 @@ def _parse_datetime(value: object) -> _dt | None:
             return _dt.utcfromtimestamp(num)
         except (ValueError, OSError, OverflowError):
             pass
-        # Try date format strings
+        # Primary: use fromisoformat — handles all ISO 8601 variants that ODL produces
+        # e.g. "2024-01-15T14:30:00", "2024-01-15T14:30:00Z", "2024-01-15T14:30:00+00:00"
+        try:
+            # Python 3.11+ fromisoformat handles trailing Z natively; for 3.10 compat
+            # we also replace trailing Z with +00:00
+            iso_str = cleaned
+            if iso_str.endswith("Z"):
+                iso_str = iso_str[:-1] + "+00:00"
+            dt = _dt.fromisoformat(iso_str)
+            # Strip timezone info to store as naive UTC
+            if dt.tzinfo is not None:
+                from datetime import timezone
+                dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+            return dt
+        except (ValueError, TypeError):
+            pass
+        # Fallback: try explicit format strings for non-ISO date formats
         for fmt in _DATE_FORMATS:
             try:
-                return _dt.strptime(cleaned.rstrip("Z"), fmt.rstrip("Z").replace("%z", ""))
+                return _dt.strptime(cleaned, fmt)
             except ValueError:
                 continue
         logger.warning("Could not parse date: %r", value)
@@ -586,6 +605,18 @@ async def import_from_opendronelog(
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Failed to connect to OpenDroneLog: {e}")
 
+    # Fetch custom equipment names from ODL (battery + drone nicknames)
+    equipment = {"battery_names": {}, "aircraft_names": {}}
+    try:
+        equipment = await opendronelog_client.get_equipment_names(db)
+        logger.info("ODL import: loaded %d battery names, %d aircraft names",
+                     len(equipment.get("battery_names", {})), len(equipment.get("aircraft_names", {})))
+    except Exception as exc:
+        logger.warning("ODL import: could not fetch equipment_names: %s", exc)
+
+    battery_names = equipment.get("battery_names", {})   # serial -> custom name
+    aircraft_names = equipment.get("aircraft_names", {})  # serial -> custom name
+
     for odl in odl_flights:
         try:
             odl_id = str(odl.get("id", ""))
@@ -599,32 +630,28 @@ async def import_from_opendronelog(
                 skipped += 1
                 continue
 
-            # Use custom display name, then file name, then fallback
+            # Flight display name: displayName from ODL, else fileName
             name = odl.get("display_name") or odl.get("name") or f"ODL Flight {odl_id}"
+
+            # Parse start_time (ODL sends ISO 8601)
             start_raw = odl.get("start_time")
             start_dt = _parse_datetime(start_raw)
+            if not start_dt:
+                logger.warning("ODL import: could not parse start_time '%s' for flight %s (%s)", start_raw, odl_id, name)
 
-            # Always fetch detail to get custom names (list endpoint often lacks them)
-            try:
-                detail = await opendronelog_client.get_flight(odl_id, db)
-                if detail:
-                    if not start_dt:
-                        detail_time = detail.get("start_time") or detail.get("startTime") or detail.get("timestamp") or detail.get("dateTime") or detail.get("date")
-                        start_dt = _parse_datetime(detail_time)
-                    # Prefer detail display_name over list display_name
-                    detail_name = detail.get("display_name") or detail.get("displayName") or detail.get("customName") or ""
-                    if detail_name:
-                        name = detail_name
-                    if not odl.get("battery_name"):
-                        odl["battery_name"] = detail.get("battery_name") or detail.get("batteryName") or detail.get("batteryNickname") or detail.get("batteryDisplayName") or ""
-                    if not odl.get("drone_name"):
-                        odl["drone_name"] = detail.get("drone_name") or detail.get("droneName") or detail.get("droneNickname") or detail.get("droneDisplayName") or ""
-                    if not odl.get("drone_model"):
-                        odl["drone_model"] = detail.get("drone_model") or detail.get("droneModel") or ""
-                    if not odl.get("file_name"):
-                        odl["file_name"] = detail.get("file_name") or detail.get("fileName") or detail.get("filename") or ""
-            except Exception:
-                pass
+            # Drone: model is hardware (droneModel), nickname comes from aircraftName or equipment_names
+            drone_model = odl.get("drone_model") or None
+            drone_serial = odl.get("drone_serial") or None
+            # ODL aircraftName = custom drone nickname; also check equipment_names lookup by serial
+            drone_name = odl.get("drone_name") or None
+            if not drone_name and drone_serial:
+                drone_name = aircraft_names.get(drone_serial) or aircraft_names.get(drone_serial.upper()) or None
+
+            # Battery custom name from equipment_names
+            bat_serial = odl.get("battery_serial") or None
+            bat_name = ""
+            if bat_serial:
+                bat_name = battery_names.get(bat_serial) or battery_names.get(bat_serial.upper()) or ""
 
             # Fetch GPS track
             track = []
@@ -645,16 +672,12 @@ async def import_from_opendronelog(
                 except (ValueError, TypeError):
                     return default
 
-            # Store drone_model (hardware) and drone_name (nickname) separately
-            drone_model = odl.get("drone_model") or None
-            drone_name = odl.get("drone_name") or None
-
             flight = Flight(
                 name=name,
                 drone_model=drone_model,
                 drone_name=drone_name,
-                drone_serial=odl.get("drone_serial") or None,
-                battery_serial=odl.get("battery_serial") or None,
+                drone_serial=drone_serial,
+                battery_serial=bat_serial,
                 start_time=start_dt,
                 duration_secs=_float(odl.get("duration_secs")),
                 total_distance=_float(odl.get("total_distance")),
@@ -674,10 +697,8 @@ async def import_from_opendronelog(
             await db.flush()
             imported += 1
 
-            # Auto-create battery record from ODL data
-            bat_serial = odl.get("battery_serial")
+            # Auto-create battery record with custom name from equipment_names
             if bat_serial:
-                bat_name = odl.get("battery_name") or ""
                 await _track_battery_from_odl(db, flight, bat_serial, bat_name, drone_model)
 
         except Exception as e:
@@ -724,6 +745,18 @@ async def import_from_opendronelog_stream(
                     yield sse({"type": "complete", "total": 0, "imported": 0, "skipped": 0, "errors": 0, "error_details": []})
                     return
 
+                # Fetch custom equipment names once
+                equipment = {"battery_names": {}, "aircraft_names": {}}
+                try:
+                    equipment = await opendronelog_client.get_equipment_names(db)
+                    logger.info("ODL import: loaded %d battery names, %d aircraft names",
+                                len(equipment.get("battery_names", {})), len(equipment.get("aircraft_names", {})))
+                except Exception as exc:
+                    logger.warning("ODL import: could not fetch equipment_names: %s", exc)
+
+                battery_names = equipment.get("battery_names", {})
+                aircraft_names = equipment.get("aircraft_names", {})
+
                 imported = 0
                 skipped = 0
                 error_count = 0
@@ -735,10 +768,7 @@ async def import_from_opendronelog_stream(
                     name = odl.get("display_name") or odl.get("name") or f"ODL Flight {odl_id}"
 
                     try:
-                        start_raw = odl.get("start_time")
-                        start_dt = _parse_datetime(start_raw)
-
-                        # Dedup by ODL flight ID (stable across renames)
+                        # Dedup by ODL flight ID
                         existing = await db.execute(
                             select(Flight).where(Flight.source_file_hash == odl_hash)
                         )
@@ -748,28 +778,24 @@ async def import_from_opendronelog_stream(
                             yield sse({"type": "progress", "current": i + 1, "total": total, "imported": imported, "skipped": skipped, "errors": error_count, "flight_name": name})
                             continue
 
-                        # Always fetch detail to get custom names
-                        try:
-                            detail = await opendronelog_client.get_flight(odl_id, db)
-                            if detail:
-                                if not start_dt:
-                                    detail_time = detail.get("start_time") or detail.get("startTime") or detail.get("timestamp") or detail.get("dateTime") or detail.get("date")
-                                    start_dt = _parse_datetime(detail_time)
-                                detail_name = detail.get("display_name") or detail.get("displayName") or detail.get("customName") or ""
-                                if detail_name:
-                                    name = detail_name
-                                if not odl.get("battery_name"):
-                                    odl["battery_name"] = detail.get("battery_name") or detail.get("batteryName") or detail.get("batteryNickname") or detail.get("batteryDisplayName") or ""
-                                if not odl.get("drone_name"):
-                                    odl["drone_name"] = detail.get("drone_name") or detail.get("droneName") or detail.get("droneNickname") or detail.get("droneDisplayName") or ""
-                                if not odl.get("drone_model"):
-                                    odl["drone_model"] = detail.get("drone_model") or detail.get("droneModel") or ""
-                                if not odl.get("file_name"):
-                                    odl["file_name"] = detail.get("file_name") or detail.get("fileName") or detail.get("filename") or ""
-                        except Exception:
-                            pass
+                        # Parse start_time (ISO 8601 from ODL)
+                        start_raw = odl.get("start_time")
+                        start_dt = _parse_datetime(start_raw)
                         if not start_dt:
                             logger.warning("ODL import: could not parse start_time '%s' for flight %s", start_raw, odl_id)
+
+                        # Drone model (hardware) and name (custom nickname from aircraftName or equipment_names)
+                        drone_model = odl.get("drone_model") or None
+                        drone_serial = odl.get("drone_serial") or None
+                        drone_name = odl.get("drone_name") or None
+                        if not drone_name and drone_serial:
+                            drone_name = aircraft_names.get(drone_serial) or aircraft_names.get(drone_serial.upper()) or None
+
+                        # Battery custom name from equipment_names
+                        bat_serial = odl.get("battery_serial") or None
+                        bat_name = ""
+                        if bat_serial:
+                            bat_name = battery_names.get(bat_serial) or battery_names.get(bat_serial.upper()) or ""
 
                         # Fetch GPS track
                         track = []
@@ -790,16 +816,12 @@ async def import_from_opendronelog_stream(
                             except (ValueError, TypeError):
                                 return default
 
-                        # Store drone_model (hardware) and drone_name (nickname) separately
-                        drone_model = odl.get("drone_model") or None
-                        drone_name = odl.get("drone_name") or None
-
                         flight = Flight(
                             name=name,
                             drone_model=drone_model,
                             drone_name=drone_name,
-                            drone_serial=odl.get("drone_serial") or None,
-                            battery_serial=odl.get("battery_serial") or None,
+                            drone_serial=drone_serial,
+                            battery_serial=bat_serial,
                             start_time=start_dt,
                             duration_secs=_float(odl.get("duration_secs")),
                             total_distance=_float(odl.get("total_distance")),
@@ -820,10 +842,8 @@ async def import_from_opendronelog_stream(
                         imported += 1
                         logger.info("ODL import: imported '%s' (%d/%d)", name, i + 1, total)
 
-                        # Auto-create battery record from ODL data
-                        bat_serial = odl.get("battery_serial")
+                        # Auto-create battery record with custom name from equipment_names
                         if bat_serial:
-                            bat_name = odl.get("battery_name") or ""
                             await _track_battery_from_odl(db, flight, bat_serial, bat_name, drone_model)
 
                     except Exception as e:
