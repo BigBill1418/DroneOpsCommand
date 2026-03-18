@@ -8,6 +8,7 @@ from app.models.system_settings import SystemSetting
 from app.models.flight import Flight, FlightSource
 from app.models.battery import Battery, BatteryLog
 from app.models.maintenance import MaintenanceRecord, MaintenanceSchedule
+from app.models.device_api_key import DeviceApiKey
 
 __all__ = [
     "Customer",
@@ -30,4 +31,5 @@ __all__ = [
     "BatteryLog",
     "MaintenanceRecord",
     "MaintenanceSchedule",
+    "DeviceApiKey",
 ]
