@@ -269,7 +269,7 @@ export default function Flights() {
   const loadFlights = useCallback(async () => {
     setLoading(true);
     try {
-      const resp = await api.get('/flight-library');
+      const resp = await api.get('/flight-library?limit=2000');
       setFlights(Array.isArray(resp.data) ? resp.data : []);
     } catch (err: any) {
       // Fallback: try legacy OpenDroneLog endpoint
