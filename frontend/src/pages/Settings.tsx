@@ -20,7 +20,7 @@ import {
 } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
-import { IconCheck, IconX, IconPlus, IconEdit, IconTrash, IconCurrencyDollar, IconMail, IconSend, IconBrandPaypal, IconCash, IconDrone, IconPlugConnected, IconMapPin, IconSearch, IconSignature, IconUpload, IconSettings, IconReceipt, IconPlane, IconPalette, IconWorldWww } from '@tabler/icons-react';
+import { IconCheck, IconX, IconPlus, IconEdit, IconTrash, IconCurrencyDollar, IconMail, IconSend, IconBrandPaypal, IconCash, IconDrone, IconPlugConnected, IconMapPin, IconSearch, IconSignature, IconUpload, IconSettings, IconReceipt, IconPlane, IconPalette, IconWorldWww, IconKey } from '@tabler/icons-react';
 import api from '../api/client';
 import { Aircraft, RateTemplate } from '../api/types';
 import { inputStyles, cardStyle } from '../components/shared/styles';
@@ -58,6 +58,7 @@ export default function Settings() {
   const [tosUploaded, setTosUploaded] = useState(false);
   const [tosUploading, setTosUploading] = useState(false);
   const [brandingSaving, setBrandingSaving] = useState(false);
+  const [djiSaving, setDjiSaving] = useState(false);
 
   const aircraftForm = useForm({
     initialValues: { model_name: '', manufacturer: 'DJI', specs_json: '{}' },
@@ -87,6 +88,10 @@ export default function Settings() {
     initialValues: { opendronelog_url: '' },
   });
 
+  const djiForm = useForm({
+    initialValues: { dji_api_key: '' },
+  });
+
   const weatherForm = useForm({
     initialValues: { weather_lat: '', weather_lon: '', weather_label: '', weather_airport_icao: '' },
   });
@@ -108,6 +113,7 @@ export default function Settings() {
     api.get('/settings/smtp').then((r) => smtpForm.setValues(r.data)).catch(() => {});
     api.get('/settings/payment').then((r) => paymentForm.setValues(r.data)).catch(() => {});
     api.get('/settings/opendronelog').then((r) => odlForm.setValues(r.data)).catch(() => {});
+    api.get('/settings/dji').then((r) => djiForm.setValues(r.data)).catch(() => {});
     api.get('/settings/weather').then((r) => weatherForm.setValues(r.data)).catch(() => {});
     api.get('/intake/default-tos-status').then((r) => setTosUploaded(r.data.uploaded)).catch(() => {});
     api.get('/settings/branding').then((r) => brandingForm.setValues(r.data)).catch(() => {});
@@ -244,6 +250,20 @@ export default function Settings() {
       setOdlStatus({ status: 'error', message: axiosErr.response?.data?.detail || 'Connection failed' });
     } finally {
       setOdlTesting(false);
+    }
+  };
+
+  const handleSaveDji = async (values: typeof djiForm.values) => {
+    setDjiSaving(true);
+    try {
+      await api.put('/settings/dji', values);
+      notifications.show({ title: 'Saved', message: 'DJI API key updated', color: 'cyan' });
+      const r = await api.get('/settings/dji');
+      djiForm.setValues(r.data);
+    } catch {
+      notifications.show({ title: 'Error', message: 'Failed to save DJI API key', color: 'red' });
+    } finally {
+      setDjiSaving(false);
     }
   };
 
@@ -484,6 +504,31 @@ export default function Settings() {
                       IMPORT ALL FLIGHTS TO LOCAL LIBRARY
                     </Button>
                   )}
+                </Stack>
+              </form>
+            </Card>
+
+            {/* DJI API Key */}
+            <Card padding="lg" radius="md" style={cardStyle}>
+              <Group gap="sm" mb="md">
+                <IconKey size={20} color="#00d4ff" />
+                <Title order={3} c="#e8edf2" style={{ letterSpacing: '1px' }}>DJI API KEY</Title>
+              </Group>
+              <Text c="#5a6478" size="xs" mb="sm" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+                Enter your DJI Developer API key for direct integration with DJI cloud services.
+              </Text>
+              <form onSubmit={djiForm.onSubmit(handleSaveDji)}>
+                <Stack gap="sm">
+                  <PasswordInput
+                    label="DJI API Key"
+                    placeholder="Enter your DJI API key"
+                    leftSection={<IconKey size={14} />}
+                    {...djiForm.getInputProps('dji_api_key')}
+                    styles={inputStyles}
+                  />
+                  <Button type="submit" color="cyan" loading={djiSaving} styles={{ root: { fontFamily: "'Bebas Neue', sans-serif" } }}>
+                    SAVE DJI API KEY
+                  </Button>
                 </Stack>
               </form>
             </Card>
