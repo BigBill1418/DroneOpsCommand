@@ -128,6 +128,9 @@ This results in:
 - `/api/intake/tos-pdf/*` (TOS PDF download) → **Public**
 - **Everything else** → Requires Cloudflare Access login
 
+> **Note:** The PDF.js worker used for inline TOS viewing is loaded from
+> `cdnjs.cloudflare.com`, so it does not require a bypass rule.
+
 ---
 
 ## Optional: Restrict to Localhost When Tunnel Is Active
