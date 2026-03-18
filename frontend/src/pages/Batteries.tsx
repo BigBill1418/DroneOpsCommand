@@ -64,7 +64,7 @@ export default function Batteries() {
   const [form, setForm] = useState({ serial: '', name: '', model: '', status: 'active', notes: '' });
   const [editBattery, setEditBattery] = useState<BatteryRecord | null>(null);
   const [editForm, setEditForm] = useState({ serial: '', name: '', model: '' });
-  const [sortBy, setSortBy] = useState<string>('serial');
+  const [sortBy, setSortBy] = useState<string>('model');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [droneModels, setDroneModels] = useState<string[]>([]);
 
@@ -181,6 +181,15 @@ export default function Batteries() {
       const key = bat.model || 'Unassigned';
       if (!map.has(key)) map.set(key, []);
       map.get(key)!.push(bat);
+    }
+
+    // Within each group, sort by custom name (natural numeric order)
+    for (const [, bats] of map) {
+      bats.sort((a, b) => {
+        const aName = a.name || a.serial;
+        const bName = b.name || b.serial;
+        return aName.localeCompare(bName, undefined, { numeric: true, sensitivity: 'base' });
+      });
     }
 
     // Sort groups by aircraft fleet order, then unmatched, then "Unassigned"
