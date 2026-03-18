@@ -708,7 +708,7 @@ export default function MissionNew() {
         await api.put(`/missions/${missionId}/report`, { final_content: reportContent });
       }
       // Generate PDF
-      const resp = await api.post(`/missions/${missionId}/report/pdf`, {}, { responseType: 'blob' });
+      const resp = await api.post(`/missions/${missionId}/report/pdf`, {}, { responseType: 'blob', timeout: 120000 });
       const blobUrl = URL.createObjectURL(new Blob([resp.data], { type: 'application/pdf' }));
       window.open(blobUrl, '_blank');
       setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
