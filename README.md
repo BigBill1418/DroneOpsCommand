@@ -1,33 +1,86 @@
 # DroneOpsReport
 
-Self-hosted invoicing and after-action reporting platform for commercial drone operations.
+**Self-hosted mission management, AI report generation, and invoicing for commercial drone operators.**
 
-**Version 2.0.0**
+**Version 2.1.0** | [Quick Start](#quick-start) | [Features](#features) | [Configuration](#configuration) | [Contributing](CONTRIBUTING.md) | [License](LICENSE)
+
+---
+
+DroneOpsReport is a self-hosted, full-stack platform for managing commercial drone operations end-to-end. It covers the complete lifecycle from flight data ingestion through AI-powered report generation, invoicing, and client delivery.
+
+Designed for FAA Part 107 certified operators running missions such as search & rescue, inspections, mapping, videography, and more.
+
+### Why DroneOpsReport?
+
+- **100% self-hosted** — runs on your own hardware via Docker Compose. No cloud dependencies, no per-seat licensing.
+- **AI stays local** — report generation uses Ollama (Mistral 7B) so client data never leaves your network.
+- **White-label ready** — company name, tagline, and branding are fully configurable from the Settings UI. No code changes needed to make it yours.
+- **Full lifecycle** — mission creation, flight log import, map generation, AI reports, PDF export, invoicing, and email delivery in one platform.
 
 ---
 
 ## Table of Contents
 
-- [Overview](#overview)
+- [Quick Start](#quick-start)
 - [Features](#features)
 - [Architecture](#architecture)
-- [Quick Start](#quick-start)
 - [Configuration](#configuration)
 - [Updating](#updating)
 - [Pages & Workflows](#pages--workflows)
 - [Backend Services](#backend-services)
 - [API Reference](#api-reference)
-- [Phase 2 Roadmap](#phase-2-roadmap)
+- [Roadmap](#roadmap)
 - [Development](#development)
+- [Contributing](#contributing)
 - [License](#license)
 
 ---
 
-## Overview
+## Quick Start
 
-DroneOpsReport is a self-hosted, full-stack platform for managing commercial drone operations end-to-end. It covers the complete lifecycle from flight data ingestion through report generation, invoicing, and client delivery. The system is designed for FAA Part 107 certified operators running missions such as search & rescue, inspections, mapping, videography, lost pet recovery, security investigations, and more.
+### Prerequisites
 
-All services run in Docker containers on your own hardware — no cloud dependencies, no per-seat licensing. The LLM runs locally via Ollama so your client data never leaves your network.
+- [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/install/) (v2+)
+- 8GB+ RAM recommended (Ollama loads a 4GB quantized model)
+- x86_64 or ARM64 host
+
+### Setup
+
+```bash
+# 1. Clone and configure
+git clone https://github.com/YOUR_USERNAME/DroneOpsReport.git
+cd DroneOpsReport
+cp .env.example .env
+
+# 2. Set your secrets (IMPORTANT: change these before first run)
+#    Edit .env and update at minimum:
+#    - POSTGRES_PASSWORD
+#    - JWT_SECRET_KEY
+#    - ADMIN_PASSWORD
+
+# 3. Launch
+docker compose up -d
+
+# 4. Wait for the AI model to download (first run only, ~4GB)
+docker compose logs -f ollama-setup
+
+# 5. Open the app
+#    Web UI:   http://localhost:3080
+#    API docs: http://localhost:8000/docs
+#    Login:    admin / (your ADMIN_PASSWORD from .env)
+```
+
+### What happens on first startup
+
+1. PostgreSQL schema is created automatically
+2. Admin user is seeded with your configured credentials
+3. Aircraft fleet (6 DJI models) and rate templates (8 billing presets) are pre-loaded
+4. Ollama downloads and loads the Mistral 7B model
+5. All storage directories are created
+
+### Personalize it
+
+After logging in, go to **Settings > Branding** to set your company name, tagline, website, and contact email. These appear on PDF reports, emails, the login page, and customer-facing pages.
 
 ---
 
@@ -218,40 +271,6 @@ All services run in Docker containers on your own hardware — no cloud dependen
 
 ---
 
-## Quick Start
-
-```bash
-# 1. Clone the repository
-git clone <repo-url>
-cd DroneOpsReport
-
-# 2. Copy environment config
-cp .env.example .env
-# Edit .env with your settings (see Configuration section below)
-
-# 3. Launch all services
-docker compose up -d
-
-# 4. Wait for Ollama to pull the Mistral model (first run only, ~4GB download)
-docker compose logs -f ollama-setup
-
-# 5. Access the app
-# Web UI: http://localhost:3080
-# API docs: http://localhost:8000/docs
-# Default login: admin / changeme_in_production
-```
-
-### First Run
-
-On first startup the backend automatically:
-1. Creates all database tables and enum types
-2. Syncs any missing PostgreSQL enum values with the Python models
-3. Adds any missing columns to existing tables (for upgrades)
-4. Seeds the admin user, aircraft fleet (6 DJI models), and rate templates (8 billing presets)
-5. Creates upload and report storage directories
-
----
-
 ## Configuration
 
 All settings are configured via environment variables in the `.env` file.
@@ -430,7 +449,7 @@ Full interactive API documentation is available at `http://localhost:8000/docs` 
 
 ---
 
-## Phase 2 Roadmap
+## Roadmap
 
 - **React Native Android App** — Mission creation, photo capture on-site, report review, and customer lookup from the field. Communicates with the stack via JWT-authenticated HTTPS API.
 - **Voice-to-Text** — On-device speech recognition in the Android app for dictating operator field notes hands-free during or after missions.
@@ -464,6 +483,12 @@ To fully reset the database (destroys all data):
 docker compose down -v
 docker compose up -d
 ```
+
+---
+
+## Contributing
+
+Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ---
 
