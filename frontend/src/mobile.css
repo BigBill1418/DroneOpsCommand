@@ -199,6 +199,19 @@
   }
 }
 
+/* ── Intake form: stack address fields on small screens ───────────── */
+@media (max-width: 480px) {
+  /* Force state/zip Group to stack vertically on narrow phones */
+  .mantine-Group-root[style*="gap: 12px"] {
+    flex-direction: column !important;
+  }
+
+  .mantine-Group-root[style*="gap: 12px"] > * {
+    min-width: 100% !important;
+    flex: 1 1 100% !important;
+  }
+}
+
 /* ── Column hiding on mobile ──────────────────────────────────────── */
 @media (max-width: 768px) {
   .hide-mobile {

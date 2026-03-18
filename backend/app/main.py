@@ -96,6 +96,9 @@ def _add_missing_columns(conn):
             "mission_flights": [
                 ("flight_id", "ALTER TABLE mission_flights ADD COLUMN flight_id UUID REFERENCES flights(id) ON DELETE SET NULL"),
             ],
+            "flights": [
+                ("drone_name", "ALTER TABLE flights ADD COLUMN drone_name VARCHAR(255)"),
+            ],
             "batteries": [
                 ("name", "ALTER TABLE batteries ADD COLUMN name VARCHAR(255)"),
             ],
@@ -154,7 +157,7 @@ limiter = Limiter(key_func=get_remote_address)
 app = FastAPI(
     title="D.O.C — Drone Operations Command",
     description="Mission management, flight data, and after-action reporting for drone operations",
-    version="2.16.1",
+    version="2.17.0",
     lifespan=lifespan,
 )
 

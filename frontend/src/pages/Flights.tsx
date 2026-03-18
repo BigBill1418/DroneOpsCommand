@@ -52,7 +52,7 @@ import {
 } from '@tabler/icons-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
-import { FlightRecord } from '../api/types';
+import { Aircraft, FlightRecord } from '../api/types';
 import StatCard from '../components/shared/StatCard';
 import { cardStyle, inputStyles, monoFont } from '../components/shared/styles';
 
@@ -123,7 +123,16 @@ function getMaxSpeed(f: FlightRecord): number {
   return Number(f.max_speed || f.maxSpeed || 0);
 }
 function getDroneModel(f: FlightRecord): string {
-  return f.drone_model || f.droneModel || f.drone || f.aircraft || f.model || '';
+  return f.drone_model || f.droneModel || f.drone || f.model || '';
+}
+function getDroneName(f: FlightRecord): string {
+  return f.drone_name || f.droneName || '';
+}
+function getDroneDisplay(f: FlightRecord): string {
+  const name = getDroneName(f);
+  const model = getDroneModel(f);
+  if (name && model && name !== model) return name;
+  return name || model || '';
 }
 function getStartTime(f: FlightRecord): string {
   return f.start_time || f.startTime || f.date || f.created_at || '';
@@ -159,7 +168,7 @@ function DroneBreakdown({ flights }: { flights: FlightRecord[] }) {
   const drones = useMemo(() => {
     const map: Record<string, { count: number; duration: number }> = {};
     for (const f of flights) {
-      const name = getDroneModel(f) || 'Unknown';
+      const name = getDroneDisplay(f) || getDroneModel(f) || 'Unknown';
       if (!map[name]) map[name] = { count: 0, duration: 0 };
       map[name].count++;
       map[name].duration += getDurationSecs(f);
@@ -240,15 +249,16 @@ export default function Flights() {
   const [uploading, setUploading] = useState(false);
   const [manualOpen, setManualOpen] = useState(false);
   const [detailFlight, setDetailFlight] = useState<FlightRecord | null>(null);
+  const [aircraft, setAircraft] = useState<Aircraft[]>([]);
   const navigate = useNavigate();
 
   // Sort state
   const [sortBy, setSortBy] = useState<string>('date');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
 
-  // Rename state
-  const [renameId, setRenameId] = useState<string | null>(null);
-  const [renameName, setRenameName] = useState('');
+  // Edit modal state (full flight edit including drone reassignment)
+  const [editId, setEditId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState({ name: '', drone_model: '', drone_name: '', aircraft_id: '' as string | null, notes: '' });
 
   // Manual flight form state
   const [manualForm, setManualForm] = useState({
@@ -280,6 +290,11 @@ export default function Flights() {
   }, []);
 
   useEffect(() => { loadFlights(); }, [loadFlights]);
+
+  // Load fleet aircraft for reassignment
+  useEffect(() => {
+    api.get('/aircraft').then((r) => setAircraft(Array.isArray(r.data) ? r.data : [])).catch(() => {});
+  }, []);
 
   // ── Upload handler ─────────────────────────────────────────────────
   const handleUpload = async (files: File[]) => {
@@ -339,19 +354,43 @@ export default function Flights() {
     }
   };
 
-  // ── Rename handler ─────────────────────────────────────────────────
-  const handleRename = async () => {
-    if (!renameId || !renameName.trim()) return;
+  // ── Edit handler (name, drone, aircraft assignment) ─────────────────
+  const openEdit = (f: FlightRecord) => {
+    setEditId(String(f.id));
+    setEditForm({
+      name: getDisplayName(f),
+      drone_model: getDroneModel(f),
+      drone_name: getDroneName(f),
+      aircraft_id: f.aircraft_id || null,
+      notes: f.notes || '',
+    });
+  };
+
+  const handleEditSave = async () => {
+    if (!editId) return;
     try {
-      await api.put(`/flight-library/${renameId}`, { name: renameName.trim() });
-      notifications.show({ title: 'Renamed', message: `Flight renamed to "${renameName.trim()}"`, color: 'cyan' });
-      setFlights((prev) => prev.map((f) => String(f.id) === renameId ? { ...f, name: renameName.trim() } : f));
-      if (detailFlight && String(detailFlight.id) === renameId) {
-        setDetailFlight({ ...detailFlight, name: renameName.trim() });
+      const payload: Record<string, any> = {};
+      if (editForm.name.trim()) payload.name = editForm.name.trim();
+      payload.drone_model = editForm.drone_model.trim() || null;
+      payload.drone_name = editForm.drone_name.trim() || null;
+      payload.aircraft_id = editForm.aircraft_id || null;
+      payload.notes = editForm.notes.trim() || null;
+
+      // If aircraft selected but no drone_model set, inherit from aircraft
+      if (payload.aircraft_id && !payload.drone_model) {
+        const ac = aircraft.find((a) => a.id === payload.aircraft_id);
+        if (ac) payload.drone_model = ac.model_name;
       }
-      setRenameId(null);
+
+      await api.put(`/flight-library/${editId}`, payload);
+      notifications.show({ title: 'Updated', message: 'Flight updated', color: 'cyan' });
+      setFlights((prev) => prev.map((f) => String(f.id) === editId ? { ...f, ...payload } : f));
+      if (detailFlight && String(detailFlight.id) === editId) {
+        setDetailFlight({ ...detailFlight, ...payload });
+      }
+      setEditId(null);
     } catch {
-      notifications.show({ title: 'Error', message: 'Failed to rename flight', color: 'red' });
+      notifications.show({ title: 'Error', message: 'Failed to update flight', color: 'red' });
     }
   };
 
@@ -391,7 +430,7 @@ export default function Flights() {
     if (search) {
       const q = search.toLowerCase();
       result = result.filter((f) => {
-        return [getDisplayName(f), getDroneModel(f), getStartTime(f), f.notes, f.drone_serial, f.source, f.original_filename]
+        return [getDisplayName(f), getDroneModel(f), getDroneName(f), getStartTime(f), f.notes, f.drone_serial, f.source, f.original_filename]
           .filter(Boolean).join(' ').toLowerCase().includes(q);
       });
     }
@@ -406,7 +445,7 @@ export default function Flights() {
           const db2 = getStartTime(b) ? new Date(getStartTime(b)).getTime() : 0;
           cmp = da - db2; break;
         }
-        case 'drone': cmp = getDroneModel(a).localeCompare(getDroneModel(b)); break;
+        case 'drone': cmp = getDroneDisplay(a).localeCompare(getDroneDisplay(b)); break;
         case 'duration': cmp = getDurationSecs(a) - getDurationSecs(b); break;
         case 'distance': cmp = getTotalDistance(a) - getTotalDistance(b); break;
         case 'altitude': cmp = getMaxAltitude(a) - getMaxAltitude(b); break;
@@ -584,7 +623,10 @@ export default function Flights() {
                         <Text size="xs" c="#5a6478" style={monoFont}>{formatDate(getStartTime(f))}</Text>
                       </Table.Td>
                       <Table.Td>
-                        <Text size="xs" c="#e8edf2">{getDroneModel(f) || '—'}</Text>
+                        <Text size="xs" c="#e8edf2">{getDroneDisplay(f) || '—'}</Text>
+                        {getDroneName(f) && getDroneModel(f) && getDroneName(f) !== getDroneModel(f) && (
+                          <Text size="10px" c="#5a6478" style={monoFont}>{getDroneModel(f)}</Text>
+                        )}
                       </Table.Td>
                       <Table.Td>
                         <Text size="xs" c="#5a6478" style={monoFont}>{formatDuration(getDurationSecs(f))}</Text>
@@ -606,8 +648,8 @@ export default function Flights() {
                             </ActionIcon>
                           </Menu.Target>
                           <Menu.Dropdown styles={{ dropdown: { background: '#0e1117', borderColor: '#1a1f2e' } }}>
-                            <Menu.Item leftSection={<IconEdit size={14} />} onClick={(e) => { e.stopPropagation(); setRenameId(String(f.id)); setRenameName(getDisplayName(f)); }}>
-                              Edit Name
+                            <Menu.Item leftSection={<IconEdit size={14} />} onClick={(e) => { e.stopPropagation(); openEdit(f); }}>
+                              Edit Flight
                             </Menu.Item>
                             <Menu.Divider />
                             <Menu.Item leftSection={<IconDownload size={14} />} onClick={(e) => { e.stopPropagation(); handleExport(String(f.id), 'gpx', getDisplayName(f)); }}>
@@ -646,14 +688,35 @@ export default function Flights() {
       >
         {detailFlight && (
           <Stack gap="md" pt="md">
+            {/* Drone info — name, model, serial */}
+            <Card padding="sm" radius="sm" style={{ background: '#0e1117', border: '1px solid #1a1f2e' }}>
+              <Group gap="xs" mb={4}>
+                <IconDrone size={16} color="#00d4ff" />
+                <Text size="11px" c="#5a6478" style={{ ...monoFont, letterSpacing: '1px' }}>AIRCRAFT</Text>
+              </Group>
+              <Text c="#e8edf2" fw={600} size="lg">
+                {getDroneDisplay(detailFlight) || 'Unknown'}
+              </Text>
+              {getDroneName(detailFlight) && getDroneModel(detailFlight) && getDroneName(detailFlight) !== getDroneModel(detailFlight) && (
+                <Text size="xs" c="#5a6478" style={monoFont}>{getDroneModel(detailFlight)}</Text>
+              )}
+              {detailFlight.drone_serial && (
+                <Text size="xs" c="#5a6478" style={monoFont}>S/N: {detailFlight.drone_serial}</Text>
+              )}
+            </Card>
+
             <SimpleGrid cols={2}>
-              <div>
-                <Text size="11px" c="#5a6478" style={{ ...monoFont, letterSpacing: '1px' }}>DRONE</Text>
-                <Text c="#e8edf2" fw={600}>{getDroneModel(detailFlight) || '—'}</Text>
-              </div>
               <div>
                 <Text size="11px" c="#5a6478" style={{ ...monoFont, letterSpacing: '1px' }}>DATE</Text>
                 <Text c="#e8edf2" fw={600}>{formatDate(getStartTime(detailFlight))}</Text>
+              </div>
+              <div>
+                <Text size="11px" c="#5a6478" style={{ ...monoFont, letterSpacing: '1px' }}>SOURCE</Text>
+                {detailFlight.source ? (
+                  <Badge color={SOURCE_COLORS[detailFlight.source] || 'gray'} variant="light" size="sm" mt={4}>
+                    {SOURCE_LABELS[detailFlight.source] || detailFlight.source}
+                  </Badge>
+                ) : <Text c="#5a6478">—</Text>}
               </div>
               <div>
                 <Text size="11px" c="#5a6478" style={{ ...monoFont, letterSpacing: '1px' }}>DURATION</Text>
@@ -681,33 +744,34 @@ export default function Flights() {
               </div>
             </SimpleGrid>
 
-            {detailFlight.source && (
-              <Group gap="xs">
-                <Text size="11px" c="#5a6478" style={{ ...monoFont, letterSpacing: '1px' }}>SOURCE</Text>
-                <Badge color={SOURCE_COLORS[detailFlight.source] || 'gray'} variant="light" size="sm">
-                  {SOURCE_LABELS[detailFlight.source] || detailFlight.source}
-                </Badge>
-              </Group>
+            {/* Battery info */}
+            {detailFlight.battery_serial && (
+              <Card padding="sm" radius="sm" style={{ background: '#0e1117', border: '1px solid #1a1f2e' }}>
+                <Group gap="xs" mb={4}>
+                  <IconBattery size={16} color="#2ecc40" />
+                  <Text size="11px" c="#5a6478" style={{ ...monoFont, letterSpacing: '1px' }}>BATTERY</Text>
+                </Group>
+                <Text c="#e8edf2" fw={500}>{detailFlight.battery_serial}</Text>
+              </Card>
+            )}
+
+            {/* Home location */}
+            {(detailFlight.home_lat && detailFlight.home_lon) && (
+              <Card padding="sm" radius="sm" style={{ background: '#0e1117', border: '1px solid #1a1f2e' }}>
+                <Group gap="xs" mb={4}>
+                  <IconMapPin size={16} color="#ff6b1a" />
+                  <Text size="11px" c="#5a6478" style={{ ...monoFont, letterSpacing: '1px' }}>HOME POINT</Text>
+                </Group>
+                <Text c="#e8edf2" size="sm" style={monoFont}>
+                  {Number(detailFlight.home_lat).toFixed(6)}, {Number(detailFlight.home_lon).toFixed(6)}
+                </Text>
+              </Card>
             )}
 
             {detailFlight.original_filename && (
               <div>
                 <Text size="11px" c="#5a6478" style={{ ...monoFont, letterSpacing: '1px' }}>LOG FILE</Text>
                 <Text c="#e8edf2" size="sm" style={monoFont}>{detailFlight.original_filename}</Text>
-              </div>
-            )}
-
-            {detailFlight.drone_serial && (
-              <div>
-                <Text size="11px" c="#5a6478" style={{ ...monoFont, letterSpacing: '1px' }}>SERIAL</Text>
-                <Text c="#e8edf2" size="sm" style={monoFont}>{detailFlight.drone_serial}</Text>
-              </div>
-            )}
-
-            {detailFlight.battery_serial && (
-              <div>
-                <Text size="11px" c="#5a6478" style={{ ...monoFont, letterSpacing: '1px' }}>BATTERY</Text>
-                <Text c="#e8edf2" size="sm" style={monoFont}>{detailFlight.battery_serial}</Text>
               </div>
             )}
 
@@ -718,15 +782,22 @@ export default function Flights() {
               </div>
             )}
 
+            {detailFlight.point_count != null && detailFlight.point_count > 0 && (
+              <div>
+                <Text size="11px" c="#5a6478" style={{ ...monoFont, letterSpacing: '1px' }}>DATA POINTS</Text>
+                <Text c="#e8edf2" size="sm" style={monoFont}>{Number(detailFlight.point_count).toLocaleString()}</Text>
+              </div>
+            )}
+
             <Button
               size="xs"
               variant="light"
               color="grape"
               leftSection={<IconEdit size={14} />}
-              onClick={() => { setRenameId(String(detailFlight.id)); setRenameName(getDisplayName(detailFlight)); }}
+              onClick={() => openEdit(detailFlight)}
               styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}
             >
-              EDIT NAME
+              EDIT FLIGHT
             </Button>
 
             <Group>
@@ -751,26 +822,67 @@ export default function Flights() {
         )}
       </Drawer>
 
-      {/* ── Rename Modal ──────────────────────────────────────────── */}
+      {/* ── Edit Flight Modal (name, drone, assignment) ─────────── */}
       <Modal
-        opened={!!renameId}
-        onClose={() => setRenameId(null)}
-        title={<Text fw={700} c="#e8edf2" style={{ fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '2px' }}>EDIT FLIGHT NAME</Text>}
+        opened={!!editId}
+        onClose={() => setEditId(null)}
+        title={<Text fw={700} c="#e8edf2" style={{ fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '2px' }}>EDIT FLIGHT</Text>}
         styles={{ header: { background: '#0e1117', borderBottom: '1px solid #1a1f2e' }, body: { background: '#0e1117' }, content: { background: '#0e1117' } }}
-        size="sm"
+        size="md"
       >
         <Stack gap="md">
           <TextInput
             label="Flight Name"
-            value={renameName}
-            onChange={(e) => setRenameName(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleRename(); } }}
+            value={editForm.name}
+            onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
             styles={inputStyles}
             autoFocus
           />
-          <Button fullWidth color="cyan" onClick={handleRename}
+          <Select
+            label="Assign to Fleet Aircraft"
+            placeholder="Select aircraft from fleet..."
+            data={aircraft.map((a) => ({ value: a.id, label: `${a.model_name} (${a.manufacturer})` }))}
+            value={editForm.aircraft_id}
+            onChange={(val) => {
+              setEditForm({ ...editForm, aircraft_id: val });
+              // Auto-fill drone model from fleet if empty
+              if (val && !editForm.drone_model) {
+                const ac = aircraft.find((a) => a.id === val);
+                if (ac) setEditForm((prev) => ({ ...prev, aircraft_id: val, drone_model: ac.model_name }));
+              }
+            }}
+            clearable
+            searchable
+            styles={{
+              input: { background: '#050608', borderColor: '#1a1f2e', color: '#e8edf2' },
+              label: { color: '#5a6478', fontFamily: "'Share Tech Mono', monospace", fontSize: '12px', letterSpacing: '1px' },
+              dropdown: { background: '#0e1117', borderColor: '#1a1f2e' },
+              option: { color: '#e8edf2' },
+            }}
+          />
+          <TextInput
+            label="Drone Model"
+            placeholder="e.g. DJI Matrice 300 RTK"
+            value={editForm.drone_model}
+            onChange={(e) => setEditForm({ ...editForm, drone_model: e.target.value })}
+            styles={inputStyles}
+          />
+          <TextInput
+            label="Drone Nickname"
+            placeholder="e.g. Big Red"
+            value={editForm.drone_name}
+            onChange={(e) => setEditForm({ ...editForm, drone_name: e.target.value })}
+            styles={inputStyles}
+          />
+          <Textarea
+            label="Notes"
+            value={editForm.notes}
+            onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })}
+            styles={inputStyles}
+          />
+          <Button fullWidth color="cyan" onClick={handleEditSave}
             styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}>
-            SAVE NAME
+            SAVE CHANGES
           </Button>
         </Stack>
       </Modal>
