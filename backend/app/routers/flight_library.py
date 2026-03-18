@@ -639,13 +639,15 @@ async def import_from_opendronelog(
             if not start_dt:
                 logger.warning("ODL import: could not parse start_time '%s' for flight %s (%s)", start_raw, odl_id, name)
 
-            # Drone: model is hardware (droneModel), nickname comes from aircraftName or equipment_names
+            # Drone: model is hardware (droneModel), custom name from equipment_names (priority)
+            # then aircraftName (DJI app name embedded in log file) as fallback
             drone_model = odl.get("drone_model") or None
             drone_serial = odl.get("drone_serial") or None
-            # ODL aircraftName = custom drone nickname; also check equipment_names lookup by serial
-            drone_name = odl.get("drone_name") or None
-            if not drone_name and drone_serial:
+            drone_name = None
+            if drone_serial:
                 drone_name = aircraft_names.get(drone_serial) or aircraft_names.get(drone_serial.upper()) or None
+            if not drone_name:
+                drone_name = odl.get("drone_name") or None  # aircraftName from log
 
             # Battery custom name from equipment_names
             bat_serial = odl.get("battery_serial") or None
@@ -784,12 +786,15 @@ async def import_from_opendronelog_stream(
                         if not start_dt:
                             logger.warning("ODL import: could not parse start_time '%s' for flight %s", start_raw, odl_id)
 
-                        # Drone model (hardware) and name (custom nickname from aircraftName or equipment_names)
+                        # Drone: model is hardware, custom name from equipment_names (priority)
+                        # then aircraftName (DJI app name from log file) as fallback
                         drone_model = odl.get("drone_model") or None
                         drone_serial = odl.get("drone_serial") or None
-                        drone_name = odl.get("drone_name") or None
-                        if not drone_name and drone_serial:
+                        drone_name = None
+                        if drone_serial:
                             drone_name = aircraft_names.get(drone_serial) or aircraft_names.get(drone_serial.upper()) or None
+                        if not drone_name:
+                            drone_name = odl.get("drone_name") or None  # aircraftName from log
 
                         # Battery custom name from equipment_names
                         bat_serial = odl.get("battery_serial") or None
