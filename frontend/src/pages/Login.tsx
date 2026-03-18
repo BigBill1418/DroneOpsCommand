@@ -117,6 +117,9 @@ export default function Login({ onLogin }: LoginProps) {
         <Anchor href="https://www.barnardHQ.com" target="_blank" c="#00d4ff" size="xs" style={{ fontFamily: "'Share Tech Mono', monospace", letterSpacing: '1px' }}>
           www.barnardHQ.com
         </Anchor>
+        <Text size="xs" c="#3a3f4a" style={{ fontFamily: "'Share Tech Mono', monospace", letterSpacing: '1px' }}>
+          v{typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : ''}
+        </Text>
       </Stack>
     </Box>
   );
