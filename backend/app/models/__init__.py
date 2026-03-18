@@ -30,4 +30,6 @@ __all__ = [
     "BatteryLog",
     "MaintenanceRecord",
     "MaintenanceSchedule",
+    "DeviceApiKey",
 ]
+from app.models.device_api_key import DeviceApiKey
