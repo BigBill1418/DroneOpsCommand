@@ -304,7 +304,8 @@ export default function Settings() {
     setPurging(true);
     try {
       const r = await api.delete('/flight-library/purge/all');
-      notifications.show({ title: 'Flights Purged', message: `${r.data.deleted} flights deleted`, color: 'orange' });
+      const batMsg = r.data.batteries_deleted ? `, ${r.data.batteries_deleted} batteries removed` : '';
+      notifications.show({ title: 'Data Purged', message: `${r.data.deleted} flights deleted${batMsg}`, color: 'orange' });
       setPurgeConfirmOpen(false);
       setPurgeChecked(false);
     } catch {
@@ -861,7 +862,7 @@ export default function Settings() {
                 <Title order={3} c="#e8edf2" style={{ letterSpacing: '1px' }}>PURGE FLIGHT DATA</Title>
               </Group>
               <Text c="#5a6478" size="xs" mb="sm" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
-                Delete all flights from the local database. Use this before re-importing from OpenDroneLog to get a clean sync.
+                Delete all flights, batteries, and battery logs from the local database. Use this before re-importing from OpenDroneLog to get a clean sync.
                 This action cannot be undone.
               </Text>
               <Button
@@ -871,7 +872,7 @@ export default function Settings() {
                 onClick={() => { setPurgeChecked(false); setPurgeConfirmOpen(true); }}
                 styles={{ root: { fontFamily: "'Bebas Neue', sans-serif" } }}
               >
-                WIPE ALL FLIGHTS
+                WIPE ALL DATA
               </Button>
             </Card>
 
@@ -1143,13 +1144,13 @@ export default function Settings() {
       >
         <Stack gap="md">
           <Text c="#e8edf2" size="sm">
-            This will permanently delete <strong>all flights</strong> and their associated battery logs from the local database.
+            This will permanently delete <strong>all flights, batteries, and battery logs</strong> from the local database for a clean re-sync.
           </Text>
           <Text c="#ff6b1a" size="xs" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
             This action cannot be undone. You can re-import from OpenDroneLog after purging.
           </Text>
           <Checkbox
-            label="I understand this will delete all flight data"
+            label="I understand this will delete all flight and battery data"
             checked={purgeChecked}
             onChange={(e) => setPurgeChecked(e.currentTarget.checked)}
             styles={{

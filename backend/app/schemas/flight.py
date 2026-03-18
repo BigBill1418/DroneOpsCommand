@@ -110,6 +110,7 @@ class BatteryCreate(BaseModel):
 
 
 class BatteryUpdate(BaseModel):
+    serial: str | None = None
     model: str | None = None
     purchase_date: str | None = None
     status: str | None = None

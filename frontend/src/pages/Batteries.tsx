@@ -27,6 +27,7 @@ import {
   IconBatteryOff,
   IconChevronDown,
   IconChevronUp,
+  IconEdit,
   IconPlus,
   IconRefresh,
   IconSelector,
@@ -60,6 +61,8 @@ export default function Batteries() {
   const [logs, setLogs] = useState<BatteryLogRecord[]>([]);
   const [logsLoading, setLogsLoading] = useState(false);
   const [form, setForm] = useState({ serial: '', model: '', status: 'active', notes: '' });
+  const [editBattery, setEditBattery] = useState<BatteryRecord | null>(null);
+  const [editForm, setEditForm] = useState({ serial: '', model: '' });
   const [sortBy, setSortBy] = useState<string>('model');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
 
@@ -113,6 +116,22 @@ export default function Batteries() {
       if (selectedBattery?.id === id) setSelectedBattery(null);
     } catch {
       notifications.show({ title: 'Error', message: 'Failed to delete', color: 'red' });
+    }
+  };
+
+  const handleEditSave = async () => {
+    if (!editBattery || !editForm.serial.trim()) return;
+    try {
+      const resp = await api.put(`/batteries/${editBattery.id}`, {
+        serial: editForm.serial.trim(),
+        model: editForm.model.trim() || null,
+      });
+      notifications.show({ title: 'Updated', message: `Battery renamed to "${editForm.serial.trim()}"`, color: 'cyan' });
+      setBatteries((prev) => prev.map((b) => b.id === editBattery.id ? resp.data : b));
+      if (selectedBattery?.id === editBattery.id) setSelectedBattery(resp.data);
+      setEditBattery(null);
+    } catch (err: any) {
+      notifications.show({ title: 'Error', message: err.response?.data?.detail || 'Failed to update battery', color: 'red' });
     }
   };
 
@@ -226,7 +245,7 @@ export default function Batteries() {
                         </Group>
                       </Table.Th>
                     ))}
-                    <Table.Th w={50}></Table.Th>
+                    <Table.Th w={80}></Table.Th>
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
@@ -279,14 +298,24 @@ export default function Batteries() {
                               </Text>
                             </Table.Td>
                             <Table.Td>
-                              <Button
-                                variant="subtle"
-                                color="red"
-                                size="compact-xs"
-                                onClick={(e) => { e.stopPropagation(); handleDelete(bat.id); }}
-                              >
-                                <IconTrash size={14} />
-                              </Button>
+                              <Group gap={4} wrap="nowrap">
+                                <Button
+                                  variant="subtle"
+                                  color="grape"
+                                  size="compact-xs"
+                                  onClick={(e) => { e.stopPropagation(); setEditBattery(bat); setEditForm({ serial: bat.serial, model: bat.model || '' }); }}
+                                >
+                                  <IconEdit size={14} />
+                                </Button>
+                                <Button
+                                  variant="subtle"
+                                  color="red"
+                                  size="compact-xs"
+                                  onClick={(e) => { e.stopPropagation(); handleDelete(bat.id); }}
+                                >
+                                  <IconTrash size={14} />
+                                </Button>
+                              </Group>
                             </Table.Td>
                           </Table.Tr>
                         );
@@ -365,10 +394,22 @@ export default function Batteries() {
               </Table>
             )}
 
-            <Button color="red" variant="light" size="xs" leftSection={<IconTrash size={14} />}
-              onClick={() => { handleDelete(selectedBattery.id); setSelectedBattery(null); }}>
-              Delete Battery
-            </Button>
+            <Group>
+              <Button
+                size="xs"
+                variant="light"
+                color="grape"
+                leftSection={<IconEdit size={14} />}
+                onClick={() => { setEditBattery(selectedBattery); setEditForm({ serial: selectedBattery.serial, model: selectedBattery.model || '' }); }}
+                styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}
+              >
+                EDIT NAME
+              </Button>
+              <Button color="red" variant="light" size="xs" leftSection={<IconTrash size={14} />}
+                onClick={() => { handleDelete(selectedBattery.id); setSelectedBattery(null); }}>
+                Delete Battery
+              </Button>
+            </Group>
           </Stack>
         )}
       </Modal>
@@ -391,6 +432,37 @@ export default function Batteries() {
           <Button fullWidth color="cyan" onClick={handleAdd}
             styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}>
             SAVE BATTERY
+          </Button>
+        </Stack>
+      </Modal>
+
+      {/* Edit Battery Name Modal */}
+      <Modal
+        opened={!!editBattery}
+        onClose={() => setEditBattery(null)}
+        title={<Text fw={700} c="#e8edf2" style={{ fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '2px' }}>EDIT BATTERY</Text>}
+        styles={{ header: { background: '#0e1117', borderBottom: '1px solid #1a1f2e' }, body: { background: '#0e1117' }, content: { background: '#0e1117' } }}
+        size="sm"
+      >
+        <Stack gap="md">
+          <TextInput
+            label="Battery Name / Serial"
+            value={editForm.serial}
+            onChange={(e) => setEditForm({ ...editForm, serial: e.target.value })}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleEditSave(); } }}
+            styles={inputStyles}
+            autoFocus
+          />
+          <TextInput
+            label="Drone Type / Model"
+            value={editForm.model}
+            onChange={(e) => setEditForm({ ...editForm, model: e.target.value })}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleEditSave(); } }}
+            styles={inputStyles}
+          />
+          <Button fullWidth color="cyan" onClick={handleEditSave}
+            styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}>
+            SAVE CHANGES
           </Button>
         </Stack>
       </Modal>

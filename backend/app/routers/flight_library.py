@@ -340,16 +340,19 @@ async def purge_all_flights(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
-    """Delete ALL flights and associated battery logs. Requires confirmation."""
+    """Delete ALL flights, battery logs, and batteries for a clean re-sync."""
     from sqlalchemy import delete as sql_delete
 
-    # Delete battery logs tied to flights first
-    await db.execute(sql_delete(BatteryLog).where(BatteryLog.flight_id.isnot(None)))
+    # Delete all battery logs (not just flight-linked — full wipe for clean ODL re-sync)
+    await db.execute(sql_delete(BatteryLog))
+    # Delete all batteries
+    bat_result = await db.execute(sql_delete(Battery))
+    bat_count = bat_result.rowcount
     # Delete all flights
     result = await db.execute(sql_delete(Flight))
     count = result.rowcount
     await db.commit()
-    return {"deleted": count}
+    return {"deleted": count, "batteries_deleted": bat_count}
 
 
 # ── Export flight ─────────────────────────────────────────────────────
