@@ -15,7 +15,7 @@ from slowapi.util import get_remote_address
 from app.config import settings
 from app.database import Base, async_session, engine, get_db
 import app.models  # noqa: F401 — ensure all models registered with Base before create_all
-from app.routers import auth, customers, aircraft, missions, flights, maps, reports, invoices, rate_templates, llm, system_settings, financials, weather, intake, flight_library, batteries, maintenance
+from app.routers import auth, customers, aircraft, missions, flights, maps, reports, invoices, rate_templates, llm, system_settings, financials, weather, intake, flight_library, batteries, maintenance, backup
 
 # Configure root logger for the app
 logging.basicConfig(
@@ -96,6 +96,9 @@ def _add_missing_columns(conn):
             "mission_flights": [
                 ("flight_id", "ALTER TABLE mission_flights ADD COLUMN flight_id UUID REFERENCES flights(id) ON DELETE SET NULL"),
             ],
+            "batteries": [
+                ("name", "ALTER TABLE batteries ADD COLUMN name VARCHAR(255)"),
+            ],
         }
 
         # Make opendronelog_flight_id nullable for existing tables (new flights use flight_id)
@@ -151,7 +154,7 @@ limiter = Limiter(key_func=get_remote_address)
 app = FastAPI(
     title="D.O.C — Drone Operations Command",
     description="Mission management, flight data, and after-action reporting for drone operations",
-    version="2.13.3",
+    version="2.14.0",
     lifespan=lifespan,
 )
 
@@ -198,6 +201,7 @@ app.include_router(intake.router)
 app.include_router(flight_library.router)
 app.include_router(batteries.router)
 app.include_router(maintenance.router)
+app.include_router(backup.router)
 
 
 @app.middleware("http")

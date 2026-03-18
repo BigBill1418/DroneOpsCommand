@@ -12,6 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgeos-dev \
     libproj-dev \
     shared-mime-info \
+    postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -22,7 +23,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Create data directories and non-root user
-RUN mkdir -p /data/uploads /data/reports \
+RUN mkdir -p /data/uploads /data/reports /data/backups \
     && useradd -m -u 1000 doc \
     && chown -R doc:doc /data /app
 

@@ -60,9 +60,9 @@ export default function Batteries() {
   const [selectedBattery, setSelectedBattery] = useState<BatteryRecord | null>(null);
   const [logs, setLogs] = useState<BatteryLogRecord[]>([]);
   const [logsLoading, setLogsLoading] = useState(false);
-  const [form, setForm] = useState({ serial: '', model: '', status: 'active', notes: '' });
+  const [form, setForm] = useState({ serial: '', name: '', model: '', status: 'active', notes: '' });
   const [editBattery, setEditBattery] = useState<BatteryRecord | null>(null);
-  const [editForm, setEditForm] = useState({ serial: '', model: '' });
+  const [editForm, setEditForm] = useState({ serial: '', name: '', model: '' });
   const [sortBy, setSortBy] = useState<string>('model');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [droneModels, setDroneModels] = useState<string[]>([]);
@@ -110,9 +110,9 @@ export default function Batteries() {
     }
     try {
       await api.post('/batteries', form);
-      notifications.show({ title: 'Battery Added', message: form.serial, color: 'cyan' });
+      notifications.show({ title: 'Battery Added', message: form.name || form.serial, color: 'cyan' });
       setAddOpen(false);
-      setForm({ serial: '', model: '', status: 'active', notes: '' });
+      setForm({ serial: '', name: '', model: '', status: 'active', notes: '' });
       loadBatteries();
     } catch (err: any) {
       notifications.show({ title: 'Error', message: err.response?.data?.detail || 'Failed to add', color: 'red' });
@@ -135,6 +135,7 @@ export default function Batteries() {
     try {
       const resp = await api.put(`/batteries/${editBattery.id}`, {
         serial: editForm.serial.trim(),
+        name: editForm.name.trim() || null,
         model: editForm.model.trim() || null,
       });
       notifications.show({ title: 'Updated', message: `Battery updated`, color: 'cyan' });
@@ -161,8 +162,8 @@ export default function Batteries() {
     const sorted = [...batteries].sort((a, b) => {
       let cmp = 0;
       switch (sortBy) {
-        case 'serial': cmp = a.serial.localeCompare(b.serial); break;
-        case 'model': cmp = (a.model || 'Unknown').localeCompare(b.model || 'Unknown'); break;
+        case 'serial': cmp = (a.name || a.serial).localeCompare(b.name || b.serial); break;
+        case 'model': cmp = (a.model || 'Unassigned').localeCompare(b.model || 'Unassigned'); break;
         case 'status': cmp = a.status.localeCompare(b.status); break;
         case 'health': cmp = (a.health_pct ?? -1) - (b.health_pct ?? -1); break;
         case 'cycles': cmp = a.cycle_count - b.cycle_count; break;
@@ -172,7 +173,7 @@ export default function Batteries() {
 
     const map = new Map<string, BatteryRecord[]>();
     for (const bat of sorted) {
-      const key = bat.model || 'Unknown';
+      const key = bat.model || 'Unassigned';
       if (!map.has(key)) map.set(key, []);
       map.get(key)!.push(bat);
     }
@@ -193,15 +194,10 @@ export default function Batteries() {
     return sortDir === 'asc' ? <IconChevronUp size={12} /> : <IconChevronDown size={12} />;
   };
 
-  // Build drone model options for Select dropdowns
+  // Build drone model options from aircraft fleet only
   const droneModelOptions = useMemo(() => {
-    // Combine configured aircraft models with any existing battery models not in the list
-    const allModels = new Set(droneModels);
-    for (const b of batteries) {
-      if (b.model && b.model !== 'Unknown') allModels.add(b.model);
-    }
-    return Array.from(allModels).sort().map((m) => ({ value: m, label: m }));
-  }, [droneModels, batteries]);
+    return droneModels.sort().map((m) => ({ value: m, label: m }));
+  }, [droneModels]);
 
   return (
     <Stack gap="lg">
@@ -258,7 +254,7 @@ export default function Batteries() {
               >
                 <Table.Thead>
                   <Table.Tr>
-                    {([['serial', 'BATTERY'], ['model', 'DRONE TYPE'], ['status', 'STATUS'], ['health', 'HEALTH'], ['cycles', 'CYCLES']] as const).map(([col, label]) => (
+                    {([['serial', 'BATTERY'], ['model', 'DRONE TYPE'], ['status', 'STATUS'], ['health', 'HEALTH'], ['cycles', 'CYCLES']] as [string, string][]).map(([col, label]) => (
                       <Table.Th key={col} onClick={() => toggleSort(col)} style={{ cursor: 'pointer', userSelect: 'none' }}>
                         <Group gap={4} wrap="nowrap">
                           {label}<SortIcon col={col} />
@@ -287,10 +283,11 @@ export default function Batteries() {
                             onClick={() => { setSelectedBattery(bat); loadLogs(bat.id); }}
                           >
                             <Table.Td>
-                              <Text size="sm" fw={600} c="#e8edf2" style={monoFont}>{bat.serial}</Text>
+                              <Text size="sm" fw={600} c="#e8edf2" style={monoFont}>{bat.name || bat.serial}</Text>
+                              {bat.name && <Text size="10px" c="#5a6478" style={monoFont}>{bat.serial}</Text>}
                             </Table.Td>
                             <Table.Td>
-                              <Text size="xs" c="#5a6478" style={monoFont}>{bat.model || 'Unknown'}</Text>
+                              <Text size="xs" c="#5a6478" style={monoFont}>{bat.model || '—'}</Text>
                             </Table.Td>
                             <Table.Td>
                               <Badge color={STATUS_COLORS[bat.status] || 'gray'} variant="light" size="sm">
@@ -318,7 +315,7 @@ export default function Batteries() {
                                   variant="subtle"
                                   color="grape"
                                   size="compact-xs"
-                                  onClick={(e) => { e.stopPropagation(); setEditBattery(bat); setEditForm({ serial: bat.serial, model: bat.model || '' }); }}
+                                  onClick={(e) => { e.stopPropagation(); setEditBattery(bat); setEditForm({ serial: bat.serial, name: bat.name || '', model: bat.model || '' }); }}
                                 >
                                   <IconEdit size={14} />
                                 </Button>
@@ -349,14 +346,18 @@ export default function Batteries() {
         opened={!!selectedBattery}
         onClose={() => setSelectedBattery(null)}
         title={<Text fw={700} c="#e8edf2" style={{ fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '2px' }}>
-          {selectedBattery?.serial} — BATTERY DETAIL
+          {selectedBattery?.name || selectedBattery?.serial} — BATTERY DETAIL
         </Text>}
         size="lg"
         styles={{ header: { background: '#0e1117', borderBottom: '1px solid #1a1f2e' }, body: { background: '#0e1117' }, content: { background: '#0e1117' } }}
       >
         {selectedBattery && (
           <Stack gap="md">
-            <SimpleGrid cols={3}>
+            <SimpleGrid cols={2}>
+              <div>
+                <Text size="11px" c="#5a6478" style={{ ...monoFont, letterSpacing: '1px' }}>SERIAL</Text>
+                <Text c="#e8edf2" style={monoFont}>{selectedBattery.serial}</Text>
+              </div>
               <div>
                 <Text size="11px" c="#5a6478" style={{ ...monoFont, letterSpacing: '1px' }}>DRONE TYPE</Text>
                 <Text c="#e8edf2">{selectedBattery.model || '—'}</Text>
@@ -415,7 +416,7 @@ export default function Batteries() {
                 variant="light"
                 color="grape"
                 leftSection={<IconEdit size={14} />}
-                onClick={() => { setEditBattery(selectedBattery); setEditForm({ serial: selectedBattery.serial, model: selectedBattery.model || '' }); }}
+                onClick={() => { setEditBattery(selectedBattery); setEditForm({ serial: selectedBattery.serial, name: selectedBattery.name || '', model: selectedBattery.model || '' }); }}
                 styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}
               >
                 EDIT BATTERY
@@ -439,6 +440,8 @@ export default function Batteries() {
         <Stack gap="md">
           <TextInput label="Serial Number" required placeholder="e.g. 1ZNDH3E0030E7C"
             value={form.serial} onChange={(e) => setForm({ ...form, serial: e.target.value })} styles={inputStyles} />
+          <TextInput label="Battery Name (Alias)" placeholder="e.g. Battery A"
+            value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} styles={inputStyles} />
           <Select
             label="Drone Type"
             placeholder="Select drone model"
@@ -469,12 +472,20 @@ export default function Batteries() {
       >
         <Stack gap="md">
           <TextInput
-            label="Battery Name / Serial"
-            value={editForm.serial}
-            onChange={(e) => setEditForm({ ...editForm, serial: e.target.value })}
+            label="Battery Name (Alias)"
+            placeholder="Display name from ODL"
+            value={editForm.name}
+            onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
             onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleEditSave(); } }}
             styles={inputStyles}
             autoFocus
+          />
+          <TextInput
+            label="Serial Number"
+            description="Hardware serial — static identifier"
+            value={editForm.serial}
+            onChange={(e) => setEditForm({ ...editForm, serial: e.target.value })}
+            styles={inputStyles}
           />
           <Select
             label="Drone Type"

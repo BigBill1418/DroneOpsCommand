@@ -205,6 +205,7 @@ export interface TelemetryData {
 export interface BatteryRecord {
   id: string;
   serial: string;
+  name: string | null;
   model: string | null;
   purchase_date: string | null;
   cycle_count: number;

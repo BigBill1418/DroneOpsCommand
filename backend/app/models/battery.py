@@ -15,6 +15,7 @@ class Battery(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     serial: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    name: Mapped[str | None] = mapped_column(String(255), nullable=True)  # display alias from ODL
     model: Mapped[str | None] = mapped_column(String(255), nullable=True)  # e.g. "TB65"
     purchase_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     cycle_count: Mapped[int] = mapped_column(Integer, default=0)

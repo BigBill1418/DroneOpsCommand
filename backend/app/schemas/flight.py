@@ -85,6 +85,7 @@ class FlightUploadResponse(BaseModel):
 class BatteryResponse(BaseModel):
     id: UUID
     serial: str
+    name: str | None = None
     model: str | None
     purchase_date: str | None = None
     cycle_count: int
@@ -102,6 +103,7 @@ class BatteryResponse(BaseModel):
 
 class BatteryCreate(BaseModel):
     serial: str
+    name: str | None = None
     model: str | None = None
     purchase_date: str | None = None
     status: str = "active"
@@ -111,6 +113,7 @@ class BatteryCreate(BaseModel):
 
 class BatteryUpdate(BaseModel):
     serial: str | None = None
+    name: str | None = None
     model: str | None = None
     purchase_date: str | None = None
     status: str | None = None

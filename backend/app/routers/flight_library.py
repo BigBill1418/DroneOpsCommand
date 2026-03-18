@@ -786,24 +786,30 @@ async def _track_battery_from_odl(
     if not serial:
         return
 
-    # Use custom battery name as serial if available (preserves ODL display names)
-    display_serial = custom_name if custom_name else serial
-
-    result = await db.execute(select(Battery).where(Battery.serial == display_serial))
+    # Look up by actual hardware serial
+    result = await db.execute(select(Battery).where(Battery.serial == serial))
     battery = result.scalar_one_or_none()
 
-    # Also check by raw serial in case it was previously imported without custom name
+    # Migration: if battery was previously stored with custom_name as serial, find and fix it
     if not battery and custom_name:
-        result2 = await db.execute(select(Battery).where(Battery.serial == serial))
+        result2 = await db.execute(select(Battery).where(Battery.serial == custom_name))
         battery = result2.scalar_one_or_none()
         if battery:
-            # Update to use the custom name
-            battery.serial = display_serial
+            # Fix: move the custom name to the name field, restore actual serial
+            battery.name = custom_name
+            battery.serial = serial
 
     if not battery:
-        battery = Battery(serial=display_serial, model=drone_model, cycle_count=0)
+        battery = Battery(serial=serial, name=custom_name or None, model=drone_model, cycle_count=0)
         db.add(battery)
         await db.flush()
+    else:
+        # Always update name from ODL if provided (ODL is source of truth for display names)
+        if custom_name:
+            battery.name = custom_name
+        # Update drone model if not set
+        if drone_model and not battery.model:
+            battery.model = drone_model
 
     battery.cycle_count += 1
 

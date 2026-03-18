@@ -21,7 +21,7 @@ import {
 } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
-import { IconCheck, IconX, IconPlus, IconEdit, IconTrash, IconCurrencyDollar, IconMail, IconSend, IconBrandPaypal, IconCash, IconDrone, IconPlugConnected, IconMapPin, IconSearch, IconSignature, IconUpload, IconSettings, IconReceipt, IconPlane, IconPalette, IconWorldWww, IconKey, IconUser, IconLock } from '@tabler/icons-react';
+import { IconCheck, IconX, IconPlus, IconEdit, IconTrash, IconCurrencyDollar, IconMail, IconSend, IconBrandPaypal, IconCash, IconDrone, IconPlugConnected, IconMapPin, IconSearch, IconSignature, IconUpload, IconSettings, IconReceipt, IconPlane, IconPalette, IconWorldWww, IconKey, IconUser, IconLock, IconDatabaseExport, IconDatabaseImport, IconShieldCheck, IconDownload, IconAlertTriangle } from '@tabler/icons-react';
 import api from '../api/client';
 import { Aircraft, RateTemplate } from '../api/types';
 import { inputStyles, cardStyle } from '../components/shared/styles';
@@ -69,6 +69,14 @@ export default function Settings() {
   const [odlImportProgress, setOdlImportProgress] = useState({ current: 0, total: 0, imported: 0, skipped: 0, errors: 0, currentFlight: '' });
   const [accountSaving, setAccountSaving] = useState(false);
   const [currentUsername, setCurrentUsername] = useState('');
+  const [backups, setBackups] = useState<{ filename: string; size_bytes: number; created_at: string; sha256: string }[]>([]);
+  const [backupCreating, setBackupCreating] = useState(false);
+  const [backupRestoring, setBackupRestoring] = useState<string | null>(null);
+  const [backupVerifying, setBackupVerifying] = useState<string | null>(null);
+  const [backupVerifyResult, setBackupVerifyResult] = useState<{ filename: string; valid: boolean; sha256_actual: string; checksum_match: boolean | null; archive_valid: boolean; toc_entries: number } | null>(null);
+  const [restoreConfirmFile, setRestoreConfirmFile] = useState<string | null>(null);
+  const [restoreChecked, setRestoreChecked] = useState(false);
+  const [backupUploading, setBackupUploading] = useState(false);
 
   const aircraftForm = useForm({
     initialValues: { model_name: '', manufacturer: 'DJI', specs_json: '{}' },
@@ -137,7 +145,85 @@ export default function Settings() {
     api.get('/settings/weather').then((r) => weatherForm.setValues(r.data)).catch(() => {});
     api.get('/intake/default-tos-status').then((r) => setTosUploaded(r.data.uploaded)).catch(() => {});
     api.get('/settings/branding').then((r) => brandingForm.setValues(r.data)).catch(() => {});
+    api.get('/backup/list').then((r) => setBackups(r.data)).catch(() => setBackups([]));
   }, []);
+
+  const loadBackups = () => api.get('/backup/list').then((r) => setBackups(r.data)).catch(() => {});
+
+  const handleCreateBackup = async () => {
+    setBackupCreating(true);
+    try {
+      const resp = await api.post('/backup/create');
+      notifications.show({ title: 'Backup Created', message: `${resp.data.filename} (${(resp.data.size_bytes / 1024 / 1024).toFixed(1)} MB)`, color: 'green' });
+      loadBackups();
+    } catch (err: any) {
+      notifications.show({ title: 'Backup Failed', message: err.response?.data?.detail || 'Failed to create backup', color: 'red' });
+    } finally {
+      setBackupCreating(false);
+    }
+  };
+
+  const handleVerifyBackup = async (filename: string) => {
+    setBackupVerifying(filename);
+    setBackupVerifyResult(null);
+    try {
+      const resp = await api.post(`/backup/verify/${filename}`);
+      setBackupVerifyResult(resp.data);
+      notifications.show({
+        title: resp.data.valid ? 'Backup Valid' : 'Backup Invalid',
+        message: resp.data.valid ? `${filename} integrity verified (${resp.data.toc_entries} objects)` : 'Integrity check failed',
+        color: resp.data.valid ? 'green' : 'red',
+      });
+    } catch (err: any) {
+      notifications.show({ title: 'Verify Failed', message: err.response?.data?.detail || 'Verification failed', color: 'red' });
+    } finally {
+      setBackupVerifying(null);
+    }
+  };
+
+  const handleRestoreBackup = async (filename: string) => {
+    setBackupRestoring(filename);
+    try {
+      await api.post(`/backup/restore/${filename}`);
+      notifications.show({ title: 'Restore Complete', message: `Database restored from ${filename}`, color: 'green' });
+      setRestoreConfirmFile(null);
+      setRestoreChecked(false);
+    } catch (err: any) {
+      notifications.show({ title: 'Restore Failed', message: err.response?.data?.detail || 'Restore failed', color: 'red' });
+    } finally {
+      setBackupRestoring(null);
+    }
+  };
+
+  const handleDownloadBackup = (filename: string) => {
+    const link = document.createElement('a');
+    link.href = `${api.defaults.baseURL}/backup/download/${filename}`;
+    link.setAttribute('download', filename);
+    // Add auth header via fetch
+    api.get(`/backup/download/${filename}`, { responseType: 'blob' }).then((resp) => {
+      const url = window.URL.createObjectURL(new Blob([resp.data]));
+      link.href = url;
+      link.click();
+      window.URL.revokeObjectURL(url);
+    }).catch(() => {
+      notifications.show({ title: 'Download Failed', message: 'Could not download backup', color: 'red' });
+    });
+  };
+
+  const handleUploadRestore = async (file: File) => {
+    setBackupUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      await api.post('/backup/upload-restore', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+      notifications.show({ title: 'Restore Complete', message: `Database restored from ${file.name}`, color: 'green' });
+      loadBackups();
+    } catch (err: any) {
+      notifications.show({ title: 'Restore Failed', message: err.response?.data?.detail || 'Upload restore failed', color: 'red' });
+    } finally {
+      setBackupUploading(false);
+    }
+  };
 
   const handleSaveAircraft = async (values: typeof aircraftForm.values) => {
     try {
@@ -633,6 +719,154 @@ export default function Settings() {
                 </Stack>
               </form>
             </Card>
+
+            {/* Database Backup & Restore */}
+            <Card padding="lg" radius="md" style={cardStyle}>
+              <Group gap="sm" mb="xs">
+                <IconDatabaseExport size={20} color="#00d4ff" />
+                <Title order={3} c="#e8edf2" style={{ letterSpacing: '1px' }}>DATABASE BACKUP & RESTORE</Title>
+              </Group>
+              <Text c="#ff6b6b" size="xs" fw={700} mb="md" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+                THIS DATA IS IRREPLICABLE. MAINTAIN REGULAR BACKUPS.
+              </Text>
+
+              <Group mb="md">
+                <Button
+                  leftSection={<IconDatabaseExport size={16} />}
+                  color="cyan"
+                  loading={backupCreating}
+                  onClick={handleCreateBackup}
+                  styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}
+                >
+                  CREATE BACKUP
+                </Button>
+                <Button
+                  leftSection={<IconDatabaseImport size={16} />}
+                  color="orange"
+                  variant="light"
+                  loading={backupUploading}
+                  onClick={() => {
+                    const input = document.createElement('input');
+                    input.type = 'file';
+                    input.accept = '.dump,.sql,.backup';
+                    input.onchange = (e) => {
+                      const file = (e.target as HTMLInputElement).files?.[0];
+                      if (file) handleUploadRestore(file);
+                    };
+                    input.click();
+                  }}
+                  styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}
+                >
+                  UPLOAD & RESTORE
+                </Button>
+              </Group>
+
+              {backups.length > 0 && (
+                <Table
+                  styles={{
+                    table: { color: '#e8edf2' },
+                    th: { color: '#00d4ff', fontFamily: "'Share Tech Mono', monospace", fontSize: '11px', letterSpacing: '1px', borderBottom: '1px solid #1a1f2e', padding: '8px' },
+                    td: { borderBottom: '1px solid #1a1f2e', padding: '6px 8px', fontSize: '13px' },
+                  }}
+                >
+                  <Table.Thead>
+                    <Table.Tr>
+                      <Table.Th>BACKUP FILE</Table.Th>
+                      <Table.Th>SIZE</Table.Th>
+                      <Table.Th>CREATED</Table.Th>
+                      <Table.Th>ACTIONS</Table.Th>
+                    </Table.Tr>
+                  </Table.Thead>
+                  <Table.Tbody>
+                    {backups.map((b) => (
+                      <Table.Tr key={b.filename}>
+                        <Table.Td>
+                          <Text size="xs" style={{ fontFamily: "'Share Tech Mono', monospace" }} c="#e8edf2">{b.filename}</Text>
+                        </Table.Td>
+                        <Table.Td>
+                          <Text size="xs" style={{ fontFamily: "'Share Tech Mono', monospace" }} c="#5a6478">{(b.size_bytes / 1024 / 1024).toFixed(1)} MB</Text>
+                        </Table.Td>
+                        <Table.Td>
+                          <Text size="xs" style={{ fontFamily: "'Share Tech Mono', monospace" }} c="#5a6478">{new Date(b.created_at).toLocaleString()}</Text>
+                        </Table.Td>
+                        <Table.Td>
+                          <Group gap={4}>
+                            <Button size="compact-xs" variant="subtle" color="cyan" onClick={() => handleDownloadBackup(b.filename)}
+                              leftSection={<IconDownload size={12} />}>DL</Button>
+                            <Button size="compact-xs" variant="subtle" color="green" loading={backupVerifying === b.filename}
+                              onClick={() => handleVerifyBackup(b.filename)} leftSection={<IconShieldCheck size={12} />}>VERIFY</Button>
+                            <Button size="compact-xs" variant="subtle" color="orange"
+                              onClick={() => { setRestoreConfirmFile(b.filename); setRestoreChecked(false); }}
+                              leftSection={<IconDatabaseImport size={12} />}>RESTORE</Button>
+                          </Group>
+                        </Table.Td>
+                      </Table.Tr>
+                    ))}
+                  </Table.Tbody>
+                </Table>
+              )}
+
+              {backupVerifyResult && (
+                <Card mt="sm" padding="sm" radius="sm" style={{ background: backupVerifyResult.valid ? 'rgba(46, 204, 64, 0.08)' : 'rgba(255, 107, 107, 0.08)', border: `1px solid ${backupVerifyResult.valid ? '#2ecc40' : '#ff6b6b'}` }}>
+                  <Group gap="sm">
+                    {backupVerifyResult.valid ? <IconShieldCheck size={18} color="#2ecc40" /> : <IconAlertTriangle size={18} color="#ff6b6b" />}
+                    <div>
+                      <Text size="xs" fw={700} c={backupVerifyResult.valid ? '#2ecc40' : '#ff6b6b'}>
+                        {backupVerifyResult.valid ? 'INTEGRITY VERIFIED' : 'INTEGRITY CHECK FAILED'}
+                      </Text>
+                      <Text size="xs" c="#5a6478" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+                        SHA-256: {backupVerifyResult.sha256_actual.slice(0, 16)}... | Archive: {backupVerifyResult.archive_valid ? 'Valid' : 'Invalid'} | Objects: {backupVerifyResult.toc_entries}
+                      </Text>
+                    </div>
+                  </Group>
+                </Card>
+              )}
+
+              {backups.length === 0 && (
+                <Text c="#5a6478" size="sm" ta="center" py="md" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+                  No backups yet. Create your first backup above.
+                </Text>
+              )}
+            </Card>
+
+            {/* Restore Confirmation Modal */}
+            <Modal
+              opened={!!restoreConfirmFile}
+              onClose={() => { setRestoreConfirmFile(null); setRestoreChecked(false); }}
+              title={<Text fw={700} c="#ff6b6b" style={{ fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '2px' }}>CONFIRM DATABASE RESTORE</Text>}
+              styles={{ header: { background: '#0e1117', borderBottom: '1px solid #1a1f2e' }, body: { background: '#0e1117' }, content: { background: '#0e1117' } }}
+            >
+              <Stack gap="md">
+                <Group gap="sm">
+                  <IconAlertTriangle size={24} color="#ff6b6b" />
+                  <Text c="#ff6b6b" fw={700}>WARNING: This will replace ALL current data.</Text>
+                </Group>
+                <Text c="#5a6478" size="sm">
+                  Restoring from <strong style={{ color: '#e8edf2' }}>{restoreConfirmFile}</strong> will overwrite the entire database.
+                  This action cannot be undone. Create a backup of the current database first if needed.
+                </Text>
+                <Checkbox
+                  label="I understand this will replace all current data"
+                  checked={restoreChecked}
+                  onChange={(e) => setRestoreChecked(e.currentTarget.checked)}
+                  color="red"
+                />
+                <Group justify="flex-end">
+                  <Button variant="subtle" color="gray" onClick={() => { setRestoreConfirmFile(null); setRestoreChecked(false); }}>
+                    Cancel
+                  </Button>
+                  <Button
+                    color="red"
+                    disabled={!restoreChecked}
+                    loading={backupRestoring === restoreConfirmFile}
+                    onClick={() => restoreConfirmFile && handleRestoreBackup(restoreConfirmFile)}
+                    styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}
+                  >
+                    RESTORE DATABASE
+                  </Button>
+                </Group>
+              </Stack>
+            </Modal>
           </Stack>
         </Tabs.Panel>
 
