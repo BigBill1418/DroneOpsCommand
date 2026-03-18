@@ -27,6 +27,18 @@ const US_STATES = [
   'SD','TN','TX','UT','VT','VA','WA','WV','WI','WY','DC',
 ];
 
+const STATE_NAME_TO_ABBR: Record<string, string> = {
+  Alabama:'AL',Alaska:'AK',Arizona:'AZ',Arkansas:'AR',California:'CA',Colorado:'CO',Connecticut:'CT',
+  Delaware:'DE',Florida:'FL',Georgia:'GA',Hawaii:'HI',Idaho:'ID',Illinois:'IL',Indiana:'IN',Iowa:'IA',
+  Kansas:'KS',Kentucky:'KY',Louisiana:'LA',Maine:'ME',Maryland:'MD',Massachusetts:'MA',Michigan:'MI',
+  Minnesota:'MN',Mississippi:'MS',Missouri:'MO',Montana:'MT',Nebraska:'NE',Nevada:'NV',
+  'New Hampshire':'NH','New Jersey':'NJ','New Mexico':'NM','New York':'NY','North Carolina':'NC',
+  'North Dakota':'ND',Ohio:'OH',Oklahoma:'OK',Oregon:'OR',Pennsylvania:'PA','Rhode Island':'RI',
+  'South Carolina':'SC','South Dakota':'SD',Tennessee:'TN',Texas:'TX',Utah:'UT',Vermont:'VT',
+  Virginia:'VA',Washington:'WA','West Virginia':'WV',Wisconsin:'WI',Wyoming:'WY',
+  'District of Columbia':'DC',
+};
+
 const inputStyles = {
   input: { background: '#050608', borderColor: '#1a1f2e', color: '#e8edf2' },
   label: { color: '#5a6478', fontFamily: "'Share Tech Mono', monospace", fontSize: '13px', letterSpacing: '1px' },
@@ -118,7 +130,9 @@ export default function CustomerIntake() {
       const street = [addr.house_number, addr.road].filter(Boolean).join(' ');
       if (street) setAddress(street);
       setCity(addr.city || addr.town || addr.village || '');
-      setStateVal(addr.state || '');
+      // Convert full state name to abbreviation for the dropdown
+      const rawState = addr.state || '';
+      setStateVal(STATE_NAME_TO_ABBR[rawState] || rawState);
       setZipCode(addr.postcode || '');
     } else {
       setAddress(result.display_name);
@@ -318,10 +332,10 @@ export default function CustomerIntake() {
             CUSTOMER INFORMATION
           </Text>
 
-          <TextInput label="Full Name" required value={name} onChange={(e) => setName(e.target.value)} styles={inputStyles} />
-          <TextInput label="Email" required type="email" value={email} onChange={(e) => setEmail(e.target.value)} styles={inputStyles} />
-          <TextInput label="Phone" value={phone} onChange={(e) => setPhone(e.target.value)} styles={inputStyles} />
-          <TextInput label="Company" value={company} onChange={(e) => setCompany(e.target.value)} styles={inputStyles} />
+          <TextInput label="Full Name" required value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" styles={inputStyles} />
+          <TextInput label="Email" required type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" styles={inputStyles} />
+          <TextInput label="Phone" value={phone} onChange={(e) => setPhone(e.target.value)} autoComplete="tel" styles={inputStyles} />
+          <TextInput label="Company" value={company} onChange={(e) => setCompany(e.target.value)} autoComplete="organization" styles={inputStyles} />
 
           <Text c="#5a6478" size="sm" mt="xs" style={{ fontFamily: "'Share Tech Mono', monospace", letterSpacing: '1px' }}>
             MAILING ADDRESS *
@@ -332,6 +346,7 @@ export default function CustomerIntake() {
               <TextInput
                 label="Street Address"
                 required
+                autoComplete="address-line1"
                 leftSection={addressLoading ? <Loader size={14} color="cyan" /> : <IconMapPin size={14} />}
                 value={address}
                 onChange={(e) => {
@@ -360,7 +375,7 @@ export default function CustomerIntake() {
           </Popover>
 
           <Group grow>
-            <TextInput label="City" required value={city} onChange={(e) => setCity(e.target.value)} styles={inputStyles} />
+            <TextInput label="City" required value={city} onChange={(e) => setCity(e.target.value)} autoComplete="address-level2" styles={inputStyles} />
             <Select
               label="State"
               required
@@ -375,7 +390,7 @@ export default function CustomerIntake() {
                 option: { color: '#e8edf2', '&[data-selected]': { background: '#00d4ff' } },
               }}
             />
-            <TextInput label="Zip Code" required value={zipCode} onChange={(e) => setZipCode(e.target.value)} styles={inputStyles} />
+            <TextInput label="Zip Code" required value={zipCode} onChange={(e) => setZipCode(e.target.value)} autoComplete="postal-code" styles={inputStyles} />
           </Group>
 
           <Button
