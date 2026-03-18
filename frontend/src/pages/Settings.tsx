@@ -59,6 +59,8 @@ export default function Settings() {
   const [tosUploading, setTosUploading] = useState(false);
   const [brandingSaving, setBrandingSaving] = useState(false);
   const [djiSaving, setDjiSaving] = useState(false);
+  const [djiTesting, setDjiTesting] = useState(false);
+  const [djiStatus, setDjiStatus] = useState<{ status: string; message?: string } | null>(null);
   const [odlImporting, setOdlImporting] = useState(false);
   const [odlImportProgress, setOdlImportProgress] = useState({ current: 0, total: 0, imported: 0, skipped: 0, errors: 0, currentFlight: '' });
   const [accountSaving, setAccountSaving] = useState(false);
@@ -278,6 +280,19 @@ export default function Settings() {
       notifications.show({ title: 'Error', message: 'Failed to save DJI API key', color: 'red' });
     } finally {
       setDjiSaving(false);
+    }
+  };
+
+  const handleTestDji = async () => {
+    setDjiTesting(true);
+    try {
+      const r = await api.post('/settings/dji/test');
+      setDjiStatus(r.data);
+    } catch (err: unknown) {
+      const axiosErr = err as { response?: { data?: { detail?: string } } };
+      setDjiStatus({ status: 'error', message: axiosErr.response?.data?.detail || 'Test failed' });
+    } finally {
+      setDjiTesting(false);
     }
   };
 
@@ -839,9 +854,31 @@ export default function Settings() {
                     {...djiForm.getInputProps('dji_api_key')}
                     styles={inputStyles}
                   />
-                  <Button type="submit" color="cyan" loading={djiSaving} styles={{ root: { fontFamily: "'Bebas Neue', sans-serif" } }}>
-                    SAVE DJI API KEY
-                  </Button>
+                  <Group>
+                    <Button type="submit" color="cyan" loading={djiSaving} styles={{ root: { fontFamily: "'Bebas Neue', sans-serif" } }}>
+                      SAVE DJI API KEY
+                    </Button>
+                    <Button
+                      variant="light"
+                      color={djiStatus?.status === 'online' ? 'green' : djiStatus?.status === 'error' ? 'red' : 'gray'}
+                      loading={djiTesting}
+                      onClick={handleTestDji}
+                      leftSection={djiStatus?.status === 'online' ? <IconCheck size={14} /> : djiStatus?.status === 'error' ? <IconX size={14} /> : <IconPlugConnected size={14} />}
+                      styles={{ root: { fontFamily: "'Bebas Neue', sans-serif" } }}
+                    >
+                      TEST KEY
+                    </Button>
+                  </Group>
+                  {djiStatus && (
+                    <Badge
+                      color={djiStatus.status === 'online' ? 'green' : djiStatus.status === 'unknown' ? 'yellow' : 'red'}
+                      variant="light"
+                      size="lg"
+                      leftSection={djiStatus.status === 'online' ? <IconCheck size={12} /> : <IconX size={12} />}
+                    >
+                      {djiStatus.message || djiStatus.status}
+                    </Badge>
+                  )}
                 </Stack>
               </form>
             </Card>

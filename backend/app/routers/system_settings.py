@@ -1,5 +1,6 @@
 """API endpoints for managing system settings (SMTP, etc.) from the admin portal."""
 
+import httpx
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -287,6 +288,43 @@ async def update_dji_settings(
         db.add(SystemSetting(key="dji_api_key", value=value))
     await db.commit()
     return {"status": "ok"}
+
+
+@router.post("/dji/test")
+async def test_dji_api_key(
+    _user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Test if the stored DJI API key is valid by hitting the DJI developer API."""
+    result = await db.execute(
+        select(SystemSetting).where(SystemSetting.key == "dji_api_key")
+    )
+    row = result.scalar_one_or_none()
+    api_key = row.value if row else ""
+
+    if not api_key:
+        return {"status": "error", "message": "No DJI API key configured"}
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                "https://developer-api.dji.com/openapi/v1/manage/user/info",
+                headers={"Api-Key": api_key},
+            )
+            if resp.status_code == 200:
+                return {"status": "online", "message": "API key is valid"}
+            elif resp.status_code == 401:
+                return {"status": "error", "message": "Invalid API key (401 Unauthorized)"}
+            elif resp.status_code == 403:
+                return {"status": "error", "message": "API key rejected (403 Forbidden)"}
+            else:
+                return {"status": "error", "message": f"DJI API returned HTTP {resp.status_code}"}
+    except httpx.ConnectError:
+        return {"status": "unknown", "message": "Cannot reach DJI API — check network connectivity"}
+    except httpx.TimeoutException:
+        return {"status": "unknown", "message": "DJI API request timed out"}
+    except Exception as e:
+        return {"status": "error", "message": f"Connection error: {type(e).__name__}"}
 
 
 @router.get("/payment")

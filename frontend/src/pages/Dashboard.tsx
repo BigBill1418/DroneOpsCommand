@@ -183,8 +183,9 @@ function formatDuration(secs: number): string {
 
 function formatDistance(meters: number): string {
   if (!meters) return '0';
-  if (meters >= 1000) return `${(meters / 1000).toFixed(1)} km`;
-  return `${Math.round(meters)} m`;
+  const feet = meters * 3.28084;
+  if (feet >= 5280) return `${(feet / 5280).toFixed(2)} mi`;
+  return `${Math.round(feet)} ft`;
 }
 
 const cardBase = { background: '#0e1117', border: '1px solid #1a1f2e' };
@@ -497,7 +498,7 @@ export default function Dashboard() {
                     <Text c="#e8edf2" fw={700} style={{ ...bebasFont, fontSize: '20px', lineHeight: 1.1 }}>
                       {wx.visibility_m != null ? `${(wx.visibility_m / 1609.344).toFixed(1)}` : '—'}
                     </Text>
-                    <Text size="xs" c="#5a6478" style={{ fontSize: '10px' }}>statute mi</Text>
+                    <Text size="xs" c="#5a6478" style={{ fontSize: '10px' }}>mi</Text>
                   </div>
                 </SimpleGrid>
 
@@ -630,9 +631,6 @@ export default function Dashboard() {
                       <Text size="xs" c="#5a6478" style={monoXs}>MAX ALTITUDE</Text>
                     </Group>
                     <Text c="#e8edf2" fw={700} style={{ ...bebasFont, fontSize: '20px', lineHeight: 1.1 }}>
-                      {Math.round(flightStats.max_altitude)} m
-                    </Text>
-                    <Text size="xs" c="#5a6478" style={{ fontSize: '10px' }}>
                       {Math.round(flightStats.max_altitude * 3.28084)} ft
                     </Text>
                   </div>
@@ -643,9 +641,6 @@ export default function Dashboard() {
                     </Group>
                     <Text c="#e8edf2" fw={700} style={{ ...bebasFont, fontSize: '20px', lineHeight: 1.1 }}>
                       {(flightStats.max_speed * 2.23694).toFixed(1)} mph
-                    </Text>
-                    <Text size="xs" c="#5a6478" style={{ fontSize: '10px' }}>
-                      {flightStats.max_speed.toFixed(1)} m/s
                     </Text>
                   </div>
                 </SimpleGrid>
