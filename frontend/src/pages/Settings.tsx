@@ -20,7 +20,7 @@ import {
 } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
-import { IconCheck, IconX, IconPlus, IconEdit, IconTrash, IconCurrencyDollar, IconMail, IconSend, IconBrandPaypal, IconCash, IconDrone, IconPlugConnected, IconMapPin, IconSearch, IconSignature, IconUpload, IconSettings, IconReceipt, IconPlane, IconPalette, IconWorldWww, IconKey } from '@tabler/icons-react';
+import { IconCheck, IconX, IconPlus, IconEdit, IconTrash, IconCurrencyDollar, IconMail, IconSend, IconBrandPaypal, IconCash, IconDrone, IconPlugConnected, IconMapPin, IconSearch, IconSignature, IconUpload, IconSettings, IconReceipt, IconPlane, IconPalette, IconWorldWww, IconKey, IconUser, IconLock } from '@tabler/icons-react';
 import api from '../api/client';
 import { Aircraft, RateTemplate } from '../api/types';
 import { inputStyles, cardStyle } from '../components/shared/styles';
@@ -59,6 +59,8 @@ export default function Settings() {
   const [tosUploading, setTosUploading] = useState(false);
   const [brandingSaving, setBrandingSaving] = useState(false);
   const [djiSaving, setDjiSaving] = useState(false);
+  const [accountSaving, setAccountSaving] = useState(false);
+  const [currentUsername, setCurrentUsername] = useState('');
 
   const aircraftForm = useForm({
     initialValues: { model_name: '', manufacturer: 'DJI', specs_json: '{}' },
@@ -92,6 +94,15 @@ export default function Settings() {
     initialValues: { dji_api_key: '' },
   });
 
+  const accountForm = useForm({
+    initialValues: { current_password: '', new_username: '', new_password: '', confirm_password: '' },
+    validate: {
+      current_password: (v) => (v.length === 0 ? 'Current password is required' : null),
+      new_password: (v) => (v && v.length > 0 && v.length < 6 ? 'Password must be at least 6 characters' : null),
+      confirm_password: (v, values) => (v !== values.new_password ? 'Passwords do not match' : null),
+    },
+  });
+
   const weatherForm = useForm({
     initialValues: { weather_lat: '', weather_lon: '', weather_label: '', weather_airport_icao: '' },
   });
@@ -114,6 +125,7 @@ export default function Settings() {
     api.get('/settings/payment').then((r) => paymentForm.setValues(r.data)).catch(() => {});
     api.get('/settings/opendronelog').then((r) => odlForm.setValues(r.data)).catch(() => {});
     api.get('/settings/dji').then((r) => djiForm.setValues(r.data)).catch(() => {});
+    api.get('/auth/account').then((r) => { setCurrentUsername(r.data.username); accountForm.setFieldValue('new_username', r.data.username); }).catch(() => {});
     api.get('/settings/weather').then((r) => weatherForm.setValues(r.data)).catch(() => {});
     api.get('/intake/default-tos-status').then((r) => setTosUploaded(r.data.uploaded)).catch(() => {});
     api.get('/settings/branding').then((r) => brandingForm.setValues(r.data)).catch(() => {});
@@ -267,6 +279,39 @@ export default function Settings() {
     }
   };
 
+  const handleSaveAccount = async (values: typeof accountForm.values) => {
+    if (!values.new_username && !values.new_password) {
+      notifications.show({ title: 'Nothing to update', message: 'Change username or password', color: 'orange' });
+      return;
+    }
+    setAccountSaving(true);
+    try {
+      const payload: Record<string, string> = { current_password: values.current_password };
+      if (values.new_username && values.new_username !== currentUsername) {
+        payload.new_username = values.new_username;
+      }
+      if (values.new_password) {
+        payload.new_password = values.new_password;
+      }
+      const r = await api.put('/auth/account', payload);
+      // Update stored tokens if returned
+      if (r.data.access_token) {
+        localStorage.setItem('access_token', r.data.access_token);
+      }
+      if (r.data.refresh_token) {
+        localStorage.setItem('refresh_token', r.data.refresh_token);
+      }
+      setCurrentUsername(r.data.username);
+      accountForm.setValues({ current_password: '', new_username: r.data.username, new_password: '', confirm_password: '' });
+      notifications.show({ title: 'Account Updated', message: 'Your credentials have been changed', color: 'green' });
+    } catch (err: unknown) {
+      const axiosErr = err as { response?: { data?: { detail?: string } } };
+      notifications.show({ title: 'Error', message: axiosErr.response?.data?.detail || 'Failed to update account', color: 'red' });
+    } finally {
+      setAccountSaving(false);
+    }
+  };
+
   const handleSavePayment = async (values: typeof paymentForm.values) => {
     setPaymentSaving(true);
     try {
@@ -353,6 +398,9 @@ export default function Settings() {
           </Tabs.Tab>
           <Tabs.Tab value="fleet" leftSection={<IconPlane size={14} />}>
             FLEET & RATES
+          </Tabs.Tab>
+          <Tabs.Tab value="account" leftSection={<IconUser size={14} />}>
+            ACCOUNT
           </Tabs.Tab>
         </Tabs.List>
 
@@ -816,6 +864,67 @@ export default function Settings() {
                   ))}
                 </Table.Tbody>
               </Table>
+            </Card>
+          </Stack>
+        </Tabs.Panel>
+
+        {/* ═══ ACCOUNT TAB ═══ */}
+        <Tabs.Panel value="account" pt="md">
+          <Stack gap="md">
+            <Card padding="lg" radius="md" style={cardStyle}>
+              <Group gap="sm" mb="md">
+                <IconUser size={20} color="#00d4ff" />
+                <Title order={3} c="#e8edf2" style={{ letterSpacing: '1px' }}>ADMIN ACCOUNT</Title>
+              </Group>
+              <Text c="#5a6478" size="xs" mb="md" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+                Change your login username and password. You must enter your current password to confirm changes.
+              </Text>
+              <form onSubmit={accountForm.onSubmit(handleSaveAccount)}>
+                <Stack gap="sm">
+                  <TextInput
+                    label="Current Username"
+                    value={currentUsername}
+                    readOnly
+                    styles={{
+                      ...inputStyles,
+                      input: { ...inputStyles.input, opacity: 0.6 },
+                    }}
+                  />
+                  <PasswordInput
+                    label="Current Password"
+                    placeholder="Enter your current password"
+                    required
+                    leftSection={<IconLock size={14} />}
+                    {...accountForm.getInputProps('current_password')}
+                    styles={inputStyles}
+                  />
+                  <div style={{ borderTop: '1px solid #1a1f2e', margin: '8px 0' }} />
+                  <TextInput
+                    label="New Username"
+                    placeholder="Leave unchanged to keep current username"
+                    leftSection={<IconUser size={14} />}
+                    {...accountForm.getInputProps('new_username')}
+                    styles={inputStyles}
+                  />
+                  <PasswordInput
+                    label="New Password"
+                    placeholder="Leave blank to keep current password"
+                    leftSection={<IconLock size={14} />}
+                    {...accountForm.getInputProps('new_password')}
+                    styles={inputStyles}
+                  />
+                  <PasswordInput
+                    label="Confirm New Password"
+                    placeholder="Re-enter new password"
+                    leftSection={<IconLock size={14} />}
+                    {...accountForm.getInputProps('confirm_password')}
+                    styles={inputStyles}
+                  />
+                  <Button type="submit" color="cyan" loading={accountSaving} styles={{ root: { fontFamily: "'Bebas Neue', sans-serif" } }}>
+                    UPDATE ACCOUNT
+                  </Button>
+                </Stack>
+              </form>
             </Card>
           </Stack>
         </Tabs.Panel>

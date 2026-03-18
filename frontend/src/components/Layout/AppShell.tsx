@@ -19,7 +19,6 @@ import {
   IconSettings,
   IconLogout,
   IconPlane,
-  IconPlus,
 } from '@tabler/icons-react';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
 import { useBranding } from '../../hooks/useBranding';
@@ -90,16 +89,6 @@ export default function AppLayout({ onLogout }: AppLayoutProps) {
             </Text>
           </Group>
           <Group>
-            <Tooltip label="New Mission">
-              <ActionIcon
-                variant="filled"
-                color="cyan"
-                size="lg"
-                onClick={() => navigate('/missions/new')}
-              >
-                <IconPlus size={18} />
-              </ActionIcon>
-            </Tooltip>
             <Tooltip label="Logout">
               <ActionIcon variant="subtle" color="gray" size="lg" onClick={onLogout}>
                 <IconLogout size={18} />
@@ -154,7 +143,7 @@ export default function AppLayout({ onLogout }: AppLayoutProps) {
               fontSize: '12px',
             }}
           >
-            v2.6.1
+            v2.7.0
           </Text>
           <Tooltip label="Star on GitHub" position="right">
             <ActionIcon
