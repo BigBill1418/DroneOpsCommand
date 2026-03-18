@@ -99,6 +99,7 @@ async def initiate_services(
         intake_token=token,
         intake_url=intake_url,
         expires_at=expires_at,
+        customer_id=str(customer.id),
     )
 
 

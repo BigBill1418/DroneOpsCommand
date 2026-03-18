@@ -52,6 +52,7 @@ class IntakeTokenResponse(BaseModel):
     intake_token: str
     intake_url: str
     expires_at: datetime
+    customer_id: str
 
 
 class IntakePublicResponse(BaseModel):
