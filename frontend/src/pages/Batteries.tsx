@@ -65,6 +65,7 @@ export default function Batteries() {
   const [editForm, setEditForm] = useState({ serial: '', model: '' });
   const [sortBy, setSortBy] = useState<string>('model');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+  const [droneModels, setDroneModels] = useState<string[]>([]);
 
   const loadBatteries = async () => {
     setLoading(true);
@@ -78,7 +79,17 @@ export default function Batteries() {
     }
   };
 
-  useEffect(() => { loadBatteries(); }, []);
+  const loadDroneModels = async () => {
+    try {
+      const resp = await api.get('/aircraft');
+      const models = (resp.data as { model_name: string }[]).map((a) => a.model_name).filter(Boolean);
+      setDroneModels(models);
+    } catch {
+      setDroneModels([]);
+    }
+  };
+
+  useEffect(() => { loadBatteries(); loadDroneModels(); }, []);
 
   const loadLogs = async (batteryId: string) => {
     setLogsLoading(true);
@@ -126,7 +137,7 @@ export default function Batteries() {
         serial: editForm.serial.trim(),
         model: editForm.model.trim() || null,
       });
-      notifications.show({ title: 'Updated', message: `Battery renamed to "${editForm.serial.trim()}"`, color: 'cyan' });
+      notifications.show({ title: 'Updated', message: `Battery updated`, color: 'cyan' });
       setBatteries((prev) => prev.map((b) => b.id === editBattery.id ? resp.data : b));
       if (selectedBattery?.id === editBattery.id) setSelectedBattery(resp.data);
       setEditBattery(null);
@@ -155,7 +166,6 @@ export default function Batteries() {
         case 'status': cmp = a.status.localeCompare(b.status); break;
         case 'health': cmp = (a.health_pct ?? -1) - (b.health_pct ?? -1); break;
         case 'cycles': cmp = a.cycle_count - b.cycle_count; break;
-        case 'voltage': cmp = (a.last_voltage ?? 0) - (b.last_voltage ?? 0); break;
       }
       return sortDir === 'asc' ? cmp : -cmp;
     });
@@ -182,6 +192,16 @@ export default function Batteries() {
     if (sortBy !== col) return <IconSelector size={12} style={{ opacity: 0.3 }} />;
     return sortDir === 'asc' ? <IconChevronUp size={12} /> : <IconChevronDown size={12} />;
   };
+
+  // Build drone model options for Select dropdowns
+  const droneModelOptions = useMemo(() => {
+    // Combine configured aircraft models with any existing battery models not in the list
+    const allModels = new Set(droneModels);
+    for (const b of batteries) {
+      if (b.model && b.model !== 'Unknown') allModels.add(b.model);
+    }
+    return Array.from(allModels).sort().map((m) => ({ value: m, label: m }));
+  }, [droneModels, batteries]);
 
   return (
     <Stack gap="lg">
@@ -238,7 +258,7 @@ export default function Batteries() {
               >
                 <Table.Thead>
                   <Table.Tr>
-                    {([['serial', 'BATTERY'], ['model', 'DRONE TYPE'], ['status', 'STATUS'], ['health', 'HEALTH'], ['cycles', 'CYCLES'], ['voltage', 'LAST VOLTAGE']] as const).map(([col, label]) => (
+                    {([['serial', 'BATTERY'], ['model', 'DRONE TYPE'], ['status', 'STATUS'], ['health', 'HEALTH'], ['cycles', 'CYCLES']] as const).map(([col, label]) => (
                       <Table.Th key={col} onClick={() => toggleSort(col)} style={{ cursor: 'pointer', userSelect: 'none' }}>
                         <Group gap={4} wrap="nowrap">
                           {label}<SortIcon col={col} />
@@ -252,7 +272,7 @@ export default function Batteries() {
                   {grouped.map(([model, bats]) => (
                     <>
                       <Table.Tr key={`group-${model}`} style={{ background: 'rgba(0, 212, 255, 0.03)' }}>
-                        <Table.Td colSpan={7} style={{ borderBottom: '1px solid #1a1f2e', padding: '6px 12px' }}>
+                        <Table.Td colSpan={6} style={{ borderBottom: '1px solid #1a1f2e', padding: '6px 12px' }}>
                           <Text size="xs" fw={700} c="#00d4ff" style={{ fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '2px', fontSize: '14px' }}>
                             {model.toUpperCase()} — {bats.length} batter{bats.length !== 1 ? 'ies' : 'y'}
                           </Text>
@@ -290,11 +310,6 @@ export default function Batteries() {
                             <Table.Td>
                               <Text size="sm" c="#00d4ff" fw={700} style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: '18px' }}>
                                 {bat.cycle_count}
-                              </Text>
-                            </Table.Td>
-                            <Table.Td>
-                              <Text size="xs" c="#e8edf2" style={monoFont}>
-                                {bat.last_voltage ? `${bat.last_voltage.toFixed(1)}V` : '—'}
                               </Text>
                             </Table.Td>
                             <Table.Td>
@@ -343,7 +358,7 @@ export default function Batteries() {
           <Stack gap="md">
             <SimpleGrid cols={3}>
               <div>
-                <Text size="11px" c="#5a6478" style={{ ...monoFont, letterSpacing: '1px' }}>MODEL</Text>
+                <Text size="11px" c="#5a6478" style={{ ...monoFont, letterSpacing: '1px' }}>DRONE TYPE</Text>
                 <Text c="#e8edf2">{selectedBattery.model || '—'}</Text>
               </div>
               <div>
@@ -403,7 +418,7 @@ export default function Batteries() {
                 onClick={() => { setEditBattery(selectedBattery); setEditForm({ serial: selectedBattery.serial, model: selectedBattery.model || '' }); }}
                 styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}
               >
-                EDIT NAME
+                EDIT BATTERY
               </Button>
               <Button color="red" variant="light" size="xs" leftSection={<IconTrash size={14} />}
                 onClick={() => { handleDelete(selectedBattery.id); setSelectedBattery(null); }}>
@@ -424,8 +439,16 @@ export default function Batteries() {
         <Stack gap="md">
           <TextInput label="Serial Number" required placeholder="e.g. 1ZNDH3E0030E7C"
             value={form.serial} onChange={(e) => setForm({ ...form, serial: e.target.value })} styles={inputStyles} />
-          <TextInput label="Model" placeholder="e.g. TB65"
-            value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })} styles={inputStyles} />
+          <Select
+            label="Drone Type"
+            placeholder="Select drone model"
+            data={droneModelOptions}
+            value={form.model || null}
+            onChange={(v) => setForm({ ...form, model: v || '' })}
+            searchable
+            clearable
+            styles={inputStyles}
+          />
           <Select label="Status" data={[{ value: 'active', label: 'Active' }, { value: 'service', label: 'In Service' }, { value: 'retired', label: 'Retired' }]}
             value={form.status} onChange={(v) => setForm({ ...form, status: v || 'active' })} styles={inputStyles} />
           <Textarea label="Notes" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} styles={inputStyles} />
@@ -436,7 +459,7 @@ export default function Batteries() {
         </Stack>
       </Modal>
 
-      {/* Edit Battery Name Modal */}
+      {/* Edit Battery Modal */}
       <Modal
         opened={!!editBattery}
         onClose={() => setEditBattery(null)}
@@ -453,11 +476,14 @@ export default function Batteries() {
             styles={inputStyles}
             autoFocus
           />
-          <TextInput
-            label="Drone Type / Model"
-            value={editForm.model}
-            onChange={(e) => setEditForm({ ...editForm, model: e.target.value })}
-            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleEditSave(); } }}
+          <Select
+            label="Drone Type"
+            placeholder="Select drone model"
+            data={droneModelOptions}
+            value={editForm.model || null}
+            onChange={(v) => setEditForm({ ...editForm, model: v || '' })}
+            searchable
+            clearable
             styles={inputStyles}
           />
           <Button fullWidth color="cyan" onClick={handleEditSave}
