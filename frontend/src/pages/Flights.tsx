@@ -576,6 +576,9 @@ export default function Flights() {
                       </Table.Td>
                       <Table.Td>
                         <Text size="sm" fw={500} lineClamp={1}>{getDisplayName(f)}</Text>
+                        {f.original_filename && f.original_filename !== getDisplayName(f) && (
+                          <Text size="10px" c="#5a6478" style={monoFont} lineClamp={1}>{f.original_filename}</Text>
+                        )}
                       </Table.Td>
                       <Table.Td>
                         <Text size="xs" c="#5a6478" style={monoFont}>{formatDate(getStartTime(f))}</Text>
@@ -685,6 +688,13 @@ export default function Flights() {
                   {SOURCE_LABELS[detailFlight.source] || detailFlight.source}
                 </Badge>
               </Group>
+            )}
+
+            {detailFlight.original_filename && (
+              <div>
+                <Text size="11px" c="#5a6478" style={{ ...monoFont, letterSpacing: '1px' }}>LOG FILE</Text>
+                <Text c="#e8edf2" size="sm" style={monoFont}>{detailFlight.original_filename}</Text>
+              </div>
             )}
 
             {detailFlight.drone_serial && (

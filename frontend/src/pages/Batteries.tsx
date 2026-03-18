@@ -31,6 +31,7 @@ import {
   IconPlus,
   IconRefresh,
   IconSelector,
+  IconSwitch,
   IconTrash,
 } from '@tabler/icons-react';
 import api from '../api/client';
@@ -157,7 +158,11 @@ export default function Batteries() {
     return { total: batteries.length, active, totalCycles, avgHealth };
   }, [batteries]);
 
-  // Group batteries by drone model for display
+  // Batch reassign state
+  const [batchGroup, setBatchGroup] = useState<string | null>(null);
+  const [batchTarget, setBatchTarget] = useState<string | null>(null);
+
+  // Group batteries by drone model, sorted by aircraft fleet order
   const grouped = useMemo(() => {
     const sorted = [...batteries].sort((a, b) => {
       let cmp = 0;
@@ -177,8 +182,20 @@ export default function Batteries() {
       if (!map.has(key)) map.set(key, []);
       map.get(key)!.push(bat);
     }
-    return Array.from(map.entries()).sort((a, b) => a[0].localeCompare(b[0]));
-  }, [batteries, sortBy, sortDir]);
+
+    // Sort groups by aircraft fleet order, then unmatched, then "Unassigned"
+    const fleetOrder = new Map(droneModels.map((m, i) => [m, i]));
+    return Array.from(map.entries()).sort((a, b) => {
+      if (a[0] === 'Unassigned') return 1;
+      if (b[0] === 'Unassigned') return -1;
+      const ai = fleetOrder.get(a[0]);
+      const bi = fleetOrder.get(b[0]);
+      if (ai !== undefined && bi !== undefined) return ai - bi;
+      if (ai !== undefined) return -1;
+      if (bi !== undefined) return 1;
+      return a[0].localeCompare(b[0]);
+    });
+  }, [batteries, sortBy, sortDir, droneModels]);
 
   const toggleSort = (col: string) => {
     if (sortBy === col) {
@@ -192,6 +209,24 @@ export default function Batteries() {
   const SortIcon = ({ col }: { col: string }) => {
     if (sortBy !== col) return <IconSelector size={12} style={{ opacity: 0.3 }} />;
     return sortDir === 'asc' ? <IconChevronUp size={12} /> : <IconChevronDown size={12} />;
+  };
+
+  const handleBatchReassign = async () => {
+    if (!batchGroup || !batchTarget) return;
+    const groupBats = batteries.filter((b) => (b.model || 'Unassigned') === batchGroup);
+    if (groupBats.length === 0) return;
+    try {
+      await api.put('/batteries/batch/model', {
+        battery_ids: groupBats.map((b) => b.id),
+        model: batchTarget,
+      });
+      notifications.show({ title: 'Batch Updated', message: `${groupBats.length} batteries reassigned to ${batchTarget}`, color: 'cyan' });
+      setBatchGroup(null);
+      setBatchTarget(null);
+      loadBatteries();
+    } catch (err: any) {
+      notifications.show({ title: 'Error', message: err.response?.data?.detail || 'Batch update failed', color: 'red' });
+    }
   };
 
   // Build drone model options from aircraft fleet only
@@ -269,9 +304,21 @@ export default function Batteries() {
                     <>
                       <Table.Tr key={`group-${model}`} style={{ background: 'rgba(0, 212, 255, 0.03)' }}>
                         <Table.Td colSpan={6} style={{ borderBottom: '1px solid #1a1f2e', padding: '6px 12px' }}>
-                          <Text size="xs" fw={700} c="#00d4ff" style={{ fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '2px', fontSize: '14px' }}>
-                            {model.toUpperCase()} — {bats.length} batter{bats.length !== 1 ? 'ies' : 'y'}
-                          </Text>
+                          <Group justify="space-between">
+                            <Text size="xs" fw={700} c="#00d4ff" style={{ fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '2px', fontSize: '14px' }}>
+                              {model.toUpperCase()} — {bats.length} batter{bats.length !== 1 ? 'ies' : 'y'}
+                            </Text>
+                            <Button
+                              variant="subtle"
+                              color="grape"
+                              size="compact-xs"
+                              leftSection={<IconSwitch size={12} />}
+                              onClick={(e) => { e.stopPropagation(); setBatchGroup(model); setBatchTarget(null); }}
+                              styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px', fontSize: '11px' } }}
+                            >
+                              REASSIGN ALL
+                            </Button>
+                          </Group>
                         </Table.Td>
                       </Table.Tr>
                       {bats.map((bat) => {
@@ -500,6 +547,40 @@ export default function Batteries() {
           <Button fullWidth color="cyan" onClick={handleEditSave}
             styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}>
             SAVE CHANGES
+          </Button>
+        </Stack>
+      </Modal>
+
+      {/* Batch Reassign Modal */}
+      <Modal
+        opened={!!batchGroup}
+        onClose={() => { setBatchGroup(null); setBatchTarget(null); }}
+        title={<Text fw={700} c="#e8edf2" style={{ fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '2px' }}>BATCH REASSIGN BATTERIES</Text>}
+        styles={{ header: { background: '#0e1117', borderBottom: '1px solid #1a1f2e' }, body: { background: '#0e1117' }, content: { background: '#0e1117' } }}
+        size="sm"
+      >
+        <Stack gap="md">
+          <Text size="sm" c="#5a6478">
+            Reassign all <Text span c="#00d4ff" fw={700}>{batteries.filter((b) => (b.model || 'Unassigned') === batchGroup).length}</Text> batteries
+            from <Text span c="#e8edf2" fw={600}>{batchGroup}</Text> to a new drone type.
+          </Text>
+          <Select
+            label="New Drone Type"
+            placeholder="Select target drone"
+            data={droneModelOptions}
+            value={batchTarget}
+            onChange={setBatchTarget}
+            searchable
+            styles={inputStyles}
+          />
+          <Button
+            fullWidth
+            color="cyan"
+            onClick={handleBatchReassign}
+            disabled={!batchTarget}
+            styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}
+          >
+            REASSIGN ALL BATTERIES
           </Button>
         </Stack>
       </Modal>

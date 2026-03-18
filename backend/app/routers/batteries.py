@@ -4,6 +4,7 @@ import logging
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -90,6 +91,31 @@ async def update_battery(
     await db.flush()
     await db.refresh(battery)
     return battery
+
+
+class BatchModelUpdate(BaseModel):
+    battery_ids: list[UUID]
+    model: str
+
+
+@router.put("/batch/model", response_model=list[BatteryResponse])
+async def batch_update_model(
+    data: BatchModelUpdate,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """Batch-reassign multiple batteries to a new drone model."""
+    updated = []
+    for bid in data.battery_ids:
+        result = await db.execute(select(Battery).where(Battery.id == bid))
+        battery = result.scalar_one_or_none()
+        if battery:
+            battery.model = data.model
+            updated.append(battery)
+    await db.flush()
+    for b in updated:
+        await db.refresh(b)
+    return updated
 
 
 @router.delete("/{battery_id}", status_code=204)

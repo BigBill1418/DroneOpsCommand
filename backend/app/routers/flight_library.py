@@ -504,18 +504,29 @@ async def import_from_opendronelog(
             # Parse start_time into a datetime object (handles strings, epochs, datetimes)
             start_dt = _parse_datetime(start_raw)
 
-            # If list endpoint didn't include start_time, try fetching detail
-            if not start_dt:
+            # Fetch detail to enrich custom names and missing fields
+            needs_detail = (
+                not start_dt
+                or not odl.get("display_name")
+                or not odl.get("battery_name")
+                or not odl.get("drone_name")
+                or not odl.get("file_name")
+            )
+            if needs_detail:
                 try:
                     detail = await opendronelog_client.get_flight(odl_id, db)
                     if detail:
-                        detail_time = detail.get("start_time") or detail.get("startTime") or detail.get("timestamp") or detail.get("dateTime") or detail.get("date")
-                        start_dt = _parse_datetime(detail_time)
-                        # Also pick up richer name/battery data from detail
+                        if not start_dt:
+                            detail_time = detail.get("start_time") or detail.get("startTime") or detail.get("timestamp") or detail.get("dateTime") or detail.get("date")
+                            start_dt = _parse_datetime(detail_time)
                         if not odl.get("display_name"):
                             name = detail.get("display_name") or detail.get("displayName") or detail.get("customName") or name
                         if not odl.get("battery_name"):
-                            odl["battery_name"] = detail.get("battery_name") or detail.get("batteryName") or detail.get("batteryNickname") or ""
+                            odl["battery_name"] = detail.get("battery_name") or detail.get("batteryName") or detail.get("batteryNickname") or detail.get("batteryDisplayName") or ""
+                        if not odl.get("drone_name"):
+                            odl["drone_name"] = detail.get("drone_name") or detail.get("droneName") or detail.get("droneNickname") or detail.get("droneDisplayName") or ""
+                        if not odl.get("file_name"):
+                            odl["file_name"] = detail.get("file_name") or detail.get("fileName") or detail.get("filename") or ""
                 except Exception:
                     pass
 
@@ -638,17 +649,29 @@ async def import_from_opendronelog_stream(
                         # Parse start_time (handles strings, epochs, datetimes)
                         start_dt = _parse_datetime(start_raw)
 
-                        # If list endpoint didn't include start_time, try fetching detail
-                        if not start_dt:
+                        # Fetch detail to enrich custom names and missing fields
+                        needs_detail = (
+                            not start_dt
+                            or not odl.get("display_name")
+                            or not odl.get("battery_name")
+                            or not odl.get("drone_name")
+                            or not odl.get("file_name")
+                        )
+                        if needs_detail:
                             try:
                                 detail = await opendronelog_client.get_flight(odl_id, db)
                                 if detail:
-                                    detail_time = detail.get("start_time") or detail.get("startTime") or detail.get("timestamp") or detail.get("dateTime") or detail.get("date")
-                                    start_dt = _parse_datetime(detail_time)
+                                    if not start_dt:
+                                        detail_time = detail.get("start_time") or detail.get("startTime") or detail.get("timestamp") or detail.get("dateTime") or detail.get("date")
+                                        start_dt = _parse_datetime(detail_time)
                                     if not odl.get("display_name"):
                                         name = detail.get("display_name") or detail.get("displayName") or detail.get("customName") or name
                                     if not odl.get("battery_name"):
-                                        odl["battery_name"] = detail.get("battery_name") or detail.get("batteryName") or detail.get("batteryNickname") or ""
+                                        odl["battery_name"] = detail.get("battery_name") or detail.get("batteryName") or detail.get("batteryNickname") or detail.get("batteryDisplayName") or ""
+                                    if not odl.get("drone_name"):
+                                        odl["drone_name"] = detail.get("drone_name") or detail.get("droneName") or detail.get("droneNickname") or detail.get("droneDisplayName") or ""
+                                    if not odl.get("file_name"):
+                                        odl["file_name"] = detail.get("file_name") or detail.get("fileName") or detail.get("filename") or ""
                             except Exception:
                                 pass
                             if not start_dt:
