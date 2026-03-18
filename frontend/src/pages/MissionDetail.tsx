@@ -41,8 +41,19 @@ export default function MissionDetail() {
   const [includeDownloadLink, setIncludeDownloadLink] = useState(false);
   const navigate = useNavigate();
 
+  // Polling for Celery report generation
+  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const stopPolling = useCallback(() => {
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
+    }
+  }, []);
+
   useEffect(() => {
     if (!id) return;
+    stopPolling();
+    setGenerating(false);
     api.get(`/missions/${id}`).then((r) => setMission(r.data)).catch(() => navigate('/'));
     api.get(`/missions/${id}/report`).then((r) => {
       setReport(r.data);
@@ -53,17 +64,8 @@ export default function MissionDetail() {
     api.get(`/missions/${id}/map`).then((r) => setMapGeojson(r.data)).catch(() => {});
     api.get(`/missions/${id}/map/coverage`).then((r) => setCoverage(r.data)).catch(() => {});
     api.get('/aircraft').then((r) => setAircraftList(r.data)).catch(() => {});
-  }, [id]);
-
-  // Polling for Celery report generation
-  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const stopPolling = useCallback(() => {
-    if (pollIntervalRef.current) {
-      clearInterval(pollIntervalRef.current);
-      pollIntervalRef.current = null;
-    }
-  }, []);
-  useEffect(() => () => stopPolling(), [stopPolling]);
+    return () => stopPolling();
+  }, [id, stopPolling]);
 
   if (!mission) return <Group justify="center" py="xl"><Loader color="cyan" /></Group>;
 

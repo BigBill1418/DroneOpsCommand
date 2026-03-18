@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import {
+  Anchor,
   Box,
   Button,
   Card,
@@ -45,15 +46,17 @@ export default function Login({ onLogin }: LoginProps) {
         minHeight: '100vh',
         background: 'linear-gradient(135deg, #050608 0%, #0e1117 50%, #050608 100%)',
         display: 'flex',
+        flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
+        gap: 24,
       }}
     >
       <Card
         shadow="xl"
         padding="xl"
         radius="md"
-        w={400}
+        w={440}
         style={{
           background: '#0e1117',
           border: '1px solid #1a1f2e',
@@ -62,28 +65,11 @@ export default function Login({ onLogin }: LoginProps) {
         <form onSubmit={handleSubmit}>
           <Stack gap="lg">
             <Center>
-              <div>
-                <Title
-                  order={1}
-                  style={{
-                    fontFamily: "'Bebas Neue', sans-serif",
-                    letterSpacing: '4px',
-                    fontSize: '36px',
-                    textAlign: 'center',
-                  }}
-                  c="#e8edf2"
-                >
-                  {branding.company_name.toUpperCase()}
-                </Title>
-                <Text
-                  ta="center"
-                  size="xs"
-                  c="#5a6478"
-                  style={{ fontFamily: "'Share Tech Mono', monospace", letterSpacing: '3px' }}
-                >
-                  {branding.company_tagline.toUpperCase()}
-                </Text>
-              </div>
+              <img
+                src="/logo-full.svg"
+                alt={branding.company_name}
+                style={{ width: '100%', maxWidth: 420, height: 'auto' }}
+              />
             </Center>
 
             <TextInput
@@ -123,6 +109,18 @@ export default function Login({ onLogin }: LoginProps) {
           </Stack>
         </form>
       </Card>
+
+      <Stack align="center" gap={4}>
+        <Text size="xs" c="#5a6478" style={{ fontFamily: "'Share Tech Mono', monospace", letterSpacing: '1px' }}>
+          Created by Bill Barnard — <Anchor href="mailto:me@barnardHQ.com" c="#5a6478" size="xs" style={{ fontFamily: "'Share Tech Mono', monospace" }}>me@barnardHQ.com</Anchor>
+        </Text>
+        <Anchor href="https://www.barnardHQ.com" target="_blank" c="#00d4ff" size="xs" style={{ fontFamily: "'Share Tech Mono', monospace", letterSpacing: '1px' }}>
+          www.barnardHQ.com
+        </Anchor>
+        <Text size="xs" c="#3a3f4a" style={{ fontFamily: "'Share Tech Mono', monospace", letterSpacing: '1px' }}>
+          v{typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : ''}
+        </Text>
+      </Stack>
     </Box>
   );
 }

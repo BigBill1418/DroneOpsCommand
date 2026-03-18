@@ -7,7 +7,6 @@ import {
   Checkbox,
   Group,
   Loader,
-  Popover,
   Select,
   Stack,
   Text,
@@ -350,41 +349,47 @@ export default function CustomerIntake() {
             MAILING ADDRESS *
           </Text>
 
-          <Popover opened={addressPopover} onClose={() => setAddressPopover(false)} position="bottom-start" width="target">
-            <Popover.Target>
-              <TextInput
-                label="Street Address"
-                required
-                autoComplete="address-line1"
-                leftSection={addressLoading ? <Loader size={14} color="cyan" /> : <IconMapPin size={14} />}
-                value={address}
-                onChange={(e) => {
-                  setAddress(e.target.value);
-                  searchAddress(e.target.value);
+          <div style={{ position: 'relative' }}>
+            <TextInput
+              label="Street Address"
+              required
+              autoComplete="address-line1"
+              leftSection={addressLoading ? <Loader size={14} color="cyan" /> : <IconMapPin size={14} />}
+              value={address}
+              onChange={(e) => {
+                setAddress(e.target.value);
+                searchAddress(e.target.value);
+              }}
+              onFocus={() => { if (addressSuggestions.length > 0) setAddressPopover(true); }}
+              onBlur={() => { setTimeout(() => setAddressPopover(false), 200); }}
+              styles={inputStyles}
+            />
+            {addressPopover && addressSuggestions.length > 0 && (
+              <div
+                style={{
+                  position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 100,
+                  background: '#0e1117', border: '1px solid #1a1f2e', borderRadius: 6,
+                  maxHeight: 200, overflow: 'auto', marginTop: 2,
                 }}
-                onFocus={() => { if (addressSuggestions.length > 0) setAddressPopover(true); }}
-                styles={inputStyles}
-              />
-            </Popover.Target>
-            <Popover.Dropdown style={{ background: '#0e1117', border: '1px solid #1a1f2e', padding: 0, maxHeight: 200, overflow: 'auto' }}>
-              {addressSuggestions.map((s, i) => (
-                <Text
-                  key={i}
-                  size="sm"
-                  c="#e8edf2"
-                  p="xs"
-                  style={{ cursor: 'pointer', borderBottom: '1px solid #1a1f2e' }}
-                  onMouseDown={(e) => { e.preventDefault(); }}
-                  onClick={() => selectAddress(s)}
-                >
-                  {s.display_name}
-                </Text>
-              ))}
-            </Popover.Dropdown>
-          </Popover>
+              >
+                {addressSuggestions.map((s, i) => (
+                  <Text
+                    key={i}
+                    size="sm"
+                    c="#e8edf2"
+                    p="xs"
+                    style={{ cursor: 'pointer', borderBottom: '1px solid #1a1f2e' }}
+                    onMouseDown={(e) => { e.preventDefault(); selectAddress(s); }}
+                  >
+                    {s.display_name}
+                  </Text>
+                ))}
+              </div>
+            )}
+          </div>
 
-          <Group grow>
-            <TextInput label="City" required value={city} onChange={(e) => setCity(e.target.value)} autoComplete="address-level2" styles={inputStyles} />
+          <TextInput label="City" required value={city} onChange={(e) => setCity(e.target.value)} autoComplete="address-level2" styles={inputStyles} />
+          <Group grow wrap="wrap" style={{ gap: 12 }}>
             <Select
               label="State"
               required
@@ -392,14 +397,24 @@ export default function CustomerIntake() {
               value={stateVal || null}
               onChange={(val) => setStateVal(val || '')}
               searchable
+              allowDeselect={false}
               styles={{
+                root: { minWidth: 100, flex: '1 1 45%' },
                 input: { background: '#050608', borderColor: '#1a1f2e', color: '#e8edf2' },
                 label: { color: '#5a6478', fontFamily: "'Share Tech Mono', monospace", fontSize: '13px', letterSpacing: '1px' },
                 dropdown: { background: '#0e1117', borderColor: '#1a1f2e' },
                 option: { color: '#e8edf2', '&[data-selected]': { background: '#00d4ff' } },
               }}
             />
-            <TextInput label="Zip Code" required value={zipCode} onChange={(e) => setZipCode(e.target.value)} autoComplete="postal-code" styles={inputStyles} />
+            <TextInput
+              label="Zip Code"
+              required
+              value={zipCode}
+              onChange={(e) => setZipCode(e.target.value.replace(/[^\d-]/g, '').slice(0, 10))}
+              autoComplete="postal-code"
+              inputMode="numeric"
+              styles={{ ...inputStyles, root: { minWidth: 100, flex: '1 1 45%' } }}
+            />
           </Group>
 
           <Button

@@ -7,6 +7,7 @@ import {
   Group,
   Modal,
   ScrollArea,
+  SimpleGrid,
   Stack,
   Table,
   Text,
@@ -313,9 +314,9 @@ export default function Customers() {
             <Table.Thead>
               <Table.Tr>
                 <Table.Th>NAME</Table.Th>
-                <Table.Th>COMPANY</Table.Th>
-                <Table.Th>EMAIL</Table.Th>
-                <Table.Th>PHONE</Table.Th>
+                <Table.Th className="hide-mobile">COMPANY</Table.Th>
+                <Table.Th className="hide-mobile">EMAIL</Table.Th>
+                <Table.Th className="hide-mobile">PHONE</Table.Th>
                 <Table.Th>TOS</Table.Th>
                 <Table.Th>ACTIONS</Table.Th>
               </Table.Tr>
@@ -324,9 +325,9 @@ export default function Customers() {
               {filtered.map((c) => (
                 <Table.Tr key={c.id}>
                   <Table.Td fw={600}>{c.name}</Table.Td>
-                  <Table.Td c="#5a6478">{c.company || '—'}</Table.Td>
-                  <Table.Td c="#5a6478">{c.email || '—'}</Table.Td>
-                  <Table.Td c="#5a6478" style={{ fontFamily: "'Share Tech Mono', monospace" }}>{c.phone ? formatPhone(c.phone) : '—'}</Table.Td>
+                  <Table.Td className="hide-mobile" c="#5a6478">{c.company || '—'}</Table.Td>
+                  <Table.Td className="hide-mobile" c="#5a6478">{c.email || '—'}</Table.Td>
+                  <Table.Td className="hide-mobile" c="#5a6478" style={{ fontFamily: "'Share Tech Mono', monospace" }}>{c.phone ? formatPhone(c.phone) : '—'}</Table.Td>
                   <Table.Td>{renderTosStatus(c)}</Table.Td>
                   <Table.Td>
                     <Group gap="xs">
@@ -404,11 +405,11 @@ export default function Customers() {
                 ))}
               </Popover.Dropdown>
             </Popover>
-            <Group grow>
+            <SimpleGrid cols={{ base: 1, xs: 3 }}>
               <TextInput label="City" {...form.getInputProps('city')} styles={inputStyles} />
               <TextInput label="State" {...form.getInputProps('state')} styles={inputStyles} />
               <TextInput label="Zip Code" {...form.getInputProps('zip_code')} styles={inputStyles} />
-            </Group>
+            </SimpleGrid>
             <Textarea label="Notes" {...form.getInputProps('notes')} styles={inputStyles} />
             <Button type="submit" color="cyan" fullWidth styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}>
               {editingId ? 'UPDATE' : 'CREATE'}

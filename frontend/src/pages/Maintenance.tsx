@@ -7,6 +7,7 @@ import {
   Loader,
   Modal,
   NumberInput,
+  ScrollArea,
   Select,
   SimpleGrid,
   Stack,
@@ -127,9 +128,9 @@ export default function Maintenance() {
 
   return (
     <Stack gap="lg">
-      <Group justify="space-between">
+      <Group justify="space-between" wrap="wrap">
         <Title order={2} c="#e8edf2" style={{ letterSpacing: '2px' }}>MAINTENANCE</Title>
-        <Group>
+        <Group wrap="wrap">
           <Button leftSection={<IconPlus size={16} />} color="cyan" onClick={() => setAddOpen(true)}
             styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}>
             LOG MAINTENANCE
@@ -161,9 +162,9 @@ export default function Maintenance() {
               </Text>
               <Stack gap={6}>
                 {alerts.map((alert, i) => (
-                  <Group key={i} justify="space-between">
-                    <Group gap="sm">
-                      <IconAlertTriangle size={16} color={alert.overdue ? '#ff6b6b' : '#ffd43b'} />
+                  <Group key={i} justify="space-between" wrap="wrap" gap="xs">
+                    <Group gap="sm" wrap="wrap">
+                      <IconAlertTriangle size={16} color={alert.overdue ? '#ff6b6b' : '#ffd43b'} style={{ flexShrink: 0 }} />
                       <Text size="sm" c="#e8edf2">{getAircraftName(alert.aircraft_id)}</Text>
                       <Text size="sm" c="#5a6478">—</Text>
                       <Text size="sm" c="#e8edf2">{getTypeLabel(alert.maintenance_type)}</Text>
@@ -202,6 +203,7 @@ export default function Maintenance() {
               <Text size="sm" c="#5a6478" mb="md" style={monoFont}>
                 {records.length} RECORD{records.length !== 1 ? 'S' : ''}
               </Text>
+              <ScrollArea type="auto">
               <Table
                 highlightOnHover
                 styles={{
@@ -215,8 +217,8 @@ export default function Maintenance() {
                     <Table.Th>DATE</Table.Th>
                     <Table.Th>AIRCRAFT</Table.Th>
                     <Table.Th>TYPE</Table.Th>
-                    <Table.Th>DESCRIPTION</Table.Th>
-                    <Table.Th>COST</Table.Th>
+                    <Table.Th className="hide-mobile">DESCRIPTION</Table.Th>
+                    <Table.Th className="hide-mobile">COST</Table.Th>
                     <Table.Th>NEXT DUE</Table.Th>
                     <Table.Th w={40}></Table.Th>
                   </Table.Tr>
@@ -233,10 +235,10 @@ export default function Maintenance() {
                       <Table.Td>
                         <Badge variant="light" color="cyan" size="sm">{getTypeLabel(rec.maintenance_type)}</Badge>
                       </Table.Td>
-                      <Table.Td>
+                      <Table.Td className="hide-mobile">
                         <Text size="xs" c="#5a6478" lineClamp={1}>{rec.description || rec.notes || '—'}</Text>
                       </Table.Td>
-                      <Table.Td>
+                      <Table.Td className="hide-mobile">
                         <Text size="xs" style={monoFont} c={rec.cost ? '#e8edf2' : '#5a6478'}>
                           {rec.cost ? `$${rec.cost.toFixed(0)}` : '—'}
                         </Text>
@@ -253,6 +255,7 @@ export default function Maintenance() {
                   ))}
                 </Table.Tbody>
               </Table>
+              </ScrollArea>
             </Card>
           )}
         </>
@@ -295,7 +298,7 @@ export default function Maintenance() {
             onChange={(v) => setForm({ ...form, performed_at: v || new Date() })}
             styles={inputStyles}
           />
-          <SimpleGrid cols={2}>
+          <SimpleGrid cols={{ base: 1, sm: 2 }}>
             <NumberInput
               label="Flight Hours At"
               placeholder="Optional"

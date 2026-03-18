@@ -83,11 +83,11 @@ export default function Missions() {
             <Table.Thead>
               <Table.Tr>
                 <Table.Th>MISSION</Table.Th>
-                <Table.Th>TYPE</Table.Th>
-                <Table.Th>LOCATION</Table.Th>
+                <Table.Th className="hide-mobile">TYPE</Table.Th>
+                <Table.Th className="hide-mobile">LOCATION</Table.Th>
                 <Table.Th>DATE</Table.Th>
                 <Table.Th>STATUS</Table.Th>
-                <Table.Th>BILLABLE</Table.Th>
+                <Table.Th className="hide-mobile">BILLABLE</Table.Th>
                 <Table.Th w={80}></Table.Th>
               </Table.Tr>
             </Table.Thead>
@@ -95,11 +95,11 @@ export default function Missions() {
               {filtered.map((m) => (
                 <Table.Tr key={m.id} style={{ cursor: 'pointer' }} onClick={() => navigate(`/missions/${m.id}`)} aria-label={`View mission: ${m.title}`}>
                   <Table.Td fw={600}>{m.title}</Table.Td>
-                  <Table.Td c="#5a6478" tt="capitalize">{m.mission_type.replace(/_/g, ' ')}</Table.Td>
-                  <Table.Td c="#5a6478">{m.location_name || '—'}</Table.Td>
+                  <Table.Td className="hide-mobile" c="#5a6478" tt="capitalize">{m.mission_type.replace(/_/g, ' ')}</Table.Td>
+                  <Table.Td className="hide-mobile" c="#5a6478">{m.location_name || '—'}</Table.Td>
                   <Table.Td c="#5a6478" style={{ fontFamily: "'Share Tech Mono', monospace" }}>{m.mission_date || '—'}</Table.Td>
                   <Table.Td><Badge color={statusColors[m.status]} variant="light" size="sm">{m.status}</Badge></Table.Td>
-                  <Table.Td>{m.is_billable ? <Badge color="orange" variant="light" size="sm">$</Badge> : '—'}</Table.Td>
+                  <Table.Td className="hide-mobile">{m.is_billable ? <Badge color="orange" variant="light" size="sm">$</Badge> : '—'}</Table.Td>
                   <Table.Td>
                     <Group gap={4} wrap="nowrap">
                       <ActionIcon

@@ -157,9 +157,12 @@ export interface FlightRecord {
   max_speed?: number;
   maxSpeed?: number;
   drone_model?: string;
+  drone_name?: string;
   droneModel?: string;
+  droneName?: string;
   drone?: string;
   aircraft?: string;
+  aircraft_obj?: Aircraft;
   model?: string;
   start_time?: string;
   startTime?: string;
@@ -171,6 +174,8 @@ export interface FlightRecord {
   drone_serial?: string;
   droneSerial?: string;
   // Native flight fields
+  home_lat?: number;
+  home_lon?: number;
   source?: string;
   original_filename?: string;
   battery_serial?: string;
@@ -205,6 +210,7 @@ export interface TelemetryData {
 export interface BatteryRecord {
   id: string;
   serial: string;
+  name: string | null;
   model: string | null;
   purchase_date: string | null;
   cycle_count: number;

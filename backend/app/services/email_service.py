@@ -126,10 +126,15 @@ async def send_report_email(
             raise ValueError(f"PDF file not found: {pdf_path}")
 
     try:
+        smtp_port = int(smtp["smtp_port"])
+    except (ValueError, TypeError):
+        raise ValueError(f"Invalid SMTP port: {smtp['smtp_port']}")
+
+    try:
         await aiosmtplib.send(
             msg,
             hostname=smtp["smtp_host"],
-            port=int(smtp["smtp_port"]),
+            port=smtp_port,
             username=smtp["smtp_user"] or None,
             password=smtp["smtp_password"] or None,
             use_tls=smtp["smtp_use_tls"] if isinstance(smtp["smtp_use_tls"], bool) else _parse_bool(str(smtp["smtp_use_tls"]), True),
@@ -199,13 +204,18 @@ async def send_intake_email(
     msg["Subject"] = subject
     msg.attach(MIMEText(html_body, "html"))
 
-    logger.info("[EMAIL-INTAKE] Sending via SMTP host=%s:%s to=%s subject='%s'", smtp["smtp_host"], smtp["smtp_port"], to_email, subject)
+    try:
+        smtp_port = int(smtp["smtp_port"])
+    except (ValueError, TypeError):
+        raise ValueError(f"Invalid SMTP port: {smtp['smtp_port']}")
+
+    logger.info("[EMAIL-INTAKE] Sending via SMTP host=%s:%s to=%s subject='%s'", smtp["smtp_host"], smtp_port, to_email, subject)
 
     try:
         await aiosmtplib.send(
             msg,
             hostname=smtp["smtp_host"],
-            port=int(smtp["smtp_port"]),
+            port=smtp_port,
             username=smtp["smtp_user"] or None,
             password=smtp["smtp_password"] or None,
             use_tls=smtp["smtp_use_tls"] if isinstance(smtp["smtp_use_tls"], bool) else _parse_bool(str(smtp["smtp_use_tls"]), True),

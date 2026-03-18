@@ -10,6 +10,7 @@ class FlightCreate(BaseModel):
     """For manual flight entry."""
     name: str
     drone_model: str | None = None
+    drone_name: str | None = None
     drone_serial: str | None = None
     battery_serial: str | None = None
     start_time: datetime | None = None
@@ -28,6 +29,7 @@ class FlightCreate(BaseModel):
 class FlightUpdate(BaseModel):
     name: str | None = None
     drone_model: str | None = None
+    drone_name: str | None = None
     drone_serial: str | None = None
     battery_serial: str | None = None
     start_time: datetime | None = None
@@ -46,6 +48,7 @@ class FlightResponse(BaseModel):
     id: UUID
     name: str
     drone_model: str | None
+    drone_name: str | None
     drone_serial: str | None
     battery_serial: str | None
     start_time: datetime | None
@@ -85,6 +88,7 @@ class FlightUploadResponse(BaseModel):
 class BatteryResponse(BaseModel):
     id: UUID
     serial: str
+    name: str | None = None
     model: str | None
     purchase_date: str | None = None
     cycle_count: int
@@ -102,6 +106,7 @@ class BatteryResponse(BaseModel):
 
 class BatteryCreate(BaseModel):
     serial: str
+    name: str | None = None
     model: str | None = None
     purchase_date: str | None = None
     status: str = "active"
@@ -110,6 +115,8 @@ class BatteryCreate(BaseModel):
 
 
 class BatteryUpdate(BaseModel):
+    serial: str | None = None
+    name: str | None = None
     model: str | None = None
     purchase_date: str | None = None
     status: str | None = None

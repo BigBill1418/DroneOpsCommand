@@ -2,7 +2,7 @@
 
 **Self-hosted mission management, AI report generation, and invoicing for commercial drone operators.**
 
-**Version 2.6.0** | [Quick Start](#quick-start) | [Features](#features) | [Configuration](#configuration) | [Contributing](CONTRIBUTING.md) | [License](LICENSE)
+**Version 2.19.0** | [Quick Start](#quick-start) | [Features](#features) | [Configuration](#configuration) | [Contributing](CONTRIBUTING.md) | [License](LICENSE)
 
 ---
 

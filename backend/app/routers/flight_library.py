@@ -1,7 +1,10 @@
 """Flight library — native flight management with upload, CRUD, and export."""
 
 import hashlib
+import json
 import logging
+import traceback
+from datetime import datetime as _dt
 from uuid import UUID
 
 import httpx
@@ -13,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.device import validate_device_api_key
 from app.auth.jwt import get_current_user
 from app.config import settings
-from app.database import get_db
+from app.database import get_db, async_session
 from app.models.battery import Battery, BatteryLog
 from app.models.device_api_key import DeviceApiKey
 from app.models.flight import Flight
@@ -25,6 +28,78 @@ from app.schemas.flight import (
 logger = logging.getLogger("doc.flights")
 
 router = APIRouter(prefix="/api/flight-library", tags=["flight-library"])
+
+
+_DATE_FORMATS = (
+    "%Y-%m-%dT%H:%M:%S",
+    "%Y-%m-%dT%H:%M:%S.%f",
+    "%Y-%m-%dT%H:%M:%SZ",
+    "%Y-%m-%dT%H:%M:%S.%fZ",
+    "%Y-%m-%dT%H:%M:%S%z",
+    "%Y-%m-%d %H:%M:%S",
+    "%Y-%m-%d %H:%M:%S.%f",
+    "%Y-%m-%d",
+    "%m/%d/%Y %H:%M:%S",
+    "%m/%d/%Y",
+    "%d/%m/%Y %H:%M:%S",
+    "%d/%m/%Y",
+)
+
+
+def _parse_datetime(value: object) -> _dt | None:
+    """Parse a datetime from string, numeric epoch, or datetime object.
+
+    Handles ISO 8601 (OpenDroneLog's format), epoch timestamps, and common
+    date strings.  Returns a naive UTC datetime suitable for DB storage.
+    """
+    if value is None or value == "":
+        return None
+    if isinstance(value, _dt):
+        return value
+    # Numeric epoch (seconds since 1970)
+    if isinstance(value, (int, float)):
+        try:
+            if value > 1e12:
+                return _dt.utcfromtimestamp(value / 1000)
+            return _dt.utcfromtimestamp(value)
+        except (OSError, OverflowError, ValueError):
+            return None
+    if isinstance(value, str):
+        cleaned = value.strip()
+        if not cleaned:
+            return None
+        # Try numeric string
+        try:
+            num = float(cleaned)
+            if num > 1e12:
+                return _dt.utcfromtimestamp(num / 1000)
+            return _dt.utcfromtimestamp(num)
+        except (ValueError, OSError, OverflowError):
+            pass
+        # Primary: use fromisoformat — handles all ISO 8601 variants that ODL produces
+        # e.g. "2024-01-15T14:30:00", "2024-01-15T14:30:00Z", "2024-01-15T14:30:00+00:00"
+        try:
+            # Python 3.11+ fromisoformat handles trailing Z natively; for 3.10 compat
+            # we also replace trailing Z with +00:00
+            iso_str = cleaned
+            if iso_str.endswith("Z"):
+                iso_str = iso_str[:-1] + "+00:00"
+            dt = _dt.fromisoformat(iso_str)
+            # Strip timezone info to store as naive UTC
+            if dt.tzinfo is not None:
+                from datetime import timezone
+                dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+            return dt
+        except (ValueError, TypeError):
+            pass
+        # Fallback: try explicit format strings for non-ISO date formats
+        for fmt in _DATE_FORMATS:
+            try:
+                return _dt.strptime(cleaned, fmt)
+            except ValueError:
+                continue
+        logger.warning("Could not parse date: %r", value)
+    return None
 
 PARSER_URL = "http://flight-parser:8100"
 
@@ -56,6 +131,97 @@ async def list_flights(
     query = query.offset(offset).limit(limit)
     result = await db.execute(query)
     return result.scalars().all()
+
+
+# ── Flight stats summary ─────────────────────────────────────────────
+# NOTE: must be registered before /{flight_id} to avoid route shadowing
+@router.get("/stats/summary")
+async def flight_stats(
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(
+            func.count(Flight.id),
+            func.sum(Flight.duration_secs),
+            func.sum(Flight.total_distance),
+            func.max(Flight.max_altitude),
+            func.max(Flight.max_speed),
+            func.sum(Flight.point_count),
+        )
+    )
+    row = result.one()
+    total = row[0] or 0
+
+    # Longest flight by duration
+    longest = None
+    longest_result = await db.execute(
+        select(Flight).where(Flight.duration_secs > 0).order_by(desc(Flight.duration_secs)).limit(1)
+    )
+    longest_flight = longest_result.scalar_one_or_none()
+    if longest_flight:
+        longest = {
+            "name": longest_flight.name,
+            "duration_secs": longest_flight.duration_secs,
+            "drone_model": longest_flight.drone_model,
+        }
+
+    # Farthest from home (max total_distance in a single flight)
+    farthest = None
+    farthest_result = await db.execute(
+        select(Flight).where(Flight.total_distance > 0).order_by(desc(Flight.total_distance)).limit(1)
+    )
+    farthest_flight = farthest_result.scalar_one_or_none()
+    if farthest_flight:
+        farthest = {
+            "name": farthest_flight.name,
+            "total_distance": farthest_flight.total_distance,
+            "drone_model": farthest_flight.drone_model,
+        }
+
+    # Recent flights (last 5)
+    recent_result = await db.execute(
+        select(Flight).order_by(desc(Flight.start_time)).limit(5)
+    )
+    recent_flights = [
+        {
+            "id": str(f.id),
+            "name": f.name,
+            "start_time": f.start_time.isoformat() if f.start_time else None,
+            "duration_secs": f.duration_secs,
+            "total_distance": f.total_distance,
+            "max_altitude": f.max_altitude,
+            "drone_model": f.drone_model,
+        }
+        for f in recent_result.scalars().all()
+    ]
+
+    return {
+        "total_flights": total,
+        "total_duration": row[1] or 0,
+        "total_distance": row[2] or 0,
+        "max_altitude": row[3] or 0,
+        "max_speed": row[4] or 0,
+        "total_points": row[5] or 0,
+        "avg_duration": (row[1] or 0) / total if total > 0 else 0,
+        "avg_distance": (row[2] or 0) / total if total > 0 else 0,
+        "longest_flight": longest,
+        "farthest_flight": farthest,
+        "recent_flights": recent_flights,
+    }
+
+
+# ── Parser health check ──────────────────────────────────────────────
+@router.get("/parser/status")
+async def parser_status(
+    _user: User = Depends(get_current_user),
+):
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            resp = await client.get(f"{PARSER_URL}/health")
+            return resp.json()
+    except Exception as e:
+        return {"status": "offline", "error": str(e)}
 
 
 # ── Get flight detail ─────────────────────────────────────────────────
@@ -93,7 +259,7 @@ async def get_telemetry(
     def downsample(arr, target):
         if not arr or len(arr) <= target:
             return arr
-        step = len(arr) / target
+        step = (len(arr) - 1) / (target - 1)
         return [arr[int(i * step)] for i in range(target)]
 
     return {
@@ -358,6 +524,28 @@ async def update_flight(
 
 
 # ── Delete flight ─────────────────────────────────────────────────────
+# ── Purge all flights ────────────────────────────────────────────────
+# NOTE: must be registered before /{flight_id} to avoid route shadowing
+@router.delete("/purge/all", status_code=200)
+async def purge_all_flights(
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """Delete ALL flights, battery logs, and batteries for a clean re-sync."""
+    from sqlalchemy import delete as sql_delete
+
+    # Delete all battery logs (not just flight-linked — full wipe for clean ODL re-sync)
+    await db.execute(sql_delete(BatteryLog))
+    # Delete all batteries
+    bat_result = await db.execute(sql_delete(Battery))
+    bat_count = bat_result.rowcount
+    # Delete all flights
+    result = await db.execute(sql_delete(Flight))
+    count = result.rowcount
+    await db.commit()
+    return {"deleted": count, "batteries_deleted": bat_count}
+
+
 @router.delete("/{flight_id}", status_code=204)
 async def delete_flight(
     flight_id: UUID,
@@ -417,37 +605,55 @@ async def import_from_opendronelog(
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Failed to connect to OpenDroneLog: {e}")
 
+    # Fetch custom equipment names from ODL (battery + drone nicknames)
+    equipment = {"battery_names": {}, "aircraft_names": {}}
+    try:
+        equipment = await opendronelog_client.get_equipment_names(db)
+        logger.info("ODL import: loaded %d battery names, %d aircraft names",
+                     len(equipment.get("battery_names", {})), len(equipment.get("aircraft_names", {})))
+    except Exception as exc:
+        logger.warning("ODL import: could not fetch equipment_names: %s", exc)
+
+    battery_names = equipment.get("battery_names", {})   # serial -> custom name
+    aircraft_names = equipment.get("aircraft_names", {})  # serial -> custom name
+
     for odl in odl_flights:
         try:
             odl_id = str(odl.get("id", ""))
+            odl_hash = f"odl_{odl_id}"
 
-            # Check if already imported by name + start_time combo
+            # Dedup by ODL flight ID (stable across renames)
+            existing = await db.execute(
+                select(Flight).where(Flight.source_file_hash == odl_hash)
+            )
+            if existing.scalar_one_or_none():
+                skipped += 1
+                continue
+
+            # Flight display name: displayName from ODL, else fileName
             name = odl.get("display_name") or odl.get("name") or f"ODL Flight {odl_id}"
+
+            # Parse start_time (ODL sends ISO 8601)
             start_raw = odl.get("start_time")
+            start_dt = _parse_datetime(start_raw)
+            if not start_dt:
+                logger.warning("ODL import: could not parse start_time '%s' for flight %s (%s)", start_raw, odl_id, name)
 
-            # Parse start_time string into a datetime object
-            start_dt = None
-            if start_raw:
-                from datetime import datetime as _dt
-                if isinstance(start_raw, str):
-                    for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M:%S.%f",
-                                "%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S.%fZ",
-                                "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
-                        try:
-                            start_dt = _dt.strptime(start_raw.rstrip("Z"), fmt.rstrip("Z"))
-                            break
-                        except ValueError:
-                            continue
-                elif isinstance(start_raw, _dt):
-                    start_dt = start_raw
+            # Drone: model is hardware (droneModel), custom name from equipment_names (priority)
+            # then aircraftName (DJI app name embedded in log file) as fallback
+            drone_model = odl.get("drone_model") or None
+            drone_serial = odl.get("drone_serial") or None
+            drone_name = None
+            if drone_serial:
+                drone_name = aircraft_names.get(drone_serial) or aircraft_names.get(drone_serial.upper()) or None
+            if not drone_name:
+                drone_name = odl.get("drone_name") or None  # aircraftName from log
 
-            if start_raw:
-                existing = await db.execute(
-                    select(Flight).where(Flight.name == name, Flight.source == "opendronelog_import")
-                )
-                if existing.scalar_one_or_none():
-                    skipped += 1
-                    continue
+            # Battery custom name from equipment_names
+            bat_serial = odl.get("battery_serial") or None
+            bat_name = ""
+            if bat_serial:
+                bat_name = battery_names.get(bat_serial) or battery_names.get(bat_serial.upper()) or ""
 
             # Fetch GPS track
             track = []
@@ -456,7 +662,6 @@ async def import_from_opendronelog(
             except Exception:
                 pass
 
-            # Safely convert numeric fields (ODL may return strings or None)
             def _float(val: object, default: float = 0.0) -> float:
                 try:
                     return float(val) if val is not None else default
@@ -471,9 +676,10 @@ async def import_from_opendronelog(
 
             flight = Flight(
                 name=name,
-                drone_model=odl.get("drone_model") or None,
-                drone_serial=odl.get("drone_serial") or None,
-                battery_serial=odl.get("battery_serial") or None,
+                drone_model=drone_model,
+                drone_name=drone_name,
+                drone_serial=drone_serial,
+                battery_serial=bat_serial,
                 start_time=start_dt,
                 duration_secs=_float(odl.get("duration_secs")),
                 total_distance=_float(odl.get("total_distance")),
@@ -486,11 +692,16 @@ async def import_from_opendronelog(
                 notes=odl.get("notes") or None,
                 tags=odl.get("tags") if odl.get("tags") else None,
                 source="opendronelog_import",
+                source_file_hash=odl_hash,
                 original_filename=odl.get("file_name") or None,
             )
             db.add(flight)
             await db.flush()
             imported += 1
+
+            # Auto-create battery record with custom name from equipment_names
+            if bat_serial:
+                await _track_battery_from_odl(db, flight, bat_serial, bat_name, drone_model)
 
         except Exception as e:
             errors.append(f"Flight {odl.get('id', '?')}: {str(e)}")
@@ -503,94 +714,172 @@ async def import_from_opendronelog(
     }
 
 
-# ── Flight stats summary ─────────────────────────────────────────────
-@router.get("/stats/summary")
-async def flight_stats(
-    db: AsyncSession = Depends(get_db),
+# ── Streaming import from OpenDroneLog (with progress) ────────────────
+@router.post("/import/opendronelog/stream")
+async def import_from_opendronelog_stream(
     _user: User = Depends(get_current_user),
 ):
-    result = await db.execute(
-        select(
-            func.count(Flight.id),
-            func.sum(Flight.duration_secs),
-            func.sum(Flight.total_distance),
-            func.max(Flight.max_altitude),
-            func.max(Flight.max_speed),
-            func.sum(Flight.point_count),
-        )
-    )
-    row = result.one()
-    total = row[0] or 0
+    """Stream import progress as Server-Sent Events."""
+    from app.services.opendronelog import opendronelog_client
 
-    # Longest flight by duration
-    longest = None
-    longest_result = await db.execute(
-        select(Flight).where(Flight.duration_secs > 0).order_by(desc(Flight.duration_secs)).limit(1)
-    )
-    longest_flight = longest_result.scalar_one_or_none()
-    if longest_flight:
-        longest = {
-            "name": longest_flight.name,
-            "duration_secs": longest_flight.duration_secs,
-            "drone_model": longest_flight.drone_model,
-        }
+    async def event_stream():
+        def sse(data: dict) -> str:
+            return f"data: {json.dumps(data)}\n\n"
 
-    # Farthest from home (max total_distance in a single flight)
-    farthest = None
-    farthest_result = await db.execute(
-        select(Flight).where(Flight.total_distance > 0).order_by(desc(Flight.total_distance)).limit(1)
-    )
-    farthest_flight = farthest_result.scalar_one_or_none()
-    if farthest_flight:
-        farthest = {
-            "name": farthest_flight.name,
-            "total_distance": farthest_flight.total_distance,
-            "drone_model": farthest_flight.drone_model,
-        }
+        async with async_session() as db:
+            try:
+                if not await opendronelog_client.is_configured(db):
+                    yield sse({"type": "error", "message": "OpenDroneLog URL not configured"})
+                    return
 
-    # Recent flights (last 5)
-    recent_result = await db.execute(
-        select(Flight).order_by(desc(Flight.start_time)).limit(5)
-    )
-    recent_flights = [
-        {
-            "id": str(f.id),
-            "name": f.name,
-            "start_time": f.start_time.isoformat() if f.start_time else None,
-            "duration_secs": f.duration_secs,
-            "total_distance": f.total_distance,
-            "max_altitude": f.max_altitude,
-            "drone_model": f.drone_model,
-        }
-        for f in recent_result.scalars().all()
-    ]
+                logger.info("ODL import: fetching flight list...")
+                try:
+                    odl_flights = await opendronelog_client.list_flights(db)
+                except Exception as e:
+                    logger.error("ODL import: failed to list flights: %s", e)
+                    yield sse({"type": "error", "message": f"Failed to connect to OpenDroneLog: {e}"})
+                    return
 
-    return {
-        "total_flights": total,
-        "total_duration": row[1] or 0,
-        "total_distance": row[2] or 0,
-        "max_altitude": row[3] or 0,
-        "max_speed": row[4] or 0,
-        "total_points": row[5] or 0,
-        "avg_duration": (row[1] or 0) / total if total > 0 else 0,
-        "avg_distance": (row[2] or 0) / total if total > 0 else 0,
-        "longest_flight": longest,
-        "farthest_flight": farthest,
-        "recent_flights": recent_flights,
-    }
+                total = len(odl_flights)
+                logger.info("ODL import: found %d flights to process", total)
+
+                if total == 0:
+                    yield sse({"type": "complete", "total": 0, "imported": 0, "skipped": 0, "errors": 0, "error_details": []})
+                    return
+
+                # Fetch custom equipment names once
+                equipment = {"battery_names": {}, "aircraft_names": {}}
+                try:
+                    equipment = await opendronelog_client.get_equipment_names(db)
+                    logger.info("ODL import: loaded %d battery names, %d aircraft names",
+                                len(equipment.get("battery_names", {})), len(equipment.get("aircraft_names", {})))
+                except Exception as exc:
+                    logger.warning("ODL import: could not fetch equipment_names: %s", exc)
+
+                battery_names = equipment.get("battery_names", {})
+                aircraft_names = equipment.get("aircraft_names", {})
+
+                imported = 0
+                skipped = 0
+                error_count = 0
+                error_details = []
+
+                for i, odl in enumerate(odl_flights):
+                    odl_id = str(odl.get("id", ""))
+                    odl_hash = f"odl_{odl_id}"
+                    name = odl.get("display_name") or odl.get("name") or f"ODL Flight {odl_id}"
+
+                    try:
+                        # Dedup by ODL flight ID
+                        existing = await db.execute(
+                            select(Flight).where(Flight.source_file_hash == odl_hash)
+                        )
+                        if existing.scalar_one_or_none():
+                            skipped += 1
+                            logger.debug("ODL import: skipped duplicate '%s'", name)
+                            yield sse({"type": "progress", "current": i + 1, "total": total, "imported": imported, "skipped": skipped, "errors": error_count, "flight_name": name})
+                            continue
+
+                        # Parse start_time (ISO 8601 from ODL)
+                        start_raw = odl.get("start_time")
+                        start_dt = _parse_datetime(start_raw)
+                        if not start_dt:
+                            logger.warning("ODL import: could not parse start_time '%s' for flight %s", start_raw, odl_id)
+
+                        # Drone: model is hardware, custom name from equipment_names (priority)
+                        # then aircraftName (DJI app name from log file) as fallback
+                        drone_model = odl.get("drone_model") or None
+                        drone_serial = odl.get("drone_serial") or None
+                        drone_name = None
+                        if drone_serial:
+                            drone_name = aircraft_names.get(drone_serial) or aircraft_names.get(drone_serial.upper()) or None
+                        if not drone_name:
+                            drone_name = odl.get("drone_name") or None  # aircraftName from log
+
+                        # Battery custom name from equipment_names
+                        bat_serial = odl.get("battery_serial") or None
+                        bat_name = ""
+                        if bat_serial:
+                            bat_name = battery_names.get(bat_serial) or battery_names.get(bat_serial.upper()) or ""
+
+                        # Fetch GPS track
+                        track = []
+                        try:
+                            track = await opendronelog_client.get_flight_track(odl_id, db)
+                        except Exception as te:
+                            logger.warning("ODL import: track fetch failed for %s: %s", odl_id, te)
+
+                        def _float(val, default=0.0):
+                            try:
+                                return float(val) if val is not None else default
+                            except (ValueError, TypeError):
+                                return default
+
+                        def _int(val, default=0):
+                            try:
+                                return int(val) if val is not None else default
+                            except (ValueError, TypeError):
+                                return default
+
+                        flight = Flight(
+                            name=name,
+                            drone_model=drone_model,
+                            drone_name=drone_name,
+                            drone_serial=drone_serial,
+                            battery_serial=bat_serial,
+                            start_time=start_dt,
+                            duration_secs=_float(odl.get("duration_secs")),
+                            total_distance=_float(odl.get("total_distance")),
+                            max_altitude=_float(odl.get("max_altitude")),
+                            max_speed=_float(odl.get("max_speed")),
+                            home_lat=_float(odl.get("home_lat"), None) if odl.get("home_lat") else None,
+                            home_lon=_float(odl.get("home_lon"), None) if odl.get("home_lon") else None,
+                            point_count=_int(odl.get("point_count")) or len(track),
+                            gps_track=track if track else None,
+                            notes=odl.get("notes") or None,
+                            tags=odl.get("tags") if odl.get("tags") else None,
+                            source="opendronelog_import",
+                            source_file_hash=odl_hash,
+                            original_filename=odl.get("file_name") or None,
+                        )
+                        db.add(flight)
+                        await db.flush()
+                        imported += 1
+                        logger.info("ODL import: imported '%s' (%d/%d)", name, i + 1, total)
+
+                        # Auto-create battery record with custom name from equipment_names
+                        if bat_serial:
+                            await _track_battery_from_odl(db, flight, bat_serial, bat_name, drone_model)
+
+                    except Exception as e:
+                        error_count += 1
+                        err_msg = f"Flight {odl_id} ({name}): {type(e).__name__}: {e}"
+                        error_details.append(err_msg)
+                        logger.error("ODL import: error on flight %s: %s\n%s", odl_id, e, traceback.format_exc())
+
+                    yield sse({"type": "progress", "current": i + 1, "total": total, "imported": imported, "skipped": skipped, "errors": error_count, "flight_name": name})
+
+                # Commit all at the end
+                await db.commit()
+                logger.info("ODL import: complete — %d imported, %d skipped, %d errors out of %d", imported, skipped, error_count, total)
+
+                yield sse({
+                    "type": "complete",
+                    "total": total,
+                    "imported": imported,
+                    "skipped": skipped,
+                    "errors": error_count,
+                    "error_details": error_details[:20],
+                })
+
+            except Exception as e:
+                logger.error("ODL import: fatal error: %s\n%s", e, traceback.format_exc())
+                await db.rollback()
+                yield sse({"type": "error", "message": f"Import failed: {type(e).__name__}: {e}"})
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
-# ── Parser health check ──────────────────────────────────────────────
-@router.get("/parser/status")
-async def parser_status(
-    _user: User = Depends(get_current_user),
-):
-    try:
-        async with httpx.AsyncClient(timeout=5) as client:
-            resp = await client.get(f"{PARSER_URL}/health")
-            return resp.json()
-    except Exception as e:
-        return {"status": "offline", "error": str(e)}
 
 
 # ── Helpers ───────────────────────────────────────────────────────────
@@ -620,6 +909,48 @@ async def _track_battery(db: AsyncSession, flight: Flight, battery_data: dict):
         min_voltage=battery_data.get("min_voltage"),
         max_temp=battery_data.get("max_temp"),
         discharge_mah=battery_data.get("discharge_mah"),
+        cycles_at_time=battery.cycle_count,
+    )
+    db.add(log)
+
+
+async def _track_battery_from_odl(
+    db: AsyncSession, flight: Flight, serial: str, custom_name: str, drone_model: str | None
+):
+    """Auto-create/update battery record from ODL flight data."""
+    if not serial:
+        return
+
+    # Look up by actual hardware serial
+    result = await db.execute(select(Battery).where(Battery.serial == serial))
+    battery = result.scalar_one_or_none()
+
+    # Migration: if battery was previously stored with custom_name as serial, find and fix it
+    if not battery and custom_name:
+        result2 = await db.execute(select(Battery).where(Battery.serial == custom_name))
+        battery = result2.scalar_one_or_none()
+        if battery:
+            # Fix: move the custom name to the name field, restore actual serial
+            battery.name = custom_name
+            battery.serial = serial
+
+    if not battery:
+        battery = Battery(serial=serial, name=custom_name or None, model=drone_model, cycle_count=0)
+        db.add(battery)
+        await db.flush()
+    else:
+        # Always update name from ODL if provided (ODL is source of truth for display names)
+        if custom_name:
+            battery.name = custom_name
+        # Update drone model if not set
+        if drone_model and not battery.model:
+            battery.model = drone_model
+
+    battery.cycle_count += 1
+
+    log = BatteryLog(
+        battery_id=battery.id,
+        flight_id=flight.id,
         cycles_at_time=battery.cycle_count,
     )
     db.add(log)

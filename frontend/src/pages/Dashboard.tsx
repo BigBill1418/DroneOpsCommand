@@ -183,8 +183,9 @@ function formatDuration(secs: number): string {
 
 function formatDistance(meters: number): string {
   if (!meters) return '0';
-  if (meters >= 1000) return `${(meters / 1000).toFixed(1)} km`;
-  return `${Math.round(meters)} m`;
+  const feet = meters * 3.28084;
+  if (feet >= 5280) return `${(feet / 5280).toFixed(2)} mi`;
+  return `${Math.round(feet)} ft`;
 }
 
 const cardBase = { background: '#0e1117', border: '1px solid #1a1f2e' };
@@ -262,11 +263,28 @@ export default function Dashboard() {
     }
   };
 
-  const copyIntakeLink = () => {
+  const copyIntakeLink = async () => {
     if (!intakeResult) return;
-    navigator.clipboard.writeText(intakeResult.intake_url);
-    setLinkCopied(true);
-    setTimeout(() => setLinkCopied(false), 2000);
+    const text = intakeResult.intake_url;
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        // Fallback for non-HTTPS / older browsers
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.left = '-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 2000);
+    } catch {
+      notifications.show({ title: 'Copy failed', message: 'Could not copy to clipboard', color: 'red' });
+    }
   };
 
   return (
@@ -305,8 +323,8 @@ export default function Dashboard() {
         <StatCard icon={IconUsers} label="CUSTOMERS" value={String(customers.length)} color="#00d4ff" />
       </SimpleGrid>
 
-      {/* Main grid: 2 columns */}
-      <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', minHeight: 0, gridTemplateRows: '1fr 1fr' }}>
+      {/* Main grid: 2 columns on desktop, single column on mobile */}
+      <div className="dashboard-grid" style={{ flex: 1, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', minHeight: 0, gridTemplateRows: 'minmax(0, 1fr) minmax(0, 1fr)', maxHeight: 'calc(100vh - 220px)' }}>
 
         {/* ═══ RECENT MISSIONS ═══ */}
         <Card padding="sm" radius="md" style={panelStyle}>
@@ -497,7 +515,7 @@ export default function Dashboard() {
                     <Text c="#e8edf2" fw={700} style={{ ...bebasFont, fontSize: '20px', lineHeight: 1.1 }}>
                       {wx.visibility_m != null ? `${(wx.visibility_m / 1609.344).toFixed(1)}` : '—'}
                     </Text>
-                    <Text size="xs" c="#5a6478" style={{ fontSize: '10px' }}>statute mi</Text>
+                    <Text size="xs" c="#5a6478" style={{ fontSize: '10px' }}>mi</Text>
                   </div>
                 </SimpleGrid>
 
@@ -630,9 +648,6 @@ export default function Dashboard() {
                       <Text size="xs" c="#5a6478" style={monoXs}>MAX ALTITUDE</Text>
                     </Group>
                     <Text c="#e8edf2" fw={700} style={{ ...bebasFont, fontSize: '20px', lineHeight: 1.1 }}>
-                      {Math.round(flightStats.max_altitude)} m
-                    </Text>
-                    <Text size="xs" c="#5a6478" style={{ fontSize: '10px' }}>
                       {Math.round(flightStats.max_altitude * 3.28084)} ft
                     </Text>
                   </div>
@@ -643,9 +658,6 @@ export default function Dashboard() {
                     </Group>
                     <Text c="#e8edf2" fw={700} style={{ ...bebasFont, fontSize: '20px', lineHeight: 1.1 }}>
                       {(flightStats.max_speed * 2.23694).toFixed(1)} mph
-                    </Text>
-                    <Text size="xs" c="#5a6478" style={{ fontSize: '10px' }}>
-                      {flightStats.max_speed.toFixed(1)} m/s
                     </Text>
                   </div>
                 </SimpleGrid>

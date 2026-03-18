@@ -1,12 +1,13 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.jwt import get_current_user
 from app.database import get_db
 from app.models.aircraft import Aircraft
+from app.models.battery import Battery
 from app.models.user import User
 from app.schemas.aircraft import AircraftCreate, AircraftResponse, AircraftUpdate
 
@@ -60,8 +61,26 @@ async def update_aircraft(
     if not aircraft:
         raise HTTPException(status_code=404, detail="Aircraft not found")
 
-    for key, value in data.model_dump(exclude_unset=True).items():
+    old_model_name = aircraft.model_name
+    updates = data.model_dump(exclude_unset=True)
+
+    for key, value in updates.items():
         setattr(aircraft, key, value)
+
+    # Cascade: if model_name changed, update all batteries referencing this aircraft
+    new_model_name = updates.get("model_name")
+    if new_model_name and new_model_name != old_model_name:
+        await db.execute(
+            update(Battery)
+            .where(Battery.aircraft_id == aircraft_id)
+            .values(model=new_model_name)
+        )
+        # Also update batteries that had the old model name string (no FK link)
+        await db.execute(
+            update(Battery)
+            .where(Battery.model == old_model_name, Battery.aircraft_id.is_(None))
+            .values(model=new_model_name)
+        )
 
     await db.flush()
     await db.refresh(aircraft)

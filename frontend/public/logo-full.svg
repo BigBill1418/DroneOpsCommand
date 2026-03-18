@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 130">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#0a0a0a"/>
+      <stop offset="100%" stop-color="#050608"/>
+    </linearGradient>
+  </defs>
+  <rect width="960" height="130" fill="url(#bg)"/>
+  <text x="480" y="82" text-anchor="middle" font-family="Arial Black, Impact, sans-serif" font-size="72" font-weight="900" letter-spacing="6">
+    <tspan fill="#e8edf2">DRONE</tspan><tspan fill="#e87b35">OPS</tspan><tspan fill="#e8edf2">COMMAND</tspan>
+  </text>
+  <text x="480" y="110" text-anchor="middle" font-family="monospace" font-size="14" fill="#7a5a3a" letter-spacing="12">
+    D . O . C
+  </text>
+</svg>

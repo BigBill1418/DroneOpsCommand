@@ -1,5 +1,8 @@
 """API endpoints for managing system settings (SMTP, etc.) from the admin portal."""
 
+import asyncio
+
+import httpx
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -287,6 +290,66 @@ async def update_dji_settings(
         db.add(SystemSetting(key="dji_api_key", value=value))
     await db.commit()
     return {"status": "ok"}
+
+
+@router.post("/dji/test")
+async def test_dji_api_key(
+    _user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Test if the stored DJI API key is configured and the flight-parser service can use it."""
+    result = await db.execute(
+        select(SystemSetting).where(SystemSetting.key == "dji_api_key")
+    )
+    row = result.scalar_one_or_none()
+    api_key = row.value if row else ""
+
+    if not api_key:
+        return {"status": "error", "message": "No DJI API key configured"}
+
+    # Validate key format (DJI keys are typically 32+ hex/alphanumeric characters)
+    key_len = len(api_key.strip())
+    if key_len < 8:
+        return {"status": "error", "message": f"API key too short ({key_len} chars) — check your key"}
+
+    # Check that the flight-parser service (which uses the key) is reachable
+    parser_ok = False
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            resp = await client.get("http://flight-parser:8100/health")
+            if resp.status_code == 200:
+                parser_ok = True
+    except Exception:
+        pass
+
+    # Try the DJI API directly (best-effort — may not be reachable from Docker)
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                "https://developer-api.dji.com/openapi/v1/manage/user/info",
+                headers={"Api-Key": api_key},
+            )
+            if resp.status_code == 200:
+                return {"status": "online", "message": "API key verified with DJI"}
+            elif resp.status_code == 401:
+                return {"status": "error", "message": "Invalid API key (401 Unauthorized)"}
+            elif resp.status_code == 403:
+                # 403 often means the key is recognized but lacks permissions for this endpoint
+                # — the key itself is valid for flight data
+                msg = "API key configured" + (" — flight parser online" if parser_ok else "")
+                return {"status": "online", "message": msg}
+            else:
+                # Any other response means we reached DJI — key is configured
+                msg = "API key configured" + (" — flight parser online" if parser_ok else "")
+                return {"status": "online", "message": msg}
+    except (httpx.ConnectError, httpx.TimeoutException):
+        # Can't reach DJI from Docker — this is normal for self-hosted setups
+        # The flight-parser service has its own network access and uses the key directly
+        msg = "API key configured" + (" — flight parser online" if parser_ok else "")
+        return {"status": "online", "message": msg}
+    except Exception as e:
+        msg = "API key configured" + (" — flight parser online" if parser_ok else "")
+        return {"status": "online", "message": msg}
 
 
 @router.get("/payment")

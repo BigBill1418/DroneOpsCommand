@@ -22,7 +22,12 @@ function copyPdfWorker(): Plugin {
   };
 }
 
+const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, 'package.json'), 'utf-8'));
+
 export default defineConfig({
+  define: {
+    __APP_VERSION__: JSON.stringify(pkg.version),
+  },
   plugins: [react(), copyPdfWorker()],
   resolve: {
     alias: {
