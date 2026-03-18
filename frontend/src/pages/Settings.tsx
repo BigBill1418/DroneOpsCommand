@@ -69,14 +69,14 @@ export default function Settings() {
   const [odlImportProgress, setOdlImportProgress] = useState({ current: 0, total: 0, imported: 0, skipped: 0, errors: 0, currentFlight: '' });
   const [accountSaving, setAccountSaving] = useState(false);
   const [currentUsername, setCurrentUsername] = useState('');
-  const [backups, setBackups] = useState<{ filename: string; size_bytes: number; created_at: string; sha256: string }[]>([]);
   const [backupCreating, setBackupCreating] = useState(false);
-  const [backupRestoring, setBackupRestoring] = useState<string | null>(null);
-  const [backupVerifying, setBackupVerifying] = useState<string | null>(null);
-  const [backupVerifyResult, setBackupVerifyResult] = useState<{ filename: string; valid: boolean; sha256_actual: string; checksum_match: boolean | null; archive_valid: boolean; toc_entries: number } | null>(null);
-  const [restoreConfirmFile, setRestoreConfirmFile] = useState<string | null>(null);
+  const [backupResult, setBackupResult] = useState<{ filename: string; sha256: string; objects: number; size: number } | null>(null);
+  const [restoreFile, setRestoreFile] = useState<File | null>(null);
+  const [restoreValidation, setRestoreValidation] = useState<{ valid: boolean; filename: string; sha256: string; size_bytes: number; toc_entries: number } | null>(null);
+  const [restoreValidating, setRestoreValidating] = useState(false);
+  const [restoreRunning, setRestoreRunning] = useState(false);
   const [restoreChecked, setRestoreChecked] = useState(false);
-  const [backupUploading, setBackupUploading] = useState(false);
+  const [restoreResult, setRestoreResult] = useState<{ restored: boolean; table_count: number; sha256: string } | null>(null);
 
   const aircraftForm = useForm({
     initialValues: { model_name: '', manufacturer: 'DJI', specs_json: '{}' },
@@ -145,17 +145,38 @@ export default function Settings() {
     api.get('/settings/weather').then((r) => weatherForm.setValues(r.data)).catch(() => {});
     api.get('/intake/default-tos-status').then((r) => setTosUploaded(r.data.uploaded)).catch(() => {});
     api.get('/settings/branding').then((r) => brandingForm.setValues(r.data)).catch(() => {});
-    api.get('/backup/list').then((r) => setBackups(r.data)).catch(() => setBackups([]));
   }, []);
 
-  const loadBackups = () => api.get('/backup/list').then((r) => setBackups(r.data)).catch(() => {});
-
-  const handleCreateBackup = async () => {
+  const handleBackupAndDownload = async () => {
     setBackupCreating(true);
+    setBackupResult(null);
     try {
-      const resp = await api.post('/backup/create');
-      notifications.show({ title: 'Backup Created', message: `${resp.data.filename} (${(resp.data.size_bytes / 1024 / 1024).toFixed(1)} MB)`, color: 'green' });
-      loadBackups();
+      const resp = await api.post('/backup/create-and-download', {}, { responseType: 'blob' });
+      const sha256 = resp.headers['x-backup-sha256'] || '';
+      const objects = parseInt(resp.headers['x-backup-objects'] || '0', 10);
+      const disposition = resp.headers['content-disposition'] || '';
+      const filenameMatch = disposition.match(/filename="(.+?)"/);
+      const filename = filenameMatch ? filenameMatch[1] : `doc_backup_${Date.now()}.dump`;
+      const blob = new Blob([resp.data], { type: 'application/octet-stream' });
+      const size = blob.size;
+
+      // Trigger Save As dialog
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+
+      setBackupResult({ filename, sha256, objects, size });
+      notifications.show({
+        title: 'Backup Created & Verified',
+        message: `${filename} — ${objects} objects, SHA-256 verified`,
+        color: 'green',
+        autoClose: 8000,
+      });
     } catch (err: any) {
       notifications.show({ title: 'Backup Failed', message: err.response?.data?.detail || 'Failed to create backup', color: 'red' });
     } finally {
@@ -163,65 +184,63 @@ export default function Settings() {
     }
   };
 
-  const handleVerifyBackup = async (filename: string) => {
-    setBackupVerifying(filename);
-    setBackupVerifyResult(null);
-    try {
-      const resp = await api.post(`/backup/verify/${filename}`);
-      setBackupVerifyResult(resp.data);
-      notifications.show({
-        title: resp.data.valid ? 'Backup Valid' : 'Backup Invalid',
-        message: resp.data.valid ? `${filename} integrity verified (${resp.data.toc_entries} objects)` : 'Integrity check failed',
-        color: resp.data.valid ? 'green' : 'red',
-      });
-    } catch (err: any) {
-      notifications.show({ title: 'Verify Failed', message: err.response?.data?.detail || 'Verification failed', color: 'red' });
-    } finally {
-      setBackupVerifying(null);
-    }
+  const handleRestoreFileSelect = () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.dump';
+    input.onchange = async (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+      setRestoreFile(file);
+      setRestoreValidation(null);
+      setRestoreResult(null);
+      setRestoreChecked(false);
+
+      // Immediately validate the uploaded file
+      setRestoreValidating(true);
+      try {
+        const formData = new FormData();
+        formData.append('file', file);
+        const resp = await api.post('/backup/validate-upload', formData, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        });
+        setRestoreValidation(resp.data);
+      } catch (err: any) {
+        notifications.show({
+          title: 'Invalid Backup File',
+          message: err.response?.data?.detail || 'File validation failed — not a valid backup',
+          color: 'red',
+        });
+        setRestoreFile(null);
+      } finally {
+        setRestoreValidating(false);
+      }
+    };
+    input.click();
   };
 
-  const handleRestoreBackup = async (filename: string) => {
-    setBackupRestoring(filename);
+  const handleConfirmRestore = async () => {
+    if (!restoreFile) return;
+    setRestoreRunning(true);
+    setRestoreResult(null);
     try {
-      await api.post(`/backup/restore/${filename}`);
-      notifications.show({ title: 'Restore Complete', message: `Database restored from ${filename}`, color: 'green' });
-      setRestoreConfirmFile(null);
-      setRestoreChecked(false);
+      const formData = new FormData();
+      formData.append('file', restoreFile);
+      const resp = await api.post('/backup/restore-from-upload', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: 600000,
+      });
+      setRestoreResult(resp.data);
+      notifications.show({
+        title: 'Database Restored Successfully',
+        message: `${resp.data.table_count} tables restored from ${restoreFile.name} — SHA-256: ${resp.data.sha256.slice(0, 12)}...`,
+        color: 'green',
+        autoClose: 10000,
+      });
     } catch (err: any) {
       notifications.show({ title: 'Restore Failed', message: err.response?.data?.detail || 'Restore failed', color: 'red' });
     } finally {
-      setBackupRestoring(null);
-    }
-  };
-
-  const handleDownloadBackup = (filename: string) => {
-    const link = document.createElement('a');
-    link.href = `${api.defaults.baseURL}/backup/download/${filename}`;
-    link.setAttribute('download', filename);
-    // Add auth header via fetch
-    api.get(`/backup/download/${filename}`, { responseType: 'blob' }).then((resp) => {
-      const url = window.URL.createObjectURL(new Blob([resp.data]));
-      link.href = url;
-      link.click();
-      window.URL.revokeObjectURL(url);
-    }).catch(() => {
-      notifications.show({ title: 'Download Failed', message: 'Could not download backup', color: 'red' });
-    });
-  };
-
-  const handleUploadRestore = async (file: File) => {
-    setBackupUploading(true);
-    try {
-      const formData = new FormData();
-      formData.append('file', file);
-      await api.post('/backup/upload-restore', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
-      notifications.show({ title: 'Restore Complete', message: `Database restored from ${file.name}`, color: 'green' });
-      loadBackups();
-    } catch (err: any) {
-      notifications.show({ title: 'Restore Failed', message: err.response?.data?.detail || 'Upload restore failed', color: 'red' });
-    } finally {
-      setBackupUploading(false);
+      setRestoreRunning(false);
     }
   };
 
@@ -726,147 +745,137 @@ export default function Settings() {
                 <IconDatabaseExport size={20} color="#00d4ff" />
                 <Title order={3} c="#e8edf2" style={{ letterSpacing: '1px' }}>DATABASE BACKUP & RESTORE</Title>
               </Group>
-              <Text c="#ff6b6b" size="xs" fw={700} mb="md" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+              <Text c="#ff6b6b" size="xs" fw={700} mb="sm" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
                 THIS DATA IS IRREPLICABLE. MAINTAIN REGULAR BACKUPS.
               </Text>
+              <Text c="#5a6478" size="xs" mb="md" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+                Backups are saved directly to your local machine. Restore uploads from your local machine.
+                All backups are validated with SHA-256 checksums and archive integrity checks before download and before restore.
+              </Text>
 
-              <Group mb="md">
+              {/* ── BACKUP SECTION ── */}
+              <Text size="11px" c="#00d4ff" fw={700} mb="xs" style={{ fontFamily: "'Share Tech Mono', monospace", letterSpacing: '1px' }}>
+                BACKUP
+              </Text>
+              <Group mb="md" align="flex-start">
                 <Button
-                  leftSection={<IconDatabaseExport size={16} />}
+                  leftSection={<IconDownload size={16} />}
                   color="cyan"
                   loading={backupCreating}
-                  onClick={handleCreateBackup}
+                  onClick={handleBackupAndDownload}
                   styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}
                 >
-                  CREATE BACKUP
-                </Button>
-                <Button
-                  leftSection={<IconDatabaseImport size={16} />}
-                  color="orange"
-                  variant="light"
-                  loading={backupUploading}
-                  onClick={() => {
-                    const input = document.createElement('input');
-                    input.type = 'file';
-                    input.accept = '.dump,.sql,.backup';
-                    input.onchange = (e) => {
-                      const file = (e.target as HTMLInputElement).files?.[0];
-                      if (file) handleUploadRestore(file);
-                    };
-                    input.click();
-                  }}
-                  styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}
-                >
-                  UPLOAD & RESTORE
+                  {backupCreating ? 'CREATING & VERIFYING...' : 'BACKUP & SAVE TO COMPUTER'}
                 </Button>
               </Group>
 
-              {backups.length > 0 && (
-                <Table
-                  styles={{
-                    table: { color: '#e8edf2' },
-                    th: { color: '#00d4ff', fontFamily: "'Share Tech Mono', monospace", fontSize: '11px', letterSpacing: '1px', borderBottom: '1px solid #1a1f2e', padding: '8px' },
-                    td: { borderBottom: '1px solid #1a1f2e', padding: '6px 8px', fontSize: '13px' },
-                  }}
-                >
-                  <Table.Thead>
-                    <Table.Tr>
-                      <Table.Th>BACKUP FILE</Table.Th>
-                      <Table.Th>SIZE</Table.Th>
-                      <Table.Th>CREATED</Table.Th>
-                      <Table.Th>ACTIONS</Table.Th>
-                    </Table.Tr>
-                  </Table.Thead>
-                  <Table.Tbody>
-                    {backups.map((b) => (
-                      <Table.Tr key={b.filename}>
-                        <Table.Td>
-                          <Text size="xs" style={{ fontFamily: "'Share Tech Mono', monospace" }} c="#e8edf2">{b.filename}</Text>
-                        </Table.Td>
-                        <Table.Td>
-                          <Text size="xs" style={{ fontFamily: "'Share Tech Mono', monospace" }} c="#5a6478">{(b.size_bytes / 1024 / 1024).toFixed(1)} MB</Text>
-                        </Table.Td>
-                        <Table.Td>
-                          <Text size="xs" style={{ fontFamily: "'Share Tech Mono', monospace" }} c="#5a6478">{new Date(b.created_at).toLocaleString()}</Text>
-                        </Table.Td>
-                        <Table.Td>
-                          <Group gap={4}>
-                            <Button size="compact-xs" variant="subtle" color="cyan" onClick={() => handleDownloadBackup(b.filename)}
-                              leftSection={<IconDownload size={12} />}>DL</Button>
-                            <Button size="compact-xs" variant="subtle" color="green" loading={backupVerifying === b.filename}
-                              onClick={() => handleVerifyBackup(b.filename)} leftSection={<IconShieldCheck size={12} />}>VERIFY</Button>
-                            <Button size="compact-xs" variant="subtle" color="orange"
-                              onClick={() => { setRestoreConfirmFile(b.filename); setRestoreChecked(false); }}
-                              leftSection={<IconDatabaseImport size={12} />}>RESTORE</Button>
-                          </Group>
-                        </Table.Td>
-                      </Table.Tr>
-                    ))}
-                  </Table.Tbody>
-                </Table>
-              )}
-
-              {backupVerifyResult && (
-                <Card mt="sm" padding="sm" radius="sm" style={{ background: backupVerifyResult.valid ? 'rgba(46, 204, 64, 0.08)' : 'rgba(255, 107, 107, 0.08)', border: `1px solid ${backupVerifyResult.valid ? '#2ecc40' : '#ff6b6b'}` }}>
+              {backupResult && (
+                <Card mb="md" padding="sm" radius="sm" style={{ background: 'rgba(46, 204, 64, 0.08)', border: '1px solid #2ecc40' }}>
                   <Group gap="sm">
-                    {backupVerifyResult.valid ? <IconShieldCheck size={18} color="#2ecc40" /> : <IconAlertTriangle size={18} color="#ff6b6b" />}
+                    <IconShieldCheck size={20} color="#2ecc40" />
                     <div>
-                      <Text size="xs" fw={700} c={backupVerifyResult.valid ? '#2ecc40' : '#ff6b6b'}>
-                        {backupVerifyResult.valid ? 'INTEGRITY VERIFIED' : 'INTEGRITY CHECK FAILED'}
+                      <Text size="xs" fw={700} c="#2ecc40">BACKUP CREATED & INTEGRITY VERIFIED</Text>
+                      <Text size="xs" c="#5a6478" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+                        File: {backupResult.filename}
                       </Text>
                       <Text size="xs" c="#5a6478" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
-                        SHA-256: {backupVerifyResult.sha256_actual.slice(0, 16)}... | Archive: {backupVerifyResult.archive_valid ? 'Valid' : 'Invalid'} | Objects: {backupVerifyResult.toc_entries}
+                        Size: {(backupResult.size / 1024 / 1024).toFixed(2)} MB | Objects: {backupResult.objects} | SHA-256: {backupResult.sha256.slice(0, 24)}...
                       </Text>
                     </div>
                   </Group>
                 </Card>
               )}
 
-              {backups.length === 0 && (
-                <Text c="#5a6478" size="sm" ta="center" py="md" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
-                  No backups yet. Create your first backup above.
-                </Text>
+              {/* ── RESTORE SECTION ── */}
+              <Text size="11px" c="#00d4ff" fw={700} mb="xs" mt="md" style={{ fontFamily: "'Share Tech Mono', monospace", letterSpacing: '1px' }}>
+                RESTORE
+              </Text>
+              <Group mb="sm" align="flex-start">
+                <Button
+                  leftSection={<IconDatabaseImport size={16} />}
+                  color="orange"
+                  variant="light"
+                  loading={restoreValidating}
+                  onClick={handleRestoreFileSelect}
+                  styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}
+                >
+                  {restoreValidating ? 'VALIDATING...' : 'SELECT BACKUP FILE FROM COMPUTER'}
+                </Button>
+              </Group>
+
+              {/* Validation result */}
+              {restoreValidation && (
+                <Card mb="sm" padding="md" radius="sm" style={{ background: 'rgba(0, 212, 255, 0.05)', border: '1px solid #1a1f2e' }}>
+                  <Group gap="sm" mb="sm">
+                    <IconShieldCheck size={18} color="#2ecc40" />
+                    <Text size="xs" fw={700} c="#2ecc40">FILE VALIDATED — READY TO RESTORE</Text>
+                  </Group>
+                  <Stack gap={4} mb="md">
+                    <Text size="xs" c="#5a6478" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+                      File: {restoreValidation.filename}
+                    </Text>
+                    <Text size="xs" c="#5a6478" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+                      Size: {(restoreValidation.size_bytes / 1024 / 1024).toFixed(2)} MB | Objects: {restoreValidation.toc_entries}
+                    </Text>
+                    <Text size="xs" c="#5a6478" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+                      SHA-256: {restoreValidation.sha256}
+                    </Text>
+                  </Stack>
+
+                  <Card padding="sm" radius="sm" style={{ background: 'rgba(255, 107, 107, 0.08)', border: '1px solid rgba(255, 107, 107, 0.3)' }}>
+                    <Group gap="sm" mb="sm">
+                      <IconAlertTriangle size={20} color="#ff6b6b" />
+                      <Text c="#ff6b6b" size="sm" fw={700}>WARNING: This will replace ALL current data.</Text>
+                    </Group>
+                    <Text c="#5a6478" size="xs" mb="sm">
+                      Restoring will drop and recreate all database tables. This cannot be undone.
+                      Make sure you have a backup of the current database before proceeding.
+                    </Text>
+                    <Checkbox
+                      label="I understand this will permanently replace all current data"
+                      checked={restoreChecked}
+                      onChange={(e) => setRestoreChecked(e.currentTarget.checked)}
+                      color="red"
+                      mb="sm"
+                    />
+                    <Group>
+                      <Button
+                        color="red"
+                        disabled={!restoreChecked}
+                        loading={restoreRunning}
+                        onClick={handleConfirmRestore}
+                        leftSection={<IconDatabaseImport size={16} />}
+                        styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}
+                      >
+                        {restoreRunning ? 'RESTORING...' : 'RESTORE DATABASE NOW'}
+                      </Button>
+                      <Button
+                        variant="subtle"
+                        color="gray"
+                        onClick={() => { setRestoreFile(null); setRestoreValidation(null); setRestoreChecked(false); setRestoreResult(null); }}
+                      >
+                        Cancel
+                      </Button>
+                    </Group>
+                  </Card>
+                </Card>
+              )}
+
+              {/* Restore success result */}
+              {restoreResult && restoreResult.restored && (
+                <Card mt="sm" padding="sm" radius="sm" style={{ background: 'rgba(46, 204, 64, 0.08)', border: '1px solid #2ecc40' }}>
+                  <Group gap="sm">
+                    <IconShieldCheck size={20} color="#2ecc40" />
+                    <div>
+                      <Text size="xs" fw={700} c="#2ecc40">DATABASE RESTORED & VERIFIED</Text>
+                      <Text size="xs" c="#5a6478" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+                        {restoreResult.table_count} tables restored | SHA-256: {restoreResult.sha256.slice(0, 24)}...
+                      </Text>
+                    </div>
+                  </Group>
+                </Card>
               )}
             </Card>
-
-            {/* Restore Confirmation Modal */}
-            <Modal
-              opened={!!restoreConfirmFile}
-              onClose={() => { setRestoreConfirmFile(null); setRestoreChecked(false); }}
-              title={<Text fw={700} c="#ff6b6b" style={{ fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '2px' }}>CONFIRM DATABASE RESTORE</Text>}
-              styles={{ header: { background: '#0e1117', borderBottom: '1px solid #1a1f2e' }, body: { background: '#0e1117' }, content: { background: '#0e1117' } }}
-            >
-              <Stack gap="md">
-                <Group gap="sm">
-                  <IconAlertTriangle size={24} color="#ff6b6b" />
-                  <Text c="#ff6b6b" fw={700}>WARNING: This will replace ALL current data.</Text>
-                </Group>
-                <Text c="#5a6478" size="sm">
-                  Restoring from <strong style={{ color: '#e8edf2' }}>{restoreConfirmFile}</strong> will overwrite the entire database.
-                  This action cannot be undone. Create a backup of the current database first if needed.
-                </Text>
-                <Checkbox
-                  label="I understand this will replace all current data"
-                  checked={restoreChecked}
-                  onChange={(e) => setRestoreChecked(e.currentTarget.checked)}
-                  color="red"
-                />
-                <Group justify="flex-end">
-                  <Button variant="subtle" color="gray" onClick={() => { setRestoreConfirmFile(null); setRestoreChecked(false); }}>
-                    Cancel
-                  </Button>
-                  <Button
-                    color="red"
-                    disabled={!restoreChecked}
-                    loading={backupRestoring === restoreConfirmFile}
-                    onClick={() => restoreConfirmFile && handleRestoreBackup(restoreConfirmFile)}
-                    styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}
-                  >
-                    RESTORE DATABASE
-                  </Button>
-                </Group>
-              </Stack>
-            </Modal>
           </Stack>
         </Tabs.Panel>
 

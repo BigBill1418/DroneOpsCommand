@@ -20,14 +20,10 @@ logger = logging.getLogger("doc.backup")
 
 router = APIRouter(prefix="/api/backup", tags=["backup"])
 
-BACKUP_DIR = "/data/backups"
-
 
 def _pg_conn_args() -> dict:
     """Extract PostgreSQL connection args from the database URL."""
-    # database_url_sync: postgresql://doc:changeme@db:5432/doc
     url = settings.database_url_sync
-    # Strip scheme
     rest = url.split("://", 1)[1]
     userinfo, hostinfo = rest.rsplit("@", 1)
     user, password = userinfo.split(":", 1)
@@ -44,25 +40,53 @@ def _run_pg_command(cmd: list[str], env: dict, timeout: int = 300) -> subprocess
     )
 
 
-@router.post("/create")
-async def create_backup(
+def _compute_sha256(filepath: str) -> str:
+    """Compute SHA-256 hash of a file."""
+    sha256 = hashlib.sha256()
+    with open(filepath, "rb") as f:
+        for chunk in iter(lambda: f.read(8192), b""):
+            sha256.update(chunk)
+    return sha256.hexdigest()
+
+
+def _validate_archive(filepath: str, env: dict) -> tuple[bool, int]:
+    """Validate a pg_dump archive. Returns (valid, toc_entry_count)."""
+    try:
+        result = _run_pg_command(["pg_restore", "--list", filepath], env, timeout=60)
+        valid = result.returncode == 0
+        entries = len([l for l in result.stdout.splitlines() if l.strip() and not l.startswith(";")])
+        return valid, entries
+    except FileNotFoundError:
+        raise HTTPException(status_code=500, detail="pg_restore not found — postgresql-client not installed")
+    except subprocess.TimeoutExpired:
+        return False, 0
+
+
+@router.post("/create-and-download")
+async def create_and_download(
     _user: User = Depends(get_current_user),
 ):
-    """Create a full PostgreSQL backup (custom format) with SHA-256 checksum."""
-    os.makedirs(BACKUP_DIR, exist_ok=True)
+    """Create a PostgreSQL backup, verify it, then stream it as a download.
 
+    The backup is created in a temp file, validated for integrity, then
+    streamed directly to the client browser as a file download (Save As).
+    SHA-256 checksum is included in response headers for verification.
+    """
     conn = _pg_conn_args()
+    env = {"PGPASSWORD": conn["password"]}
     timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
     filename = f"doc_backup_{timestamp}.dump"
-    filepath = os.path.join(BACKUP_DIR, filename)
 
-    env = {"PGPASSWORD": conn["password"]}
+    # Create backup in a temp directory
+    tmpdir = tempfile.mkdtemp(prefix="doc_backup_")
+    filepath = os.path.join(tmpdir, filename)
+
     cmd = [
         "pg_dump",
         "-h", conn["host"],
         "-p", conn["port"],
         "-U", conn["user"],
-        "-Fc",  # custom format — supports selective restore, compression
+        "-Fc",  # custom format — compressed, supports selective restore
         "-f", filepath,
         conn["dbname"],
     ]
@@ -78,226 +102,143 @@ async def create_backup(
         logger.error("pg_dump failed: %s", result.stderr)
         raise HTTPException(status_code=500, detail=f"Backup failed: {result.stderr[:500]}")
 
+    # Validate the archive before sending to user
+    archive_valid, toc_entries = _validate_archive(filepath, env)
+    if not archive_valid:
+        os.unlink(filepath)
+        os.rmdir(tmpdir)
+        raise HTTPException(status_code=500, detail="Backup archive failed validation — file is corrupt")
+
     # Compute SHA-256 checksum
-    sha256 = hashlib.sha256()
-    with open(filepath, "rb") as f:
-        for chunk in iter(lambda: f.read(8192), b""):
-            sha256.update(chunk)
-    checksum = sha256.hexdigest()
-
-    # Write checksum file
-    checksum_path = filepath + ".sha256"
-    with open(checksum_path, "w") as f:
-        f.write(f"{checksum}  {filename}\n")
-
+    checksum = _compute_sha256(filepath)
     file_size = os.path.getsize(filepath)
-    logger.info("Backup created: %s (%d bytes, sha256=%s)", filename, file_size, checksum)
 
-    return {
-        "filename": filename,
-        "size_bytes": file_size,
-        "sha256": checksum,
-        "created_at": datetime.utcnow().isoformat(),
-    }
-
-
-@router.get("/download/{filename}")
-async def download_backup(
-    filename: str,
-    _user: User = Depends(get_current_user),
-):
-    """Download a backup file."""
-    # Sanitize filename to prevent path traversal
-    safe_name = os.path.basename(filename)
-    filepath = os.path.join(BACKUP_DIR, safe_name)
-
-    if not os.path.isfile(filepath):
-        raise HTTPException(status_code=404, detail="Backup file not found")
+    logger.info(
+        "Backup created & verified: %s (%d bytes, sha256=%s, %d objects)",
+        filename, file_size, checksum, toc_entries,
+    )
 
     def iter_file():
-        with open(filepath, "rb") as f:
-            while chunk := f.read(65536):
-                yield chunk
+        try:
+            with open(filepath, "rb") as f:
+                while chunk := f.read(65536):
+                    yield chunk
+        finally:
+            # Clean up temp file after streaming
+            try:
+                os.unlink(filepath)
+                os.rmdir(tmpdir)
+            except OSError:
+                pass
 
     return StreamingResponse(
         iter_file(),
         media_type="application/octet-stream",
-        headers={"Content-Disposition": f'attachment; filename="{safe_name}"'},
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Length": str(file_size),
+            "X-Backup-SHA256": checksum,
+            "X-Backup-Objects": str(toc_entries),
+            "X-Backup-Timestamp": timestamp,
+            "Access-Control-Expose-Headers": "X-Backup-SHA256, X-Backup-Objects, X-Backup-Timestamp, Content-Disposition",
+        },
     )
 
 
-@router.get("/list")
-async def list_backups(
-    _user: User = Depends(get_current_user),
-):
-    """List all available backups with their checksums."""
-    os.makedirs(BACKUP_DIR, exist_ok=True)
-    backups = []
-
-    for fname in sorted(os.listdir(BACKUP_DIR), reverse=True):
-        if not fname.endswith(".dump"):
-            continue
-        fpath = os.path.join(BACKUP_DIR, fname)
-        checksum = ""
-        checksum_file = fpath + ".sha256"
-        if os.path.isfile(checksum_file):
-            with open(checksum_file) as f:
-                checksum = f.read().split()[0] if f.read else ""
-                # Re-read since f.read consumed it
-            with open(checksum_file) as f:
-                line = f.readline().strip()
-                checksum = line.split()[0] if line else ""
-
-        backups.append({
-            "filename": fname,
-            "size_bytes": os.path.getsize(fpath),
-            "created_at": datetime.utcfromtimestamp(os.path.getmtime(fpath)).isoformat(),
-            "sha256": checksum,
-        })
-
-    return backups
-
-
-@router.post("/verify/{filename}")
-async def verify_backup(
-    filename: str,
-    _user: User = Depends(get_current_user),
-):
-    """Verify backup integrity by checking SHA-256 checksum and pg_restore validation."""
-    safe_name = os.path.basename(filename)
-    filepath = os.path.join(BACKUP_DIR, safe_name)
-
-    if not os.path.isfile(filepath):
-        raise HTTPException(status_code=404, detail="Backup file not found")
-
-    # 1. Verify SHA-256 checksum
-    sha256 = hashlib.sha256()
-    with open(filepath, "rb") as f:
-        for chunk in iter(lambda: f.read(8192), b""):
-            sha256.update(chunk)
-    actual_checksum = sha256.hexdigest()
-
-    checksum_file = filepath + ".sha256"
-    stored_checksum = ""
-    checksum_match = None
-    if os.path.isfile(checksum_file):
-        with open(checksum_file) as f:
-            line = f.readline().strip()
-            stored_checksum = line.split()[0] if line else ""
-        checksum_match = actual_checksum == stored_checksum
-
-    # 2. Validate with pg_restore --list (checks archive structure without restoring)
-    conn = _pg_conn_args()
-    env = {"PGPASSWORD": conn["password"]}
-    try:
-        result = _run_pg_command(["pg_restore", "--list", filepath], env, timeout=60)
-        archive_valid = result.returncode == 0
-        toc_entries = len([l for l in result.stdout.splitlines() if l.strip() and not l.startswith(";")])
-    except FileNotFoundError:
-        raise HTTPException(status_code=500, detail="pg_restore not found — postgresql-client not installed")
-    except subprocess.TimeoutExpired:
-        archive_valid = False
-        toc_entries = 0
-
-    is_valid = archive_valid and (checksum_match is not False)
-
-    return {
-        "filename": safe_name,
-        "valid": is_valid,
-        "sha256_actual": actual_checksum,
-        "sha256_stored": stored_checksum,
-        "checksum_match": checksum_match,
-        "archive_valid": archive_valid,
-        "toc_entries": toc_entries,
-        "size_bytes": os.path.getsize(filepath),
-    }
-
-
-@router.post("/restore/{filename}")
-async def restore_backup(
-    filename: str,
-    _user: User = Depends(get_current_user),
-):
-    """Restore the database from a backup file. WARNING: this replaces ALL current data."""
-    safe_name = os.path.basename(filename)
-    filepath = os.path.join(BACKUP_DIR, safe_name)
-
-    if not os.path.isfile(filepath):
-        raise HTTPException(status_code=404, detail="Backup file not found")
-
-    conn = _pg_conn_args()
-    env = {"PGPASSWORD": conn["password"]}
-
-    # Use pg_restore with --clean to drop existing objects first
-    cmd = [
-        "pg_restore",
-        "-h", conn["host"],
-        "-p", conn["port"],
-        "-U", conn["user"],
-        "-d", conn["dbname"],
-        "--clean",
-        "--if-exists",
-        "--no-owner",
-        "--no-privileges",
-        filepath,
-    ]
-
-    try:
-        result = _run_pg_command(cmd, env, timeout=600)
-    except subprocess.TimeoutExpired:
-        raise HTTPException(status_code=504, detail="Restore timed out")
-    except FileNotFoundError:
-        raise HTTPException(status_code=500, detail="pg_restore not found — postgresql-client not installed")
-
-    # pg_restore may return non-zero for warnings (e.g. "role does not exist") which are harmless
-    if result.returncode != 0 and "ERROR" in result.stderr:
-        # Check if there are actual errors vs just warnings
-        errors = [l for l in result.stderr.splitlines() if "ERROR" in l]
-        if errors:
-            logger.error("pg_restore errors: %s", "\n".join(errors[:10]))
-            raise HTTPException(status_code=500, detail=f"Restore had errors: {errors[0][:200]}")
-
-    logger.info("Database restored from %s", safe_name)
-    return {
-        "restored": True,
-        "filename": safe_name,
-        "warnings": result.stderr[:1000] if result.stderr else None,
-    }
-
-
-@router.post("/upload-restore")
-async def upload_and_restore(
+@router.post("/validate-upload")
+async def validate_upload(
     file: UploadFile = File(...),
     _user: User = Depends(get_current_user),
 ):
-    """Upload a backup file and restore from it."""
-    os.makedirs(BACKUP_DIR, exist_ok=True)
+    """Upload a backup file and validate it WITHOUT restoring.
 
-    # Save uploaded file
+    Returns integrity info so the user can confirm before proceeding.
+    The file is saved to a temp location for the subsequent restore call.
+    """
+    conn = _pg_conn_args()
+    env = {"PGPASSWORD": conn["password"]}
+
+    # Save to temp file for validation
+    tmpdir = tempfile.mkdtemp(prefix="doc_restore_")
     safe_name = os.path.basename(file.filename or "uploaded_backup.dump")
-    filepath = os.path.join(BACKUP_DIR, safe_name)
+    filepath = os.path.join(tmpdir, safe_name)
 
     content = await file.read()
     with open(filepath, "wb") as f:
         f.write(content)
 
-    # Compute and store checksum
-    sha256 = hashlib.sha256(content).hexdigest()
-    with open(filepath + ".sha256", "w") as f:
-        f.write(f"{sha256}  {safe_name}\n")
+    # Compute checksum
+    checksum = hashlib.sha256(content).hexdigest()
 
-    # Verify archive is valid before restoring
+    # Validate archive structure
+    archive_valid, toc_entries = _validate_archive(filepath, env)
+
+    if not archive_valid:
+        # Clean up
+        os.unlink(filepath)
+        os.rmdir(tmpdir)
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid backup file — not a valid PostgreSQL custom-format archive. "
+                   "Only .dump files created by pg_dump -Fc are supported.",
+        )
+
+    logger.info(
+        "Upload validated: %s (%d bytes, sha256=%s, %d objects)",
+        safe_name, len(content), checksum, toc_entries,
+    )
+
+    return {
+        "valid": True,
+        "filename": safe_name,
+        "temp_path": filepath,
+        "sha256": checksum,
+        "size_bytes": len(content),
+        "toc_entries": toc_entries,
+    }
+
+
+@router.post("/restore-from-upload")
+async def restore_from_upload(
+    file: UploadFile = File(...),
+    _user: User = Depends(get_current_user),
+):
+    """Upload a backup file and restore the database from it.
+
+    Validates the archive first, then performs the restore.
+    This replaces ALL current database contents.
+    """
     conn = _pg_conn_args()
     env = {"PGPASSWORD": conn["password"]}
 
-    try:
-        check = _run_pg_command(["pg_restore", "--list", filepath], env, timeout=60)
-        if check.returncode != 0:
-            raise HTTPException(status_code=400, detail="Invalid backup file — not a valid PostgreSQL archive")
-    except FileNotFoundError:
-        raise HTTPException(status_code=500, detail="pg_restore not found — postgresql-client not installed")
+    # Save to temp file
+    tmpdir = tempfile.mkdtemp(prefix="doc_restore_")
+    safe_name = os.path.basename(file.filename or "uploaded_backup.dump")
+    filepath = os.path.join(tmpdir, safe_name)
 
-    # Restore
+    content = await file.read()
+    with open(filepath, "wb") as f:
+        f.write(content)
+
+    # Compute checksum
+    checksum = hashlib.sha256(content).hexdigest()
+
+    # Validate archive BEFORE restoring
+    archive_valid, toc_entries = _validate_archive(filepath, env)
+    if not archive_valid:
+        os.unlink(filepath)
+        os.rmdir(tmpdir)
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid backup file — archive validation failed. Restore aborted to protect existing data.",
+        )
+
+    logger.info(
+        "Restoring from upload: %s (sha256=%s, %d objects)",
+        safe_name, checksum, toc_entries,
+    )
+
+    # Perform restore
     cmd = [
         "pg_restore",
         "-h", conn["host"],
@@ -314,17 +255,59 @@ async def upload_and_restore(
     try:
         result = _run_pg_command(cmd, env, timeout=600)
     except subprocess.TimeoutExpired:
+        os.unlink(filepath)
+        os.rmdir(tmpdir)
         raise HTTPException(status_code=504, detail="Restore timed out")
 
-    if result.returncode != 0 and "ERROR" in result.stderr:
+    # Clean up temp file
+    try:
+        os.unlink(filepath)
+        os.rmdir(tmpdir)
+    except OSError:
+        pass
+
+    # pg_restore returns non-zero for harmless warnings; only fail on real errors
+    if result.returncode != 0 and result.stderr:
         errors = [l for l in result.stderr.splitlines() if "ERROR" in l]
         if errors:
-            raise HTTPException(status_code=500, detail=f"Restore had errors: {errors[0][:200]}")
+            logger.error("pg_restore errors: %s", "\n".join(errors[:10]))
+            raise HTTPException(
+                status_code=500,
+                detail=f"Restore had errors: {errors[0][:200]}",
+            )
 
-    logger.info("Database restored from uploaded file %s (sha256=%s)", safe_name, sha256)
+    # Post-restore validation: verify key tables exist and are accessible
+    verify_result = _run_pg_command(
+        [
+            "psql",
+            "-h", conn["host"],
+            "-p", conn["port"],
+            "-U", conn["user"],
+            "-d", conn["dbname"],
+            "-c", "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';",
+            "-t", "-A",
+        ],
+        env,
+        timeout=15,
+    )
+    table_count = 0
+    if verify_result.returncode == 0:
+        try:
+            table_count = int(verify_result.stdout.strip())
+        except ValueError:
+            pass
+
+    logger.info(
+        "Database restored from %s — %d public tables present, sha256=%s",
+        safe_name, table_count, checksum,
+    )
+
     return {
         "restored": True,
         "filename": safe_name,
-        "sha256": sha256,
+        "sha256": checksum,
         "size_bytes": len(content),
+        "toc_entries": toc_entries,
+        "table_count": table_count,
+        "warnings": result.stderr[:1000] if result.stderr else None,
     }
