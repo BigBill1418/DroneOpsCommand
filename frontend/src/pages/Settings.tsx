@@ -3,6 +3,7 @@ import {
   Badge,
   Button,
   Card,
+  Checkbox,
   Group,
   Loader,
   Stack,
@@ -61,6 +62,9 @@ export default function Settings() {
   const [djiSaving, setDjiSaving] = useState(false);
   const [djiTesting, setDjiTesting] = useState(false);
   const [djiStatus, setDjiStatus] = useState<{ status: string; message?: string } | null>(null);
+  const [purgeConfirmOpen, setPurgeConfirmOpen] = useState(false);
+  const [purgeChecked, setPurgeChecked] = useState(false);
+  const [purging, setPurging] = useState(false);
   const [odlImporting, setOdlImporting] = useState(false);
   const [odlImportProgress, setOdlImportProgress] = useState({ current: 0, total: 0, imported: 0, skipped: 0, errors: 0, currentFlight: '' });
   const [accountSaving, setAccountSaving] = useState(false);
@@ -293,6 +297,20 @@ export default function Settings() {
       setDjiStatus({ status: 'error', message: axiosErr.response?.data?.detail || 'Test failed' });
     } finally {
       setDjiTesting(false);
+    }
+  };
+
+  const handlePurgeFlights = async () => {
+    setPurging(true);
+    try {
+      const r = await api.delete('/flight-library/purge/all');
+      notifications.show({ title: 'Flights Purged', message: `${r.data.deleted} flights deleted`, color: 'orange' });
+      setPurgeConfirmOpen(false);
+      setPurgeChecked(false);
+    } catch {
+      notifications.show({ title: 'Error', message: 'Failed to purge flights', color: 'red' });
+    } finally {
+      setPurging(false);
     }
   };
 
@@ -836,6 +854,27 @@ export default function Settings() {
               </form>
             </Card>
 
+            {/* Purge Flight Data */}
+            <Card padding="lg" radius="md" style={{ ...cardStyle, border: '1px solid rgba(255, 68, 68, 0.2)' }}>
+              <Group gap="sm" mb="md">
+                <IconTrash size={20} color="#ff4444" />
+                <Title order={3} c="#e8edf2" style={{ letterSpacing: '1px' }}>PURGE FLIGHT DATA</Title>
+              </Group>
+              <Text c="#5a6478" size="xs" mb="sm" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+                Delete all flights from the local database. Use this before re-importing from OpenDroneLog to get a clean sync.
+                This action cannot be undone.
+              </Text>
+              <Button
+                color="red"
+                variant="light"
+                leftSection={<IconTrash size={14} />}
+                onClick={() => { setPurgeChecked(false); setPurgeConfirmOpen(true); }}
+                styles={{ root: { fontFamily: "'Bebas Neue', sans-serif" } }}
+              >
+                WIPE ALL FLIGHTS
+              </Button>
+            </Card>
+
             {/* DJI API Key */}
             <Card padding="lg" radius="md" style={cardStyle}>
               <Group gap="sm" mb="md">
@@ -1093,6 +1132,48 @@ export default function Settings() {
             </Button>
           </Stack>
         </form>
+      </Modal>
+      {/* Purge Flights Confirmation Modal */}
+      <Modal
+        opened={purgeConfirmOpen}
+        onClose={() => setPurgeConfirmOpen(false)}
+        title={<Text fw={700} c="#ff4444" style={{ fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '2px' }}>CONFIRM FLIGHT DATA PURGE</Text>}
+        styles={{ header: { background: '#0e1117', borderBottom: '1px solid rgba(255,68,68,0.3)' }, body: { background: '#0e1117' }, content: { background: '#0e1117' } }}
+        size="sm"
+      >
+        <Stack gap="md">
+          <Text c="#e8edf2" size="sm">
+            This will permanently delete <strong>all flights</strong> and their associated battery logs from the local database.
+          </Text>
+          <Text c="#ff6b1a" size="xs" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+            This action cannot be undone. You can re-import from OpenDroneLog after purging.
+          </Text>
+          <Checkbox
+            label="I understand this will delete all flight data"
+            checked={purgeChecked}
+            onChange={(e) => setPurgeChecked(e.currentTarget.checked)}
+            styles={{
+              input: { borderColor: '#ff4444', '&:checked': { backgroundColor: '#ff4444', borderColor: '#ff4444' } },
+              label: { color: '#e8edf2', fontFamily: "'Share Tech Mono', monospace", fontSize: '12px' },
+            }}
+          />
+          <Group>
+            <Button variant="default" onClick={() => setPurgeConfirmOpen(false)}
+              styles={{ root: { fontFamily: "'Bebas Neue', sans-serif" } }}>
+              CANCEL
+            </Button>
+            <Button
+              color="red"
+              disabled={!purgeChecked}
+              loading={purging}
+              onClick={handlePurgeFlights}
+              leftSection={<IconTrash size={14} />}
+              styles={{ root: { fontFamily: "'Bebas Neue', sans-serif" } }}
+            >
+              PURGE ALL FLIGHTS
+            </Button>
+          </Group>
+        </Stack>
       </Modal>
     </Stack>
   );

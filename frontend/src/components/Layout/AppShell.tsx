@@ -140,10 +140,10 @@ export default function AppLayout({ onLogout }: AppLayoutProps) {
             c="#5a6478"
             style={{
               fontFamily: "'Share Tech Mono', monospace",
-              fontSize: '12px',
+              fontSize: '15px',
             }}
           >
-            v2.10.0
+            v2.11.0
           </Text>
           <Tooltip label="Star on GitHub" position="right">
             <ActionIcon

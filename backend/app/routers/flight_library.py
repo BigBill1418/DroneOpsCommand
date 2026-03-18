@@ -280,6 +280,24 @@ async def delete_flight(
     await db.delete(flight)
 
 
+# ── Purge all flights ────────────────────────────────────────────────
+@router.delete("/purge/all", status_code=200)
+async def purge_all_flights(
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """Delete ALL flights and associated battery logs. Requires confirmation."""
+    from sqlalchemy import delete as sql_delete
+
+    # Delete battery logs tied to flights first
+    await db.execute(sql_delete(BatteryLog).where(BatteryLog.flight_id.isnot(None)))
+    # Delete all flights
+    result = await db.execute(sql_delete(Flight))
+    count = result.rowcount
+    await db.commit()
+    return {"deleted": count}
+
+
 # ── Export flight ─────────────────────────────────────────────────────
 @router.get("/{flight_id}/export/{fmt}")
 async def export_flight(
