@@ -4,7 +4,7 @@ set -e
 # ── Configuration ──────────────────────────────────────────────────
 # Override these with environment variables or edit for your setup.
 INSTALL_DIR="${DRONEOPS_DIR:-$(cd "$(dirname "$0")" && pwd)}"
-BRANCH="${DRONEOPS_BRANCH:-claude/drone-report-generator-qk9UM}"
+BRANCH="${DRONEOPS_BRANCH:-main}"
 # ───────────────────────────────────────────────────────────────────
 
 cd "$INSTALL_DIR"
