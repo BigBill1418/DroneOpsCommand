@@ -62,28 +62,11 @@ export default function Login({ onLogin }: LoginProps) {
         <form onSubmit={handleSubmit}>
           <Stack gap="lg">
             <Center>
-              <div>
-                <Title
-                  order={1}
-                  style={{
-                    fontFamily: "'Bebas Neue', sans-serif",
-                    letterSpacing: '4px',
-                    fontSize: '36px',
-                    textAlign: 'center',
-                  }}
-                  c="#e8edf2"
-                >
-                  {branding.company_name.toUpperCase()}
-                </Title>
-                <Text
-                  ta="center"
-                  size="xs"
-                  c="#5a6478"
-                  style={{ fontFamily: "'Share Tech Mono', monospace", letterSpacing: '3px' }}
-                >
-                  {branding.company_tagline.toUpperCase()}
-                </Text>
-              </div>
+              <img
+                src="/logo-full.svg"
+                alt={branding.company_name}
+                style={{ width: '100%', maxWidth: 360, height: 'auto' }}
+              />
             </Center>
 
             <TextInput
