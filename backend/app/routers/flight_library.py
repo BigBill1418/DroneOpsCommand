@@ -259,7 +259,7 @@ async def get_telemetry(
     def downsample(arr, target):
         if not arr or len(arr) <= target:
             return arr
-        step = len(arr) / target
+        step = (len(arr) - 1) / (target - 1)
         return [arr[int(i * step)] for i in range(target)]
 
     return {

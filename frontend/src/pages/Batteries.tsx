@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import {
   Badge,
   Button,
@@ -310,8 +310,8 @@ export default function Batteries() {
                 </Table.Thead>
                 <Table.Tbody>
                   {grouped.map(([model, bats]) => (
-                    <>
-                      <Table.Tr key={`group-${model}`} style={{ background: 'rgba(0, 212, 255, 0.03)' }}>
+                    <Fragment key={model}>
+                      <Table.Tr style={{ background: 'rgba(0, 212, 255, 0.03)' }}>
                         <Table.Td colSpan={6} style={{ borderBottom: '1px solid #1a1f2e', padding: '6px 12px' }}>
                           <Group justify="space-between">
                             <Text size="xs" fw={700} c="#00d4ff" style={{ fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '2px', fontSize: '14px' }}>
@@ -388,7 +388,7 @@ export default function Batteries() {
                           </Table.Tr>
                         );
                       })}
-                    </>
+                    </Fragment>
                   ))}
                 </Table.Tbody>
               </Table>

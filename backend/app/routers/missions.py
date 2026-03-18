@@ -383,6 +383,8 @@ async def delete_image(
     if not image:
         raise HTTPException(status_code=404, detail="Image not found")
 
-    if os.path.exists(image.file_path):
+    try:
         os.remove(image.file_path)
+    except OSError:
+        pass
     await db.delete(image)
