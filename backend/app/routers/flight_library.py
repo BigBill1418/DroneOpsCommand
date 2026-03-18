@@ -428,6 +428,50 @@ async def flight_stats(
     )
     row = result.one()
     total = row[0] or 0
+
+    # Longest flight by duration
+    longest = None
+    longest_result = await db.execute(
+        select(Flight).where(Flight.duration_secs > 0).order_by(desc(Flight.duration_secs)).limit(1)
+    )
+    longest_flight = longest_result.scalar_one_or_none()
+    if longest_flight:
+        longest = {
+            "name": longest_flight.name,
+            "duration_secs": longest_flight.duration_secs,
+            "drone_model": longest_flight.drone_model,
+        }
+
+    # Farthest from home (max total_distance in a single flight)
+    farthest = None
+    farthest_result = await db.execute(
+        select(Flight).where(Flight.total_distance > 0).order_by(desc(Flight.total_distance)).limit(1)
+    )
+    farthest_flight = farthest_result.scalar_one_or_none()
+    if farthest_flight:
+        farthest = {
+            "name": farthest_flight.name,
+            "total_distance": farthest_flight.total_distance,
+            "drone_model": farthest_flight.drone_model,
+        }
+
+    # Recent flights (last 5)
+    recent_result = await db.execute(
+        select(Flight).order_by(desc(Flight.start_time)).limit(5)
+    )
+    recent_flights = [
+        {
+            "id": str(f.id),
+            "name": f.name,
+            "start_time": f.start_time.isoformat() if f.start_time else None,
+            "duration_secs": f.duration_secs,
+            "total_distance": f.total_distance,
+            "max_altitude": f.max_altitude,
+            "drone_model": f.drone_model,
+        }
+        for f in recent_result.scalars().all()
+    ]
+
     return {
         "total_flights": total,
         "total_duration": row[1] or 0,
@@ -437,6 +481,9 @@ async def flight_stats(
         "total_points": row[5] or 0,
         "avg_duration": (row[1] or 0) / total if total > 0 else 0,
         "avg_distance": (row[2] or 0) / total if total > 0 else 0,
+        "longest_flight": longest,
+        "farthest_flight": farthest,
+        "recent_flights": recent_flights,
     }
 
 

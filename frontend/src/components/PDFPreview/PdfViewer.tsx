@@ -11,8 +11,11 @@ import {
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
 
-// Configure PDF.js worker — use CDN so it loads on public pages (intake form via Cloudflare tunnel)
-pdfjs.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.mjs`;
+// Configure PDF.js worker — use local copy built by vite copyPdfWorker plugin.
+// In dev mode, import directly from node_modules via Vite's dependency resolution.
+pdfjs.GlobalWorkerOptions.workerSrc = import.meta.env.DEV
+  ? new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).href
+  : '/pdf.worker.min.mjs';
 
 interface PdfViewerProps {
   url: string;
