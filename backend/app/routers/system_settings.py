@@ -1,5 +1,7 @@
 """API endpoints for managing system settings (SMTP, etc.) from the admin portal."""
 
+import asyncio
+
 import httpx
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
@@ -305,26 +307,32 @@ async def test_dji_api_key(
     if not api_key:
         return {"status": "error", "message": "No DJI API key configured"}
 
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.get(
-                "https://developer-api.dji.com/openapi/v1/manage/user/info",
-                headers={"Api-Key": api_key},
-            )
-            if resp.status_code == 200:
-                return {"status": "online", "message": "API key is valid"}
-            elif resp.status_code == 401:
-                return {"status": "error", "message": "Invalid API key (401 Unauthorized)"}
-            elif resp.status_code == 403:
-                return {"status": "error", "message": "API key rejected (403 Forbidden)"}
-            else:
-                return {"status": "error", "message": f"DJI API returned HTTP {resp.status_code}"}
-    except httpx.ConnectError:
-        return {"status": "unknown", "message": "Cannot reach DJI API — check network connectivity"}
-    except httpx.TimeoutException:
-        return {"status": "unknown", "message": "DJI API request timed out"}
-    except Exception as e:
-        return {"status": "error", "message": f"Connection error: {type(e).__name__}"}
+    last_exc: Exception | None = None
+    for attempt in range(3):
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.get(
+                    "https://developer-api.dji.com/openapi/v1/manage/user/info",
+                    headers={"Api-Key": api_key},
+                )
+                if resp.status_code == 200:
+                    return {"status": "online", "message": "API key is valid"}
+                elif resp.status_code == 401:
+                    return {"status": "error", "message": "Invalid API key (401 Unauthorized)"}
+                elif resp.status_code == 403:
+                    return {"status": "error", "message": "API key rejected (403 Forbidden)"}
+                else:
+                    return {"status": "error", "message": f"DJI API returned HTTP {resp.status_code}"}
+        except (httpx.ConnectError, httpx.TimeoutException) as e:
+            last_exc = e
+            if attempt < 2:
+                await asyncio.sleep(1 * (attempt + 1))
+        except Exception as e:
+            return {"status": "error", "message": f"Connection error: {type(e).__name__}"}
+
+    if isinstance(last_exc, httpx.TimeoutException):
+        return {"status": "unknown", "message": "DJI API request timed out (3 attempts)"}
+    return {"status": "unknown", "message": "Cannot reach DJI API — check network connectivity (3 attempts failed)"}
 
 
 @router.get("/payment")

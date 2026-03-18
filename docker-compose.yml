@@ -62,6 +62,9 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     restart: unless-stopped
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     environment:
       - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://doc:changeme_in_production@db:5432/doc}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
