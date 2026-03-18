@@ -10,6 +10,7 @@ import {
 } from '@mantine/core';
 import {
   IconBattery3,
+  IconBrandGithub,
   IconChartBar,
   IconDashboard,
   IconDrone,
@@ -137,19 +138,38 @@ export default function AppLayout({ onLogout }: AppLayoutProps) {
             }}
           />
         ))}
-        <Text
-          size="xs"
-          c="#5a6478"
+        <Group
+          gap={8}
           style={{
-            fontFamily: "'Share Tech Mono', monospace",
-            fontSize: '12px',
             position: 'absolute',
             bottom: 12,
             left: 16,
           }}
         >
-          v2.4.7
-        </Text>
+          <Text
+            size="xs"
+            c="#5a6478"
+            style={{
+              fontFamily: "'Share Tech Mono', monospace",
+              fontSize: '12px',
+            }}
+          >
+            v2.4.8
+          </Text>
+          <Tooltip label="Star on GitHub" position="right">
+            <ActionIcon
+              variant="subtle"
+              color="gray"
+              size="xs"
+              component="a"
+              href="https://github.com/BigBill1418/DroneOpsCommand"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <IconBrandGithub size={14} />
+            </ActionIcon>
+          </Tooltip>
+        </Group>
       </AppShell.Navbar>
 
       <AppShell.Main>

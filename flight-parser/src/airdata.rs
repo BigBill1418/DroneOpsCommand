@@ -74,7 +74,7 @@ pub fn parse_airdata_csv(
             Some(v) if v.abs() > 0.001 => v,
             _ => continue,
         };
-        let lon: f64 = match record.get(lon_idx).and_then(|v| v.parse().ok()) {
+        let lon: f64 = match record.get(lon_idx).and_then(|v| v.parse::<f64>().ok()) {
             Some(v) if v.abs() > 0.001 => v,
             _ => continue,
         };

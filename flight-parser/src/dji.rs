@@ -61,8 +61,8 @@ pub fn parse_dji_log(
         let osd = &frame.osd;
         let lat = osd.latitude;
         let lon = osd.longitude;
-        let alt = osd.altitude as f64;
-        let spd = osd.speed as f64;
+        let alt = osd.height as f64;
+        let spd = ((osd.x_speed as f64).powi(2) + (osd.y_speed as f64).powi(2)).sqrt();
 
         if lat.abs() > 0.001 && lon.abs() > 0.001 {
             track.push(TrackPoint {
@@ -91,12 +91,12 @@ pub fn parse_dji_log(
         speeds.push(spd);
         if alt > max_alt { max_alt = alt; }
         if spd > max_speed { max_speed = spd; }
-        satellites_vec.push(osd.satellite_count as u32);
+        satellites_vec.push(osd.gps_num as u32);
 
         // Extract battery data
         let battery = &frame.battery;
         let voltage = battery.voltage as f64 / 1000.0; // mV to V
-        let pct = battery.charge_percent as f64;
+        let pct = battery.charge_level as f64;
         let temp = battery.temperature as f64;
 
         battery_pcts.push(pct);
