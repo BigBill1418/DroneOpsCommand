@@ -3,7 +3,7 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     # Database
-    database_url: str = "postgresql+asyncpg://droneops:changeme@db:5432/droneops"
+    database_url: str = "postgresql+asyncpg://doc:changeme@db:5432/doc"
 
     # Redis
     redis_url: str = "redis://redis:6379/0"

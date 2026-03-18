@@ -9,7 +9,7 @@ from shapely.ops import unary_union
 
 from app.config import settings
 
-logger = logging.getLogger("droneops.map_renderer")
+logger = logging.getLogger("doc.map_renderer")
 
 # Convert square meters to acres
 SQ_METERS_TO_ACRES = 0.000247105

@@ -170,4 +170,88 @@ export interface FlightRecord {
   notes?: string;
   drone_serial?: string;
   droneSerial?: string;
+  // Native flight fields
+  source?: string;
+  original_filename?: string;
+  battery_serial?: string;
+  tags?: string[];
+  gps_track?: TrackPoint[];
+  telemetry?: TelemetryData;
+  aircraft_id?: string;
+  updated_at?: string;
+}
+
+export interface TrackPoint {
+  lat: number;
+  lng: number;
+  alt: number;
+  timestamp?: string;
+  speed?: number;
+  heading?: number;
+}
+
+export interface TelemetryData {
+  timestamps: string[];
+  altitude: number[];
+  speed: number[];
+  battery_pct?: number[];
+  battery_voltage?: number[];
+  battery_temp?: number[];
+  satellites?: number[];
+  signal_strength?: number[];
+  distance_from_home?: number[];
+}
+
+export interface BatteryRecord {
+  id: string;
+  serial: string;
+  model: string | null;
+  purchase_date: string | null;
+  cycle_count: number;
+  last_voltage: number | null;
+  health_pct: number | null;
+  status: string;
+  notes: string | null;
+  aircraft_id: string | null;
+  aircraft: Aircraft | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BatteryLogRecord {
+  id: string;
+  battery_id: string;
+  flight_id: string | null;
+  timestamp: string;
+  start_voltage: number | null;
+  end_voltage: number | null;
+  min_voltage: number | null;
+  max_temp: number | null;
+  cycles_at_time: number | null;
+  discharge_mah: number | null;
+}
+
+export interface MaintenanceRecordType {
+  id: string;
+  aircraft_id: string;
+  maintenance_type: string;
+  description: string | null;
+  performed_at: string;
+  flight_hours_at: number | null;
+  next_due_hours: number | null;
+  next_due_date: string | null;
+  cost: number | null;
+  notes: string | null;
+  created_at: string;
+}
+
+export interface MaintenanceAlert {
+  schedule_id?: string;
+  record_id?: string;
+  aircraft_id: string;
+  maintenance_type: string;
+  description: string | null;
+  next_due_date: string | null;
+  days_until: number;
+  overdue: boolean;
 }

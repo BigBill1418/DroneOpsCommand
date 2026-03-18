@@ -66,7 +66,10 @@ class MissionFlight(Base):
     mission_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("missions.id", ondelete="CASCADE"), nullable=False
     )
-    opendronelog_flight_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    opendronelog_flight_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    flight_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("flights.id", ondelete="SET NULL"), nullable=True
+    )
     aircraft_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("aircraft.id"), nullable=True
     )
@@ -74,6 +77,7 @@ class MissionFlight(Base):
     added_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     mission = relationship("Mission", back_populates="flights")
+    flight = relationship("Flight", lazy="selectin")
     aircraft = relationship("Aircraft", lazy="selectin")
 
 

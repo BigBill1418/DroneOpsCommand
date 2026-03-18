@@ -8,14 +8,16 @@ from app.schemas.aircraft import AircraftResponse
 
 
 class MissionFlightCreate(BaseModel):
-    opendronelog_flight_id: str
+    opendronelog_flight_id: str | None = None
+    flight_id: UUID | None = None
     aircraft_id: UUID | None = None
     flight_data_cache: dict | None = None
 
 
 class MissionFlightResponse(BaseModel):
     id: UUID
-    opendronelog_flight_id: str
+    opendronelog_flight_id: str | None
+    flight_id: UUID | None = None
     aircraft_id: UUID | None
     aircraft: AircraftResponse | None = None
     flight_data_cache: dict | None

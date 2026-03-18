@@ -8,7 +8,7 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-celery_app = Celery("droneops", broker=settings.redis_url, backend=settings.redis_url)
+celery_app = Celery("doc", broker=settings.redis_url, backend=settings.redis_url)
 celery_app.conf.update(
     task_serializer="json",
     accept_content=["json"],

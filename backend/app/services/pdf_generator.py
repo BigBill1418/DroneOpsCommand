@@ -8,7 +8,7 @@ from weasyprint import HTML
 
 from app.config import settings
 
-logger = logging.getLogger("droneops.pdf_generator")
+logger = logging.getLogger("doc.pdf_generator")
 
 # Set up Jinja2 template environment
 template_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "templates")

@@ -5,6 +5,9 @@ from app.models.report import Report
 from app.models.invoice import Invoice, LineItem, LineItemCategory, RateTemplate
 from app.models.user import User
 from app.models.system_settings import SystemSetting
+from app.models.flight import Flight, FlightSource
+from app.models.battery import Battery, BatteryLog
+from app.models.maintenance import MaintenanceRecord, MaintenanceSchedule
 
 __all__ = [
     "Customer",
@@ -21,4 +24,10 @@ __all__ = [
     "RateTemplate",
     "User",
     "SystemSetting",
+    "Flight",
+    "FlightSource",
+    "Battery",
+    "BatteryLog",
+    "MaintenanceRecord",
+    "MaintenanceSchedule",
 ]

@@ -10,6 +10,8 @@ import MissionNew from './pages/MissionNew';
 import MissionDetail from './pages/MissionDetail';
 import Customers from './pages/Customers';
 import Flights from './pages/Flights';
+import Batteries from './pages/Batteries';
+import Maintenance from './pages/Maintenance';
 import Financials from './pages/Financials';
 import Settings from './pages/Settings';
 import CustomerIntake from './pages/CustomerIntake';
@@ -43,6 +45,8 @@ export default function App() {
                 <Route path="/missions/:id/edit" element={<MissionNew />} />
                 <Route path="/missions/:id" element={<MissionDetail />} />
                 <Route path="/customers" element={<Customers />} />
+                <Route path="/batteries" element={<Batteries />} />
+                <Route path="/maintenance" element={<Maintenance />} />
                 <Route path="/financials" element={<Financials />} />
                 <Route path="/settings" element={<Settings />} />
                 <Route path="*" element={<Navigate to="/" />} />

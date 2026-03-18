@@ -1,4 +1,4 @@
-# Cloudflare Tunnel Setup for DroneOpsReport
+# Cloudflare Tunnel Setup for DroneOpsCommand
 
 Cloudflare Tunnel lets customers reach intake forms at `https://droneops.example.com` without opening any ports on your router or exposing your server IP.
 
@@ -21,7 +21,7 @@ You can use either dashboard — both work:
 
 1. Click **Create a tunnel**
 2. Choose **Cloudflared** as the connector type
-3. Name it something like `droneops-server`
+3. Name it something like `doc-server`
 4. **Copy the tunnel token** — it looks like `eyJhIjoiN2...` (a long base64 string)
 
 ## Step 2: Add a Public Hostname Route
@@ -30,7 +30,7 @@ When adding a route you'll see two options — **Public Hostname** and **Private
 
 1. Click **Add a public hostname**
 2. Set:
-   - **Subdomain**: `droneops`
+   - **Subdomain**: `doc`
    - **Domain**: `example.com`
    - **Service type**: `HTTP`
    - **URL**: `frontend:80`
@@ -81,7 +81,7 @@ docker compose --profile tunnel stop cloudflared
 
 2. In the Cloudflare dashboard, the tunnel status should show **Healthy**
 
-3. Open `https://droneops.example.com` in your browser — you should see the DroneOpsReport login page
+3. Open `https://droneops.example.com` in your browser — you should see the DroneOpsCommand login page
 
 4. Test an intake link: `https://droneops.example.com/intake/<token>`
 
@@ -98,7 +98,7 @@ This is the recommended security step — it makes intake forms public but locks
 3. Configure:
    - **Application name**: `DroneOps Admin`
    - **Session duration**: 24 hours
-   - **Subdomain**: `droneops` / **Domain**: `example.com`
+   - **Subdomain**: `doc` / **Domain**: `example.com`
    - **Path**: leave empty (protects the whole site)
 4. Under **Policies**, create an "Allow" policy:
    - **Policy name**: `Admin Only`
@@ -127,6 +127,9 @@ This results in:
 - `/api/intake/form/*` (form GET/POST) → **Public**
 - `/api/intake/tos-pdf/*` (TOS PDF download) → **Public**
 - **Everything else** → Requires Cloudflare Access login
+
+> **Note:** The PDF.js worker used for inline TOS viewing is loaded from
+> `cdnjs.cloudflare.com`, so it does not require a bypass rule.
 
 ---
 

@@ -1,12 +1,12 @@
 #!/bin/bash
 # Polls the remote branch for new commits and auto-deploys.
-# Run via cron: * * * * * /path/to/droneops/autopull.sh
+# Run via cron: * * * * * /path/to/doc/autopull.sh
 #
 # Logs to autopull.log in the install directory.
 
 set -e
-DIR="${DRONEOPS_DIR:-$(cd "$(dirname "$0")" && pwd)}"
-BRANCH="${DRONEOPS_BRANCH:-main}"
+DIR="${DOC_DIR:-$(cd "$(dirname "$0")" && pwd)}"
+BRANCH="${DOC_BRANCH:-main}"
 LOGFILE="$DIR/autopull.log"
 LOCKFILE="$DIR/.autopull.lock"
 

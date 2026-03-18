@@ -9,9 +9,11 @@ import {
   Tooltip,
 } from '@mantine/core';
 import {
+  IconBattery3,
   IconChartBar,
   IconDashboard,
   IconDrone,
+  IconTool,
   IconUsers,
   IconSettings,
   IconLogout,
@@ -36,6 +38,8 @@ export default function AppLayout({ onLogout }: AppLayoutProps) {
     { icon: IconPlane, label: 'Flights', path: '/flights' },
     { icon: IconDrone, label: 'Missions', path: '/missions' },
     { icon: IconUsers, label: 'Customers', path: '/customers' },
+    { icon: IconBattery3, label: 'Batteries', path: '/batteries' },
+    { icon: IconTool, label: 'Maintenance', path: '/maintenance' },
     { icon: IconChartBar, label: 'Financials', path: '/financials' },
     { icon: IconSettings, label: 'Settings', path: '/settings' },
   ];
@@ -144,7 +148,7 @@ export default function AppLayout({ onLogout }: AppLayoutProps) {
             left: 16,
           }}
         >
-          v2.0.0
+          v2.4.2
         </Text>
       </AppShell.Navbar>
 

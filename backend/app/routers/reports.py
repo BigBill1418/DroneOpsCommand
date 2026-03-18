@@ -21,7 +21,7 @@ from app.schemas.report import ReportGenerateRequest, ReportResponse, ReportUpda
 from app.services.map_renderer import calculate_area_acres, extract_gps_tracks, render_static_map
 from app.services.pdf_generator import generate_pdf
 
-logger = logging.getLogger("droneops.reports")
+logger = logging.getLogger("doc.reports")
 
 router = APIRouter(prefix="/api/missions", tags=["reports"])
 

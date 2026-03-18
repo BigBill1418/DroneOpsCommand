@@ -1,41 +1,59 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActionIcon,
   Badge,
   Button,
   Card,
+  Drawer,
+  FileButton,
   Group,
   Loader,
-  RingProgress,
+  Menu,
+  Modal,
+  NumberInput,
+  Progress,
   ScrollArea,
+  Select,
   SimpleGrid,
   Stack,
   Table,
   Text,
   TextInput,
+  Textarea,
   Title,
   Tooltip,
 } from '@mantine/core';
+import { DateTimePicker } from '@mantine/dates';
 import { notifications } from '@mantine/notifications';
 import {
-  IconClock,
-  IconDrone,
   IconArrowsMaximize,
+  IconBattery,
   IconBolt,
+  IconClock,
+  IconCloudUpload,
+  IconDatabase,
+  IconDotsVertical,
+  IconDownload,
+  IconDrone,
+  IconEdit,
   IconMapPin,
   IconPlane,
+  IconPlus,
   IconRefresh,
+  IconRoute,
   IconRuler,
   IconSearch,
-  IconRoute,
   IconTimeline,
+  IconTrash,
+  IconUpload,
 } from '@tabler/icons-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
 import { FlightRecord } from '../api/types';
 import StatCard from '../components/shared/StatCard';
-import { cardStyle, monoFont } from '../components/shared/styles';
+import { cardStyle, inputStyles, monoFont } from '../components/shared/styles';
 
-// --- Formatters ---
+// ── Formatters ───────────────────────────────────────────────────────
 
 function formatDuration(seconds: number | null | undefined): string {
   if (!seconds) return '—';
@@ -87,7 +105,7 @@ function formatDate(dateStr: string | null | undefined): string {
   }
 }
 
-// --- Field accessors (handle both camelCase ODL and normalized snake_case) ---
+// ── Field accessors (handle both legacy ODL + native formats) ────────
 
 function getDurationSecs(f: FlightRecord): number {
   return Number(f.duration_secs || f.durationSecs || f.duration || f.duration_seconds || 0);
@@ -114,7 +132,23 @@ function getPointCount(f: FlightRecord): number {
   return Number(f.point_count || f.pointCount || 0);
 }
 
-// --- Drone breakdown mini-chart ---
+const SOURCE_COLORS: Record<string, string> = {
+  dji_txt: 'cyan',
+  litchi_csv: 'green',
+  airdata_csv: 'orange',
+  manual: 'grape',
+  opendronelog_import: 'blue',
+};
+
+const SOURCE_LABELS: Record<string, string> = {
+  dji_txt: 'DJI',
+  litchi_csv: 'Litchi',
+  airdata_csv: 'Airdata',
+  manual: 'Manual',
+  opendronelog_import: 'ODL Import',
+};
+
+// ── Drone Breakdown ──────────────────────────────────────────────────
 
 const DRONE_COLORS = ['#00d4ff', '#ff6b1a', '#2ecc40', '#ff6b6b', '#b57edc', '#ffd43b', '#20c997', '#ff8787'];
 
@@ -133,7 +167,6 @@ function DroneBreakdown({ flights }: { flights: FlightRecord[] }) {
   }, [flights]);
 
   if (drones.length === 0) return null;
-
   const total = drones.reduce((s, d) => s + d.duration, 0);
 
   return (
@@ -164,32 +197,25 @@ function DroneBreakdown({ flights }: { flights: FlightRecord[] }) {
   );
 }
 
-// --- Top Flights ---
+// ── Top Flights ──────────────────────────────────────────────────────
 
 function TopFlights({ flights, label, accessor, formatter }: {
   flights: FlightRecord[]; label: string; accessor: (f: FlightRecord) => number; formatter: (v: number) => string;
 }) {
   const top = useMemo(() => {
-    return [...flights]
-      .sort((a, b) => accessor(b) - accessor(a))
-      .slice(0, 3)
-      .filter((f) => accessor(f) > 0);
+    return [...flights].sort((a, b) => accessor(b) - accessor(a)).slice(0, 3).filter((f) => accessor(f) > 0);
   }, [flights]);
 
   if (top.length === 0) return null;
 
   return (
     <Card padding="md" radius="md" style={cardStyle}>
-      <Text size="11px" c="#5a6478" mb="sm" style={{ ...monoFont, letterSpacing: '1px' }} tt="uppercase">
-        {label}
-      </Text>
+      <Text size="11px" c="#5a6478" mb="sm" style={{ ...monoFont, letterSpacing: '1px' }} tt="uppercase">{label}</Text>
       <Stack gap={8}>
         {top.map((f, i) => (
           <Group key={f.id ?? i} justify="space-between">
             <Group gap="xs">
-              <Badge size="xs" color={i === 0 ? 'yellow' : 'gray'} variant="filled" w={20} style={{ textAlign: 'center' }}>
-                {i + 1}
-              </Badge>
+              <Badge size="xs" color={i === 0 ? 'yellow' : 'gray'} variant="filled" w={20} style={{ textAlign: 'center' }}>{i + 1}</Badge>
               <Text size="xs" c="#e8edf2" lineClamp={1}>{getDisplayName(f)}</Text>
             </Group>
             <Text size="xs" c="#00d4ff" style={monoFont} fw={600}>{formatter(accessor(f))}</Text>
@@ -200,53 +226,126 @@ function TopFlights({ flights, label, accessor, formatter }: {
   );
 }
 
-// === Main Component ===
+// ══════════════════════════════════════════════════════════════════════
+// MAIN COMPONENT
+// ══════════════════════════════════════════════════════════════════════
 
 export default function Flights() {
   const [flights, setFlights] = useState<FlightRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [error, setError] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [manualOpen, setManualOpen] = useState(false);
+  const [detailFlight, setDetailFlight] = useState<FlightRecord | null>(null);
   const navigate = useNavigate();
 
-  const loadFlights = async () => {
+  // Manual flight form state
+  const [manualForm, setManualForm] = useState({
+    name: '', drone_model: '', duration_secs: 0, total_distance: 0,
+    max_altitude: 0, max_speed: 0, notes: '', start_time: null as Date | null,
+  });
+
+  const loadFlights = useCallback(async () => {
     setLoading(true);
-    setError(null);
     try {
-      const resp = await api.get('/flights');
-      let data: FlightRecord[] = [];
-      if (Array.isArray(resp.data)) {
-        data = resp.data;
-      } else if (resp.data && typeof resp.data === 'object') {
-        data = resp.data.flights || resp.data.data || resp.data.results || resp.data.items || [];
+      const resp = await api.get('/flight-library');
+      setFlights(Array.isArray(resp.data) ? resp.data : []);
+    } catch (err: any) {
+      // Fallback: try legacy OpenDroneLog endpoint
+      try {
+        const resp = await api.get('/flights');
+        let data: FlightRecord[] = [];
+        if (Array.isArray(resp.data)) data = resp.data;
+        else if (resp.data && typeof resp.data === 'object') {
+          data = resp.data.flights || resp.data.data || resp.data.results || resp.data.items || [];
+        }
+        setFlights(data);
+      } catch {
+        setFlights([]);
       }
-      setFlights(data);
-      if (data.length === 0) {
-        setError('Connected to OpenDroneLog but no flights found. Upload flight logs to OpenDroneLog first.');
-      }
-    } catch (err: unknown) {
-      const axiosErr = err as { response?: { data?: { detail?: string } } };
-      const detail = axiosErr.response?.data?.detail || 'Could not fetch flights. Check the OpenDroneLog URL in Settings.';
-      setError(detail);
-      notifications.show({ title: 'OpenDroneLog', message: detail, color: 'red' });
     } finally {
       setLoading(false);
     }
-  };
-
-  useEffect(() => {
-    loadFlights();
   }, []);
 
-  // --- Computed stats ---
-  const stats = useMemo(() => {
-    const totalFlights = flights.length;
-    let totalDuration = 0;
-    let totalDistance = 0;
-    let maxAlt = 0;
-    let maxSpd = 0;
-    let totalPoints = 0;
+  useEffect(() => { loadFlights(); }, [loadFlights]);
 
+  // ── Upload handler ─────────────────────────────────────────────────
+  const handleUpload = async (files: File[]) => {
+    if (!files.length) return;
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      files.forEach((f) => formData.append('files', f));
+      const resp = await api.post('/flight-library/upload', formData);
+      const { imported, skipped, errors } = resp.data;
+      notifications.show({
+        title: 'Upload Complete',
+        message: `${imported} imported, ${skipped} duplicates skipped${errors.length ? `, ${errors.length} errors` : ''}`,
+        color: imported > 0 ? 'cyan' : 'yellow',
+      });
+      if (errors.length > 0) {
+        errors.forEach((e: string) => notifications.show({ title: 'Parse Error', message: e, color: 'red' }));
+      }
+      loadFlights();
+    } catch (err: any) {
+      const msg = err.response?.data?.detail || 'Upload failed — is the flight-parser service running?';
+      notifications.show({ title: 'Upload Error', message: msg, color: 'red' });
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  // ── Manual entry handler ───────────────────────────────────────────
+  const handleManualSave = async () => {
+    if (!manualForm.name.trim()) {
+      notifications.show({ title: 'Error', message: 'Flight name is required', color: 'red' });
+      return;
+    }
+    try {
+      await api.post('/flight-library/manual', {
+        ...manualForm,
+        start_time: manualForm.start_time?.toISOString() || null,
+      });
+      notifications.show({ title: 'Flight Added', message: manualForm.name, color: 'cyan' });
+      setManualOpen(false);
+      setManualForm({ name: '', drone_model: '', duration_secs: 0, total_distance: 0, max_altitude: 0, max_speed: 0, notes: '', start_time: null });
+      loadFlights();
+    } catch (err: any) {
+      notifications.show({ title: 'Error', message: err.response?.data?.detail || 'Failed to save flight', color: 'red' });
+    }
+  };
+
+  // ── Delete handler ─────────────────────────────────────────────────
+  const handleDelete = async (id: string) => {
+    try {
+      await api.delete(`/flight-library/${id}`);
+      notifications.show({ title: 'Deleted', message: 'Flight removed', color: 'orange' });
+      setFlights((prev) => prev.filter((f) => String(f.id) !== id));
+      if (detailFlight && String(detailFlight.id) === id) setDetailFlight(null);
+    } catch {
+      notifications.show({ title: 'Error', message: 'Failed to delete flight', color: 'red' });
+    }
+  };
+
+  // ── Export handler ─────────────────────────────────────────────────
+  const handleExport = async (id: string, format: string, name: string) => {
+    try {
+      const resp = await api.get(`/flight-library/${id}/export/${format}`, { responseType: 'blob' });
+      const url = window.URL.createObjectURL(new Blob([resp.data]));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${name}.${format}`;
+      a.click();
+      window.URL.revokeObjectURL(url);
+    } catch {
+      notifications.show({ title: 'Export Error', message: `Failed to export as ${format}`, color: 'red' });
+    }
+  };
+
+  // ── Computed stats ─────────────────────────────────────────────────
+  const stats = useMemo(() => {
+    let totalDuration = 0, totalDistance = 0, maxAlt = 0, maxSpd = 0, totalPoints = 0;
     for (const f of flights) {
       totalDuration += getDurationSecs(f);
       totalDistance += getTotalDistance(f);
@@ -256,48 +355,57 @@ export default function Flights() {
       if (spd > maxSpd) maxSpd = spd;
       totalPoints += getPointCount(f);
     }
-
-    const avgDuration = totalFlights > 0 ? totalDuration / totalFlights : 0;
-    const avgDistance = totalFlights > 0 ? totalDistance / totalFlights : 0;
-
-    return { totalFlights, totalDuration, totalDistance, maxAlt, maxSpd, avgDuration, avgDistance, totalPoints };
+    const n = flights.length;
+    return { totalFlights: n, totalDuration, totalDistance, maxAlt, maxSpd, totalPoints, avgDuration: n ? totalDuration / n : 0, avgDistance: n ? totalDistance / n : 0 };
   }, [flights]);
 
   const filtered = useMemo(() => {
     if (!search) return flights;
     const q = search.toLowerCase();
     return flights.filter((f) => {
-      const searchable = [
-        getDisplayName(f), getDroneModel(f), getStartTime(f),
-        f.notes, f.drone_serial, f.droneSerial,
-        f.id?.toString(),
-      ].filter(Boolean).join(' ').toLowerCase();
-      return searchable.includes(q);
+      return [getDisplayName(f), getDroneModel(f), getStartTime(f), f.notes, f.drone_serial, f.source, f.original_filename]
+        .filter(Boolean).join(' ').toLowerCase().includes(q);
     });
   }, [flights, search]);
 
   return (
     <Stack gap="lg">
+      {/* ── Header ──────────────────────────────────────────────────── */}
       <Group justify="space-between">
         <Title order={2} c="#e8edf2" style={{ letterSpacing: '2px' }}>FLIGHTS</Title>
         <Group>
+          <FileButton onChange={(files) => handleUpload(files)} accept=".txt,.csv" multiple>
+            {(props) => (
+              <Button
+                {...props}
+                leftSection={<IconUpload size={16} />}
+                variant="light"
+                color="cyan"
+                loading={uploading}
+                styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}
+              >
+                UPLOAD LOGS
+              </Button>
+            )}
+          </FileButton>
+          <Button
+            leftSection={<IconPlus size={16} />}
+            variant="light"
+            color="grape"
+            onClick={() => setManualOpen(true)}
+            styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}
+          >
+            MANUAL ENTRY
+          </Button>
           <Button
             leftSection={<IconRefresh size={16} />}
-            variant="light"
-            color="cyan"
+            variant="subtle"
+            color="gray"
             onClick={loadFlights}
             loading={loading}
             styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}
           >
             REFRESH
-          </Button>
-          <Button
-            leftSection={<IconPlane size={16} />}
-            color="cyan"
-            onClick={() => navigate('/missions/new')}
-            styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}
-          >
-            NEW MISSION
           </Button>
         </Group>
       </Group>
@@ -305,21 +413,34 @@ export default function Flights() {
       {loading ? (
         <Group justify="center" py="xl">
           <Loader color="cyan" size="lg" />
-          <Text c="#5a6478">Loading flights from OpenDroneLog...</Text>
+          <Text c="#5a6478">Loading flight library...</Text>
         </Group>
-      ) : error && flights.length === 0 ? (
+      ) : flights.length === 0 ? (
         <Card padding="xl" radius="md" style={cardStyle}>
           <Stack align="center" gap="md">
             <IconDrone size={48} color="#5a6478" />
-            <Text c="#5a6478" ta="center">{error}</Text>
-            <Button variant="light" color="cyan" size="sm" onClick={() => navigate('/settings')}>
-              Check Settings
-            </Button>
+            <Title order={3} c="#e8edf2">No Flights Yet</Title>
+            <Text c="#5a6478" ta="center" maw={400}>
+              Upload DJI flight logs (.txt), Litchi/Airdata CSV files, or add flights manually.
+              You can also import existing flights from OpenDroneLog in Settings.
+            </Text>
+            <Group>
+              <FileButton onChange={(files) => handleUpload(files)} accept=".txt,.csv" multiple>
+                {(props) => (
+                  <Button {...props} leftSection={<IconCloudUpload size={16} />} color="cyan">
+                    Upload Flight Logs
+                  </Button>
+                )}
+              </FileButton>
+              <Button leftSection={<IconPlus size={16} />} variant="light" color="grape" onClick={() => setManualOpen(true)}>
+                Add Manual Flight
+              </Button>
+            </Group>
           </Stack>
         </Card>
       ) : (
         <>
-          {/* ===== Summary Stats (OpenDroneLog-style) ===== */}
+          {/* ── Summary Stats ───────────────────────────────────────── */}
           <SimpleGrid cols={{ base: 2, sm: 3, md: 5 }}>
             <StatCard icon={IconPlane} label="Total Flights" value={stats.totalFlights.toLocaleString()} />
             <StatCard icon={IconRuler} label="Total Distance" value={formatDistance(stats.totalDistance)} />
@@ -329,41 +450,19 @@ export default function Flights() {
           </SimpleGrid>
 
           <SimpleGrid cols={{ base: 2, sm: 3, md: 3 }}>
-            <StatCard
-              icon={IconRoute}
-              label="Avg Distance / Flight"
-              value={formatDistance(stats.avgDistance)}
-            />
-            <StatCard
-              icon={IconTimeline}
-              label="Avg Duration / Flight"
-              value={formatDurationLong(stats.avgDuration)}
-            />
-            <StatCard
-              icon={IconMapPin}
-              label="Total Data Points"
-              value={stats.totalPoints > 0 ? stats.totalPoints.toLocaleString() : '—'}
-            />
+            <StatCard icon={IconRoute} label="Avg Distance / Flight" value={formatDistance(stats.avgDistance)} />
+            <StatCard icon={IconTimeline} label="Avg Duration / Flight" value={formatDurationLong(stats.avgDuration)} />
+            <StatCard icon={IconMapPin} label="Total Data Points" value={stats.totalPoints > 0 ? stats.totalPoints.toLocaleString() : '—'} />
           </SimpleGrid>
 
-          {/* ===== Drone Breakdown & Top Flights ===== */}
+          {/* ── Drone Breakdown & Top Flights ───────────────────────── */}
           <SimpleGrid cols={{ base: 1, md: 3 }}>
             <DroneBreakdown flights={flights} />
-            <TopFlights
-              flights={flights}
-              label="Longest Flights"
-              accessor={getDurationSecs}
-              formatter={(v) => formatDurationLong(v)}
-            />
-            <TopFlights
-              flights={flights}
-              label="Furthest Flights"
-              accessor={getTotalDistance}
-              formatter={(v) => formatDistance(v)}
-            />
+            <TopFlights flights={flights} label="Longest Flights" accessor={getDurationSecs} formatter={(v) => formatDurationLong(v)} />
+            <TopFlights flights={flights} label="Furthest Flights" accessor={getTotalDistance} formatter={(v) => formatDistance(v)} />
           </SimpleGrid>
 
-          {/* ===== Flight Table ===== */}
+          {/* ── Flight Table ────────────────────────────────────────── */}
           <Card padding="lg" radius="md" style={cardStyle}>
             <Group justify="space-between" mb="md">
               <Text size="sm" c="#5a6478" style={monoFont}>
@@ -375,9 +474,7 @@ export default function Flights() {
                 size="xs"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                styles={{
-                  input: { background: '#050608', borderColor: '#1a1f2e', color: '#e8edf2', width: 260 },
-                }}
+                styles={{ input: { background: '#050608', borderColor: '#1a1f2e', color: '#e8edf2', width: 260 } }}
               />
             </Group>
 
@@ -386,21 +483,13 @@ export default function Flights() {
                 highlightOnHover
                 styles={{
                   table: { color: '#e8edf2' },
-                  th: {
-                    color: '#00d4ff',
-                    fontFamily: "'Share Tech Mono', monospace",
-                    fontSize: '12px',
-                    letterSpacing: '1px',
-                    borderBottom: '1px solid #1a1f2e',
-                    padding: '10px 12px',
-                    whiteSpace: 'nowrap',
-                  },
+                  th: { color: '#00d4ff', fontFamily: "'Share Tech Mono', monospace", fontSize: '12px', letterSpacing: '1px', borderBottom: '1px solid #1a1f2e', padding: '10px 12px', whiteSpace: 'nowrap' },
                   td: { borderBottom: '1px solid #1a1f2e', padding: '8px 12px' },
                 }}
               >
                 <Table.Thead>
                   <Table.Tr>
-                    <Table.Th>#</Table.Th>
+                    <Table.Th>SOURCE</Table.Th>
                     <Table.Th>NAME</Table.Th>
                     <Table.Th>DATE</Table.Th>
                     <Table.Th>DRONE</Table.Th>
@@ -408,13 +497,20 @@ export default function Flights() {
                     <Table.Th>DISTANCE</Table.Th>
                     <Table.Th>MAX ALT</Table.Th>
                     <Table.Th>MAX SPEED</Table.Th>
+                    <Table.Th w={50}></Table.Th>
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
                   {filtered.map((f, idx) => (
-                    <Table.Tr key={f.id ?? idx}>
+                    <Table.Tr
+                      key={f.id ?? idx}
+                      style={{ cursor: 'pointer' }}
+                      onClick={() => setDetailFlight(f)}
+                    >
                       <Table.Td>
-                        <Text size="xs" c="#5a6478" style={monoFont}>{f.id ?? idx + 1}</Text>
+                        <Badge size="xs" color={SOURCE_COLORS[f.source || ''] || 'gray'} variant="light">
+                          {SOURCE_LABELS[f.source || ''] || f.source || '—'}
+                        </Badge>
                       </Table.Td>
                       <Table.Td>
                         <Text size="sm" fw={500} lineClamp={1}>{getDisplayName(f)}</Text>
@@ -437,6 +533,30 @@ export default function Flights() {
                       <Table.Td>
                         <Text size="xs" c="#5a6478" style={monoFont}>{formatSpeed(getMaxSpeed(f))}</Text>
                       </Table.Td>
+                      <Table.Td>
+                        <Menu shadow="md" width={160} position="bottom-end">
+                          <Menu.Target>
+                            <ActionIcon variant="subtle" color="gray" size="sm" onClick={(e) => e.stopPropagation()}>
+                              <IconDotsVertical size={14} />
+                            </ActionIcon>
+                          </Menu.Target>
+                          <Menu.Dropdown styles={{ dropdown: { background: '#0e1117', borderColor: '#1a1f2e' } }}>
+                            <Menu.Item leftSection={<IconDownload size={14} />} onClick={(e) => { e.stopPropagation(); handleExport(String(f.id), 'gpx', getDisplayName(f)); }}>
+                              Export GPX
+                            </Menu.Item>
+                            <Menu.Item leftSection={<IconDownload size={14} />} onClick={(e) => { e.stopPropagation(); handleExport(String(f.id), 'kml', getDisplayName(f)); }}>
+                              Export KML
+                            </Menu.Item>
+                            <Menu.Item leftSection={<IconDownload size={14} />} onClick={(e) => { e.stopPropagation(); handleExport(String(f.id), 'csv', getDisplayName(f)); }}>
+                              Export CSV
+                            </Menu.Item>
+                            <Menu.Divider />
+                            <Menu.Item color="red" leftSection={<IconTrash size={14} />} onClick={(e) => { e.stopPropagation(); handleDelete(String(f.id)); }}>
+                              Delete
+                            </Menu.Item>
+                          </Menu.Dropdown>
+                        </Menu>
+                      </Table.Td>
                     </Table.Tr>
                   ))}
                 </Table.Tbody>
@@ -445,6 +565,179 @@ export default function Flights() {
           </Card>
         </>
       )}
+
+      {/* ── Flight Detail Drawer ──────────────────────────────────── */}
+      <Drawer
+        opened={!!detailFlight}
+        onClose={() => setDetailFlight(null)}
+        title={<Text fw={700} size="lg" c="#e8edf2" style={{ fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '2px' }}>{detailFlight ? getDisplayName(detailFlight).toUpperCase() : ''}</Text>}
+        position="right"
+        size="lg"
+        styles={{ header: { background: '#0e1117', borderBottom: '1px solid #1a1f2e' }, body: { background: '#050608' }, content: { background: '#050608' } }}
+      >
+        {detailFlight && (
+          <Stack gap="md" pt="md">
+            <SimpleGrid cols={2}>
+              <div>
+                <Text size="11px" c="#5a6478" style={{ ...monoFont, letterSpacing: '1px' }}>DRONE</Text>
+                <Text c="#e8edf2" fw={600}>{getDroneModel(detailFlight) || '—'}</Text>
+              </div>
+              <div>
+                <Text size="11px" c="#5a6478" style={{ ...monoFont, letterSpacing: '1px' }}>DATE</Text>
+                <Text c="#e8edf2" fw={600}>{formatDate(getStartTime(detailFlight))}</Text>
+              </div>
+              <div>
+                <Text size="11px" c="#5a6478" style={{ ...monoFont, letterSpacing: '1px' }}>DURATION</Text>
+                <Text c="#00d4ff" fw={700} size="xl" style={{ fontFamily: "'Bebas Neue', sans-serif" }}>
+                  {formatDuration(getDurationSecs(detailFlight))}
+                </Text>
+              </div>
+              <div>
+                <Text size="11px" c="#5a6478" style={{ ...monoFont, letterSpacing: '1px' }}>DISTANCE</Text>
+                <Text c="#00d4ff" fw={700} size="xl" style={{ fontFamily: "'Bebas Neue', sans-serif" }}>
+                  {formatDistance(getTotalDistance(detailFlight))}
+                </Text>
+              </div>
+              <div>
+                <Text size="11px" c="#5a6478" style={{ ...monoFont, letterSpacing: '1px' }}>MAX ALTITUDE</Text>
+                <Text c="#ff6b1a" fw={700} size="xl" style={{ fontFamily: "'Bebas Neue', sans-serif" }}>
+                  {formatAltitude(getMaxAltitude(detailFlight))}
+                </Text>
+              </div>
+              <div>
+                <Text size="11px" c="#5a6478" style={{ ...monoFont, letterSpacing: '1px' }}>MAX SPEED</Text>
+                <Text c="#ff6b1a" fw={700} size="xl" style={{ fontFamily: "'Bebas Neue', sans-serif" }}>
+                  {formatSpeed(getMaxSpeed(detailFlight))}
+                </Text>
+              </div>
+            </SimpleGrid>
+
+            {detailFlight.source && (
+              <Group gap="xs">
+                <Text size="11px" c="#5a6478" style={{ ...monoFont, letterSpacing: '1px' }}>SOURCE</Text>
+                <Badge color={SOURCE_COLORS[detailFlight.source] || 'gray'} variant="light" size="sm">
+                  {SOURCE_LABELS[detailFlight.source] || detailFlight.source}
+                </Badge>
+              </Group>
+            )}
+
+            {detailFlight.drone_serial && (
+              <div>
+                <Text size="11px" c="#5a6478" style={{ ...monoFont, letterSpacing: '1px' }}>SERIAL</Text>
+                <Text c="#e8edf2" size="sm" style={monoFont}>{detailFlight.drone_serial}</Text>
+              </div>
+            )}
+
+            {detailFlight.battery_serial && (
+              <div>
+                <Text size="11px" c="#5a6478" style={{ ...monoFont, letterSpacing: '1px' }}>BATTERY</Text>
+                <Text c="#e8edf2" size="sm" style={monoFont}>{detailFlight.battery_serial}</Text>
+              </div>
+            )}
+
+            {detailFlight.notes && (
+              <div>
+                <Text size="11px" c="#5a6478" style={{ ...monoFont, letterSpacing: '1px' }}>NOTES</Text>
+                <Text c="#e8edf2" size="sm">{detailFlight.notes}</Text>
+              </div>
+            )}
+
+            <Group>
+              <Button size="xs" variant="light" color="cyan" leftSection={<IconDownload size={14} />}
+                onClick={() => handleExport(String(detailFlight.id), 'gpx', getDisplayName(detailFlight))}>GPX</Button>
+              <Button size="xs" variant="light" color="cyan" leftSection={<IconDownload size={14} />}
+                onClick={() => handleExport(String(detailFlight.id), 'kml', getDisplayName(detailFlight))}>KML</Button>
+              <Button size="xs" variant="light" color="cyan" leftSection={<IconDownload size={14} />}
+                onClick={() => handleExport(String(detailFlight.id), 'csv', getDisplayName(detailFlight))}>CSV</Button>
+            </Group>
+
+            <Button
+              color="red"
+              variant="light"
+              size="xs"
+              leftSection={<IconTrash size={14} />}
+              onClick={() => handleDelete(String(detailFlight.id))}
+            >
+              Delete Flight
+            </Button>
+          </Stack>
+        )}
+      </Drawer>
+
+      {/* ── Manual Entry Modal ────────────────────────────────────── */}
+      <Modal
+        opened={manualOpen}
+        onClose={() => setManualOpen(false)}
+        title={<Text fw={700} c="#e8edf2" style={{ fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '2px' }}>ADD MANUAL FLIGHT</Text>}
+        styles={{ header: { background: '#0e1117', borderBottom: '1px solid #1a1f2e' }, body: { background: '#0e1117' }, content: { background: '#0e1117' } }}
+        size="md"
+      >
+        <Stack gap="md">
+          <TextInput
+            label="Flight Name"
+            placeholder="e.g. SAR Mission - Oak Park"
+            required
+            value={manualForm.name}
+            onChange={(e) => setManualForm({ ...manualForm, name: e.target.value })}
+            styles={inputStyles}
+          />
+          <TextInput
+            label="Drone Model"
+            placeholder="e.g. DJI Matrice 30T"
+            value={manualForm.drone_model}
+            onChange={(e) => setManualForm({ ...manualForm, drone_model: e.target.value })}
+            styles={inputStyles}
+          />
+          <DateTimePicker
+            label="Flight Date & Time"
+            value={manualForm.start_time}
+            onChange={(v) => setManualForm({ ...manualForm, start_time: v })}
+            styles={inputStyles}
+          />
+          <SimpleGrid cols={2}>
+            <NumberInput
+              label="Duration (minutes)"
+              value={manualForm.duration_secs / 60}
+              onChange={(v) => setManualForm({ ...manualForm, duration_secs: (Number(v) || 0) * 60 })}
+              min={0}
+              styles={inputStyles}
+            />
+            <NumberInput
+              label="Distance (miles)"
+              value={manualForm.total_distance / 1609.344}
+              onChange={(v) => setManualForm({ ...manualForm, total_distance: (Number(v) || 0) * 1609.344 })}
+              min={0}
+              decimalScale={2}
+              styles={inputStyles}
+            />
+            <NumberInput
+              label="Max Altitude (feet)"
+              value={manualForm.max_altitude * 3.28084}
+              onChange={(v) => setManualForm({ ...manualForm, max_altitude: (Number(v) || 0) / 3.28084 })}
+              min={0}
+              styles={inputStyles}
+            />
+            <NumberInput
+              label="Max Speed (mph)"
+              value={manualForm.max_speed * 2.23694}
+              onChange={(v) => setManualForm({ ...manualForm, max_speed: (Number(v) || 0) / 2.23694 })}
+              min={0}
+              decimalScale={1}
+              styles={inputStyles}
+            />
+          </SimpleGrid>
+          <Textarea
+            label="Notes"
+            value={manualForm.notes}
+            onChange={(e) => setManualForm({ ...manualForm, notes: e.target.value })}
+            styles={inputStyles}
+          />
+          <Button fullWidth color="cyan" onClick={handleManualSave}
+            styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}>
+            SAVE FLIGHT
+          </Button>
+        </Stack>
+      </Modal>
     </Stack>
   );
 }

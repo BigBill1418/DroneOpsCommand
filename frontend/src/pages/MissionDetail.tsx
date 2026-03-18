@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import {
   Badge,
   Button,
@@ -55,18 +55,58 @@ export default function MissionDetail() {
     api.get('/aircraft').then((r) => setAircraftList(r.data)).catch(() => {});
   }, [id]);
 
+  // Polling for Celery report generation
+  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const stopPolling = useCallback(() => {
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
+    }
+  }, []);
+  useEffect(() => () => stopPolling(), [stopPolling]);
+
   if (!mission) return <Group justify="center" py="xl"><Loader color="cyan" /></Group>;
 
   const handleGenerate = async () => {
     setGenerating(true);
     try {
       const resp = await api.post(`/missions/${id}/report/generate`, { user_narrative: narrative, include_download_link: includeDownloadLink });
-      setReport(resp.data);
-      setReportContent(resp.data.final_content || '');
-      notifications.show({ title: 'Report Generated', message: 'Ready for review', color: 'cyan' });
+      const taskId = resp.data.task_id;
+      if (!taskId) {
+        // Synchronous fallback
+        setReport(resp.data);
+        setReportContent(resp.data.final_content || '');
+        setGenerating(false);
+        return;
+      }
+
+      notifications.show({ title: 'Generating Report', message: 'The AI is writing your report...', color: 'cyan' });
+
+      pollIntervalRef.current = setInterval(async () => {
+        try {
+          const status = await api.get(`/missions/${id}/report/status/${taskId}`);
+          if (status.data.status === 'complete') {
+            stopPolling();
+            try {
+              const reportResp = await api.get(`/missions/${id}/report`);
+              setReport(reportResp.data);
+              setReportContent(reportResp.data.final_content || '');
+              notifications.show({ title: 'Report Ready', message: 'Your AI report is ready for review', color: 'green' });
+            } catch {
+              notifications.show({ title: 'Report Generated', message: 'Report is ready — reload the page to view it', color: 'cyan' });
+            }
+            setGenerating(false);
+          } else if (status.data.status === 'failed') {
+            stopPolling();
+            notifications.show({ title: 'Generation Failed', message: status.data.detail || 'Report generation failed', color: 'red' });
+            setGenerating(false);
+          }
+        } catch {
+          // Network blip during poll — keep trying
+        }
+      }, 3000);
     } catch {
       notifications.show({ title: 'Error', message: 'Generation failed', color: 'red' });
-    } finally {
       setGenerating(false);
     }
   };
@@ -84,7 +124,7 @@ export default function MissionDetail() {
   const handleGeneratePDF = async () => {
     await handleSaveReport();
     try {
-      const resp = await api.post(`/missions/${id}/report/pdf`, {}, { responseType: 'blob' });
+      const resp = await api.post(`/missions/${id}/report/pdf`, {}, { responseType: 'blob', timeout: 120000 });
       const blobUrl = URL.createObjectURL(new Blob([resp.data], { type: 'application/pdf' }));
       window.open(blobUrl, '_blank');
       // Revoke after browser has had time to open the tab

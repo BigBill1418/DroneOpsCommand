@@ -4,7 +4,7 @@ import httpx
 
 from app.config import settings
 
-logger = logging.getLogger("droneops.ollama")
+logger = logging.getLogger("doc.ollama")
 
 SYSTEM_PROMPT_TEMPLATE = """You are a professional drone operations report writer for {company_name}, \
 an FAA Part 107 certified drone operations company. Generate a detailed, client-facing \
