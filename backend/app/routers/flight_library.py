@@ -112,6 +112,97 @@ async def list_flights(
     return result.scalars().all()
 
 
+# ── Flight stats summary ─────────────────────────────────────────────
+# NOTE: must be registered before /{flight_id} to avoid route shadowing
+@router.get("/stats/summary")
+async def flight_stats(
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(
+            func.count(Flight.id),
+            func.sum(Flight.duration_secs),
+            func.sum(Flight.total_distance),
+            func.max(Flight.max_altitude),
+            func.max(Flight.max_speed),
+            func.sum(Flight.point_count),
+        )
+    )
+    row = result.one()
+    total = row[0] or 0
+
+    # Longest flight by duration
+    longest = None
+    longest_result = await db.execute(
+        select(Flight).where(Flight.duration_secs > 0).order_by(desc(Flight.duration_secs)).limit(1)
+    )
+    longest_flight = longest_result.scalar_one_or_none()
+    if longest_flight:
+        longest = {
+            "name": longest_flight.name,
+            "duration_secs": longest_flight.duration_secs,
+            "drone_model": longest_flight.drone_model,
+        }
+
+    # Farthest from home (max total_distance in a single flight)
+    farthest = None
+    farthest_result = await db.execute(
+        select(Flight).where(Flight.total_distance > 0).order_by(desc(Flight.total_distance)).limit(1)
+    )
+    farthest_flight = farthest_result.scalar_one_or_none()
+    if farthest_flight:
+        farthest = {
+            "name": farthest_flight.name,
+            "total_distance": farthest_flight.total_distance,
+            "drone_model": farthest_flight.drone_model,
+        }
+
+    # Recent flights (last 5)
+    recent_result = await db.execute(
+        select(Flight).order_by(desc(Flight.start_time)).limit(5)
+    )
+    recent_flights = [
+        {
+            "id": str(f.id),
+            "name": f.name,
+            "start_time": f.start_time.isoformat() if f.start_time else None,
+            "duration_secs": f.duration_secs,
+            "total_distance": f.total_distance,
+            "max_altitude": f.max_altitude,
+            "drone_model": f.drone_model,
+        }
+        for f in recent_result.scalars().all()
+    ]
+
+    return {
+        "total_flights": total,
+        "total_duration": row[1] or 0,
+        "total_distance": row[2] or 0,
+        "max_altitude": row[3] or 0,
+        "max_speed": row[4] or 0,
+        "total_points": row[5] or 0,
+        "avg_duration": (row[1] or 0) / total if total > 0 else 0,
+        "avg_distance": (row[2] or 0) / total if total > 0 else 0,
+        "longest_flight": longest,
+        "farthest_flight": farthest,
+        "recent_flights": recent_flights,
+    }
+
+
+# ── Parser health check ──────────────────────────────────────────────
+@router.get("/parser/status")
+async def parser_status(
+    _user: User = Depends(get_current_user),
+):
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            resp = await client.get(f"{PARSER_URL}/health")
+            return resp.json()
+    except Exception as e:
+        return {"status": "offline", "error": str(e)}
+
+
 # ── Get flight detail ─────────────────────────────────────────────────
 @router.get("/{flight_id}", response_model=FlightDetailResponse)
 async def get_flight(
@@ -321,20 +412,8 @@ async def update_flight(
 
 
 # ── Delete flight ─────────────────────────────────────────────────────
-@router.delete("/{flight_id}", status_code=204)
-async def delete_flight(
-    flight_id: UUID,
-    db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
-):
-    result = await db.execute(select(Flight).where(Flight.id == flight_id))
-    flight = result.scalar_one_or_none()
-    if not flight:
-        raise HTTPException(status_code=404, detail="Flight not found")
-    await db.delete(flight)
-
-
 # ── Purge all flights ────────────────────────────────────────────────
+# NOTE: must be registered before /{flight_id} to avoid route shadowing
 @router.delete("/purge/all", status_code=200)
 async def purge_all_flights(
     db: AsyncSession = Depends(get_db),
@@ -353,6 +432,19 @@ async def purge_all_flights(
     count = result.rowcount
     await db.commit()
     return {"deleted": count, "batteries_deleted": bat_count}
+
+
+@router.delete("/{flight_id}", status_code=204)
+async def delete_flight(
+    flight_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    result = await db.execute(select(Flight).where(Flight.id == flight_id))
+    flight = result.scalar_one_or_none()
+    if not flight:
+        raise HTTPException(status_code=404, detail="Flight not found")
+    await db.delete(flight)
 
 
 # ── Export flight ─────────────────────────────────────────────────────
@@ -653,94 +745,6 @@ async def import_from_opendronelog_stream(
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
-# ── Flight stats summary ─────────────────────────────────────────────
-@router.get("/stats/summary")
-async def flight_stats(
-    db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
-):
-    result = await db.execute(
-        select(
-            func.count(Flight.id),
-            func.sum(Flight.duration_secs),
-            func.sum(Flight.total_distance),
-            func.max(Flight.max_altitude),
-            func.max(Flight.max_speed),
-            func.sum(Flight.point_count),
-        )
-    )
-    row = result.one()
-    total = row[0] or 0
-
-    # Longest flight by duration
-    longest = None
-    longest_result = await db.execute(
-        select(Flight).where(Flight.duration_secs > 0).order_by(desc(Flight.duration_secs)).limit(1)
-    )
-    longest_flight = longest_result.scalar_one_or_none()
-    if longest_flight:
-        longest = {
-            "name": longest_flight.name,
-            "duration_secs": longest_flight.duration_secs,
-            "drone_model": longest_flight.drone_model,
-        }
-
-    # Farthest from home (max total_distance in a single flight)
-    farthest = None
-    farthest_result = await db.execute(
-        select(Flight).where(Flight.total_distance > 0).order_by(desc(Flight.total_distance)).limit(1)
-    )
-    farthest_flight = farthest_result.scalar_one_or_none()
-    if farthest_flight:
-        farthest = {
-            "name": farthest_flight.name,
-            "total_distance": farthest_flight.total_distance,
-            "drone_model": farthest_flight.drone_model,
-        }
-
-    # Recent flights (last 5)
-    recent_result = await db.execute(
-        select(Flight).order_by(desc(Flight.start_time)).limit(5)
-    )
-    recent_flights = [
-        {
-            "id": str(f.id),
-            "name": f.name,
-            "start_time": f.start_time.isoformat() if f.start_time else None,
-            "duration_secs": f.duration_secs,
-            "total_distance": f.total_distance,
-            "max_altitude": f.max_altitude,
-            "drone_model": f.drone_model,
-        }
-        for f in recent_result.scalars().all()
-    ]
-
-    return {
-        "total_flights": total,
-        "total_duration": row[1] or 0,
-        "total_distance": row[2] or 0,
-        "max_altitude": row[3] or 0,
-        "max_speed": row[4] or 0,
-        "total_points": row[5] or 0,
-        "avg_duration": (row[1] or 0) / total if total > 0 else 0,
-        "avg_distance": (row[2] or 0) / total if total > 0 else 0,
-        "longest_flight": longest,
-        "farthest_flight": farthest,
-        "recent_flights": recent_flights,
-    }
-
-
-# ── Parser health check ──────────────────────────────────────────────
-@router.get("/parser/status")
-async def parser_status(
-    _user: User = Depends(get_current_user),
-):
-    try:
-        async with httpx.AsyncClient(timeout=5) as client:
-            resp = await client.get(f"{PARSER_URL}/health")
-            return resp.json()
-    except Exception as e:
-        return {"status": "offline", "error": str(e)}
 
 
 # ── Helpers ───────────────────────────────────────────────────────────
