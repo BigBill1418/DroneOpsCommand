@@ -64,7 +64,7 @@ export default function Batteries() {
   const [form, setForm] = useState({ serial: '', name: '', model: '', status: 'active', notes: '' });
   const [editBattery, setEditBattery] = useState<BatteryRecord | null>(null);
   const [editForm, setEditForm] = useState({ serial: '', name: '', model: '' });
-  const [sortBy, setSortBy] = useState<string>('model');
+  const [sortBy, setSortBy] = useState<string>('serial');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [droneModels, setDroneModels] = useState<string[]>([]);
 
@@ -167,7 +167,7 @@ export default function Batteries() {
     const sorted = [...batteries].sort((a, b) => {
       let cmp = 0;
       switch (sortBy) {
-        case 'serial': cmp = (a.name || a.serial).localeCompare(b.name || b.serial); break;
+        case 'serial': cmp = (a.name || a.serial).localeCompare(b.name || b.serial, undefined, { numeric: true, sensitivity: 'base' }); break;
         case 'model': cmp = (a.model || 'Unassigned').localeCompare(b.model || 'Unassigned'); break;
         case 'status': cmp = a.status.localeCompare(b.status); break;
         case 'health': cmp = (a.health_pct ?? -1) - (b.health_pct ?? -1); break;
