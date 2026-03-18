@@ -465,7 +465,7 @@ export default function CustomerIntake() {
           {tosPdfUrl && tosPdfBlobUrl ? (
             <PdfViewer
               url={tosPdfBlobUrl}
-              height={500}
+              height={Math.min(500, window.innerHeight * 0.5)}
               downloadFilename="Terms_of_Service.pdf"
             />
           ) : tosPdfUrl ? (
@@ -518,7 +518,7 @@ export default function CustomerIntake() {
                 penColor="#00d4ff"
                 backgroundColor="#050608"
                 canvasProps={{
-                  style: { width: '100%', height: 150 },
+                  style: { width: '100%', height: 'min(150px, 30vw)', minHeight: 80 },
                 }}
               />
             </Box>
@@ -572,7 +572,7 @@ export default function CustomerIntake() {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        padding: 20,
+        padding: '16px',
       }}
     >
       <Card

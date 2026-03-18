@@ -576,7 +576,7 @@ export default function Flights() {
                 size="xs"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                styles={{ input: { background: '#050608', borderColor: '#1a1f2e', color: '#e8edf2', minWidth: 200, maxWidth: 300 } }}
+                styles={{ input: { background: '#050608', borderColor: '#1a1f2e', color: '#e8edf2' }, root: { flex: '1 1 200px', maxWidth: 300 } }}
               />
             </Group>
 

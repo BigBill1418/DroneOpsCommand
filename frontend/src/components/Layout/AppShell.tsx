@@ -7,6 +7,7 @@ import {
   Text,
   ActionIcon,
   Tooltip,
+  ScrollArea,
 } from '@mantine/core';
 import {
   IconBattery3,
@@ -99,7 +100,7 @@ export default function AppLayout({ onLogout }: AppLayoutProps) {
       </AppShell.Header>
 
       <AppShell.Navbar p="xs" style={{ display: 'flex', flexDirection: 'column' }}>
-        <div style={{ flex: 1 }}>
+        <ScrollArea style={{ flex: 1 }} type="auto" offsetScrollbars>
           {navItems.map((item) => (
             <NavLink
               key={item.path}
@@ -128,8 +129,8 @@ export default function AppLayout({ onLogout }: AppLayoutProps) {
               }}
             />
           ))}
-        </div>
-        <Group gap={8} px={4} pb={4}>
+        </ScrollArea>
+        <Group gap={8} px={4} pb={4} style={{ flexShrink: 0 }}>
           <Text
             size="xs"
             c="#5a6478"
@@ -138,7 +139,7 @@ export default function AppLayout({ onLogout }: AppLayoutProps) {
               fontSize: '15px',
             }}
           >
-            v2.19.1
+            v2.20.0
           </Text>
           <Tooltip label="Star on GitHub" position="right">
             <ActionIcon

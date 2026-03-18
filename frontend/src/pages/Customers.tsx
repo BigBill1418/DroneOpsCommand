@@ -306,7 +306,7 @@ export default function Customers() {
         ) : (
           <ScrollArea type="auto">
           <Table highlightOnHover styles={{
-            table: { color: '#e8edf2', minWidth: 700 },
+            table: { color: '#e8edf2', minWidth: 400 },
             th: { color: '#00d4ff', fontFamily: "'Share Tech Mono', monospace", fontSize: '13px', letterSpacing: '1px', borderBottom: '1px solid #1a1f2e' },
             td: { borderBottom: '1px solid #1a1f2e' },
           }}>

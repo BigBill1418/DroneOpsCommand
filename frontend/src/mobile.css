@@ -31,9 +31,15 @@
     margin-right: 12px;
   }
 
+  /* Navbar overlay — ensure it covers content on mobile */
+  .mantine-AppShell-navbar {
+    z-index: 200;
+  }
+
   /* Reduce page padding on mobile */
   .mantine-AppShell-main {
     padding: 8px !important;
+    padding-top: 68px !important; /* header height + small gap */
   }
 
   /* Tables: ensure scroll areas show scrollbar */
@@ -65,12 +71,21 @@
     padding: 10px !important;
   }
 
-  /* Modals — fullscreen on mobile for forms */
+  /* Modals — near-fullscreen on mobile for forms */
+  .mantine-Modal-inner {
+    padding: 8px !important;
+  }
+
   .mantine-Modal-content {
-    min-height: 60vh;
+    min-height: 50vh;
+    max-height: 95vh !important;
   }
 
   .mantine-Modal-body {
+    padding: 12px !important;
+  }
+
+  .mantine-Modal-header {
     padding: 12px !important;
   }
 
@@ -80,15 +95,38 @@
     max-width: 100% !important;
   }
 
+  .mantine-Drawer-body {
+    padding: 12px !important;
+  }
+
   /* Inputs — adequate size for touch */
   .mantine-TextInput-input,
   .mantine-Textarea-input,
   .mantine-Select-input,
   .mantine-PasswordInput-input,
   .mantine-NumberInput-input,
-  .mantine-DateInput-input {
+  .mantine-DateInput-input,
+  .mantine-DateTimePicker-input {
     min-height: 44px !important;
     font-size: 16px !important; /* prevents iOS zoom on focus */
+  }
+
+  /* Input wrappers — ensure full width in all contexts */
+  .mantine-TextInput-root,
+  .mantine-Textarea-root,
+  .mantine-Select-root,
+  .mantine-PasswordInput-root,
+  .mantine-NumberInput-root,
+  .mantine-DateInput-root {
+    max-width: 100% !important;
+  }
+
+  /* Remove fixed min/max widths on search inputs */
+  .mantine-TextInput-input[placeholder*="Search"],
+  .mantine-TextInput-input[placeholder*="search"] {
+    min-width: unset !important;
+    max-width: unset !important;
+    width: 100% !important;
   }
 
   /* Select dropdowns — bigger items for touch */
@@ -98,17 +136,28 @@
   }
 
   /* Search inputs — full width */
-  .mantine-TextInput-root:has([placeholder*="Search"]) {
+  .mantine-TextInput-root:has([placeholder*="Search"]),
+  .mantine-TextInput-root:has([placeholder*="search"]) {
     width: 100% !important;
+    min-width: unset !important;
+    max-width: unset !important;
+    flex: 1 1 100% !important;
   }
 
-  .mantine-TextInput-root:has([placeholder*="Search"]) .mantine-TextInput-input {
+  .mantine-TextInput-root:has([placeholder*="Search"]) .mantine-TextInput-input,
+  .mantine-TextInput-root:has([placeholder*="search"]) .mantine-TextInput-input {
     width: 100% !important;
+    min-width: unset !important;
+    max-width: unset !important;
   }
 
   /* Page titles — slightly smaller */
   .mantine-Title-root[data-order="2"] {
     font-size: 1.5rem !important;
+  }
+
+  .mantine-Title-root[data-order="3"] {
+    font-size: 1.2rem !important;
   }
 
   /* Notification positioning for mobile */
@@ -138,12 +187,19 @@
   .mantine-Tabs-tab {
     min-height: 44px !important;
     padding: 8px 12px !important;
+    font-size: 13px !important;
   }
 
   .mantine-Tabs-list {
     flex-wrap: nowrap !important;
     overflow-x: auto !important;
     -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  .mantine-Tabs-list::-webkit-scrollbar {
+    display: none;
   }
 
   /* Popover — constrain to viewport */
@@ -154,6 +210,33 @@
   /* Tooltip — hide on touch devices since they need hover */
   .mantine-Tooltip-tooltip {
     display: none !important;
+  }
+
+  /* ── Groups: force wrapping on mobile ──────────────────────────── */
+
+  /* Page header groups (title + actions) should stack */
+  .mantine-Stack-root > .mantine-Group-root:first-child {
+    gap: 8px !important;
+  }
+
+  /* Ensure Groups with justify="space-between" wrap properly */
+  .mantine-Group-root[style*="justify-content: space-between"] {
+    gap: 8px !important;
+  }
+
+  /* Switch label text — prevent overflow */
+  .mantine-Switch-label {
+    font-size: 14px !important;
+  }
+
+  .mantine-Switch-description {
+    font-size: 12px !important;
+  }
+
+  /* Rich text editor — constrain height */
+  .tiptap-editor-wrapper {
+    max-height: 50vh;
+    overflow-y: auto;
   }
 }
 
@@ -180,8 +263,7 @@
 
 /* ── Forms: side-by-side fields → stack on mobile ────────────────── */
 @media (max-width: 768px) {
-  /* Mantine Group with grow uses flex-wrap: wrap with children flex: 1 */
-  /* Force all form Groups to stack vertically */
+  /* Force all form Groups to stack vertically in modals and drawers */
   .mantine-Modal-body .mantine-Group-root,
   .mantine-Drawer-body .mantine-Group-root {
     flex-wrap: wrap !important;
@@ -193,9 +275,18 @@
   .mantine-Modal-body .mantine-Group-root > .mantine-NumberInput-root,
   .mantine-Modal-body .mantine-Group-root > .mantine-Select-root,
   .mantine-Modal-body .mantine-Group-root > .mantine-DateInput-root,
-  .mantine-Drawer-body .mantine-Group-root > .mantine-TextInput-root {
+  .mantine-Drawer-body .mantine-Group-root > .mantine-TextInput-root,
+  .mantine-Drawer-body .mantine-Group-root > .mantine-PasswordInput-root,
+  .mantine-Drawer-body .mantine-Group-root > .mantine-NumberInput-root,
+  .mantine-Drawer-body .mantine-Group-root > .mantine-Select-root,
+  .mantine-Drawer-body .mantine-Group-root > .mantine-DateInput-root {
     min-width: 100% !important;
     flex: 1 1 100% !important;
+  }
+
+  /* SimpleGrid with xs breakpoint — force single column on phones */
+  .mantine-SimpleGrid-root {
+    gap: 8px !important;
   }
 }
 
@@ -209,6 +300,11 @@
   .mantine-Group-root[style*="gap: 12px"] > * {
     min-width: 100% !important;
     flex: 1 1 100% !important;
+  }
+
+  /* Smaller stat card text on very small screens */
+  .mantine-Card-root .mantine-Text-root[style*="Bebas Neue"] {
+    font-size: 20px !important;
   }
 }
 
@@ -231,5 +327,29 @@
   .dashboard-grid > .mantine-Card-root {
     min-height: 250px;
     max-height: 400px;
+  }
+}
+
+/* ── Prevent horizontal overflow globally ─────────────────────────── */
+@media (max-width: 768px) {
+  body {
+    overflow-x: hidden;
+  }
+
+  .mantine-AppShell-main {
+    overflow-x: hidden;
+    max-width: 100vw;
+  }
+
+  /* Prevent text from causing horizontal scroll */
+  .mantine-Text-root {
+    overflow-wrap: break-word;
+    word-break: break-word;
+  }
+
+  /* Long URLs / links should wrap */
+  a, .mantine-Anchor-root {
+    overflow-wrap: break-word;
+    word-break: break-all;
   }
 }

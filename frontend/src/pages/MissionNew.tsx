@@ -755,11 +755,13 @@ export default function MissionNew() {
         onStepClick={setActive}
         color="cyan"
         size="sm"
+        allowNextStepsSelect={false}
         styles={{
+          steps: { flexWrap: 'wrap', gap: '4px' },
           step: { color: '#e8edf2' },
-          stepLabel: { color: '#e8edf2', fontFamily: "'Rajdhani', sans-serif" },
-          stepDescription: { color: '#5a6478' },
-          separator: { borderColor: '#1a1f2e' },
+          stepLabel: { color: '#e8edf2', fontFamily: "'Rajdhani', sans-serif", fontSize: '13px' },
+          stepDescription: { color: '#5a6478', fontSize: '11px' },
+          separator: { borderColor: '#1a1f2e', minWidth: '10px' },
         }}
       >
         {/* Step 1: Mission Details */}
@@ -1129,9 +1131,9 @@ export default function MissionNew() {
                 <Text c="#5a6478">This mission is not billable. You can skip this step.</Text>
               ) : (
                 <>
-                  <Group justify="space-between">
+                  <Group justify="space-between" wrap="wrap">
                     <Text c="#e8edf2" fw={600}>Line Items</Text>
-                    <Group gap="xs">
+                    <Group gap="xs" wrap="wrap">
                       <Select
                         placeholder="Add from template..."
                         data={rateTemplates.map((t) => ({

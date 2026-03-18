@@ -199,7 +199,7 @@ export default function MissionDetail() {
       {usedAircraft.length > 0 && (
         <Card padding="lg" radius="md" style={cardStyle}>
           <Title order={3} c="#e8edf2" mb="md" style={{ letterSpacing: '1px' }}>AIRCRAFT DEPLOYED</Title>
-          <Group>{usedAircraft.map((a) => <AircraftCard key={a.id} aircraft={a} />)}</Group>
+          <Group wrap="wrap">{usedAircraft.map((a) => <AircraftCard key={a.id} aircraft={a} />)}</Group>
         </Card>
       )}
 
@@ -208,7 +208,7 @@ export default function MissionDetail() {
         <Title order={3} c="#e8edf2" mb="md" style={{ letterSpacing: '1px' }}>FLIGHT PATH MAP</Title>
         <FlightMap geojson={mapGeojson} coverage={coverage ?? undefined} height="min(400px, 60vw)" />
         {coverage && (
-          <Group mt="sm" gap="xl">
+          <Group mt="sm" gap="xl" wrap="wrap">
             <div>
               <Text c="#5a6478" size="xs" style={{ fontFamily: "'Share Tech Mono', monospace" }}>AREA COVERED</Text>
               <Text c="#00d4ff" size="xl" fw={700} style={{ fontFamily: "'Bebas Neue', sans-serif" }}>
@@ -232,7 +232,7 @@ export default function MissionDetail() {
                 <IconLink size={16} color="#00d4ff" />
                 <Title order={4} c="#e8edf2" style={{ letterSpacing: '1px' }}>MISSION FOOTAGE DOWNLOAD</Title>
               </Group>
-              <Text c="#5a6478" size="xs" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+              <Text c="#5a6478" size="xs" style={{ fontFamily: "'Share Tech Mono', monospace", overflowWrap: 'break-word', wordBreak: 'break-all' }}>
                 {mission.download_link_url}
               </Text>
             </div>

@@ -50,13 +50,15 @@ export default function Login({ onLogin }: LoginProps) {
         alignItems: 'center',
         justifyContent: 'center',
         gap: 24,
+        padding: '16px',
       }}
     >
       <Card
         shadow="xl"
         padding="xl"
         radius="md"
-        w={440}
+        w="100%"
+        maw={440}
         style={{
           background: '#0e1117',
           border: '1px solid #1a1f2e',
