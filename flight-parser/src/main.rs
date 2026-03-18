@@ -158,7 +158,7 @@ async fn parse(mut multipart: Multipart) -> Result<Json<ParseResponse>, StatusCo
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::init();
+    tracing_subscriber::fmt::init();
 
     let port = env::var("PARSER_PORT").unwrap_or_else(|_| "8100".to_string());
 

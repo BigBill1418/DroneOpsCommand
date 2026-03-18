@@ -49,7 +49,11 @@ async def financials_summary(
             continue
 
         invoiced_count += 1
-        inv_total = float(inv.total or 0)
+
+        # Derive invoice total from line items so it always matches
+        # the category breakdown (guards against stale inv.total).
+        li_sum = sum(float(li.total or 0) for li in inv.line_items)
+        inv_total = li_sum if li_sum > 0 else float(inv.total or 0)
         total_revenue += inv_total
 
         if inv.paid_in_full:

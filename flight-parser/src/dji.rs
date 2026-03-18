@@ -20,29 +20,16 @@ pub fn parse_dji_log(
     let details = &log.details;
 
     let drone_model = Some(format!("{:?}", details.product_type));
-    let start_time = details.timestamp.map(|ts| {
-        chrono::DateTime::from_timestamp(ts as i64 / 1000, 0)
-            .map(|dt| dt.to_rfc3339())
-            .unwrap_or_default()
-    });
 
-    // For encrypted logs (v13+), we need the API key to decrypt records
-    let frames = if let Some(api_key) = _api_key {
-        match log.frames(api_key) {
-            Ok(f) => f,
-            Err(e) => {
-                tracing::warn!("{}: Could not decrypt frames (v13+ encrypted): {}. Returning metadata only.", filename, e);
-                Vec::new()
-            }
-        }
-    } else {
-        // Try without key (works for older unencrypted logs)
-        match log.frames("") {
-            Ok(f) => f,
-            Err(_) => {
-                tracing::warn!("{}: Encrypted log requires DJI_API_KEY for full parsing. Returning metadata only.", filename);
-                Vec::new()
-            }
+    // Try to get frames — pass None for keychains (works for unencrypted logs)
+    let frames = match log.frames(None) {
+        Ok(f) => f,
+        Err(e) => {
+            tracing::warn!(
+                "{}: Could not decode frames: {}. Returning metadata only.",
+                filename, e
+            );
+            Vec::new()
         }
     };
 
@@ -70,60 +57,64 @@ pub fn parse_dji_log(
 
     for frame in &frames {
         // Extract OSD (On-Screen Display) data — primary flight telemetry
-        if let Some(osd) = &frame.osd {
-            let lat = osd.latitude;
-            let lon = osd.longitude;
-            let alt = osd.altitude as f64;
-            let spd = osd.speed as f64;
+        // In dji-log-parser 0.5.7, osd and battery are direct structs, not Options
+        let osd = &frame.osd;
+        let lat = osd.latitude;
+        let lon = osd.longitude;
+        let alt = osd.altitude as f64;
+        let spd = osd.speed as f64;
 
-            if lat.abs() > 0.001 && lon.abs() > 0.001 {
-                track.push(TrackPoint {
-                    lat,
-                    lng: lon,
-                    alt,
-                    timestamp: None,
-                    speed: Some(spd),
-                    heading: Some(osd.yaw as f64),
-                });
+        if lat.abs() > 0.001 && lon.abs() > 0.001 {
+            track.push(TrackPoint {
+                lat,
+                lng: lon,
+                alt,
+                timestamp: None,
+                speed: Some(spd),
+                heading: Some(osd.yaw as f64),
+            });
 
-                if home_lat.is_none() {
-                    home_lat = Some(lat);
-                    home_lon = Some(lon);
-                }
-
-                // Calculate distance from previous point
-                if let (Some(plat), Some(plon)) = (prev_lat, prev_lon) {
-                    total_distance += haversine(plat, plon, lat, lon);
-                }
-                prev_lat = Some(lat);
-                prev_lon = Some(lon);
+            if home_lat.is_none() {
+                home_lat = Some(lat);
+                home_lon = Some(lon);
             }
 
-            altitudes.push(alt);
-            speeds.push(spd);
-            if alt > max_alt { max_alt = alt; }
-            if spd > max_speed { max_speed = spd; }
-            satellites_vec.push(osd.satellite_count as u32);
+            // Calculate distance from previous point
+            if let (Some(plat), Some(plon)) = (prev_lat, prev_lon) {
+                total_distance += haversine(plat, plon, lat, lon);
+            }
+            prev_lat = Some(lat);
+            prev_lon = Some(lon);
         }
+
+        altitudes.push(alt);
+        speeds.push(spd);
+        if alt > max_alt { max_alt = alt; }
+        if spd > max_speed { max_speed = spd; }
+        satellites_vec.push(osd.satellite_count as u32);
 
         // Extract battery data
-        if let Some(battery) = &frame.battery {
-            let voltage = battery.voltage as f64 / 1000.0; // mV to V
-            let pct = battery.charge_percent as f64;
-            let temp = battery.temperature as f64;
+        let battery = &frame.battery;
+        let voltage = battery.voltage as f64 / 1000.0; // mV to V
+        let pct = battery.charge_percent as f64;
+        let temp = battery.temperature as f64;
 
-            battery_pcts.push(pct);
-            battery_voltages.push(voltage);
-            battery_temps.push(temp);
+        battery_pcts.push(pct);
+        battery_voltages.push(voltage);
+        battery_temps.push(temp);
 
-            if start_voltage.is_none() { start_voltage = Some(voltage); }
-            end_voltage = Some(voltage);
-            min_voltage = Some(min_voltage.map_or(voltage, |v: f64| v.min(voltage)));
-            max_temp = Some(max_temp.map_or(temp, |t: f64| t.max(temp)));
-        }
+        if start_voltage.is_none() { start_voltage = Some(voltage); }
+        end_voltage = Some(voltage);
+        min_voltage = Some(min_voltage.map_or(voltage, |v: f64| v.min(voltage)));
+        max_temp = Some(max_temp.map_or(temp, |t: f64| t.max(temp)));
     }
 
-    let duration_secs = details.duration.unwrap_or(0) as f64;
+    // Estimate duration from frame count (~10 frames/sec typical for DJI logs)
+    let duration_secs = if !frames.is_empty() {
+        frames.len() as f64 / 10.0
+    } else {
+        0.0
+    };
     let point_count = track.len();
 
     let telemetry = if !altitudes.is_empty() {
@@ -158,9 +149,9 @@ pub fn parse_dji_log(
     Ok(ParsedFlight {
         name: filename.to_string(),
         drone_model,
-        drone_serial: details.serial_number.clone(),
+        drone_serial: None,
         battery_serial,
-        start_time,
+        start_time: None,
         duration_secs,
         total_distance,
         max_altitude: max_alt,
@@ -176,8 +167,7 @@ pub fn parse_dji_log(
         original_filename: filename.to_string(),
         raw_metadata: Some(serde_json::json!({
             "product_type": format!("{:?}", details.product_type),
-            "serial_number": details.serial_number,
-            "software_version": details.app_version,
+            "app_version": details.app_version,
         })),
     })
 }
