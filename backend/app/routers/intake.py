@@ -20,7 +20,7 @@ from app.models.customer import Customer
 from app.models.user import User
 from app.schemas.customer import IntakeFormData, IntakePublicResponse, IntakeTokenResponse
 
-logger = logging.getLogger("droneops.intake")
+logger = logging.getLogger("doc.intake")
 
 router = APIRouter(prefix="/api/intake", tags=["intake"])
 limiter = Limiter(key_func=get_remote_address)

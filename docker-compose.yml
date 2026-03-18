@@ -3,13 +3,13 @@ services:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-droneops}
+      POSTGRES_USER: ${POSTGRES_USER:-doc}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme_in_production}
-      POSTGRES_DB: ${POSTGRES_DB:-droneops}
+      POSTGRES_DB: ${POSTGRES_DB:-doc}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-droneops}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-doc}"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -63,7 +63,7 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     environment:
-      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://droneops:changeme_in_production@db:5432/droneops}
+      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://doc:changeme_in_production@db:5432/doc}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://ollama:11434}
       - OLLAMA_MODEL=${OLLAMA_MODEL:-mistral:7b-instruct-v0.3-q4_K_M}
@@ -103,7 +103,7 @@ services:
     restart: unless-stopped
     command: celery -A app.tasks.celery_tasks worker --loglevel=info
     environment:
-      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://droneops:changeme_in_production@db:5432/droneops}
+      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://doc:changeme_in_production@db:5432/doc}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://ollama:11434}
       - OLLAMA_MODEL=${OLLAMA_MODEL:-mistral:7b-instruct-v0.3-q4_K_M}

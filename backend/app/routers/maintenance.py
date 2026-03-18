@@ -17,7 +17,7 @@ from app.schemas.flight import (
     MaintenanceScheduleCreate, MaintenanceScheduleResponse,
 )
 
-logger = logging.getLogger("droneops.maintenance")
+logger = logging.getLogger("doc.maintenance")
 
 router = APIRouter(prefix="/api/maintenance", tags=["maintenance"])
 

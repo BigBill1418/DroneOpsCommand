@@ -2,7 +2,7 @@
 name = "flight-parser"
 version = "1.0.0"
 edition = "2021"
-description = "DJI/Litchi/Airdata flight log parser microservice for DroneOpsReport"
+description = "DJI/Litchi/Airdata flight log parser microservice for DroneOpsCommand"
 
 [dependencies]
 axum = { version = "0.7", features = ["multipart"] }

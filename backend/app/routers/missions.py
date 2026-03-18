@@ -27,7 +27,7 @@ from app.schemas.mission import (
 )
 from app.services.opendronelog import opendronelog_client
 
-logger = logging.getLogger("droneops.missions")
+logger = logging.getLogger("doc.missions")
 
 router = APIRouter(prefix="/api/missions", tags=["missions"])
 

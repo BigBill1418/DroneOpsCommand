@@ -193,10 +193,10 @@ async def test_smtp(
     from email.mime.text import MIMEText
 
     try:
-        msg = MIMEText("This is a test email from DroneOpsReport.")
+        msg = MIMEText("This is a test email from DroneOpsCommand.")
         msg["From"] = f"{smtp['smtp_from_name']} <{smtp['smtp_from_email']}>"
         msg["To"] = smtp["smtp_from_email"]
-        msg["Subject"] = "DroneOpsReport SMTP Test"
+        msg["Subject"] = "DroneOpsCommand SMTP Test"
 
         await aiosmtplib.send(
             msg,
@@ -329,7 +329,7 @@ async def lookup_weather_location(
             resp = await client.get(
                 "https://nominatim.openstreetmap.org/search",
                 params={"q": query, "format": "json", "limit": 1, "countrycodes": "us"},
-                headers={"User-Agent": "DroneOpsReport/1.0"},
+                headers={"User-Agent": "DroneOpsCommand/1.0"},
             )
             resp.raise_for_status()
             results = resp.json()

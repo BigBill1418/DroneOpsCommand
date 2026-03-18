@@ -8,7 +8,7 @@ from app.database import get_db
 from app.models.user import User
 from app.services.opendronelog import opendronelog_client
 
-logger = logging.getLogger("droneops.flights")
+logger = logging.getLogger("doc.flights")
 
 router = APIRouter(prefix="/api/flights", tags=["flights"])
 

@@ -13,7 +13,7 @@ from app.models.battery import Battery, BatteryLog
 from app.models.user import User
 from app.schemas.flight import BatteryCreate, BatteryLogResponse, BatteryResponse, BatteryUpdate
 
-logger = logging.getLogger("droneops.batteries")
+logger = logging.getLogger("doc.batteries")
 
 router = APIRouter(prefix="/api/batteries", tags=["batteries"])
 

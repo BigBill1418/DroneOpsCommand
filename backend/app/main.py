@@ -23,7 +23,7 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
-logger = logging.getLogger("droneops")
+logger = logging.getLogger("doc")
 
 
 def _add_missing_columns(conn):
@@ -35,7 +35,7 @@ def _add_missing_columns(conn):
     import logging
     from sqlalchemy import text, inspect as sa_inspect
 
-    logger = logging.getLogger("droneops.migrations")
+    logger = logging.getLogger("doc.migrations")
 
     try:
         inspector = sa_inspect(conn)
@@ -149,9 +149,9 @@ async def lifespan(app: FastAPI):
 limiter = Limiter(key_func=get_remote_address)
 
 app = FastAPI(
-    title="Flight Operations Command Center",
-    description="Invoicing and after-action reporting tool for drone operations",
-    version="2.2.0",
+    title="D.O.C — Drone Operations Command",
+    description="Mission management, flight data, and after-action reporting for drone operations",
+    version="2.3.0",
     lifespan=lifespan,
 )
 
@@ -221,7 +221,7 @@ async def log_requests(request: Request, call_next):
 
 @app.get("/api/health")
 async def health_check():
-    return {"status": "healthy", "service": "Flight Operations Command Center"}
+    return {"status": "healthy", "service": "D.O.C — Drone Operations Command"}
 
 
 @app.get("/api/branding")

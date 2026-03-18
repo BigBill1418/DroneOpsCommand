@@ -1,11 +1,11 @@
-# Contributing to DroneOpsReport
+# Contributing to DroneOpsCommand
 
 Thanks for your interest in contributing! This guide covers how to get started.
 
 ## Getting Started
 
 1. Fork the repository
-2. Clone your fork: `git clone https://github.com/YOUR_USERNAME/DroneOpsReport.git`
+2. Clone your fork: `git clone https://github.com/YOUR_USERNAME/DroneOpsCommand.git`
 3. Create a feature branch: `git checkout -b feature/your-feature-name`
 4. Make your changes
 5. Test locally with Docker Compose (see below)

@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.models.system_settings import SystemSetting
 
-logger = logging.getLogger("droneops.email")
+logger = logging.getLogger("doc.email")
 
 template_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "templates")
 jinja_env = Environment(loader=FileSystemLoader(template_dir), autoescape=select_autoescape(["html"]))

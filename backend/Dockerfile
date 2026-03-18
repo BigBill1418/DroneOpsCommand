@@ -23,10 +23,10 @@ COPY . .
 
 # Create data directories and non-root user
 RUN mkdir -p /data/uploads /data/reports \
-    && useradd -m -u 1000 droneops \
-    && chown -R droneops:droneops /data /app
+    && useradd -m -u 1000 doc \
+    && chown -R doc:doc /data /app
 
-USER droneops
+USER doc
 
 EXPOSE 8000
 

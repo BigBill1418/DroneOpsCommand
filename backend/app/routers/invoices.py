@@ -20,7 +20,7 @@ from app.schemas.invoice import (
     LineItemUpdate,
 )
 
-logger = logging.getLogger("droneops.invoices")
+logger = logging.getLogger("doc.invoices")
 
 router = APIRouter(prefix="/api/missions", tags=["invoices"])
 

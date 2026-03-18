@@ -20,7 +20,7 @@ from app.services.map_renderer import (
     render_static_map,
 )
 
-logger = logging.getLogger("droneops.maps")
+logger = logging.getLogger("doc.maps")
 
 router = APIRouter(prefix="/api/missions", tags=["maps"])
 

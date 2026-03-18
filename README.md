@@ -1,16 +1,16 @@
-# DroneOpsReport
+# DroneOpsCommand
 
 **Self-hosted mission management, AI report generation, and invoicing for commercial drone operators.**
 
-**Version 2.2.0** | [Quick Start](#quick-start) | [Features](#features) | [Configuration](#configuration) | [Contributing](CONTRIBUTING.md) | [License](LICENSE)
+**Version 2.3.0** | [Quick Start](#quick-start) | [Features](#features) | [Configuration](#configuration) | [Contributing](CONTRIBUTING.md) | [License](LICENSE)
 
 ---
 
-DroneOpsReport is a self-hosted, full-stack platform for managing commercial drone operations end-to-end. It covers the complete lifecycle from flight data ingestion through AI-powered report generation, invoicing, and client delivery.
+DroneOpsCommand is a self-hosted, full-stack platform for managing commercial drone operations end-to-end. It covers the complete lifecycle from flight data ingestion through AI-powered report generation, invoicing, and client delivery.
 
 Designed for FAA Part 107 certified operators running missions such as search & rescue, inspections, mapping, videography, and more.
 
-### Why DroneOpsReport?
+### Why DroneOpsCommand?
 
 - **100% self-hosted** — runs on your own hardware via Docker Compose. No cloud dependencies, no per-seat licensing.
 - **AI stays local** — report generation uses Ollama (Mistral 7B) so client data never leaves your network.
@@ -48,8 +48,8 @@ Designed for FAA Part 107 certified operators running missions such as search & 
 
 ```bash
 # 1. Clone and configure
-git clone https://github.com/YOUR_USERNAME/DroneOpsReport.git
-cd DroneOpsReport
+git clone https://github.com/YOUR_USERNAME/DroneOpsCommand.git
+cd DroneOpsCommand
 cp .env.example .env
 
 # 2. Set your secrets (IMPORTANT: change these before first run)
@@ -278,9 +278,9 @@ All settings are configured via environment variables in the `.env` file.
 ### Database
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `POSTGRES_USER` | `droneops` | PostgreSQL username |
+| `POSTGRES_USER` | `doc` | PostgreSQL username |
 | `POSTGRES_PASSWORD` | `changeme_in_production` | PostgreSQL password |
-| `POSTGRES_DB` | `droneops` | Database name |
+| `POSTGRES_DB` | `doc` | Database name |
 | `DATABASE_URL` | `postgresql+asyncpg://...` | Full async connection string |
 
 ### Authentication

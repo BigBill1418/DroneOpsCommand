@@ -20,7 +20,7 @@ from app.schemas.flight import (
     FlightCreate, FlightDetailResponse, FlightResponse, FlightUpdate, FlightUploadResponse,
 )
 
-logger = logging.getLogger("droneops.flights")
+logger = logging.getLogger("doc.flights")
 
 router = APIRouter(prefix="/api/flight-library", tags=["flight-library"])
 
@@ -479,7 +479,7 @@ def _export_csv(flight: Flight, track: list) -> StreamingResponse:
 def _export_gpx(flight: Flight, track: list) -> StreamingResponse:
     lines = [
         '<?xml version="1.0" encoding="UTF-8"?>',
-        '<gpx version="1.1" creator="DroneOpsReport">',
+        '<gpx version="1.1" creator="DroneOpsCommand">',
         f'  <trk><name>{flight.name}</name><trkseg>',
     ]
     for pt in track:
