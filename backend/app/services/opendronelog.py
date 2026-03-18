@@ -59,30 +59,38 @@ def _normalize_flight(raw: dict) -> dict:
     We produce a flat dict with both the original keys and normalized aliases
     so the frontend can use predictable field names.
     """
+    # Helper: return first truthy value from a list of keys (None-safe)
+    def _first(keys: list[str], default=None):
+        for k in keys:
+            v = raw.get(k)
+            if v is not None and v != "":
+                return v
+        return default
+
     return {
         # Preserve all original keys
         **raw,
         # Normalized aliases for frontend consumption
         "id": raw.get("id"),
-        "name": raw.get("displayName") or raw.get("display_name") or raw.get("fileName") or raw.get("file_name") or raw.get("name") or raw.get("title") or "",
-        "file_name": raw.get("fileName") or raw.get("file_name") or raw.get("filename") or "",
-        "display_name": raw.get("displayName") or raw.get("display_name") or raw.get("displayname") or "",
-        "drone_model": raw.get("droneModel") or raw.get("drone_model") or raw.get("dronemodel") or raw.get("drone") or raw.get("aircraft") or raw.get("model") or "",
-        "drone_name": raw.get("droneName") or raw.get("drone_name") or raw.get("dronename") or raw.get("droneDisplayName") or raw.get("drone_display_name") or "",
-        "drone_serial": raw.get("droneSerial") or raw.get("drone_serial") or raw.get("droneserial") or "",
-        "battery_serial": raw.get("batterySerial") or raw.get("battery_serial") or raw.get("batteryserial") or "",
-        "battery_name": raw.get("batteryName") or raw.get("battery_name") or raw.get("batteryname") or raw.get("batteryDisplayName") or raw.get("battery_display_name") or "",
-        "start_time": raw.get("startTime") or raw.get("start_time") or raw.get("date") or raw.get("created_at") or "",
-        "duration_secs": raw.get("durationSecs") or raw.get("duration_secs") or raw.get("duration") or raw.get("duration_seconds") or raw.get("flight_duration") or 0,
-        "total_distance": raw.get("totalDistance") or raw.get("total_distance") or raw.get("distance") or raw.get("distance_meters") or 0,
-        "max_altitude": raw.get("maxAltitude") or raw.get("max_altitude") or raw.get("max_alt") or raw.get("altitude_max") or 0,
-        "max_speed": raw.get("maxSpeed") or raw.get("max_speed") or 0,
-        "home_lat": raw.get("homeLat") or raw.get("home_lat") or None,
-        "home_lon": raw.get("homeLon") or raw.get("home_lon") or None,
-        "point_count": raw.get("pointCount") or raw.get("point_count") or 0,
-        "notes": raw.get("notes") or "",
-        "color": raw.get("color") or "",
-        "tags": raw.get("tags") or [],
+        "name": _first(["displayName", "display_name", "customName", "custom_name", "fileName", "file_name", "name", "title", "label"], ""),
+        "file_name": _first(["fileName", "file_name", "filename"], ""),
+        "display_name": _first(["displayName", "display_name", "displayname", "customName", "custom_name", "flightName", "flight_name", "label"], ""),
+        "drone_model": _first(["droneModel", "drone_model", "dronemodel", "drone", "aircraft", "aircraftModel", "aircraft_model"], ""),
+        "drone_name": _first(["droneName", "drone_name", "dronename", "droneDisplayName", "drone_display_name", "droneNickname", "drone_nickname"], ""),
+        "drone_serial": _first(["droneSerial", "drone_serial", "droneserial"], ""),
+        "battery_serial": _first(["batterySerial", "battery_serial", "batteryserial", "batterySn", "battery_sn"], ""),
+        "battery_name": _first(["batteryName", "battery_name", "batteryname", "batteryDisplayName", "battery_display_name", "batteryNickname", "battery_nickname", "batteryLabel", "battery_label"], ""),
+        "start_time": _first(["startTime", "start_time", "dateTime", "date_time", "flightDate", "flight_date", "timestamp", "recordedAt", "recorded_at", "date", "created_at", "createdAt"], ""),
+        "duration_secs": _first(["durationSecs", "duration_secs", "duration", "duration_seconds", "flight_duration", "flightDuration"], 0),
+        "total_distance": _first(["totalDistance", "total_distance", "distance", "distance_meters", "distanceMeters"], 0),
+        "max_altitude": _first(["maxAltitude", "max_altitude", "max_alt", "altitude_max", "altitudeMax"], 0),
+        "max_speed": _first(["maxSpeed", "max_speed", "speedMax", "speed_max"], 0),
+        "home_lat": _first(["homeLat", "home_lat"], None),
+        "home_lon": _first(["homeLon", "home_lon"], None),
+        "point_count": _first(["pointCount", "point_count"], 0),
+        "notes": _first(["notes"], ""),
+        "color": _first(["color"], ""),
+        "tags": _first(["tags"], []),
     }
 
 

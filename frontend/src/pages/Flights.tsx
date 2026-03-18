@@ -29,6 +29,8 @@ import {
   IconArrowsMaximize,
   IconBattery,
   IconBolt,
+  IconChevronDown,
+  IconChevronUp,
   IconClock,
   IconCloudUpload,
   IconDatabase,
@@ -43,6 +45,7 @@ import {
   IconRoute,
   IconRuler,
   IconSearch,
+  IconSelector,
   IconTimeline,
   IconTrash,
   IconUpload,
@@ -239,6 +242,10 @@ export default function Flights() {
   const [detailFlight, setDetailFlight] = useState<FlightRecord | null>(null);
   const navigate = useNavigate();
 
+  // Sort state
+  const [sortBy, setSortBy] = useState<string>('date');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+
   // Rename state
   const [renameId, setRenameId] = useState<string | null>(null);
   const [renameName, setRenameName] = useState('');
@@ -380,13 +387,49 @@ export default function Flights() {
   }, [flights]);
 
   const filtered = useMemo(() => {
-    if (!search) return flights;
-    const q = search.toLowerCase();
-    return flights.filter((f) => {
-      return [getDisplayName(f), getDroneModel(f), getStartTime(f), f.notes, f.drone_serial, f.source, f.original_filename]
-        .filter(Boolean).join(' ').toLowerCase().includes(q);
+    let result = flights;
+    if (search) {
+      const q = search.toLowerCase();
+      result = result.filter((f) => {
+        return [getDisplayName(f), getDroneModel(f), getStartTime(f), f.notes, f.drone_serial, f.source, f.original_filename]
+          .filter(Boolean).join(' ').toLowerCase().includes(q);
+      });
+    }
+    // Sort
+    const sorted = [...result].sort((a, b) => {
+      let cmp = 0;
+      switch (sortBy) {
+        case 'source': cmp = (a.source || '').localeCompare(b.source || ''); break;
+        case 'name': cmp = getDisplayName(a).localeCompare(getDisplayName(b)); break;
+        case 'date': {
+          const da = getStartTime(a) ? new Date(getStartTime(a)).getTime() : 0;
+          const db2 = getStartTime(b) ? new Date(getStartTime(b)).getTime() : 0;
+          cmp = da - db2; break;
+        }
+        case 'drone': cmp = getDroneModel(a).localeCompare(getDroneModel(b)); break;
+        case 'duration': cmp = getDurationSecs(a) - getDurationSecs(b); break;
+        case 'distance': cmp = getTotalDistance(a) - getTotalDistance(b); break;
+        case 'altitude': cmp = getMaxAltitude(a) - getMaxAltitude(b); break;
+        case 'speed': cmp = getMaxSpeed(a) - getMaxSpeed(b); break;
+      }
+      return sortDir === 'asc' ? cmp : -cmp;
     });
-  }, [flights, search]);
+    return sorted;
+  }, [flights, search, sortBy, sortDir]);
+
+  const toggleSort = (col: string) => {
+    if (sortBy === col) {
+      setSortDir((d) => d === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortBy(col);
+      setSortDir(col === 'name' || col === 'source' || col === 'drone' ? 'asc' : 'desc');
+    }
+  };
+
+  const SortIcon = ({ col }: { col: string }) => {
+    if (sortBy !== col) return <IconSelector size={12} style={{ opacity: 0.3 }} />;
+    return sortDir === 'asc' ? <IconChevronUp size={12} /> : <IconChevronDown size={12} />;
+  };
 
   return (
     <Stack gap="lg">
@@ -509,14 +552,13 @@ export default function Flights() {
               >
                 <Table.Thead>
                   <Table.Tr>
-                    <Table.Th>SOURCE</Table.Th>
-                    <Table.Th>NAME</Table.Th>
-                    <Table.Th>DATE</Table.Th>
-                    <Table.Th>DRONE</Table.Th>
-                    <Table.Th>DURATION</Table.Th>
-                    <Table.Th>DISTANCE</Table.Th>
-                    <Table.Th>MAX ALT</Table.Th>
-                    <Table.Th>MAX SPEED</Table.Th>
+                    {([['source', 'SOURCE'], ['name', 'NAME'], ['date', 'DATE'], ['drone', 'DRONE'], ['duration', 'DURATION'], ['distance', 'DISTANCE'], ['altitude', 'MAX ALT'], ['speed', 'MAX SPEED']] as const).map(([col, label]) => (
+                      <Table.Th key={col} onClick={() => toggleSort(col)} style={{ cursor: 'pointer', userSelect: 'none' }}>
+                        <Group gap={4} wrap="nowrap">
+                          {label}<SortIcon col={col} />
+                        </Group>
+                      </Table.Th>
+                    ))}
                     <Table.Th w={50}></Table.Th>
                   </Table.Tr>
                 </Table.Thead>

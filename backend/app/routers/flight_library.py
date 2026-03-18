@@ -4,6 +4,7 @@ import hashlib
 import json
 import logging
 import traceback
+from datetime import datetime as _dt
 from uuid import UUID
 
 import httpx
@@ -25,6 +26,59 @@ from app.schemas.flight import (
 logger = logging.getLogger("doc.flights")
 
 router = APIRouter(prefix="/api/flight-library", tags=["flight-library"])
+
+
+_DATE_FORMATS = (
+    "%Y-%m-%dT%H:%M:%S",
+    "%Y-%m-%dT%H:%M:%S.%f",
+    "%Y-%m-%dT%H:%M:%SZ",
+    "%Y-%m-%dT%H:%M:%S.%fZ",
+    "%Y-%m-%dT%H:%M:%S%z",
+    "%Y-%m-%d %H:%M:%S",
+    "%Y-%m-%d %H:%M:%S.%f",
+    "%Y-%m-%d",
+    "%m/%d/%Y %H:%M:%S",
+    "%m/%d/%Y",
+    "%d/%m/%Y %H:%M:%S",
+    "%d/%m/%Y",
+)
+
+
+def _parse_datetime(value: object) -> _dt | None:
+    """Parse a datetime from string, numeric epoch, or datetime object."""
+    if value is None or value == "":
+        return None
+    if isinstance(value, _dt):
+        return value
+    # Numeric epoch (seconds since 1970)
+    if isinstance(value, (int, float)):
+        try:
+            # Epoch in milliseconds (Java/JS style) vs seconds
+            if value > 1e12:
+                return _dt.utcfromtimestamp(value / 1000)
+            return _dt.utcfromtimestamp(value)
+        except (OSError, OverflowError, ValueError):
+            return None
+    if isinstance(value, str):
+        cleaned = value.strip()
+        if not cleaned:
+            return None
+        # Try numeric string
+        try:
+            num = float(cleaned)
+            if num > 1e12:
+                return _dt.utcfromtimestamp(num / 1000)
+            return _dt.utcfromtimestamp(num)
+        except (ValueError, OSError, OverflowError):
+            pass
+        # Try date format strings
+        for fmt in _DATE_FORMATS:
+            try:
+                return _dt.strptime(cleaned.rstrip("Z"), fmt.rstrip("Z").replace("%z", ""))
+            except ValueError:
+                continue
+        logger.warning("Could not parse date: %r", value)
+    return None
 
 PARSER_URL = "http://flight-parser:8100"
 
@@ -348,33 +402,35 @@ async def import_from_opendronelog(
         try:
             odl_id = str(odl.get("id", ""))
 
-            # Check if already imported by name + start_time combo
+            # Use custom display name, then file name, then fallback
             name = odl.get("display_name") or odl.get("name") or f"ODL Flight {odl_id}"
             start_raw = odl.get("start_time")
 
-            # Parse start_time string into a datetime object
-            start_dt = None
-            if start_raw:
-                from datetime import datetime as _dt
-                if isinstance(start_raw, str):
-                    for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M:%S.%f",
-                                "%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S.%fZ",
-                                "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
-                        try:
-                            start_dt = _dt.strptime(start_raw.rstrip("Z"), fmt.rstrip("Z"))
-                            break
-                        except ValueError:
-                            continue
-                elif isinstance(start_raw, _dt):
-                    start_dt = start_raw
+            # Parse start_time into a datetime object (handles strings, epochs, datetimes)
+            start_dt = _parse_datetime(start_raw)
 
-            if start_raw:
-                existing = await db.execute(
-                    select(Flight).where(Flight.name == name, Flight.source == "opendronelog_import")
-                )
-                if existing.scalar_one_or_none():
-                    skipped += 1
-                    continue
+            # If list endpoint didn't include start_time, try fetching detail
+            if not start_dt:
+                try:
+                    detail = await opendronelog_client.get_flight(odl_id, db)
+                    if detail:
+                        detail_time = detail.get("start_time") or detail.get("startTime") or detail.get("timestamp") or detail.get("dateTime") or detail.get("date")
+                        start_dt = _parse_datetime(detail_time)
+                        # Also pick up richer name/battery data from detail
+                        if not odl.get("display_name"):
+                            name = detail.get("display_name") or detail.get("displayName") or detail.get("customName") or name
+                        if not odl.get("battery_name"):
+                            odl["battery_name"] = detail.get("battery_name") or detail.get("batteryName") or detail.get("batteryNickname") or ""
+                except Exception:
+                    pass
+
+            # Dedup check
+            existing = await db.execute(
+                select(Flight).where(Flight.name == name, Flight.source == "opendronelog_import")
+            )
+            if existing.scalar_one_or_none():
+                skipped += 1
+                continue
 
             # Fetch GPS track
             track = []
@@ -446,7 +502,6 @@ async def import_from_opendronelog_stream(
 ):
     """Stream import progress as Server-Sent Events."""
     from app.services.opendronelog import opendronelog_client
-    from datetime import datetime as _dt
 
     async def event_stream():
         def sse(data: dict) -> str:
@@ -485,33 +540,34 @@ async def import_from_opendronelog_stream(
                     try:
                         start_raw = odl.get("start_time")
 
-                        # Parse start_time
-                        start_dt = None
-                        if start_raw:
-                            if isinstance(start_raw, str):
-                                for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M:%S.%f",
-                                            "%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S.%fZ",
-                                            "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
-                                    try:
-                                        start_dt = _dt.strptime(start_raw.rstrip("Z"), fmt.rstrip("Z"))
-                                        break
-                                    except ValueError:
-                                        continue
-                                if not start_dt:
-                                    logger.warning("ODL import: could not parse start_time '%s' for flight %s", start_raw, odl_id)
-                            elif isinstance(start_raw, _dt):
-                                start_dt = start_raw
+                        # Parse start_time (handles strings, epochs, datetimes)
+                        start_dt = _parse_datetime(start_raw)
+
+                        # If list endpoint didn't include start_time, try fetching detail
+                        if not start_dt:
+                            try:
+                                detail = await opendronelog_client.get_flight(odl_id, db)
+                                if detail:
+                                    detail_time = detail.get("start_time") or detail.get("startTime") or detail.get("timestamp") or detail.get("dateTime") or detail.get("date")
+                                    start_dt = _parse_datetime(detail_time)
+                                    if not odl.get("display_name"):
+                                        name = detail.get("display_name") or detail.get("displayName") or detail.get("customName") or name
+                                    if not odl.get("battery_name"):
+                                        odl["battery_name"] = detail.get("battery_name") or detail.get("batteryName") or detail.get("batteryNickname") or ""
+                            except Exception:
+                                pass
+                            if not start_dt:
+                                logger.warning("ODL import: could not parse start_time '%s' for flight %s", start_raw, odl_id)
 
                         # Check duplicate
-                        if start_raw:
-                            existing = await db.execute(
-                                select(Flight).where(Flight.name == name, Flight.source == "opendronelog_import")
-                            )
-                            if existing.scalar_one_or_none():
-                                skipped += 1
-                                logger.debug("ODL import: skipped duplicate '%s'", name)
-                                yield sse({"type": "progress", "current": i + 1, "total": total, "imported": imported, "skipped": skipped, "errors": error_count, "flight_name": name})
-                                continue
+                        existing = await db.execute(
+                            select(Flight).where(Flight.name == name, Flight.source == "opendronelog_import")
+                        )
+                        if existing.scalar_one_or_none():
+                            skipped += 1
+                            logger.debug("ODL import: skipped duplicate '%s'", name)
+                            yield sse({"type": "progress", "current": i + 1, "total": total, "imported": imported, "skipped": skipped, "errors": error_count, "flight_name": name})
+                            continue
 
                         # Fetch GPS track
                         track = []

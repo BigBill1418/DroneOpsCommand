@@ -7,6 +7,7 @@ import {
   Loader,
   Modal,
   Progress,
+  ScrollArea,
   SimpleGrid,
   Stack,
   Table,
@@ -24,8 +25,11 @@ import {
   IconBattery3,
   IconBattery4,
   IconBatteryOff,
+  IconChevronDown,
+  IconChevronUp,
   IconPlus,
   IconRefresh,
+  IconSelector,
   IconTrash,
 } from '@tabler/icons-react';
 import api from '../api/client';
@@ -38,15 +42,6 @@ const STATUS_COLORS: Record<string, string> = {
   service: 'yellow',
   retired: 'red',
 };
-
-function getBatteryIcon(pct: number | null) {
-  if (pct === null) return IconBattery;
-  if (pct >= 80) return IconBattery4;
-  if (pct >= 60) return IconBattery3;
-  if (pct >= 40) return IconBattery2;
-  if (pct >= 20) return IconBattery1;
-  return IconBatteryOff;
-}
 
 function getHealthColor(pct: number | null): string {
   if (pct === null) return '#5a6478';
@@ -65,6 +60,8 @@ export default function Batteries() {
   const [logs, setLogs] = useState<BatteryLogRecord[]>([]);
   const [logsLoading, setLogsLoading] = useState(false);
   const [form, setForm] = useState({ serial: '', model: '', status: 'active', notes: '' });
+  const [sortBy, setSortBy] = useState<string>('model');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
 
   const loadBatteries = async () => {
     setLoading(true);
@@ -122,11 +119,50 @@ export default function Batteries() {
   const stats = useMemo(() => {
     const active = batteries.filter((b) => b.status === 'active').length;
     const totalCycles = batteries.reduce((s, b) => s + b.cycle_count, 0);
-    const avgHealth = batteries.filter(b => b.health_pct !== null).length > 0
-      ? batteries.filter(b => b.health_pct !== null).reduce((s, b) => s + (b.health_pct || 0), 0) / batteries.filter(b => b.health_pct !== null).length
+    const withHealth = batteries.filter(b => b.health_pct !== null);
+    const avgHealth = withHealth.length > 0
+      ? withHealth.reduce((s, b) => s + (b.health_pct || 0), 0) / withHealth.length
       : null;
     return { total: batteries.length, active, totalCycles, avgHealth };
   }, [batteries]);
+
+  // Group batteries by drone model for display
+  const grouped = useMemo(() => {
+    const sorted = [...batteries].sort((a, b) => {
+      let cmp = 0;
+      switch (sortBy) {
+        case 'serial': cmp = a.serial.localeCompare(b.serial); break;
+        case 'model': cmp = (a.model || 'Unknown').localeCompare(b.model || 'Unknown'); break;
+        case 'status': cmp = a.status.localeCompare(b.status); break;
+        case 'health': cmp = (a.health_pct ?? -1) - (b.health_pct ?? -1); break;
+        case 'cycles': cmp = a.cycle_count - b.cycle_count; break;
+        case 'voltage': cmp = (a.last_voltage ?? 0) - (b.last_voltage ?? 0); break;
+      }
+      return sortDir === 'asc' ? cmp : -cmp;
+    });
+
+    const map = new Map<string, BatteryRecord[]>();
+    for (const bat of sorted) {
+      const key = bat.model || 'Unknown';
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(bat);
+    }
+    return Array.from(map.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+  }, [batteries, sortBy, sortDir]);
+
+  const toggleSort = (col: string) => {
+    if (sortBy === col) {
+      setSortDir((d) => d === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortBy(col);
+      setSortDir(col === 'serial' || col === 'model' || col === 'status' ? 'asc' : 'desc');
+    }
+  };
+
+  const SortIcon = ({ col }: { col: string }) => {
+    if (sortBy !== col) return <IconSelector size={12} style={{ opacity: 0.3 }} />;
+    return sortDir === 'asc' ? <IconChevronUp size={12} /> : <IconChevronDown size={12} />;
+  };
 
   return (
     <Stack gap="lg">
@@ -167,63 +203,104 @@ export default function Batteries() {
             <StatCard icon={IconBattery3} label="Avg Health" value={stats.avgHealth !== null ? `${Math.round(stats.avgHealth)}%` : '—'} color={getHealthColor(stats.avgHealth)} />
           </SimpleGrid>
 
-          <SimpleGrid cols={{ base: 1, sm: 2, md: 3 }}>
-            {batteries.map((bat) => {
-              const Icon = getBatteryIcon(bat.health_pct);
-              const healthColor = getHealthColor(bat.health_pct);
-              return (
-                <Card key={bat.id} padding="md" radius="md" style={{ ...cardStyle, cursor: 'pointer', transition: 'border-color 0.2s' }}
-                  onClick={() => { setSelectedBattery(bat); loadLogs(bat.id); }}
-                >
-                  <Group justify="space-between" mb="sm">
-                    <Group gap="sm">
-                      <Icon size={24} color={healthColor} />
-                      <div>
-                        <Text fw={700} c="#e8edf2" style={{ fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px', fontSize: '18px' }}>
-                          {bat.serial}
-                        </Text>
-                        <Text size="xs" c="#5a6478" style={monoFont}>{bat.model || 'Unknown Model'}</Text>
-                      </div>
-                    </Group>
-                    <Badge color={STATUS_COLORS[bat.status] || 'gray'} variant="light" size="sm">
-                      {bat.status.toUpperCase()}
-                    </Badge>
-                  </Group>
+          <Card padding="lg" radius="md" style={cardStyle}>
+            <Text size="sm" c="#5a6478" style={monoFont} mb="md">
+              {batteries.length} BATTER{batteries.length !== 1 ? 'IES' : 'Y'} — {grouped.length} DRONE TYPE{grouped.length !== 1 ? 'S' : ''}
+            </Text>
 
-                  {bat.health_pct !== null && (
-                    <div style={{ marginBottom: 8 }}>
-                      <Group justify="space-between" mb={4}>
-                        <Text size="xs" c="#5a6478" style={monoFont}>HEALTH</Text>
-                        <Text size="xs" c={healthColor} fw={700} style={monoFont}>{Math.round(bat.health_pct)}%</Text>
-                      </Group>
-                      <Progress value={bat.health_pct} color={healthColor} size="sm" style={{ background: '#1a1f2e' }} />
-                    </div>
-                  )}
-
-                  <Group justify="space-between">
-                    <div>
-                      <Text size="11px" c="#5a6478" style={{ ...monoFont, letterSpacing: '1px' }}>CYCLES</Text>
-                      <Text c="#00d4ff" fw={700} style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: '22px' }}>
-                        {bat.cycle_count}
-                      </Text>
-                    </div>
-                    {bat.last_voltage && (
-                      <div>
-                        <Text size="11px" c="#5a6478" style={{ ...monoFont, letterSpacing: '1px' }}>LAST VOLTAGE</Text>
-                        <Text c="#e8edf2" fw={700} style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: '22px' }}>
-                          {bat.last_voltage.toFixed(1)}V
-                        </Text>
-                      </div>
-                    )}
-                  </Group>
-                </Card>
-              );
-            })}
-          </SimpleGrid>
+            <ScrollArea>
+              <Table
+                highlightOnHover
+                styles={{
+                  table: { color: '#e8edf2' },
+                  th: { color: '#00d4ff', fontFamily: "'Share Tech Mono', monospace", fontSize: '12px', letterSpacing: '1px', borderBottom: '1px solid #1a1f2e', padding: '10px 12px', whiteSpace: 'nowrap' },
+                  td: { borderBottom: '1px solid #1a1f2e', padding: '8px 12px' },
+                }}
+              >
+                <Table.Thead>
+                  <Table.Tr>
+                    {([['serial', 'BATTERY'], ['model', 'DRONE TYPE'], ['status', 'STATUS'], ['health', 'HEALTH'], ['cycles', 'CYCLES'], ['voltage', 'LAST VOLTAGE']] as const).map(([col, label]) => (
+                      <Table.Th key={col} onClick={() => toggleSort(col)} style={{ cursor: 'pointer', userSelect: 'none' }}>
+                        <Group gap={4} wrap="nowrap">
+                          {label}<SortIcon col={col} />
+                        </Group>
+                      </Table.Th>
+                    ))}
+                    <Table.Th w={50}></Table.Th>
+                  </Table.Tr>
+                </Table.Thead>
+                <Table.Tbody>
+                  {grouped.map(([model, bats]) => (
+                    <>
+                      <Table.Tr key={`group-${model}`} style={{ background: 'rgba(0, 212, 255, 0.03)' }}>
+                        <Table.Td colSpan={7} style={{ borderBottom: '1px solid #1a1f2e', padding: '6px 12px' }}>
+                          <Text size="xs" fw={700} c="#00d4ff" style={{ fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '2px', fontSize: '14px' }}>
+                            {model.toUpperCase()} — {bats.length} batter{bats.length !== 1 ? 'ies' : 'y'}
+                          </Text>
+                        </Table.Td>
+                      </Table.Tr>
+                      {bats.map((bat) => {
+                        const healthColor = getHealthColor(bat.health_pct);
+                        return (
+                          <Table.Tr
+                            key={bat.id}
+                            style={{ cursor: 'pointer' }}
+                            onClick={() => { setSelectedBattery(bat); loadLogs(bat.id); }}
+                          >
+                            <Table.Td>
+                              <Text size="sm" fw={600} c="#e8edf2" style={monoFont}>{bat.serial}</Text>
+                            </Table.Td>
+                            <Table.Td>
+                              <Text size="xs" c="#5a6478" style={monoFont}>{bat.model || 'Unknown'}</Text>
+                            </Table.Td>
+                            <Table.Td>
+                              <Badge color={STATUS_COLORS[bat.status] || 'gray'} variant="light" size="sm">
+                                {bat.status.toUpperCase()}
+                              </Badge>
+                            </Table.Td>
+                            <Table.Td>
+                              {bat.health_pct !== null ? (
+                                <Group gap={8} wrap="nowrap">
+                                  <Progress value={bat.health_pct} color={healthColor} size="sm" style={{ background: '#1a1f2e', flex: 1, minWidth: 60 }} />
+                                  <Text size="xs" c={healthColor} fw={700} style={monoFont} w={40} ta="right">{Math.round(bat.health_pct)}%</Text>
+                                </Group>
+                              ) : (
+                                <Text size="xs" c="#5a6478" style={monoFont}>—</Text>
+                              )}
+                            </Table.Td>
+                            <Table.Td>
+                              <Text size="sm" c="#00d4ff" fw={700} style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: '18px' }}>
+                                {bat.cycle_count}
+                              </Text>
+                            </Table.Td>
+                            <Table.Td>
+                              <Text size="xs" c="#e8edf2" style={monoFont}>
+                                {bat.last_voltage ? `${bat.last_voltage.toFixed(1)}V` : '—'}
+                              </Text>
+                            </Table.Td>
+                            <Table.Td>
+                              <Button
+                                variant="subtle"
+                                color="red"
+                                size="compact-xs"
+                                onClick={(e) => { e.stopPropagation(); handleDelete(bat.id); }}
+                              >
+                                <IconTrash size={14} />
+                              </Button>
+                            </Table.Td>
+                          </Table.Tr>
+                        );
+                      })}
+                    </>
+                  ))}
+                </Table.Tbody>
+              </Table>
+            </ScrollArea>
+          </Card>
         </>
       )}
 
-      {/* ── Battery Detail Modal ──────────────────────────────────── */}
+      {/* Battery Detail Modal */}
       <Modal
         opened={!!selectedBattery}
         onClose={() => setSelectedBattery(null)}
@@ -296,7 +373,7 @@ export default function Batteries() {
         )}
       </Modal>
 
-      {/* ── Add Battery Modal ─────────────────────────────────────── */}
+      {/* Add Battery Modal */}
       <Modal
         opened={addOpen}
         onClose={() => setAddOpen(false)}
