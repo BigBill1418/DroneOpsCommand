@@ -4,7 +4,7 @@ set -e
 # ── Configuration ──────────────────────────────────────────────────
 # Override these with environment variables or edit for your setup.
 INSTALL_DIR="${DRONEOPS_DIR:-$(cd "$(dirname "$0")" && pwd)}"
-BRANCH="${DRONEOPS_BRANCH:-claude/drone-report-generator-qk9UM}"
+BRANCH="${DRONEOPS_BRANCH:-main}"
 # ───────────────────────────────────────────────────────────────────
 
 cd "$INSTALL_DIR"
@@ -33,10 +33,8 @@ if ! git fetch origin "$BRANCH"; then
 fi
 
 echo "=== Syncing to $BRANCH ==="
-git checkout main 2>/dev/null || git checkout -b main origin/main
-# Feature branch is source of truth — force main to match it
+git checkout "$BRANCH" 2>/dev/null || git checkout -b "$BRANCH" "origin/$BRANCH"
 git reset --hard "origin/$BRANCH"
-git push origin main --force 2>/dev/null || true
 CURRENT_COMMIT=$(git rev-parse HEAD)
 
 # Figure out what changed since last deploy
@@ -49,13 +47,16 @@ fi
 
 REBUILD_FRONTEND=false
 REBUILD_BACKEND=false
+REBUILD_PARSER=false
 
 if [ "$CHANGED" = "all" ]; then
   REBUILD_FRONTEND=true
   REBUILD_BACKEND=true
+  REBUILD_PARSER=true
 else
   echo "$CHANGED" | grep -q "^frontend/" && REBUILD_FRONTEND=true
   echo "$CHANGED" | grep -q "^backend/" && REBUILD_BACKEND=true
+  echo "$CHANGED" | grep -q "^flight-parser/" && REBUILD_PARSER=true
 fi
 
 # --clean flag forces full rebuild (no cache)
@@ -64,12 +65,14 @@ if [ "$1" = "--clean" ]; then
   CACHE_FLAG="--no-cache"
   REBUILD_FRONTEND=true
   REBUILD_BACKEND=true
+  REBUILD_PARSER=true
 fi
 
 # --all flag rebuilds everything
 if [ "$1" = "--all" ]; then
   REBUILD_FRONTEND=true
   REBUILD_BACKEND=true
+  REBUILD_PARSER=true
 fi
 
 if $REBUILD_FRONTEND; then
@@ -82,7 +85,12 @@ if $REBUILD_BACKEND; then
   $DOCKER build $CACHE_FLAG backend worker
 fi
 
-if $REBUILD_FRONTEND || $REBUILD_BACKEND; then
+if $REBUILD_PARSER; then
+  echo "=== Rebuilding flight-parser ==="
+  $DOCKER build $CACHE_FLAG flight-parser
+fi
+
+if $REBUILD_FRONTEND || $REBUILD_BACKEND || $REBUILD_PARSER; then
   echo "=== Restarting changed services ==="
   $DOCKER up -d
 else
