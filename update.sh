@@ -4,7 +4,7 @@ set -e
 # ── Configuration ──────────────────────────────────────────────────
 # Override these with environment variables or edit for your setup.
 INSTALL_DIR="${DRONEOPS_DIR:-$(cd "$(dirname "$0")" && pwd)}"
-BRANCH="${DRONEOPS_BRANCH:-main}"
+BRANCH="${DRONEOPS_BRANCH:-claude/drone-report-generator-qk9UM}"
 # ───────────────────────────────────────────────────────────────────
 
 cd "$INSTALL_DIR"
@@ -34,7 +34,7 @@ if ! git fetch origin "$BRANCH"; then
   git remote -v
   echo ""
   echo "If the repo was renamed, fix it with:"
-  echo "  git remote set-url origin https://github.com/BigBill1418/DroneOpsCommand.git"
+  echo "  git remote set-url origin https://github.com/BigBill1418/DroneOpsReport.git"
   exit 1
 fi
 
