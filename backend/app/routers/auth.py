@@ -1,3 +1,7 @@
+import logging
+import time
+from collections import defaultdict
+
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from jose import JWTError, jwt
 from slowapi import Limiter
@@ -19,25 +23,79 @@ from app.database import get_db
 from app.models.user import User
 from app.schemas.auth import LoginRequest, RefreshRequest, TokenResponse
 
+logger = logging.getLogger("doc.auth")
+
 
 class AccountUpdateRequest(BaseModel):
     current_password: str
     new_username: str | None = None
     new_password: str | None = None
 
+
+# ── Login lockout: 3 failed attempts in 120s → locked for 5 minutes ──
+LOCKOUT_MAX_ATTEMPTS = 3
+LOCKOUT_WINDOW_SECS = 120
+LOCKOUT_DURATION_SECS = 300
+
+# {ip_address: [timestamp, timestamp, ...]}
+_failed_attempts: dict[str, list[float]] = defaultdict(list)
+# {ip_address: lockout_until_timestamp}
+_lockouts: dict[str, float] = {}
+
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 limiter = Limiter(key_func=get_remote_address)
+
+
+def _check_lockout(ip: str) -> None:
+    """Raise 429 if the IP is currently locked out."""
+    until = _lockouts.get(ip)
+    if until and time.time() < until:
+        remaining = int(until - time.time())
+        logger.warning("Login attempt from locked-out IP %s (%ds remaining)", ip, remaining)
+        raise HTTPException(
+            status_code=429,
+            detail=f"Too many failed attempts. Account locked for {remaining} seconds.",
+        )
+    elif until:
+        # Lockout expired — clean up
+        del _lockouts[ip]
+        _failed_attempts.pop(ip, None)
+
+
+def _record_failure(ip: str) -> None:
+    """Record a failed login and trigger lockout if threshold exceeded."""
+    now = time.time()
+    attempts = _failed_attempts[ip]
+    # Prune attempts outside the window
+    attempts[:] = [t for t in attempts if now - t < LOCKOUT_WINDOW_SECS]
+    attempts.append(now)
+    logger.warning("Failed login from %s (attempt %d/%d in window)", ip, len(attempts), LOCKOUT_MAX_ATTEMPTS)
+    if len(attempts) >= LOCKOUT_MAX_ATTEMPTS:
+        _lockouts[ip] = now + LOCKOUT_DURATION_SECS
+        _failed_attempts.pop(ip, None)
+        logger.warning("IP %s locked out for %ds after %d failed attempts", ip, LOCKOUT_DURATION_SECS, LOCKOUT_MAX_ATTEMPTS)
+
+
+def _clear_failures(ip: str) -> None:
+    """Clear failure tracking on successful login."""
+    _failed_attempts.pop(ip, None)
+    _lockouts.pop(ip, None)
 
 
 @router.post("/login", response_model=TokenResponse)
 @limiter.limit("5/minute")
 async def login(request: Request, body: LoginRequest, db: AsyncSession = Depends(get_db)):
+    client_ip = get_remote_address(request)
+    _check_lockout(client_ip)
+
     result = await db.execute(select(User).where(User.username == body.username))
     user = result.scalar_one_or_none()
 
     if not user or not verify_password(body.password, user.hashed_password):
+        _record_failure(client_ip)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
+    _clear_failures(client_ip)
     return TokenResponse(
         access_token=create_access_token({"sub": user.username}),
         refresh_token=create_refresh_token({"sub": user.username}),

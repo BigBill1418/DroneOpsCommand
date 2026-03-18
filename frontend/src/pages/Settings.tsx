@@ -59,6 +59,8 @@ export default function Settings() {
   const [tosUploading, setTosUploading] = useState(false);
   const [brandingSaving, setBrandingSaving] = useState(false);
   const [djiSaving, setDjiSaving] = useState(false);
+  const [odlImporting, setOdlImporting] = useState(false);
+  const [odlImportProgress, setOdlImportProgress] = useState({ current: 0, total: 0, imported: 0, skipped: 0, errors: 0, currentFlight: '' });
   const [accountSaving, setAccountSaving] = useState(false);
   const [currentUsername, setCurrentUsername] = useState('');
 
@@ -312,6 +314,62 @@ export default function Settings() {
     }
   };
 
+  const handleOdlImport = async () => {
+    setOdlImporting(true);
+    setOdlImportProgress({ current: 0, total: 0, imported: 0, skipped: 0, errors: 0, currentFlight: '' });
+    try {
+      const token = localStorage.getItem('access_token');
+      const resp = await fetch('/api/flight-library/import/opendronelog/stream', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ detail: 'Import failed' }));
+        throw new Error(err.detail || `HTTP ${resp.status}`);
+      }
+      const reader = resp.body?.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      while (reader) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          try {
+            const event = JSON.parse(line.slice(6));
+            if (event.type === 'progress') {
+              setOdlImportProgress({
+                current: event.current,
+                total: event.total,
+                imported: event.imported,
+                skipped: event.skipped,
+                errors: event.errors,
+                currentFlight: event.flight_name || '',
+              });
+            } else if (event.type === 'complete') {
+              setOdlImportProgress((p) => ({ ...p, current: event.total, total: event.total }));
+              notifications.show({
+                title: 'Import Complete',
+                message: `${event.imported} imported, ${event.skipped} skipped, ${event.errors} errors`,
+                color: event.errors > 0 ? 'orange' : 'green',
+                autoClose: 8000,
+              });
+            } else if (event.type === 'error') {
+              notifications.show({ title: 'Import Error', message: event.message, color: 'red', autoClose: 8000 });
+            }
+          } catch { /* skip malformed lines */ }
+        }
+      }
+    } catch (err: any) {
+      notifications.show({ title: 'Import Failed', message: err.message || 'Migration failed', color: 'red', autoClose: 8000 });
+    } finally {
+      setOdlImporting(false);
+    }
+  };
+
   const handleSavePayment = async (values: typeof paymentForm.values) => {
     setPaymentSaving(true);
     try {
@@ -395,6 +453,9 @@ export default function Settings() {
           </Tabs.Tab>
           <Tabs.Tab value="email" leftSection={<IconMail size={14} />}>
             EMAIL & BILLING
+          </Tabs.Tab>
+          <Tabs.Tab value="flight" leftSection={<IconDrone size={14} />}>
+            FLIGHT DATA
           </Tabs.Tab>
           <Tabs.Tab value="fleet" leftSection={<IconPlane size={14} />}>
             FLEET & RATES
@@ -489,96 +550,6 @@ export default function Settings() {
                   )}
                 </Stack>
               )}
-            </Card>
-
-            {/* OpenDroneLog */}
-            <Card padding="lg" radius="md" style={cardStyle}>
-              <Group justify="space-between" mb="md">
-                <Group gap="sm">
-                  <IconDrone size={20} color="#00d4ff" />
-                  <Title order={3} c="#e8edf2" style={{ letterSpacing: '1px' }}>OPENDRONELOG</Title>
-                </Group>
-                <Button
-                  leftSection={<IconPlugConnected size={14} />}
-                  size="xs"
-                  variant="light"
-                  color="cyan"
-                  loading={odlTesting}
-                  onClick={handleTestOdl}
-                >
-                  Test Connection
-                </Button>
-              </Group>
-              <form onSubmit={odlForm.onSubmit(handleSaveOdl)}>
-                <Stack gap="sm">
-                  <TextInput
-                    label="OpenDroneLog URL"
-                    placeholder="http://host.docker.internal:8080 or http://192.168.x.x:8080"
-                    {...odlForm.getInputProps('opendronelog_url')}
-                    styles={inputStyles}
-                  />
-                  <Text c="#5a6478" size="xs" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
-                    If OpenDroneLog runs on the same machine as Docker, use http://host.docker.internal:PORT
-                  </Text>
-                  {odlStatus && (
-                    <Group gap="xs">
-                      <Badge color={odlStatus.status === 'online' ? 'green' : 'red'} size="sm">
-                        {odlStatus.status}
-                      </Badge>
-                      <Text c={odlStatus.status === 'online' ? '#e8edf2' : '#ff6b6b'} size="sm">
-                        {odlStatus.message}
-                      </Text>
-                    </Group>
-                  )}
-                  <Button type="submit" color="cyan" loading={odlSaving} styles={{ root: { fontFamily: "'Bebas Neue', sans-serif" } }}>
-                    SAVE
-                  </Button>
-                  {odlStatus?.status === 'online' && (
-                    <Button
-                      variant="light"
-                      color="orange"
-                      leftSection={<IconDrone size={14} />}
-                      onClick={async () => {
-                        try {
-                          notifications.show({ title: 'Importing...', message: 'Migrating flights from OpenDroneLog...', color: 'cyan', autoClose: false, id: 'odl-import' });
-                          const resp = await api.post('/flight-library/import/opendronelog');
-                          notifications.update({ id: 'odl-import', title: 'Import Complete', message: `${resp.data.imported} flights imported, ${resp.data.skipped} skipped`, color: 'green', autoClose: 5000 });
-                        } catch (err: any) {
-                          notifications.update({ id: 'odl-import', title: 'Import Failed', message: err.response?.data?.detail || 'Migration failed', color: 'red', autoClose: 5000 });
-                        }
-                      }}
-                      styles={{ root: { fontFamily: "'Bebas Neue', sans-serif" } }}
-                    >
-                      IMPORT ALL FLIGHTS TO LOCAL LIBRARY
-                    </Button>
-                  )}
-                </Stack>
-              </form>
-            </Card>
-
-            {/* DJI API Key */}
-            <Card padding="lg" radius="md" style={cardStyle}>
-              <Group gap="sm" mb="md">
-                <IconKey size={20} color="#00d4ff" />
-                <Title order={3} c="#e8edf2" style={{ letterSpacing: '1px' }}>DJI API KEY</Title>
-              </Group>
-              <Text c="#5a6478" size="xs" mb="sm" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
-                Enter your DJI Developer API key for direct integration with DJI cloud services.
-              </Text>
-              <form onSubmit={djiForm.onSubmit(handleSaveDji)}>
-                <Stack gap="sm">
-                  <PasswordInput
-                    label="DJI API Key"
-                    placeholder="Enter your DJI API key"
-                    leftSection={<IconKey size={14} />}
-                    {...djiForm.getInputProps('dji_api_key')}
-                    styles={inputStyles}
-                  />
-                  <Button type="submit" color="cyan" loading={djiSaving} styles={{ root: { fontFamily: "'Bebas Neue', sans-serif" } }}>
-                    SAVE DJI API KEY
-                  </Button>
-                </Stack>
-              </form>
             </Card>
 
             {/* Weather / Airspace Location */}
@@ -753,6 +724,123 @@ export default function Settings() {
                   />
                   <Button type="submit" color="cyan" loading={paymentSaving} styles={{ root: { fontFamily: "'Bebas Neue', sans-serif" } }}>
                     SAVE PAYMENT LINKS
+                  </Button>
+                </Stack>
+              </form>
+            </Card>
+          </Stack>
+        </Tabs.Panel>
+
+        {/* ═══ FLIGHT DATA TAB ═══ */}
+        <Tabs.Panel value="flight" pt="md">
+          <Stack gap="md">
+            {/* OpenDroneLog */}
+            <Card padding="lg" radius="md" style={cardStyle}>
+              <Group justify="space-between" mb="md">
+                <Group gap="sm">
+                  <IconDrone size={20} color="#00d4ff" />
+                  <Title order={3} c="#e8edf2" style={{ letterSpacing: '1px' }}>OPENDRONELOG</Title>
+                </Group>
+                <Button
+                  leftSection={<IconPlugConnected size={14} />}
+                  size="xs"
+                  variant="light"
+                  color="cyan"
+                  loading={odlTesting}
+                  onClick={handleTestOdl}
+                >
+                  Test Connection
+                </Button>
+              </Group>
+              <form onSubmit={odlForm.onSubmit(handleSaveOdl)}>
+                <Stack gap="sm">
+                  <TextInput
+                    label="OpenDroneLog URL"
+                    placeholder="http://host.docker.internal:8080 or http://192.168.x.x:8080"
+                    {...odlForm.getInputProps('opendronelog_url')}
+                    styles={inputStyles}
+                  />
+                  <Text c="#5a6478" size="xs" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+                    If OpenDroneLog runs on the same machine as Docker, use http://host.docker.internal:PORT
+                  </Text>
+                  {odlStatus && (
+                    <Group gap="xs">
+                      <Badge color={odlStatus.status === 'online' ? 'green' : 'red'} size="sm">
+                        {odlStatus.status}
+                      </Badge>
+                      <Text c={odlStatus.status === 'online' ? '#e8edf2' : '#ff6b6b'} size="sm">
+                        {odlStatus.message}
+                      </Text>
+                    </Group>
+                  )}
+                  <Button type="submit" color="cyan" loading={odlSaving} styles={{ root: { fontFamily: "'Bebas Neue', sans-serif" } }}>
+                    SAVE
+                  </Button>
+                  {odlStatus?.status === 'online' && (
+                    <Button
+                      variant="light"
+                      color="orange"
+                      leftSection={<IconDrone size={14} />}
+                      onClick={handleOdlImport}
+                      loading={odlImporting}
+                      styles={{ root: { fontFamily: "'Bebas Neue', sans-serif" } }}
+                    >
+                      IMPORT ALL FLIGHTS TO LOCAL LIBRARY
+                    </Button>
+                  )}
+                  {odlImporting && (
+                    <Card padding="sm" radius="sm" style={{ background: '#050608', border: '1px solid #1a1f2e' }}>
+                      <Group justify="space-between" mb={4}>
+                        <Text size="xs" c="#00d4ff" style={{ fontFamily: "'Share Tech Mono', monospace", letterSpacing: '1px' }}>
+                          IMPORTING FLIGHTS...
+                        </Text>
+                        <Text size="xs" c="#5a6478" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+                          {odlImportProgress.current} / {odlImportProgress.total}
+                        </Text>
+                      </Group>
+                      <div style={{ width: '100%', height: 6, background: '#1a1f2e', borderRadius: 3, overflow: 'hidden' }}>
+                        <div style={{
+                          width: odlImportProgress.total > 0 ? `${(odlImportProgress.current / odlImportProgress.total) * 100}%` : '0%',
+                          height: '100%',
+                          background: '#00d4ff',
+                          borderRadius: 3,
+                          transition: 'width 0.3s ease',
+                        }} />
+                      </div>
+                      <Text size="xs" c="#5a6478" mt={4} style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: '10px' }}>
+                        {odlImportProgress.imported} imported · {odlImportProgress.skipped} skipped · {odlImportProgress.errors} errors
+                      </Text>
+                      {odlImportProgress.currentFlight && (
+                        <Text size="xs" c="#5a6478" mt={2} style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: '10px' }} lineClamp={1}>
+                          Processing: {odlImportProgress.currentFlight}
+                        </Text>
+                      )}
+                    </Card>
+                  )}
+                </Stack>
+              </form>
+            </Card>
+
+            {/* DJI API Key */}
+            <Card padding="lg" radius="md" style={cardStyle}>
+              <Group gap="sm" mb="md">
+                <IconKey size={20} color="#00d4ff" />
+                <Title order={3} c="#e8edf2" style={{ letterSpacing: '1px' }}>DJI API KEY</Title>
+              </Group>
+              <Text c="#5a6478" size="xs" mb="sm" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+                Enter your DJI Developer API key for direct integration with DJI cloud services.
+              </Text>
+              <form onSubmit={djiForm.onSubmit(handleSaveDji)}>
+                <Stack gap="sm">
+                  <PasswordInput
+                    label="DJI API Key"
+                    placeholder="Enter your DJI API key"
+                    leftSection={<IconKey size={14} />}
+                    {...djiForm.getInputProps('dji_api_key')}
+                    styles={inputStyles}
+                  />
+                  <Button type="submit" color="cyan" loading={djiSaving} styles={{ root: { fontFamily: "'Bebas Neue', sans-serif" } }}>
+                    SAVE DJI API KEY
                   </Button>
                 </Stack>
               </form>

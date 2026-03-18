@@ -1,7 +1,9 @@
 """Flight library — native flight management with upload, CRUD, and export."""
 
 import hashlib
+import json
 import logging
+import traceback
 from uuid import UUID
 
 import httpx
@@ -12,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.jwt import get_current_user
 from app.config import settings
-from app.database import get_db
+from app.database import get_db, async_session
 from app.models.battery import Battery, BatteryLog
 from app.models.flight import Flight
 from app.models.user import User
@@ -408,6 +410,152 @@ async def import_from_opendronelog(
         "errors": errors,
         "total_in_opendronelog": len(odl_flights),
     }
+
+
+# ── Streaming import from OpenDroneLog (with progress) ────────────────
+@router.post("/import/opendronelog/stream")
+async def import_from_opendronelog_stream(
+    _user: User = Depends(get_current_user),
+):
+    """Stream import progress as Server-Sent Events."""
+    from app.services.opendronelog import opendronelog_client
+    from datetime import datetime as _dt
+
+    async def event_stream():
+        def sse(data: dict) -> str:
+            return f"data: {json.dumps(data)}\n\n"
+
+        async with async_session() as db:
+            try:
+                if not await opendronelog_client.is_configured(db):
+                    yield sse({"type": "error", "message": "OpenDroneLog URL not configured"})
+                    return
+
+                logger.info("ODL import: fetching flight list...")
+                try:
+                    odl_flights = await opendronelog_client.list_flights(db)
+                except Exception as e:
+                    logger.error("ODL import: failed to list flights: %s", e)
+                    yield sse({"type": "error", "message": f"Failed to connect to OpenDroneLog: {e}"})
+                    return
+
+                total = len(odl_flights)
+                logger.info("ODL import: found %d flights to process", total)
+
+                if total == 0:
+                    yield sse({"type": "complete", "total": 0, "imported": 0, "skipped": 0, "errors": 0, "error_details": []})
+                    return
+
+                imported = 0
+                skipped = 0
+                error_count = 0
+                error_details = []
+
+                for i, odl in enumerate(odl_flights):
+                    odl_id = str(odl.get("id", ""))
+                    name = odl.get("display_name") or odl.get("name") or f"ODL Flight {odl_id}"
+
+                    try:
+                        start_raw = odl.get("start_time")
+
+                        # Parse start_time
+                        start_dt = None
+                        if start_raw:
+                            if isinstance(start_raw, str):
+                                for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M:%S.%f",
+                                            "%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S.%fZ",
+                                            "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+                                    try:
+                                        start_dt = _dt.strptime(start_raw.rstrip("Z"), fmt.rstrip("Z"))
+                                        break
+                                    except ValueError:
+                                        continue
+                                if not start_dt:
+                                    logger.warning("ODL import: could not parse start_time '%s' for flight %s", start_raw, odl_id)
+                            elif isinstance(start_raw, _dt):
+                                start_dt = start_raw
+
+                        # Check duplicate
+                        if start_raw:
+                            existing = await db.execute(
+                                select(Flight).where(Flight.name == name, Flight.source == "opendronelog_import")
+                            )
+                            if existing.scalar_one_or_none():
+                                skipped += 1
+                                logger.debug("ODL import: skipped duplicate '%s'", name)
+                                yield sse({"type": "progress", "current": i + 1, "total": total, "imported": imported, "skipped": skipped, "errors": error_count, "flight_name": name})
+                                continue
+
+                        # Fetch GPS track
+                        track = []
+                        try:
+                            track = await opendronelog_client.get_flight_track(odl_id, db)
+                        except Exception as te:
+                            logger.warning("ODL import: track fetch failed for %s: %s", odl_id, te)
+
+                        def _float(val, default=0.0):
+                            try:
+                                return float(val) if val is not None else default
+                            except (ValueError, TypeError):
+                                return default
+
+                        def _int(val, default=0):
+                            try:
+                                return int(val) if val is not None else default
+                            except (ValueError, TypeError):
+                                return default
+
+                        flight = Flight(
+                            name=name,
+                            drone_model=odl.get("drone_model") or None,
+                            drone_serial=odl.get("drone_serial") or None,
+                            battery_serial=odl.get("battery_serial") or None,
+                            start_time=start_dt,
+                            duration_secs=_float(odl.get("duration_secs")),
+                            total_distance=_float(odl.get("total_distance")),
+                            max_altitude=_float(odl.get("max_altitude")),
+                            max_speed=_float(odl.get("max_speed")),
+                            home_lat=_float(odl.get("home_lat"), None) if odl.get("home_lat") else None,
+                            home_lon=_float(odl.get("home_lon"), None) if odl.get("home_lon") else None,
+                            point_count=_int(odl.get("point_count")) or len(track),
+                            gps_track=track if track else None,
+                            notes=odl.get("notes") or None,
+                            tags=odl.get("tags") if odl.get("tags") else None,
+                            source="opendronelog_import",
+                            original_filename=odl.get("file_name") or None,
+                        )
+                        db.add(flight)
+                        await db.flush()
+                        imported += 1
+                        logger.info("ODL import: imported '%s' (%d/%d)", name, i + 1, total)
+
+                    except Exception as e:
+                        error_count += 1
+                        err_msg = f"Flight {odl_id} ({name}): {type(e).__name__}: {e}"
+                        error_details.append(err_msg)
+                        logger.error("ODL import: error on flight %s: %s\n%s", odl_id, e, traceback.format_exc())
+
+                    yield sse({"type": "progress", "current": i + 1, "total": total, "imported": imported, "skipped": skipped, "errors": error_count, "flight_name": name})
+
+                # Commit all at the end
+                await db.commit()
+                logger.info("ODL import: complete — %d imported, %d skipped, %d errors out of %d", imported, skipped, error_count, total)
+
+                yield sse({
+                    "type": "complete",
+                    "total": total,
+                    "imported": imported,
+                    "skipped": skipped,
+                    "errors": error_count,
+                    "error_details": error_details[:20],
+                })
+
+            except Exception as e:
+                logger.error("ODL import: fatal error: %s\n%s", e, traceback.format_exc())
+                await db.rollback()
+                yield sse({"type": "error", "message": f"Import failed: {type(e).__name__}: {e}"})
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 # ── Flight stats summary ─────────────────────────────────────────────
