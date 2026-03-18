@@ -378,9 +378,12 @@ async def import_from_opendronelog(
                 except (ValueError, TypeError):
                     return default
 
+            # Use custom drone name if available, otherwise fall back to drone model
+            drone_display = odl.get("drone_name") or odl.get("drone_model") or None
+
             flight = Flight(
                 name=name,
-                drone_model=odl.get("drone_model") or None,
+                drone_model=drone_display,
                 drone_serial=odl.get("drone_serial") or None,
                 battery_serial=odl.get("battery_serial") or None,
                 start_time=start_dt,
@@ -400,6 +403,12 @@ async def import_from_opendronelog(
             db.add(flight)
             await db.flush()
             imported += 1
+
+            # Auto-create battery record from ODL data
+            bat_serial = odl.get("battery_serial")
+            if bat_serial:
+                bat_name = odl.get("battery_name") or ""
+                await _track_battery_from_odl(db, flight, bat_serial, bat_name, drone_display)
 
         except Exception as e:
             errors.append(f"Flight {odl.get('id', '?')}: {str(e)}")
@@ -505,9 +514,12 @@ async def import_from_opendronelog_stream(
                             except (ValueError, TypeError):
                                 return default
 
+                        # Use custom drone name if available, otherwise fall back to drone model
+                        drone_display = odl.get("drone_name") or odl.get("drone_model") or None
+
                         flight = Flight(
                             name=name,
-                            drone_model=odl.get("drone_model") or None,
+                            drone_model=drone_display,
                             drone_serial=odl.get("drone_serial") or None,
                             battery_serial=odl.get("battery_serial") or None,
                             start_time=start_dt,
@@ -528,6 +540,12 @@ async def import_from_opendronelog_stream(
                         await db.flush()
                         imported += 1
                         logger.info("ODL import: imported '%s' (%d/%d)", name, i + 1, total)
+
+                        # Auto-create battery record from ODL data
+                        bat_serial = odl.get("battery_serial")
+                        if bat_serial:
+                            bat_name = odl.get("battery_name") or ""
+                            await _track_battery_from_odl(db, flight, bat_serial, bat_name, drone_display)
 
                     except Exception as e:
                         error_count += 1
@@ -675,6 +693,42 @@ async def _track_battery(db: AsyncSession, flight: Flight, battery_data: dict):
         min_voltage=battery_data.get("min_voltage"),
         max_temp=battery_data.get("max_temp"),
         discharge_mah=battery_data.get("discharge_mah"),
+        cycles_at_time=battery.cycle_count,
+    )
+    db.add(log)
+
+
+async def _track_battery_from_odl(
+    db: AsyncSession, flight: Flight, serial: str, custom_name: str, drone_model: str | None
+):
+    """Auto-create/update battery record from ODL flight data."""
+    if not serial:
+        return
+
+    # Use custom battery name as serial if available (preserves ODL display names)
+    display_serial = custom_name if custom_name else serial
+
+    result = await db.execute(select(Battery).where(Battery.serial == display_serial))
+    battery = result.scalar_one_or_none()
+
+    # Also check by raw serial in case it was previously imported without custom name
+    if not battery and custom_name:
+        result2 = await db.execute(select(Battery).where(Battery.serial == serial))
+        battery = result2.scalar_one_or_none()
+        if battery:
+            # Update to use the custom name
+            battery.serial = display_serial
+
+    if not battery:
+        battery = Battery(serial=display_serial, model=drone_model, cycle_count=0)
+        db.add(battery)
+        await db.flush()
+
+    battery.cycle_count += 1
+
+    log = BatteryLog(
+        battery_id=battery.id,
+        flight_id=flight.id,
         cycles_at_time=battery.cycle_count,
     )
     db.add(log)

@@ -306,7 +306,7 @@ export default function Dashboard() {
       </SimpleGrid>
 
       {/* Main grid: 2 columns */}
-      <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', minHeight: 0, gridTemplateRows: '1fr 1fr' }}>
+      <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', minHeight: 0, gridTemplateRows: 'minmax(0, 1fr) minmax(0, 1fr)', maxHeight: 'calc(100vh - 220px)' }}>
 
         {/* ═══ RECENT MISSIONS ═══ */}
         <Card padding="sm" radius="md" style={panelStyle}>

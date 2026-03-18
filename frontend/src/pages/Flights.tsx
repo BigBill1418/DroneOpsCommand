@@ -239,6 +239,10 @@ export default function Flights() {
   const [detailFlight, setDetailFlight] = useState<FlightRecord | null>(null);
   const navigate = useNavigate();
 
+  // Rename state
+  const [renameId, setRenameId] = useState<string | null>(null);
+  const [renameName, setRenameName] = useState('');
+
   // Manual flight form state
   const [manualForm, setManualForm] = useState({
     name: '', drone_model: '', duration_secs: 0, total_distance: 0,
@@ -325,6 +329,22 @@ export default function Flights() {
       if (detailFlight && String(detailFlight.id) === id) setDetailFlight(null);
     } catch {
       notifications.show({ title: 'Error', message: 'Failed to delete flight', color: 'red' });
+    }
+  };
+
+  // ── Rename handler ─────────────────────────────────────────────────
+  const handleRename = async () => {
+    if (!renameId || !renameName.trim()) return;
+    try {
+      await api.put(`/flight-library/${renameId}`, { name: renameName.trim() });
+      notifications.show({ title: 'Renamed', message: `Flight renamed to "${renameName.trim()}"`, color: 'cyan' });
+      setFlights((prev) => prev.map((f) => String(f.id) === renameId ? { ...f, name: renameName.trim() } : f));
+      if (detailFlight && String(detailFlight.id) === renameId) {
+        setDetailFlight({ ...detailFlight, name: renameName.trim() });
+      }
+      setRenameId(null);
+    } catch {
+      notifications.show({ title: 'Error', message: 'Failed to rename flight', color: 'red' });
     }
   };
 
@@ -541,6 +561,10 @@ export default function Flights() {
                             </ActionIcon>
                           </Menu.Target>
                           <Menu.Dropdown styles={{ dropdown: { background: '#0e1117', borderColor: '#1a1f2e' } }}>
+                            <Menu.Item leftSection={<IconEdit size={14} />} onClick={(e) => { e.stopPropagation(); setRenameId(String(f.id)); setRenameName(getDisplayName(f)); }}>
+                              Edit Name
+                            </Menu.Item>
+                            <Menu.Divider />
                             <Menu.Item leftSection={<IconDownload size={14} />} onClick={(e) => { e.stopPropagation(); handleExport(String(f.id), 'gpx', getDisplayName(f)); }}>
                               Export GPX
                             </Menu.Item>
@@ -642,6 +666,17 @@ export default function Flights() {
               </div>
             )}
 
+            <Button
+              size="xs"
+              variant="light"
+              color="grape"
+              leftSection={<IconEdit size={14} />}
+              onClick={() => { setRenameId(String(detailFlight.id)); setRenameName(getDisplayName(detailFlight)); }}
+              styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}
+            >
+              EDIT NAME
+            </Button>
+
             <Group>
               <Button size="xs" variant="light" color="cyan" leftSection={<IconDownload size={14} />}
                 onClick={() => handleExport(String(detailFlight.id), 'gpx', getDisplayName(detailFlight))}>GPX</Button>
@@ -663,6 +698,30 @@ export default function Flights() {
           </Stack>
         )}
       </Drawer>
+
+      {/* ── Rename Modal ──────────────────────────────────────────── */}
+      <Modal
+        opened={!!renameId}
+        onClose={() => setRenameId(null)}
+        title={<Text fw={700} c="#e8edf2" style={{ fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '2px' }}>EDIT FLIGHT NAME</Text>}
+        styles={{ header: { background: '#0e1117', borderBottom: '1px solid #1a1f2e' }, body: { background: '#0e1117' }, content: { background: '#0e1117' } }}
+        size="sm"
+      >
+        <Stack gap="md">
+          <TextInput
+            label="Flight Name"
+            value={renameName}
+            onChange={(e) => setRenameName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleRename(); } }}
+            styles={inputStyles}
+            autoFocus
+          />
+          <Button fullWidth color="cyan" onClick={handleRename}
+            styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}>
+            SAVE NAME
+          </Button>
+        </Stack>
+      </Modal>
 
       {/* ── Manual Entry Modal ────────────────────────────────────── */}
       <Modal
