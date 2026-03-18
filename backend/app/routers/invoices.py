@@ -71,6 +71,16 @@ async def create_invoice(
     invoice = Invoice(mission_id=mission_id, **data.model_dump())
     db.add(invoice)
     await db.flush()
+
+    # Recalculate totals from line items (if any were provided)
+    result2 = await db.execute(
+        select(Invoice)
+        .where(Invoice.id == invoice.id)
+        .options(selectinload(Invoice.line_items))
+    )
+    invoice = result2.scalar_one()
+    _recalculate_invoice(invoice)
+    await db.flush()
     await db.refresh(invoice)
     return invoice
 
