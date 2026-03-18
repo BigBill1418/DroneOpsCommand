@@ -140,7 +140,7 @@ limiter = Limiter(key_func=get_remote_address)
 app = FastAPI(
     title="Flight Operations Command Center",
     description="Invoicing and after-action reporting tool for drone operations",
-    version="1.14.5",
+    version="1.15.0",
     lifespan=lifespan,
 )
 

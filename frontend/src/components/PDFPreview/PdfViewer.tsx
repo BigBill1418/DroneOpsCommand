@@ -1,7 +1,13 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { Document, Page, pdfjs } from 'react-pdf';
-import { Box, Group, ActionIcon, Text, Loader, Center, Button, Stack } from '@mantine/core';
-import { IconChevronLeft, IconChevronRight, IconDownload, IconZoomIn, IconZoomOut, IconRefresh } from '@tabler/icons-react';
+import { Box, Group, ActionIcon, Text, Loader, Center, Button, Stack, Tooltip } from '@mantine/core';
+import {
+  IconDownload,
+  IconZoomIn,
+  IconZoomOut,
+  IconRefresh,
+  IconArrowsMaximize,
+} from '@tabler/icons-react';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
 
@@ -15,14 +21,16 @@ interface PdfViewerProps {
   downloadFilename?: string;
 }
 
-export default function PdfViewer({ url, height = 500, showToolbar = true, downloadFilename }: PdfViewerProps) {
+export default function PdfViewer({ url, height = 600, showToolbar = true, downloadFilename }: PdfViewerProps) {
   const [numPages, setNumPages] = useState<number>(0);
-  const [pageNumber, setPageNumber] = useState(1);
-  const [scale, setScale] = useState(1.0);
+  const [scale, setScale] = useState(1.2);
   const [containerWidth, setContainerWidth] = useState(0);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [retryKey, setRetryKey] = useState(0);
+  const [currentPage, setCurrentPage] = useState(1);
   const containerRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const pageRefs = useRef<Map<number, HTMLDivElement>>(new Map());
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -35,9 +43,31 @@ export default function PdfViewer({ url, height = 500, showToolbar = true, downl
     return () => obs.disconnect();
   }, []);
 
+  // Track which page is visible during scroll
+  useEffect(() => {
+    const scrollEl = scrollRef.current;
+    if (!scrollEl || numPages === 0) return;
+    const handleScroll = () => {
+      const scrollTop = scrollEl.scrollTop;
+      const scrollMid = scrollTop + scrollEl.clientHeight / 3;
+      let closest = 1;
+      let closestDist = Infinity;
+      pageRefs.current.forEach((el, pageNum) => {
+        const dist = Math.abs(el.offsetTop - scrollMid);
+        if (dist < closestDist) {
+          closestDist = dist;
+          closest = pageNum;
+        }
+      });
+      setCurrentPage(closest);
+    };
+    scrollEl.addEventListener('scroll', handleScroll, { passive: true });
+    return () => scrollEl.removeEventListener('scroll', handleScroll);
+  }, [numPages]);
+
   const onDocumentLoadSuccess = ({ numPages }: { numPages: number }) => {
     setNumPages(numPages);
-    setPageNumber(1);
+    setCurrentPage(1);
     setLoadError(null);
   };
 
@@ -52,19 +82,119 @@ export default function PdfViewer({ url, height = 500, showToolbar = true, downl
     setRetryKey((k) => k + 1);
   }, []);
 
-  const pageWidth = containerWidth > 0 ? (containerWidth - 2) * scale : undefined;
+  const resetZoom = useCallback(() => setScale(1.2), []);
+
+  const pageWidth = containerWidth > 0 ? (containerWidth - 32) * scale : undefined;
+
+  const setPageRef = useCallback((pageNum: number) => (el: HTMLDivElement | null) => {
+    if (el) {
+      pageRefs.current.set(pageNum, el);
+    } else {
+      pageRefs.current.delete(pageNum);
+    }
+  }, []);
 
   return (
     <Box
       ref={containerRef}
       style={{
         border: '1px solid #1a1f2e',
-        borderRadius: 6,
+        borderRadius: 8,
         overflow: 'hidden',
-        background: '#2a2a2a',
+        background: '#1a1a1a',
+        display: 'flex',
+        flexDirection: 'column',
       }}
     >
+      {/* Toolbar at top for better visibility */}
+      {showToolbar && numPages > 0 && (
+        <Group
+          justify="space-between"
+          px="md"
+          py={8}
+          style={{
+            background: '#0e1117',
+            borderBottom: '1px solid #1a1f2e',
+            flexShrink: 0,
+          }}
+        >
+          <Group gap="sm">
+            <Tooltip label="Zoom out" position="bottom" withArrow>
+              <ActionIcon
+                variant="subtle"
+                color="gray"
+                size="md"
+                onClick={() => setScale((s) => Math.max(0.5, +(s - 0.15).toFixed(2)))}
+                disabled={scale <= 0.5}
+              >
+                <IconZoomOut size={16} />
+              </ActionIcon>
+            </Tooltip>
+            <Text
+              c="#8a94a6"
+              size="xs"
+              style={{
+                fontFamily: "'Share Tech Mono', monospace",
+                minWidth: 44,
+                textAlign: 'center',
+                userSelect: 'none',
+              }}
+            >
+              {Math.round(scale * 100)}%
+            </Text>
+            <Tooltip label="Zoom in" position="bottom" withArrow>
+              <ActionIcon
+                variant="subtle"
+                color="gray"
+                size="md"
+                onClick={() => setScale((s) => Math.min(3.0, +(s + 0.15).toFixed(2)))}
+                disabled={scale >= 3.0}
+              >
+                <IconZoomIn size={16} />
+              </ActionIcon>
+            </Tooltip>
+            <Tooltip label="Fit to width" position="bottom" withArrow>
+              <ActionIcon
+                variant="subtle"
+                color="gray"
+                size="md"
+                onClick={resetZoom}
+              >
+                <IconArrowsMaximize size={16} />
+              </ActionIcon>
+            </Tooltip>
+          </Group>
+
+          <Text
+            c="#8a94a6"
+            size="xs"
+            style={{ fontFamily: "'Share Tech Mono', monospace", userSelect: 'none' }}
+          >
+            Page {currentPage} of {numPages}
+          </Text>
+
+          {downloadFilename ? (
+            <Tooltip label="Download PDF" position="bottom" withArrow>
+              <ActionIcon
+                variant="subtle"
+                color="cyan"
+                size="md"
+                component="a"
+                href={url}
+                download={downloadFilename}
+              >
+                <IconDownload size={16} />
+              </ActionIcon>
+            </Tooltip>
+          ) : (
+            <Box style={{ width: 28 }} />
+          )}
+        </Group>
+      )}
+
+      {/* Continuous scroll document area */}
       <Box
+        ref={scrollRef}
         style={{
           height,
           overflow: 'auto',
@@ -121,87 +251,34 @@ export default function PdfViewer({ url, height = 500, showToolbar = true, downl
             </Center>
           }
         >
-          <Page
-            pageNumber={pageNumber}
-            width={pageWidth}
-            renderTextLayer={true}
-            renderAnnotationLayer={true}
-          />
+          <div style={{ padding: '12px 0' }}>
+            {Array.from({ length: numPages }, (_, i) => (
+              <div
+                key={i + 1}
+                ref={setPageRef(i + 1)}
+                style={{
+                  marginBottom: i < numPages - 1 ? 12 : 0,
+                  display: 'flex',
+                  justifyContent: 'center',
+                  background: '#fff',
+                  marginLeft: 'auto',
+                  marginRight: 'auto',
+                  width: 'fit-content',
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
+                  borderRadius: 2,
+                }}
+              >
+                <Page
+                  pageNumber={i + 1}
+                  width={pageWidth}
+                  renderTextLayer={true}
+                  renderAnnotationLayer={true}
+                />
+              </div>
+            ))}
+          </div>
         </Document>
       </Box>
-
-      {showToolbar && numPages > 0 && (
-        <Group
-          justify="space-between"
-          px="sm"
-          py={6}
-          style={{ background: '#0e1117', borderTop: '1px solid #1a1f2e' }}
-        >
-          <Group gap="xs">
-            <ActionIcon
-              variant="subtle"
-              color="gray"
-              size="sm"
-              onClick={() => setScale((s) => Math.max(0.5, s - 0.15))}
-              disabled={scale <= 0.5}
-            >
-              <IconZoomOut size={14} />
-            </ActionIcon>
-            <Text c="#5a6478" size="xs" style={{ fontFamily: "'Share Tech Mono', monospace", minWidth: 40, textAlign: 'center' }}>
-              {Math.round(scale * 100)}%
-            </Text>
-            <ActionIcon
-              variant="subtle"
-              color="gray"
-              size="sm"
-              onClick={() => setScale((s) => Math.min(2.5, s + 0.15))}
-              disabled={scale >= 2.5}
-            >
-              <IconZoomIn size={14} />
-            </ActionIcon>
-          </Group>
-
-          <Group gap="xs">
-            <ActionIcon
-              variant="subtle"
-              color="gray"
-              size="sm"
-              onClick={() => setPageNumber((p) => Math.max(1, p - 1))}
-              disabled={pageNumber <= 1}
-            >
-              <IconChevronLeft size={14} />
-            </ActionIcon>
-            <Text c="#5a6478" size="xs" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
-              {pageNumber} / {numPages}
-            </Text>
-            <ActionIcon
-              variant="subtle"
-              color="gray"
-              size="sm"
-              onClick={() => setPageNumber((p) => Math.min(numPages, p + 1))}
-              disabled={pageNumber >= numPages}
-            >
-              <IconChevronRight size={14} />
-            </ActionIcon>
-          </Group>
-
-          {downloadFilename && (
-            <Button
-              variant="subtle"
-              color="cyan"
-              size="xs"
-              component="a"
-              href={url}
-              download={downloadFilename}
-              leftSection={<IconDownload size={14} />}
-              styles={{ root: { fontFamily: "'Share Tech Mono', monospace" } }}
-            >
-              DOWNLOAD
-            </Button>
-          )}
-          {!downloadFilename && <Box style={{ width: 1 }} />}
-        </Group>
-      )}
     </Box>
   );
 }
