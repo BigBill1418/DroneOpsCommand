@@ -1353,10 +1353,11 @@ export default function Settings() {
                 </Text>
               </Stack>
               <Text c="#5a6478" size="xs" mt="md" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
-                Using Cloudflare Access? Add bypass policies for
-                /api/flight-library/device-upload and
-                /api/flight-library/device-health — otherwise
-                Access blocks DroneOpsSync before the API key can authenticate.
+                Using Cloudflare Access? Add a bypass policy for
+                /api/flight-library/device-* — otherwise Access blocks
+                DroneOpsSync before the API key can authenticate.
+                Also merge /api/intake/form/* and /api/intake/tos-pdf/*
+                into a single /api/intake/* bypass to save policy slots.
               </Text>
             </Card>
           </Stack>

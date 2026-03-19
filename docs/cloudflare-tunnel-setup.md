@@ -105,9 +105,10 @@ This is the recommended security step — it makes intake forms public but locks
    - **Selector**: `Emails` → enter your email address(es)
    - **Authentication method**: One-time PIN (sent to your email) or Google/GitHub SSO
 
-### Bypass Intake Routes
+### Bypass Public Routes
 
-Still in the same application settings:
+Cloudflare Access limits the number of hostnames/policies per application,
+so use wildcard paths to consolidate rules. Still in the same application:
 
 1. Add a second policy **above** the Allow policy:
    - **Policy name**: `Public Intake`
@@ -116,25 +117,21 @@ Still in the same application settings:
 2. Under **Additional settings** for this bypass policy:
    - **Path**: `/intake/*`
 
-3. Add another Bypass policy:
-   - **Path**: `/api/intake/form/*`
+3. Add another Bypass policy for the intake API (covers form submission + TOS PDF):
+   - **Path**: `/api/intake/*`
 
-4. And another:
-   - **Path**: `/api/intake/tos-pdf/*`
+4. Add another Bypass policy for **DroneOpsSync** field controllers (covers upload + health check):
+   - **Path**: `/api/flight-library/device-*`
 
-5. Add bypass policies for **DroneOpsSync** field controllers:
-   - **Path**: `/api/flight-library/device-upload`
+Only **3 bypass rules** needed:
 
-6. And the device health check:
-   - **Path**: `/api/flight-library/device-health`
+| Path | What it covers |
+|------|---------------|
+| `/intake/*` | Customer intake frontend SPA |
+| `/api/intake/*` | Intake form GET/POST + TOS PDF download |
+| `/api/flight-library/device-*` | DroneOpsSync upload + health check (secured by API key) |
 
-This results in:
-- `/intake/*` (frontend form) → **Public** (no login needed)
-- `/api/intake/form/*` (form GET/POST) → **Public**
-- `/api/intake/tos-pdf/*` (TOS PDF download) → **Public**
-- `/api/flight-library/device-upload` (DroneOpsSync uploads) → **Public** (secured by API key)
-- `/api/flight-library/device-health` (DroneOpsSync health check) → **Public** (secured by API key)
-- **Everything else** → Requires Cloudflare Access login
+Everything else requires Cloudflare Access login.
 
 > **Note:** The device endpoints are still secured — they require a valid
 > `X-Device-Api-Key` header. The Cloudflare Access bypass just lets the
@@ -200,4 +197,4 @@ Customer's Browser
 | Intake form loads but API calls fail | Make sure the tunnel hostname points to `frontend:80`, not `backend:8000` |
 | "Access Denied" on intake form | Check your Cloudflare Access bypass policies include `/intake/*` and `/api/intake/form/*` |
 | TOS PDF won't load | Add bypass for `/api/intake/tos-pdf/*` in Access policies |
-| DroneOpsSync says "server unreachable" | Add Cloudflare Access bypass policies for `/api/flight-library/device-upload` and `/api/flight-library/device-health`. If using direct IP, make sure the device is on the same LAN and try port 3080 (nginx) or 8000 (backend direct). |
+| DroneOpsSync says "server unreachable" | Add a Cloudflare Access bypass for `/api/flight-library/device-*`. If using direct IP, make sure the device is on the same LAN and try port 3080 (nginx) or 8000 (backend direct). |
