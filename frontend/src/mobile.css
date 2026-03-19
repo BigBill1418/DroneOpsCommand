@@ -246,6 +246,42 @@
     max-height: 50vh;
     overflow-y: auto;
   }
+
+  /* ── Login page: ensure inputs are tappable when keyboard opens ──── */
+  .login-page {
+    min-height: 100dvh !important;
+    /* Allow the page to scroll when the virtual keyboard opens */
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+    /* Push content toward the top so keyboard doesn't cover inputs */
+    justify-content: flex-start !important;
+    padding-top: 15vh !important;
+    padding-bottom: 40px !important;
+  }
+
+  /* Ensure login inputs have high enough z-index and pointer events */
+  .login-page .mantine-TextInput-input,
+  .login-page .mantine-PasswordInput-input {
+    position: relative;
+    z-index: 1;
+    touch-action: manipulation;
+    -webkit-user-select: text !important;
+    user-select: text !important;
+  }
+
+  /* Make sure the password visibility toggle doesn't block the input */
+  .login-page .mantine-PasswordInput-visibilityToggle {
+    min-width: 28px !important;
+    min-height: 28px !important;
+    max-width: 28px !important;
+    pointer-events: auto;
+    z-index: 2;
+  }
+
+  /* Keep login card padding reasonable on mobile */
+  .login-page .mantine-Card-root {
+    padding: 20px !important;
+  }
 }
 
 /* ── Tablet-specific (769px - 1024px) ─────────────────────────────── */

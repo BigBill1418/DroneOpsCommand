@@ -43,7 +43,7 @@ export default function Login({ onLogin }: LoginProps) {
   return (
     <Box
       style={{
-        minHeight: '100vh',
+        minHeight: '100dvh',
         background: 'linear-gradient(135deg, #050608 0%, #0e1117 50%, #050608 100%)',
         display: 'flex',
         flexDirection: 'column',
@@ -51,7 +51,10 @@ export default function Login({ onLogin }: LoginProps) {
         justifyContent: 'center',
         gap: 24,
         padding: '16px',
+        overflowY: 'auto',
+        WebkitOverflowScrolling: 'touch',
       }}
+      className="login-page"
     >
       <Card
         shadow="xl"

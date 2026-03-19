@@ -380,6 +380,35 @@ async def upload_flights(
 
 
 
+# ── Device health check (test API key + connectivity) ────────────────
+@router.get("/device-health")
+async def device_health(
+    device: DeviceApiKey = Depends(validate_device_api_key),
+    db: AsyncSession = Depends(get_db),
+):
+    """Lightweight connectivity test for DroneOpsSync.
+
+    Returns 200 with device info if the API key is valid and the server is
+    reachable.  DroneOpsSync can hit this endpoint on startup to verify the
+    connection before attempting file uploads.
+    """
+    # Check if the flight-parser service is reachable (non-blocking best effort)
+    parser_ok = False
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            resp = await client.get(f"{PARSER_URL}/health")
+            parser_ok = resp.status_code == 200
+    except Exception:
+        pass
+
+    return {
+        "status": "connected",
+        "device_label": device.label,
+        "parser_available": parser_ok,
+        "upload_endpoint": "/api/flight-library/device-upload",
+    }
+
+
 # ── Device upload (field controllers via X-Device-Api-Key) ───────────
 @router.post("/device-upload", response_model=FlightUploadResponse)
 async def device_upload_flights(

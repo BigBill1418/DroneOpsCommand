@@ -1348,6 +1348,9 @@ export default function Settings() {
                 <Text c="#e8edf2" size="sm" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
                   4. Upload endpoint: /api/flight-library/device-upload
                 </Text>
+                <Text c="#e8edf2" size="sm" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+                  5. Health check: GET /api/flight-library/device-health
+                </Text>
               </Stack>
             </Card>
           </Stack>
