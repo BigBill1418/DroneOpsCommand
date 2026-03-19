@@ -122,11 +122,23 @@ Still in the same application settings:
 4. And another:
    - **Path**: `/api/intake/tos-pdf/*`
 
+5. Add bypass policies for **DroneOpsSync** field controllers:
+   - **Path**: `/api/flight-library/device-upload`
+
+6. And the device health check:
+   - **Path**: `/api/flight-library/device-health`
+
 This results in:
 - `/intake/*` (frontend form) → **Public** (no login needed)
 - `/api/intake/form/*` (form GET/POST) → **Public**
 - `/api/intake/tos-pdf/*` (TOS PDF download) → **Public**
+- `/api/flight-library/device-upload` (DroneOpsSync uploads) → **Public** (secured by API key)
+- `/api/flight-library/device-health` (DroneOpsSync health check) → **Public** (secured by API key)
 - **Everything else** → Requires Cloudflare Access login
+
+> **Note:** The device endpoints are still secured — they require a valid
+> `X-Device-Api-Key` header. The Cloudflare Access bypass just lets the
+> request reach your server so the API key authentication can happen.
 
 > **Note:** The PDF.js worker used for inline TOS viewing is loaded from
 > `cdnjs.cloudflare.com`, so it does not require a bypass rule.
@@ -188,3 +200,4 @@ Customer's Browser
 | Intake form loads but API calls fail | Make sure the tunnel hostname points to `frontend:80`, not `backend:8000` |
 | "Access Denied" on intake form | Check your Cloudflare Access bypass policies include `/intake/*` and `/api/intake/form/*` |
 | TOS PDF won't load | Add bypass for `/api/intake/tos-pdf/*` in Access policies |
+| DroneOpsSync says "server unreachable" | Add Cloudflare Access bypass policies for `/api/flight-library/device-upload` and `/api/flight-library/device-health`. If using direct IP, make sure the device is on the same LAN and try port 3080 (nginx) or 8000 (backend direct). |

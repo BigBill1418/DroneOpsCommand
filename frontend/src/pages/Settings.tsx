@@ -1352,6 +1352,12 @@ export default function Settings() {
                   5. Health check: GET /api/flight-library/device-health
                 </Text>
               </Stack>
+              <Text c="#5a6478" size="xs" mt="md" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+                Using Cloudflare Access? Add bypass policies for
+                /api/flight-library/device-upload and
+                /api/flight-library/device-health — otherwise
+                Access blocks DroneOpsSync before the API key can authenticate.
+              </Text>
             </Card>
           </Stack>
         </Tabs.Panel>
