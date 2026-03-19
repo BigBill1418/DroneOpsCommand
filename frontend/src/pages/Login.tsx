@@ -50,6 +50,9 @@ export default function Login({ onLogin }: LoginProps) {
         alignItems: 'center',
         justifyContent: 'center',
         gap: 24,
+        padding: '16px',
+        boxSizing: 'border-box',
+        overflowX: 'hidden',
       }}
     >
       <Card
@@ -58,10 +61,11 @@ export default function Login({ onLogin }: LoginProps) {
         radius="md"
         w="100%"
         maw={440}
-        mx="md"
         style={{
           background: '#0e1117',
           border: '1px solid #1a1f2e',
+          position: 'relative',
+          zIndex: 1,
         }}
       >
         <form onSubmit={handleSubmit}>
