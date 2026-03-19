@@ -1257,7 +1257,27 @@ export default function Settings() {
                     variant="light"
                     color="cyan"
                     mt={8}
-                    onClick={() => { navigator.clipboard.writeText(newDeviceKey); notifications.show({ title: 'Copied', message: 'API key copied to clipboard', color: 'cyan' }); }}
+                    onClick={() => {
+                      const copy = (text: string) => {
+                        if (navigator.clipboard?.writeText) {
+                          return navigator.clipboard.writeText(text);
+                        }
+                        // Fallback for non-secure contexts (HTTP tunnels, older browsers)
+                        const ta = document.createElement('textarea');
+                        ta.value = text;
+                        ta.style.position = 'fixed';
+                        ta.style.opacity = '0';
+                        document.body.appendChild(ta);
+                        ta.focus();
+                        ta.select();
+                        document.execCommand('copy');
+                        document.body.removeChild(ta);
+                        return Promise.resolve();
+                      };
+                      copy(newDeviceKey)
+                        .then(() => notifications.show({ title: 'Copied', message: 'API key copied to clipboard', color: 'cyan' }))
+                        .catch(() => notifications.show({ title: 'Copy failed', message: 'Please select the key and copy manually', color: 'orange' }));
+                    }}
                     styles={{ root: { fontFamily: "'Share Tech Mono', monospace" } }}
                   >
                     COPY TO CLIPBOARD

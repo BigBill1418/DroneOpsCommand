@@ -4,6 +4,7 @@ import {
   Burger,
   Group,
   NavLink,
+  Overlay,
   Text,
   ActionIcon,
   Tooltip,
@@ -139,7 +140,7 @@ export default function AppLayout({ onLogout }: AppLayoutProps) {
               fontSize: '15px',
             }}
           >
-            v2.20.2
+            v2.20.3
           </Text>
           <Tooltip label="Star on GitHub" position="right">
             <ActionIcon
@@ -158,6 +159,16 @@ export default function AppLayout({ onLogout }: AppLayoutProps) {
       </AppShell.Navbar>
 
       <AppShell.Main>
+        {/* Backdrop overlay when mobile navbar is open — lets users tap outside to close */}
+        {opened && (
+          <Overlay
+            onClick={() => setOpened(false)}
+            backgroundOpacity={0.5}
+            color="#000"
+            zIndex={199}
+            hiddenFrom="sm"
+          />
+        )}
         <Outlet />
       </AppShell.Main>
     </AppShell>

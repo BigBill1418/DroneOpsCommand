@@ -6,6 +6,25 @@
 
 /* ── Global: Touch targets & spacing ──────────────────────────────── */
 @media (max-width: 768px) {
+  /* Remove 300ms tap delay and improve touch responsiveness */
+  html {
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Notification container — must never block clicks on content beneath.
+     The container is position:fixed z-index:400 and on mobile our styles
+     stretch it nearly full-width (left:8px right:8px).  Without an explicit
+     pointer-events:none, a browser that hasn't loaded the Mantine stylesheet
+     yet (or where specificity differs) will swallow every tap. */
+  .mantine-Notifications-root {
+    pointer-events: none !important;
+  }
+
+  .mantine-Notifications-root > * {
+    pointer-events: auto !important;
+  }
+
   /* Ensure buttons meet 44px minimum touch target */
   .mantine-Button-root {
     min-height: 44px;
