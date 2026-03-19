@@ -56,7 +56,9 @@ export default function Login({ onLogin }: LoginProps) {
         shadow="xl"
         padding="xl"
         radius="md"
-        w={440}
+        w="100%"
+        maw={440}
+        mx="md"
         style={{
           background: '#0e1117',
           border: '1px solid #1a1f2e',
@@ -74,6 +76,8 @@ export default function Login({ onLogin }: LoginProps) {
 
             <TextInput
               label="Username"
+              name="username"
+              autoComplete="username"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               required
@@ -85,6 +89,8 @@ export default function Login({ onLogin }: LoginProps) {
 
             <PasswordInput
               label="Password"
+              name="password"
+              autoComplete="current-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required

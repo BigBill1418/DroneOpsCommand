@@ -18,6 +18,9 @@ flight-parser/target/
 .vscode/
 .idea/
 
+# Claude Code local settings
+.claude/settings.local.json
+
 # Data volumes
 /data/
 
