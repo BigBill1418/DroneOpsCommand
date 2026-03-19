@@ -16,6 +16,14 @@
     min-height: 44px;
   }
 
+  /* Don't enlarge the password visibility toggle — it sits inside the input
+     wrapper and the 44px minimum causes it to cover the entire text input,
+     blocking touch events on the password field. */
+  .mantine-PasswordInput-visibilityToggle {
+    min-width: 28px !important;
+    min-height: 28px !important;
+  }
+
   /* Navbar items — bigger touch targets */
   .mantine-NavLink-root {
     min-height: 48px;
