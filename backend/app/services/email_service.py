@@ -130,6 +130,10 @@ async def send_report_email(
     except (ValueError, TypeError):
         raise ValueError(f"Invalid SMTP port: {smtp['smtp_port']}")
 
+    tls_flag = smtp["smtp_use_tls"] if isinstance(smtp["smtp_use_tls"], bool) else _parse_bool(str(smtp["smtp_use_tls"]), True)
+    # Port 465 uses implicit TLS (use_tls); port 587 and others use STARTTLS (start_tls)
+    tls_kwargs = {"use_tls": True} if smtp_port == 465 else {"start_tls": tls_flag}
+
     try:
         await aiosmtplib.send(
             msg,
@@ -137,7 +141,7 @@ async def send_report_email(
             port=smtp_port,
             username=smtp["smtp_user"] or None,
             password=smtp["smtp_password"] or None,
-            use_tls=smtp["smtp_use_tls"] if isinstance(smtp["smtp_use_tls"], bool) else _parse_bool(str(smtp["smtp_use_tls"]), True),
+            **tls_kwargs,
         )
         logger.info("Email sent successfully to %s", to_email)
     except Exception as exc:
@@ -209,6 +213,10 @@ async def send_intake_email(
     except (ValueError, TypeError):
         raise ValueError(f"Invalid SMTP port: {smtp['smtp_port']}")
 
+    tls_flag = smtp["smtp_use_tls"] if isinstance(smtp["smtp_use_tls"], bool) else _parse_bool(str(smtp["smtp_use_tls"]), True)
+    # Port 465 uses implicit TLS (use_tls); port 587 and others use STARTTLS (start_tls)
+    tls_kwargs = {"use_tls": True} if smtp_port == 465 else {"start_tls": tls_flag}
+
     logger.info("[EMAIL-INTAKE] Sending via SMTP host=%s:%s to=%s subject='%s'", smtp["smtp_host"], smtp_port, to_email, subject)
 
     try:
@@ -218,7 +226,7 @@ async def send_intake_email(
             port=smtp_port,
             username=smtp["smtp_user"] or None,
             password=smtp["smtp_password"] or None,
-            use_tls=smtp["smtp_use_tls"] if isinstance(smtp["smtp_use_tls"], bool) else _parse_bool(str(smtp["smtp_use_tls"]), True),
+            **tls_kwargs,
         )
         elapsed = _time.perf_counter() - start
         logger.info("[EMAIL-INTAKE] SUCCESS — Sent to %s in %.3fs", to_email, elapsed)
