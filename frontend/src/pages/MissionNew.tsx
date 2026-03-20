@@ -136,6 +136,7 @@ export default function MissionNew() {
   const [rateTemplates, setRateTemplates] = useState<RateTemplate[]>([]);
   const [paidInFull, setPaidInFull] = useState(false);
   const [invoiceExists, setInvoiceExists] = useState(false);
+  const savingInvoiceRef = useRef(false);
 
   // UNAS Download Link
   const [unasFolderPath, setUnasFolderPath] = useState('');
@@ -664,21 +665,35 @@ export default function MissionNew() {
     ]);
   };
 
-  const handleSaveInvoice = async () => {
-    if (!missionId) return;
+  const handleSaveInvoice = async (): Promise<boolean> => {
+    if (!missionId) return false;
+    if (savingInvoiceRef.current) return false;
+    savingInvoiceRef.current = true;
     try {
-      if (invoiceExists) {
-        // Update existing invoice
+      // Determine invoice state from server to avoid stale React state race conditions
+      let hasInvoice = false;
+      try {
         await api.put(`/missions/${missionId}/invoice`, { paid_in_full: paidInFull });
-        // Delete existing line items and re-add (simplest approach)
+        hasInvoice = true;
+      } catch (e: any) {
+        if (e?.response?.status === 404) {
+          // Invoice doesn't exist yet — create it
+          await api.post(`/missions/${missionId}/invoice`, { tax_rate: 0, paid_in_full: paidInFull });
+        } else {
+          throw e;
+        }
+      }
+      setInvoiceExists(true);
+
+      // If invoice existed, delete old line items before re-adding
+      if (hasInvoice) {
         const invResp = await api.get(`/missions/${missionId}/invoice`);
         for (const existing of invResp.data.line_items) {
           await api.delete(`/missions/${missionId}/invoice/items/${existing.id}`);
         }
-      } else {
-        await api.post(`/missions/${missionId}/invoice`, { tax_rate: 0, paid_in_full: paidInFull });
-        setInvoiceExists(true);
       }
+
+      // Add all current line items
       for (const item of lineItems) {
         if (item.description) {
           await api.post(`/missions/${missionId}/invoice/items`, {
@@ -690,8 +705,13 @@ export default function MissionNew() {
         }
       }
       notifications.show({ title: 'Invoice Saved', message: 'Line items saved', color: 'cyan' });
-    } catch {
-      notifications.show({ title: 'Error', message: 'Failed to save invoice', color: 'red' });
+      return true;
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail || err?.message || 'Unknown error';
+      notifications.show({ title: 'Error', message: `Failed to save invoice: ${detail}`, color: 'red' });
+      return false;
+    } finally {
+      savingInvoiceRef.current = false;
     }
   };
 
@@ -701,7 +721,8 @@ export default function MissionNew() {
     try {
       // Ensure invoice is persisted before PDF generation
       if (form.values.is_billable && lineItems.filter((li) => li.description).length > 0) {
-        await handleSaveInvoice();
+        const saved = await handleSaveInvoice();
+        if (!saved) return;
       }
       // Save final report content
       if (reportContent) {
@@ -1259,7 +1280,8 @@ export default function MissionNew() {
                       notifications.show({ title: 'Invoice Required', message: 'Billable missions require at least one line item with a description.', color: 'red' });
                       return;
                     }
-                    await handleSaveInvoice();
+                    const saved = await handleSaveInvoice();
+                    if (!saved) return;
                   }
                   setActive(5);
                 }}
