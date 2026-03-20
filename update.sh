@@ -2,7 +2,7 @@
 set -e
 
 # ── DroneOps Updater ──────────────────────────────────────────────
-REPO="https://github.com/BigBill1418/DroneOpsCommand.git"
+REPO="https://github.com/BigBill1418/DroneOpsReport.git"
 BRANCH="main"
 INSTALL_DIR="$(cd "$(dirname "$0")" && pwd)"
 DEPLOY_MARKER="$INSTALL_DIR/.last_deployed_commit"
@@ -19,7 +19,7 @@ fi
 # ── Self-update: refresh this script from remote before doing anything ──
 echo ""
 echo "  Checking for script updates..."
-REMOTE_SCRIPT=$(curl -fsSL "https://raw.githubusercontent.com/BigBill1418/DroneOpsCommand/$BRANCH/update.sh" 2>/dev/null || true)
+REMOTE_SCRIPT=$(curl -fsSL "https://raw.githubusercontent.com/BigBill1418/DroneOpsReport/$BRANCH/update.sh" 2>/dev/null || true)
 if [ -n "$REMOTE_SCRIPT" ]; then
   LOCAL_HASH=$(md5sum "$0" | cut -d' ' -f1)
   REMOTE_HASH=$(echo "$REMOTE_SCRIPT" | md5sum | cut -d' ' -f1)
@@ -35,7 +35,7 @@ fi
 
 # ── Fix remote URL if repo was renamed ──
 CURRENT_URL=$(git remote get-url origin 2>/dev/null || true)
-if [ -n "$CURRENT_URL" ] && echo "$CURRENT_URL" | grep -qi "DroneOpsReport"; then
+if [ -n "$CURRENT_URL" ] && echo "$CURRENT_URL" | grep -qi "DroneOpsCommand"; then
   echo "  Fixing remote URL (repo was renamed)..."
   git remote set-url origin "$REPO"
 fi
