@@ -105,6 +105,7 @@ export default function MissionNew() {
   const isEditing = Boolean(editId);
 
   const [active, setActive] = useState(0);
+  const [highestStep, setHighestStep] = useState(0);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [aircraft, setAircraft] = useState<Aircraft[]>([]);
   const [missionId, setMissionId] = useState<string | null>(editId || null);
@@ -148,6 +149,19 @@ export default function MissionNew() {
   const [missionAircraft, setMissionAircraft] = useState<string[]>([]);
 
   const navigate = useNavigate();
+
+  // Track the highest step the user has reached so they can freely click
+  // back and forth between any previously-visited steps.
+  useEffect(() => {
+    setHighestStep((prev) => Math.max(prev, active));
+  }, [active]);
+
+  const handleStepClick = (step: number) => {
+    // Allow navigating to any step up to the highest one already visited
+    if (step <= highestStep) {
+      setActive(step);
+    }
+  };
 
   const form = useForm({
     initialValues: {
@@ -648,6 +662,7 @@ export default function MissionNew() {
       await api.put(`/missions/${missionId}/report`, {
         user_narrative: narrative || undefined,
         final_content: reportContent || undefined,
+        include_download_link: includeDownloadLink,
       });
       notifications.show({ title: 'Draft Saved', message: 'Report draft has been saved', color: 'cyan' });
     } catch (err: any) {
@@ -773,10 +788,9 @@ export default function MissionNew() {
 
       <Stepper
         active={active}
-        onStepClick={setActive}
+        onStepClick={handleStepClick}
         color="cyan"
         size="sm"
-        allowNextStepsSelect={false}
         styles={{
           steps: { flexWrap: 'wrap', gap: '4px' },
           step: { color: '#e8edf2' },
