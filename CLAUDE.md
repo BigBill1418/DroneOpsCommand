@@ -22,12 +22,12 @@ Include the version tag in the commit message (e.g. `— v1.7.8`).
 
 ## Branch Workflow (REQUIRED)
 
-This project uses a `dev` branch for development and `main` for production releases.
+This project uses a `claude/dev` branch for development and `main` for production releases.
 
-**Before committing any code change, ALWAYS ask the user:** "Should this go to `dev`, `main`, or both?"
+**Before committing any code change, ALWAYS ask the user:** "Should this go to `claude/dev`, `main`, or both?"
 - Do NOT assume a target branch — always ask first.
-- `dev` is the default development branch; `main` is production-stable.
-- The `update.sh` script pulls from `dev` by default on the server.
+- `claude/dev` is the default development branch; `main` is production-stable.
+- The `update.sh` script pulls from `claude/dev` by default on the server.
 
 ## Conventions
 
