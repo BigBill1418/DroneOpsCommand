@@ -1,138 +1,115 @@
 #!/bin/bash
 set -e
 
-# ── Configuration ──────────────────────────────────────────────────
-# Override these with environment variables or edit for your setup.
-INSTALL_DIR="${DRONEOPS_DIR:-$(cd "$(dirname "$0")" && pwd)}"
-BRANCH="${DRONEOPS_BRANCH:-dev}"
-# ───────────────────────────────────────────────────────────────────
+# ── DroneOps Updater ──────────────────────────────────────────────
+REPO="https://github.com/BigBill1418/DroneOpsCommand.git"
+BRANCH="dev"
+INSTALL_DIR="$(cd "$(dirname "$0")" && pwd)"
+DEPLOY_MARKER="$INSTALL_DIR/.last_deployed_commit"
+# ──────────────────────────────────────────────────────────────────
 
 cd "$INSTALL_DIR"
 
-# Use sudo for docker if not running as root and not in docker group
+# Docker compose — use sudo if needed
 DOCKER="docker compose"
 if [ "$(id -u)" -ne 0 ] && ! docker info >/dev/null 2>&1; then
   DOCKER="sudo docker compose"
 fi
 
-# Track last deployed commit and branch
-DEPLOY_MARKER=".last_deployed_commit"
-BRANCH_MARKER=".last_deployed_branch"
-PREV_COMMIT=""
-PREV_BRANCH=""
-
-if [ -f "$DEPLOY_MARKER" ]; then
-  PREV_COMMIT=$(cat "$DEPLOY_MARKER")
+# ── Self-update: refresh this script from remote before doing anything ──
+echo ""
+echo "  Checking for script updates..."
+REMOTE_SCRIPT=$(curl -fsSL "https://raw.githubusercontent.com/BigBill1418/DroneOpsCommand/$BRANCH/update.sh" 2>/dev/null || true)
+if [ -n "$REMOTE_SCRIPT" ]; then
+  LOCAL_HASH=$(md5sum "$0" | cut -d' ' -f1)
+  REMOTE_HASH=$(echo "$REMOTE_SCRIPT" | md5sum | cut -d' ' -f1)
+  if [ "$LOCAL_HASH" != "$REMOTE_HASH" ]; then
+    echo "  update.sh has changed — refreshing..."
+    echo "$REMOTE_SCRIPT" > "$0"
+    chmod +x "$0"
+    echo "  Restarting with updated script..."
+    echo ""
+    exec "$0" "$@"
+  fi
 fi
-if [ -f "$BRANCH_MARKER" ]; then
-  PREV_BRANCH=$(cat "$BRANCH_MARKER")
+
+# ── Fix remote URL if repo was renamed ──
+CURRENT_URL=$(git remote get-url origin 2>/dev/null || true)
+if [ -n "$CURRENT_URL" ] && echo "$CURRENT_URL" | grep -qi "DroneOpsReport"; then
+  echo "  Fixing remote URL (repo was renamed)..."
+  git remote set-url origin "$REPO"
 fi
 
-echo "=== Fetching latest from $BRANCH ==="
-if ! git fetch origin "$BRANCH"; then
-  echo "ERROR: git fetch failed. Check your remote URL:"
-  git remote -v
+# ── Fetch & sync ──
+echo ""
+echo "  Pulling latest from $BRANCH..."
+if ! git fetch origin "$BRANCH" 2>/dev/null; then
   echo ""
-  echo "If the repo was renamed, fix it with:"
-  echo "  git remote set-url origin https://github.com/BigBill1418/DroneOpsCommand.git"
+  echo "  ERROR: Could not reach the repo. Check your internet connection."
+  echo "  Remote: $(git remote get-url origin)"
   exit 1
 fi
 
-echo "=== Syncing to $BRANCH ==="
 git checkout "$BRANCH" 2>/dev/null || git checkout -b "$BRANCH" "origin/$BRANCH"
 
-# Capture state before reset
-BEFORE_COMMIT=$(git rev-parse HEAD)
-git reset --hard "origin/$BRANCH"
-CURRENT_COMMIT=$(git rev-parse HEAD)
+PREV_COMMIT=""
+[ -f "$DEPLOY_MARKER" ] && PREV_COMMIT=$(cat "$DEPLOY_MARKER")
 
-# Determine what changed
+git reset --hard "origin/$BRANCH" >/dev/null
+CURRENT_COMMIT=$(git rev-parse HEAD)
+SHORT_COMMIT=$(echo "$CURRENT_COMMIT" | head -c 7)
+
+# ── Detect what changed ──
 REBUILD_FRONTEND=false
 REBUILD_BACKEND=false
 REBUILD_PARSER=false
 
-if [ "$PREV_BRANCH" != "$BRANCH" ] && [ -n "$PREV_BRANCH" ]; then
-  # Branch switch — compare current tree against what docker is running
-  # Use the PREV_COMMIT as the base if it exists in history
-  echo "=== Branch changed: $PREV_BRANCH -> $BRANCH ==="
-  if [ -n "$PREV_COMMIT" ] && git cat-file -t "$PREV_COMMIT" >/dev/null 2>&1; then
-    CHANGED=$(git diff --name-only "$PREV_COMMIT" "$CURRENT_COMMIT")
-  else
-    # Can't find old commit — check what services have code changes vs running images
-    CHANGED="all"
-  fi
-elif [ -n "$PREV_COMMIT" ] && git cat-file -t "$PREV_COMMIT" >/dev/null 2>&1; then
+if [ -n "$PREV_COMMIT" ] && git cat-file -t "$PREV_COMMIT" >/dev/null 2>&1; then
   CHANGED=$(git diff --name-only "$PREV_COMMIT" "$CURRENT_COMMIT")
-else
-  # First run or marker invalid — rebuild everything
-  CHANGED="all"
-fi
-
-if [ "$CHANGED" = "all" ]; then
-  echo "=== First deploy or marker invalid — rebuilding all services ==="
-  REBUILD_FRONTEND=true
-  REBUILD_BACKEND=true
-  REBUILD_PARSER=true
-elif [ -z "$CHANGED" ]; then
-  echo "=== Already at latest commit ($(echo "$CURRENT_COMMIT" | head -c 7)), no file changes ==="
-else
-  echo "=== Changes detected between $(echo "${PREV_COMMIT:-none}" | head -c 7) and $(echo "$CURRENT_COMMIT" | head -c 7) ==="
+  if [ -z "$CHANGED" ]; then
+    echo "  Already up to date ($SHORT_COMMIT). Nothing to do."
+    echo ""
+    $DOCKER ps --format "table {{.Names}}\t{{.Status}}" 2>/dev/null || true
+    exit 0
+  fi
   echo "$CHANGED" | grep -q "^frontend/" && REBUILD_FRONTEND=true
   echo "$CHANGED" | grep -q "^backend/" && REBUILD_BACKEND=true
   echo "$CHANGED" | grep -q "^flight-parser/" && REBUILD_PARSER=true
-
-  # Show what's being rebuilt
-  $REBUILD_FRONTEND && echo "  -> frontend changed"
-  $REBUILD_BACKEND && echo "  -> backend changed"
-  $REBUILD_PARSER && echo "  -> flight-parser changed"
-
-  # If only non-service files changed (README, docs, etc.), nothing to rebuild
-  if ! $REBUILD_FRONTEND && ! $REBUILD_BACKEND && ! $REBUILD_PARSER; then
-    echo "  -> changes are in non-service files only (no rebuild needed)"
-  fi
-fi
-
-# --clean flag forces full rebuild (no cache)
-CACHE_FLAG=""
-if [ "$1" = "--clean" ]; then
-  CACHE_FLAG="--no-cache"
-  REBUILD_FRONTEND=true
-  REBUILD_BACKEND=true
-  REBUILD_PARSER=true
-fi
-
-# --all flag rebuilds everything
-if [ "$1" = "--all" ]; then
-  REBUILD_FRONTEND=true
-  REBUILD_BACKEND=true
-  REBUILD_PARSER=true
-fi
-
-if $REBUILD_FRONTEND; then
-  echo "=== Rebuilding frontend ==="
-  $DOCKER build $CACHE_FLAG frontend
-fi
-
-if $REBUILD_BACKEND; then
-  echo "=== Rebuilding backend + worker ==="
-  $DOCKER build $CACHE_FLAG backend worker
-fi
-
-if $REBUILD_PARSER; then
-  echo "=== Rebuilding flight-parser ==="
-  $DOCKER build $CACHE_FLAG flight-parser
-fi
-
-if $REBUILD_FRONTEND || $REBUILD_BACKEND || $REBUILD_PARSER; then
-  echo "=== Restarting changed services ==="
-  $DOCKER up -d
 else
-  echo "=== No service changes detected, nothing to rebuild ==="
+  # First run — rebuild everything
+  REBUILD_FRONTEND=true
+  REBUILD_BACKEND=true
+  REBUILD_PARSER=true
 fi
 
-# Save current commit and branch as deployed
-echo "$CURRENT_COMMIT" > "$DEPLOY_MARKER"
-echo "$BRANCH" > "$BRANCH_MARKER"
+# ── Flags ──
+if [ "$1" = "--clean" ] || [ "$1" = "--all" ]; then
+  REBUILD_FRONTEND=true
+  REBUILD_BACKEND=true
+  REBUILD_PARSER=true
+fi
+CACHE_FLAG=""
+[ "$1" = "--clean" ] && CACHE_FLAG="--no-cache"
 
-echo "=== Done ($(echo "$CURRENT_COMMIT" | head -c 7)) ==="
-$DOCKER ps
+# ── Build only what changed ──
+SERVICES=""
+$REBUILD_FRONTEND && SERVICES="$SERVICES frontend" && echo "  Rebuilding frontend..."
+$REBUILD_BACKEND && SERVICES="$SERVICES backend worker" && echo "  Rebuilding backend..."
+$REBUILD_PARSER && SERVICES="$SERVICES flight-parser" && echo "  Rebuilding flight-parser..."
+
+if [ -z "$SERVICES" ]; then
+  echo "  Only docs/config changed — no rebuild needed."
+else
+  echo ""
+  $DOCKER build $CACHE_FLAG $SERVICES
+  $DOCKER up -d
+fi
+
+# ── Save deploy marker ──
+echo "$CURRENT_COMMIT" > "$DEPLOY_MARKER"
+
+echo ""
+echo "  Updated to $SHORT_COMMIT"
+echo ""
+$DOCKER ps --format "table {{.Names}}\t{{.Status}}" 2>/dev/null || true
+echo ""
