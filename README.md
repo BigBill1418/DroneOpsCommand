@@ -2,7 +2,7 @@
 
 **Self-hosted mission management, AI report generation, and invoicing for commercial drone operators.**
 
-**Version 2.20.3** | [Quick Start](#quick-start) | [Features](#features) | [Configuration](#configuration) | [Contributing](CONTRIBUTING.md) | [License](LICENSE)
+**Version 2.21.0** | [Quick Start](#quick-start) | [Features](#features) | [Configuration](#configuration) | [Contributing](CONTRIBUTING.md) | [License](LICENSE)
 
 ---
 
@@ -48,7 +48,7 @@ Designed for FAA Part 107 certified operators running missions such as search & 
 
 ```bash
 # 1. Clone and configure
-git clone https://github.com/YOUR_USERNAME/DroneOpsCommand.git
+git clone https://github.com/BigBill1418/DroneOpsCommand.git
 cd DroneOpsCommand
 cp .env.example .env
 

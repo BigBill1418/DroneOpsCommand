@@ -34,7 +34,7 @@ if ! git fetch origin "$BRANCH"; then
   git remote -v
   echo ""
   echo "If the repo was renamed, fix it with:"
-  echo "  git remote set-url origin https://github.com/BigBill1418/DroneOpsReport.git"
+  echo "  git remote set-url origin https://github.com/BigBill1418/DroneOpsCommand.git"
   exit 1
 fi
 

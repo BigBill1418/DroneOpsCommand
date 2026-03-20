@@ -30,7 +30,7 @@ services:
       - ollama_data:/root/.ollama
     environment:
       - OLLAMA_HOST=0.0.0.0
-      # Keep model loaded in RAM permanently (64GB available)
+      # Keep model loaded in RAM permanently
       - OLLAMA_KEEP_ALIVE=-1
       # Single-request mode — all CPU goes to one generation
       - OLLAMA_NUM_PARALLEL=1
