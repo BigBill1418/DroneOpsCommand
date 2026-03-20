@@ -3,40 +3,15 @@ set -e
 
 # ── DroneOpsCommand Update Script ─────────────────────────────────
 #
-# Usage:
-#   ./update.sh dev          Pull claude/dev branch, rebuild & run (testing)
-#   ./update.sh prod         Pull main branch, rebuild & run (production)
+# Interactive deploy & promote tool.
+# Run ./update.sh and follow the prompts, or pass args directly:
+#   ./update.sh dev          Pull claude/dev, rebuild & run
+#   ./update.sh prod         Pull main, rebuild & run
+#   ./update.sh promote      Merge claude/dev → main, rebuild prod
 #   ./update.sh dev --clean  Full rebuild, no Docker cache
-#   ./update.sh dev --all    Rebuild all services even if unchanged
-#   ./update.sh              Defaults to "dev"
 #
 # ──────────────────────────────────────────────────────────────────
 
-# ── Parse arguments ──────────────────────────────────────────────
-MODE="${1:-dev}"
-FLAG="${2:-}"
-
-# Allow flag as first arg when no mode specified (backwards compat)
-if [ "$MODE" = "--clean" ] || [ "$MODE" = "--all" ]; then
-  FLAG="$MODE"
-  MODE="dev"
-fi
-
-case "$MODE" in
-  dev)   BRANCH="claude/dev" ;;
-  prod)  BRANCH="main" ;;
-  *)
-    echo "Usage: $0 [dev|prod] [--clean|--all]"
-    echo ""
-    echo "  dev   — Pull from claude/dev (testing/development)"
-    echo "  prod  — Pull from main (production)"
-    echo "  --clean  Force full rebuild (no Docker cache)"
-    echo "  --all    Rebuild all services even if unchanged"
-    exit 1
-    ;;
-esac
-
-# ── Setup ────────────────────────────────────────────────────────
 INSTALL_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$INSTALL_DIR"
 
@@ -47,98 +22,254 @@ fi
 
 DEPLOY_MARKER=".last_deployed_commit"
 
-echo ""
-echo "╔══════════════════════════════════════════════════╗"
-echo "║  DroneOpsCommand Update — $MODE                      ║"
-echo "║  Branch: $BRANCH"
-echo "╚══════════════════════════════════════════════════╝"
-echo ""
+# ── Colors ───────────────────────────────────────────────────────
+CYAN='\033[0;36m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+BOLD='\033[1m'
+NC='\033[0m'
 
-# ── Fetch & sync ─────────────────────────────────────────────────
-echo "=== Fetching $BRANCH ==="
-if ! git fetch origin "$BRANCH"; then
-  echo "ERROR: Failed to fetch '$BRANCH'. Check remote:"
-  git remote -v
+# ── Helper functions ─────────────────────────────────────────────
+banner() {
   echo ""
-  echo "Fix with: git remote set-url origin https://github.com/BigBill1418/DroneOpsCommand.git"
-  exit 1
-fi
+  echo -e "${CYAN}╔══════════════════════════════════════════════════╗${NC}"
+  echo -e "${CYAN}║${NC}  ${BOLD}DroneOpsCommand${NC} — $1"
+  echo -e "${CYAN}╚══════════════════════════════════════════════════╝${NC}"
+  echo ""
+}
 
-git checkout "$BRANCH" 2>/dev/null || git checkout -b "$BRANCH" "origin/$BRANCH"
-
-PREV_COMMIT=""
-if [ -f "$DEPLOY_MARKER" ]; then
-  PREV_COMMIT=$(cat "$DEPLOY_MARKER")
-fi
-
-git reset --hard "origin/$BRANCH"
-CURRENT_COMMIT=$(git rev-parse HEAD)
-
-# ── Detect changes ───────────────────────────────────────────────
-REBUILD_FRONTEND=false
-REBUILD_BACKEND=false
-REBUILD_PARSER=false
-
-if [ -n "$PREV_COMMIT" ] && git cat-file -t "$PREV_COMMIT" >/dev/null 2>&1; then
-  CHANGED=$(git diff --name-only "$PREV_COMMIT" "$CURRENT_COMMIT")
-else
-  CHANGED="all"
-fi
-
-if [ "$CHANGED" = "all" ]; then
-  echo "=== First deploy or branch switch — rebuilding all ==="
-  REBUILD_FRONTEND=true
-  REBUILD_BACKEND=true
-  REBUILD_PARSER=true
-elif [ -z "$CHANGED" ]; then
-  echo "=== Already at latest ($(echo "$CURRENT_COMMIT" | head -c 7)), nothing changed ==="
-else
-  echo "=== Changes: $(echo "${PREV_COMMIT:-none}" | head -c 7) → $(echo "$CURRENT_COMMIT" | head -c 7) ==="
-  echo "$CHANGED" | grep -q "^frontend/" && REBUILD_FRONTEND=true
-  echo "$CHANGED" | grep -q "^backend/" && REBUILD_BACKEND=true
-  echo "$CHANGED" | grep -q "^flight-parser/" && REBUILD_PARSER=true
-
-  $REBUILD_FRONTEND && echo "  → frontend"
-  $REBUILD_BACKEND  && echo "  → backend"
-  $REBUILD_PARSER   && echo "  → flight-parser"
-
-  if ! $REBUILD_FRONTEND && ! $REBUILD_BACKEND && ! $REBUILD_PARSER; then
-    echo "  → non-service files only (no rebuild needed)"
+fetch_branch() {
+  local branch="$1"
+  echo -e "${CYAN}Fetching ${branch}...${NC}"
+  if ! git fetch origin "$branch"; then
+    echo -e "${RED}ERROR: Failed to fetch '$branch'. Check remote:${NC}"
+    git remote -v
+    exit 1
   fi
+}
+
+sync_branch() {
+  local branch="$1"
+  git checkout "$branch" 2>/dev/null || git checkout -b "$branch" "origin/$branch"
+  git reset --hard "origin/$branch"
+}
+
+detect_and_rebuild() {
+  local branch="$1"
+  local cache_flag="$2"
+  local current_commit
+  current_commit=$(git rev-parse HEAD)
+
+  local prev_commit=""
+  if [ -f "$DEPLOY_MARKER" ]; then
+    prev_commit=$(cat "$DEPLOY_MARKER")
+  fi
+
+  # Detect changes
+  local rebuild_frontend=false
+  local rebuild_backend=false
+  local rebuild_parser=false
+  local changed
+
+  if [ -n "$prev_commit" ] && git cat-file -t "$prev_commit" >/dev/null 2>&1; then
+    changed=$(git diff --name-only "$prev_commit" "$current_commit")
+  else
+    changed="all"
+  fi
+
+  if [ "$changed" = "all" ]; then
+    echo -e "${YELLOW}First deploy or branch switch — rebuilding all${NC}"
+    rebuild_frontend=true
+    rebuild_backend=true
+    rebuild_parser=true
+  elif [ -z "$changed" ]; then
+    echo -e "${GREEN}Already at latest ($(echo "$current_commit" | head -c 7)), nothing changed${NC}"
+  else
+    echo -e "Changes: $(echo "${prev_commit:-none}" | head -c 7) → $(echo "$current_commit" | head -c 7)"
+    echo "$changed" | grep -q "^frontend/" && rebuild_frontend=true
+    echo "$changed" | grep -q "^backend/" && rebuild_backend=true
+    echo "$changed" | grep -q "^flight-parser/" && rebuild_parser=true
+
+    $rebuild_frontend && echo "  → frontend"
+    $rebuild_backend  && echo "  → backend"
+    $rebuild_parser   && echo "  → flight-parser"
+
+    if ! $rebuild_frontend && ! $rebuild_backend && ! $rebuild_parser; then
+      echo "  → non-service files only (no rebuild needed)"
+    fi
+  fi
+
+  # Force rebuild all with --clean or --all
+  if [ "$cache_flag" = "--no-cache" ] || [ "$cache_flag" = "--all" ]; then
+    rebuild_frontend=true
+    rebuild_backend=true
+    rebuild_parser=true
+  fi
+
+  local docker_cache=""
+  [ "$cache_flag" = "--no-cache" ] && docker_cache="--no-cache"
+
+  # Build
+  $rebuild_frontend && echo -e "${CYAN}Building frontend...${NC}" && $DOCKER build $docker_cache frontend
+  $rebuild_backend  && echo -e "${CYAN}Building backend + worker...${NC}" && $DOCKER build $docker_cache backend worker
+  $rebuild_parser   && echo -e "${CYAN}Building flight-parser...${NC}" && $DOCKER build $docker_cache flight-parser
+
+  if $rebuild_frontend || $rebuild_backend || $rebuild_parser; then
+    echo -e "${CYAN}Restarting services...${NC}"
+    $DOCKER up -d
+  else
+    echo -e "${GREEN}No services to rebuild${NC}"
+  fi
+
+  # Save state
+  echo "$current_commit" > "$DEPLOY_MARKER"
+
+  echo ""
+  echo -e "${GREEN}Done — $(echo "$current_commit" | head -c 7)${NC}"
+  $DOCKER ps
+}
+
+do_dev() {
+  local flag="$1"
+  banner "Update DEV (claude/dev)"
+  fetch_branch "claude/dev"
+  sync_branch "claude/dev"
+  detect_and_rebuild "claude/dev" "$flag"
+}
+
+do_prod() {
+  local flag="$1"
+  banner "Update PROD (main)"
+  fetch_branch "main"
+  sync_branch "main"
+  detect_and_rebuild "main" "$flag"
+}
+
+do_promote() {
+  banner "Promote DEV → PROD"
+
+  # Fetch both branches
+  fetch_branch "claude/dev"
+  fetch_branch "main"
+
+  # Show what will be promoted
+  local dev_commit main_commit
+  dev_commit=$(git rev-parse origin/claude/dev)
+  main_commit=$(git rev-parse origin/main)
+
+  if [ "$dev_commit" = "$main_commit" ]; then
+    echo -e "${GREEN}claude/dev and main are already identical. Nothing to promote.${NC}"
+    return
+  fi
+
+  echo -e "${BOLD}Commits to promote:${NC}"
+  git log --oneline "origin/main..origin/claude/dev"
+  echo ""
+
+  echo -e "${YELLOW}This will merge claude/dev into main and rebuild production.${NC}"
+  read -r -p "Continue? [y/N] " confirm
+  if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+    echo "Aborted."
+    return
+  fi
+
+  # Merge dev into main
+  echo -e "${CYAN}Merging claude/dev → main...${NC}"
+  git checkout main 2>/dev/null || git checkout -b main origin/main
+  git reset --hard origin/main
+  git merge origin/claude/dev -m "Promote claude/dev to production"
+
+  # Push main
+  echo -e "${CYAN}Pushing main...${NC}"
+  git push origin main
+
+  echo -e "${GREEN}Main updated to $(git rev-parse HEAD | head -c 7)${NC}"
+  echo ""
+
+  # Rebuild production
+  detect_and_rebuild "main" ""
+}
+
+do_status() {
+  banner "Status"
+
+  fetch_branch "claude/dev" 2>/dev/null
+  fetch_branch "main" 2>/dev/null
+
+  local dev_commit main_commit
+  dev_commit=$(git rev-parse origin/claude/dev 2>/dev/null || echo "not found")
+  main_commit=$(git rev-parse origin/main 2>/dev/null || echo "not found")
+
+  echo -e "${BOLD}Branches:${NC}"
+  echo -e "  claude/dev : $(echo "$dev_commit" | head -c 7)"
+  echo -e "  main       : $(echo "$main_commit" | head -c 7)"
+  echo ""
+
+  if [ "$dev_commit" != "$main_commit" ] && [ "$dev_commit" != "not found" ] && [ "$main_commit" != "not found" ]; then
+    local ahead
+    ahead=$(git rev-list --count "origin/main..origin/claude/dev")
+    echo -e "${YELLOW}claude/dev is ${ahead} commit(s) ahead of main${NC}"
+    echo ""
+    echo -e "${BOLD}Unpromoted commits:${NC}"
+    git log --oneline "origin/main..origin/claude/dev"
+  else
+    echo -e "${GREEN}Branches are in sync${NC}"
+  fi
+
+  echo ""
+  echo -e "${BOLD}Running services:${NC}"
+  $DOCKER ps
+}
+
+# ── Interactive menu ─────────────────────────────────────────────
+show_menu() {
+  echo ""
+  echo -e "${CYAN}╔══════════════════════════════════════════════════╗${NC}"
+  echo -e "${CYAN}║${NC}  ${BOLD}DroneOpsCommand${NC} — Server Management             ${CYAN}║${NC}"
+  echo -e "${CYAN}╠══════════════════════════════════════════════════╣${NC}"
+  echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
+  echo -e "${CYAN}║${NC}  ${BOLD}1)${NC}  Update DEV    — pull claude/dev & rebuild    ${CYAN}║${NC}"
+  echo -e "${CYAN}║${NC}  ${BOLD}2)${NC}  Update PROD   — pull main & rebuild          ${CYAN}║${NC}"
+  echo -e "${CYAN}║${NC}  ${BOLD}3)${NC}  Promote       — merge dev → main & deploy   ${CYAN}║${NC}"
+  echo -e "${CYAN}║${NC}  ${BOLD}4)${NC}  Status        — show branch & service info   ${CYAN}║${NC}"
+  echo -e "${CYAN}║${NC}  ${BOLD}5)${NC}  Clean rebuild — full rebuild, no cache (dev)  ${CYAN}║${NC}"
+  echo -e "${CYAN}║${NC}  ${BOLD}6)${NC}  Exit                                         ${CYAN}║${NC}"
+  echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
+  echo -e "${CYAN}╚══════════════════════════════════════════════════╝${NC}"
+  echo ""
+  read -r -p "Select [1-6]: " choice
+
+  case "$choice" in
+    1) do_dev "" ;;
+    2) do_prod "" ;;
+    3) do_promote ;;
+    4) do_status ;;
+    5) do_dev "--no-cache" ;;
+    6) echo "Bye."; exit 0 ;;
+    *) echo -e "${RED}Invalid choice${NC}"; show_menu ;;
+  esac
+}
+
+# ── Main ─────────────────────────────────────────────────────────
+MODE="${1:-}"
+FLAG="${2:-}"
+
+# Allow flag as first arg for backwards compat
+if [ "$MODE" = "--clean" ] || [ "$MODE" = "--all" ]; then
+  FLAG="$MODE"
+  MODE="dev"
 fi
 
-# ── Handle flags ─────────────────────────────────────────────────
-CACHE_FLAG=""
-if [ "$FLAG" = "--clean" ]; then
-  echo "=== Clean build requested (no Docker cache) ==="
-  CACHE_FLAG="--no-cache"
-  REBUILD_FRONTEND=true
-  REBUILD_BACKEND=true
-  REBUILD_PARSER=true
-fi
-
-if [ "$FLAG" = "--all" ]; then
-  echo "=== Rebuilding all services ==="
-  REBUILD_FRONTEND=true
-  REBUILD_BACKEND=true
-  REBUILD_PARSER=true
-fi
-
-# ── Build & deploy ───────────────────────────────────────────────
-$REBUILD_FRONTEND && echo "=== Building frontend ===" && $DOCKER build $CACHE_FLAG frontend
-$REBUILD_BACKEND  && echo "=== Building backend + worker ===" && $DOCKER build $CACHE_FLAG backend worker
-$REBUILD_PARSER   && echo "=== Building flight-parser ===" && $DOCKER build $CACHE_FLAG flight-parser
-
-if $REBUILD_FRONTEND || $REBUILD_BACKEND || $REBUILD_PARSER; then
-  echo "=== Restarting services ==="
-  $DOCKER up -d
-else
-  echo "=== No services to rebuild ==="
-fi
-
-# ── Save state ───────────────────────────────────────────────────
-echo "$CURRENT_COMMIT" > "$DEPLOY_MARKER"
-
-echo ""
-echo "=== Done [$MODE] — $(echo "$CURRENT_COMMIT" | head -c 7) ==="
-$DOCKER ps
+case "$MODE" in
+  dev)      do_dev "$( [ "$FLAG" = "--clean" ] && echo "--no-cache" || [ "$FLAG" = "--all" ] && echo "--all" || echo "" )" ;;
+  prod)     do_prod "$( [ "$FLAG" = "--clean" ] && echo "--no-cache" || [ "$FLAG" = "--all" ] && echo "--all" || echo "" )" ;;
+  promote)  do_promote ;;
+  status)   do_status ;;
+  "")       show_menu ;;
+  *)
+    echo "Usage: $0 [dev|prod|promote|status] [--clean|--all]"
+    echo "  Or just run $0 with no args for the interactive menu."
+    exit 1
+    ;;
+esac

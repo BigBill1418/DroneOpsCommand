@@ -30,8 +30,11 @@ Include the version tag in the commit message (e.g. `— v1.7.8`).
 - Default to `claude/dev` unless told otherwise.
 
 **Server update commands:**
+- `./update.sh` — interactive menu (prompts for action)
 - `./update.sh dev` — pull `claude/dev`, rebuild, test
 - `./update.sh prod` — pull `main`, rebuild, deploy production
+- `./update.sh promote` — merge `claude/dev` → `main`, rebuild production
+- `./update.sh status` — show branch info & running services
 - `./update.sh dev --clean` — full rebuild, no Docker cache
 
 ## Conventions
