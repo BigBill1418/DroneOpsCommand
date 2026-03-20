@@ -3,7 +3,7 @@ set -e
 
 # ── DroneOps Updater ──────────────────────────────────────────────
 REPO="https://github.com/BigBill1418/DroneOpsCommand.git"
-BRANCH="dev"
+BRANCH="main"
 INSTALL_DIR="$(cd "$(dirname "$0")" && pwd)"
 DEPLOY_MARKER="$INSTALL_DIR/.last_deployed_commit"
 # ──────────────────────────────────────────────────────────────────

@@ -26,6 +26,7 @@ import { Mission, Report, Aircraft, CoverageData } from '../api/types';
 import FlightMap from '../components/FlightMap/FlightMap';
 import AircraftCard from '../components/AircraftCard/AircraftCard';
 import RichTextEditor from '../components/RichTextEditor/RichTextEditor';
+import PdfViewer from '../components/PDFPreview/PdfViewer';
 import { inputStyles, statusColors } from '../components/shared/styles';
 
 export default function MissionDetail() {
@@ -39,6 +40,7 @@ export default function MissionDetail() {
   const [reportContent, setReportContent] = useState('');
   const [generating, setGenerating] = useState(false);
   const [includeDownloadLink, setIncludeDownloadLink] = useState(false);
+  const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null);
   const navigate = useNavigate();
 
   // Polling for Celery report generation
@@ -127,10 +129,9 @@ export default function MissionDetail() {
     await handleSaveReport();
     try {
       const resp = await api.post(`/missions/${id}/report/pdf`, {}, { responseType: 'blob', timeout: 120000 });
+      if (pdfBlobUrl) URL.revokeObjectURL(pdfBlobUrl);
       const blobUrl = URL.createObjectURL(new Blob([resp.data], { type: 'application/pdf' }));
-      window.open(blobUrl, '_blank');
-      // Revoke after browser has had time to open the tab
-      setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+      setPdfBlobUrl(blobUrl);
     } catch {
       notifications.show({ title: 'Error', message: 'PDF generation failed', color: 'red' });
     }
@@ -299,16 +300,26 @@ export default function MissionDetail() {
 
       {/* Actions */}
       <Card padding="lg" radius="md" style={cardStyle}>
-        <Group wrap="wrap">
-          <Button leftSection={<IconDownload size={16} />} color="cyan" onClick={handleGeneratePDF}
-            styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}>
-            GENERATE PDF
-          </Button>
-          <Button leftSection={<IconSend size={16} />} color="orange" variant="light" onClick={handleSend}
-            styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}>
-            EMAIL TO CUSTOMER
-          </Button>
-        </Group>
+        <Stack gap="md">
+          <Group wrap="wrap">
+            <Button leftSection={<IconDownload size={16} />} color="cyan" onClick={handleGeneratePDF}
+              styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}>
+              GENERATE PDF
+            </Button>
+            <Button leftSection={<IconSend size={16} />} color="orange" variant="light" onClick={handleSend}
+              styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}>
+              EMAIL TO CUSTOMER
+            </Button>
+          </Group>
+
+          {pdfBlobUrl && (
+            <PdfViewer
+              url={pdfBlobUrl}
+              height={700}
+              downloadFilename="Mission_Report.pdf"
+            />
+          )}
+        </Stack>
       </Card>
     </Stack>
   );
