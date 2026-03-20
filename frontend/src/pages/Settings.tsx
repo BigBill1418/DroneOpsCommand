@@ -5,6 +5,7 @@ import {
   Card,
   Checkbox,
   Group,
+  Image,
   Loader,
   Stack,
   Text,
@@ -21,7 +22,7 @@ import {
 } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
-import { IconCheck, IconX, IconPlus, IconEdit, IconTrash, IconCurrencyDollar, IconMail, IconSend, IconBrandPaypal, IconCash, IconDrone, IconPlugConnected, IconMapPin, IconSearch, IconSignature, IconUpload, IconSettings, IconReceipt, IconPlane, IconPalette, IconWorldWww, IconKey, IconUser, IconLock, IconDatabaseExport, IconDatabaseImport, IconShieldCheck, IconDownload, IconAlertTriangle } from '@tabler/icons-react';
+import { IconCheck, IconX, IconPlus, IconEdit, IconTrash, IconCurrencyDollar, IconMail, IconSend, IconBrandPaypal, IconCash, IconDrone, IconPlugConnected, IconMapPin, IconSearch, IconSignature, IconUpload, IconSettings, IconReceipt, IconPlane, IconPalette, IconWorldWww, IconKey, IconUser, IconLock, IconDatabaseExport, IconDatabaseImport, IconShieldCheck, IconDownload, IconAlertTriangle, IconPhoto } from '@tabler/icons-react';
 import api from '../api/client';
 import { Aircraft, RateTemplate } from '../api/types';
 import { inputStyles, cardStyle } from '../components/shared/styles';
@@ -44,6 +45,8 @@ export default function Settings() {
   const [aircraft, setAircraft] = useState<Aircraft[]>([]);
   const [aircraftModal, setAircraftModal] = useState(false);
   const [editingAircraftId, setEditingAircraftId] = useState<string | null>(null);
+  const [aircraftImageUploading, setAircraftImageUploading] = useState(false);
+  const [editingAircraftImage, setEditingAircraftImage] = useState<string | null>(null);
   const [rateTemplates, setRateTemplates] = useState<RateTemplate[]>([]);
   const [rateModal, setRateModal] = useState(false);
   const [editingRateId, setEditingRateId] = useState<string | null>(null);
@@ -275,12 +278,50 @@ export default function Settings() {
 
   const handleEditAircraft = (a: Aircraft) => {
     setEditingAircraftId(a.id);
+    setEditingAircraftImage(a.image_filename || null);
     aircraftForm.setValues({
       model_name: a.model_name,
       manufacturer: a.manufacturer,
       specs_json: JSON.stringify(a.specs, null, 2),
     });
     setAircraftModal(true);
+  };
+
+  const handleUploadAircraftImage = (aircraftId: string) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/jpeg,image/png,image/webp';
+    input.onchange = async (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+      setAircraftImageUploading(true);
+      try {
+        const formData = new FormData();
+        formData.append('file', file);
+        const resp = await api.post(`/aircraft/${aircraftId}/image`, formData, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        });
+        setEditingAircraftImage(resp.data.image_filename);
+        setAircraft((prev) => prev.map((a) => a.id === aircraftId ? { ...a, image_filename: resp.data.image_filename } : a));
+        notifications.show({ title: 'Uploaded', message: 'Aircraft image uploaded', color: 'cyan' });
+      } catch {
+        notifications.show({ title: 'Error', message: 'Failed to upload image (JPEG/PNG/WebP, max 10MB)', color: 'red' });
+      } finally {
+        setAircraftImageUploading(false);
+      }
+    };
+    input.click();
+  };
+
+  const handleDeleteAircraftImage = async (aircraftId: string) => {
+    try {
+      await api.delete(`/aircraft/${aircraftId}/image`);
+      setEditingAircraftImage(null);
+      setAircraft((prev) => prev.map((a) => a.id === aircraftId ? { ...a, image_filename: null } : a));
+      notifications.show({ title: 'Removed', message: 'Aircraft image removed', color: 'orange' });
+    } catch {
+      notifications.show({ title: 'Error', message: 'Failed to remove image', color: 'red' });
+    }
   };
 
   const handleDeleteAircraft = async (id: string) => {
@@ -1372,13 +1413,6 @@ export default function Settings() {
                   5. Health check: GET /api/flight-library/device-health
                 </Text>
               </Stack>
-              <Text c="#5a6478" size="xs" mt="md" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
-                Using Cloudflare Access? Add a bypass policy for
-                /api/flight-library/device-* — otherwise Access blocks
-                DroneOpsSync before the API key can authenticate.
-                Also merge /api/intake/form/* and /api/intake/tos-pdf/*
-                into a single /api/intake/* bypass to save policy slots.
-              </Text>
             </Card>
           </Stack>
         </Tabs.Panel>
@@ -1407,6 +1441,7 @@ export default function Settings() {
               }}>
                 <Table.Thead>
                   <Table.Tr>
+                    <Table.Th w={50}></Table.Th>
                     <Table.Th>MODEL</Table.Th>
                     <Table.Th>MANUFACTURER</Table.Th>
                     <Table.Th>KEY SPECS</Table.Th>
@@ -1416,6 +1451,13 @@ export default function Settings() {
                 <Table.Tbody>
                   {aircraft.map((a) => (
                     <Table.Tr key={a.id}>
+                      <Table.Td>
+                        {a.image_filename ? (
+                          <Image src={`/uploads/${a.image_filename}`} w={36} h={36} radius="sm" fit="cover" />
+                        ) : (
+                          <IconDrone size={20} color="#5a6478" />
+                        )}
+                      </Table.Td>
                       <Table.Td fw={600}>{a.model_name}</Table.Td>
                       <Table.Td c="#5a6478">{a.manufacturer}</Table.Td>
                       <Table.Td c="#5a6478" style={{ fontSize: '12px' }}>
@@ -1577,7 +1619,7 @@ export default function Settings() {
 
       <Modal
         opened={aircraftModal}
-        onClose={() => setAircraftModal(false)}
+        onClose={() => { setAircraftModal(false); setEditingAircraftImage(null); }}
         title={editingAircraftId ? 'Edit Aircraft' : 'New Aircraft'}
         styles={{ header: { background: '#0e1117' }, content: { background: '#0e1117' }, title: { color: '#e8edf2', fontFamily: "'Bebas Neue', sans-serif" } }}
       >
@@ -1585,6 +1627,84 @@ export default function Settings() {
           <Stack gap="sm">
             <TextInput label="Model Name" required {...aircraftForm.getInputProps('model_name')} styles={inputStyles} />
             <TextInput label="Manufacturer" {...aircraftForm.getInputProps('manufacturer')} styles={inputStyles} />
+
+            {/* Aircraft Image Upload */}
+            {editingAircraftId && (
+              <div>
+                <Text size="sm" fw={500} c="#c1c2c5" mb={4}>Aircraft Image</Text>
+                <div
+                  style={{
+                    border: '1px dashed #1a1f2e',
+                    borderRadius: 8,
+                    padding: 16,
+                    textAlign: 'center',
+                    background: '#050608',
+                  }}
+                >
+                  {editingAircraftImage ? (
+                    <Stack align="center" gap="xs">
+                      <Image
+                        src={`/uploads/${editingAircraftImage}`}
+                        maw={200}
+                        mah={150}
+                        radius="md"
+                        fit="contain"
+                      />
+                      <Group gap="xs">
+                        <Button
+                          size="xs"
+                          variant="light"
+                          color="cyan"
+                          leftSection={<IconPhoto size={14} />}
+                          loading={aircraftImageUploading}
+                          onClick={() => handleUploadAircraftImage(editingAircraftId)}
+                          styles={{ root: { fontFamily: "'Share Tech Mono', monospace" } }}
+                        >
+                          Replace
+                        </Button>
+                        <Button
+                          size="xs"
+                          variant="light"
+                          color="red"
+                          leftSection={<IconTrash size={14} />}
+                          onClick={() => handleDeleteAircraftImage(editingAircraftId)}
+                          styles={{ root: { fontFamily: "'Share Tech Mono', monospace" } }}
+                        >
+                          Remove
+                        </Button>
+                      </Group>
+                    </Stack>
+                  ) : (
+                    <Stack align="center" gap="xs">
+                      <IconDrone size={40} color="#5a6478" />
+                      <Text size="xs" c="#5a6478" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+                        No image uploaded
+                      </Text>
+                      <Button
+                        size="xs"
+                        variant="light"
+                        color="cyan"
+                        leftSection={<IconUpload size={14} />}
+                        loading={aircraftImageUploading}
+                        onClick={() => handleUploadAircraftImage(editingAircraftId)}
+                        styles={{ root: { fontFamily: "'Share Tech Mono', monospace" } }}
+                      >
+                        Upload Image
+                      </Button>
+                      <Text size="xs" c="#5a6478" style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: '10px' }}>
+                        JPEG, PNG, or WebP — max 10MB
+                      </Text>
+                    </Stack>
+                  )}
+                </div>
+              </div>
+            )}
+            {!editingAircraftId && (
+              <Text size="xs" c="#5a6478" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+                Save the aircraft first, then edit it to upload an image.
+              </Text>
+            )}
+
             <Textarea label="Specs (JSON)" minRows={6} {...aircraftForm.getInputProps('specs_json')} styles={inputStyles} />
             <Button type="submit" color="cyan" styles={{ root: { fontFamily: "'Bebas Neue', sans-serif" } }}>
               SAVE
