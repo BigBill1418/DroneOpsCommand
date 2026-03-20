@@ -136,6 +136,14 @@
   .mantine-DateTimePicker-input {
     min-height: 44px !important;
     font-size: 16px !important; /* prevents iOS zoom on focus */
+    -webkit-user-select: text !important;
+    user-select: text !important;
+    touch-action: manipulation !important;
+  }
+
+  /* Ensure input wrappers don't block touch events */
+  .mantine-Input-wrapper {
+    touch-action: manipulation !important;
   }
 
   /* Input wrappers — ensure full width in all contexts */
