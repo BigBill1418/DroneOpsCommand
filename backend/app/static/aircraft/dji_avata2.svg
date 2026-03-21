@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 160" fill="none">
+  <!-- DJI Avata 2 - Cinewhoop FPV with guards -->
+  <rect width="200" height="160" rx="8" fill="#050608"/>
+  <!-- Prop guards - distinctive Avata ring design -->
+  <circle cx="62" cy="52" r="24" fill="none" stroke="#1a1f2e" stroke-width="3"/>
+  <circle cx="138" cy="52" r="24" fill="none" stroke="#1a1f2e" stroke-width="3"/>
+  <circle cx="62" cy="105" r="24" fill="none" stroke="#1a1f2e" stroke-width="3"/>
+  <circle cx="138" cy="105" r="24" fill="none" stroke="#1a1f2e" stroke-width="3"/>
+  <!-- Rotors inside guards -->
+  <ellipse cx="62" cy="52" rx="16" ry="4" fill="#0e1117" stroke="#00d4ff" stroke-width="1" opacity="0.6"/>
+  <ellipse cx="138" cy="52" rx="16" ry="4" fill="#0e1117" stroke="#00d4ff" stroke-width="1" opacity="0.6"/>
+  <ellipse cx="62" cy="105" rx="16" ry="4" fill="#0e1117" stroke="#00d4ff" stroke-width="1" opacity="0.6"/>
+  <ellipse cx="138" cy="105" rx="16" ry="4" fill="#0e1117" stroke="#00d4ff" stroke-width="1" opacity="0.6"/>
+  <!-- Body - compact rounded -->
+  <rect x="72" y="55" width="56" height="46" rx="14" fill="#0e1117" stroke="#1a1f2e" stroke-width="1.5"/>
+  <!-- Camera - wide angle -->
+  <rect x="88" y="50" width="24" height="10" rx="5" fill="#1a1f2e"/>
+  <circle cx="100" cy="55" r="4" fill="#050608" stroke="#00d4ff" stroke-width="1"/>
+  <!-- Status LED -->
+  <circle cx="100" cy="78" r="2.5" fill="#00d4ff" opacity="0.8"/>
+  <!-- Label -->
+  <text x="100" y="148" text-anchor="middle" font-family="sans-serif" font-size="9" fill="#5a6478" letter-spacing="1">AVATA 2</text>
+</svg>

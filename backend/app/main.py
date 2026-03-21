@@ -147,6 +147,15 @@ async def lifespan(app: FastAPI):
     os.makedirs(settings.upload_dir, exist_ok=True)
     os.makedirs(settings.reports_dir, exist_ok=True)
 
+    # Copy bundled default aircraft images to uploads if not already present
+    bundled_aircraft_dir = os.path.join(os.path.dirname(__file__), "static", "aircraft")
+    if os.path.isdir(bundled_aircraft_dir):
+        import shutil
+        for fname in os.listdir(bundled_aircraft_dir):
+            dest = os.path.join(settings.upload_dir, fname)
+            if not os.path.exists(dest):
+                shutil.copy2(os.path.join(bundled_aircraft_dir, fname), dest)
+
     yield
 
     await engine.dispose()
@@ -157,7 +166,7 @@ limiter = Limiter(key_func=get_remote_address)
 app = FastAPI(
     title="D.O.C — Drone Operations Command",
     description="Mission management, flight data, and after-action reporting for drone operations",
-    version="2.23.3",
+    version="2.23.4",
     lifespan=lifespan,
 )
 
