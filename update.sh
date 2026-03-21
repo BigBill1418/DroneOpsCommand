@@ -5,10 +5,12 @@ set -e
 #
 # Interactive deploy & promote tool.
 # Run ./update.sh and follow the prompts, or pass args directly:
-#   ./update.sh dev          Pull claude/dev, rebuild & run
-#   ./update.sh prod         Pull main, rebuild & run
-#   ./update.sh promote      Merge claude/dev → main, rebuild prod
-#   ./update.sh dev --clean  Full rebuild, no Docker cache
+#   ./update.sh dev            Pull claude/dev, rebuild changed services
+#   ./update.sh prod           Pull main, rebuild changed services
+#   ./update.sh promote        Merge claude/dev → main, rebuild prod
+#   ./update.sh status         Show branch & service info
+#   ./update.sh dev --clean    Full dev rebuild, no Docker cache
+#   ./update.sh prod --clean   Full prod rebuild, no Docker cache
 #
 # ──────────────────────────────────────────────────────────────────
 
@@ -233,12 +235,13 @@ show_menu() {
   echo -e "${CYAN}║${NC}  ${BOLD}2)${NC}  Update PROD   — pull main & rebuild          ${CYAN}║${NC}"
   echo -e "${CYAN}║${NC}  ${BOLD}3)${NC}  Promote       — merge dev → main & deploy   ${CYAN}║${NC}"
   echo -e "${CYAN}║${NC}  ${BOLD}4)${NC}  Status        — show branch & service info   ${CYAN}║${NC}"
-  echo -e "${CYAN}║${NC}  ${BOLD}5)${NC}  Clean rebuild — full rebuild, no cache (dev)  ${CYAN}║${NC}"
-  echo -e "${CYAN}║${NC}  ${BOLD}6)${NC}  Exit                                         ${CYAN}║${NC}"
+  echo -e "${CYAN}║${NC}  ${BOLD}5)${NC}  Clean DEV     — full rebuild, no cache (dev)  ${CYAN}║${NC}"
+  echo -e "${CYAN}║${NC}  ${BOLD}6)${NC}  Clean PROD    — full rebuild, no cache (main) ${CYAN}║${NC}"
+  echo -e "${CYAN}║${NC}  ${BOLD}7)${NC}  Exit                                         ${CYAN}║${NC}"
   echo -e "${CYAN}║${NC}                                                  ${CYAN}║${NC}"
   echo -e "${CYAN}╚══════════════════════════════════════════════════╝${NC}"
   echo ""
-  read -r -p "Select [1-6]: " choice
+  read -r -p "Select [1-7]: " choice
 
   case "$choice" in
     1) do_dev "" ;;
@@ -246,7 +249,8 @@ show_menu() {
     3) do_promote ;;
     4) do_status ;;
     5) do_dev "--no-cache" ;;
-    6) echo "Bye."; exit 0 ;;
+    6) do_prod "--no-cache" ;;
+    7) echo "Bye."; exit 0 ;;
     *) echo -e "${RED}Invalid choice${NC}"; show_menu ;;
   esac
 }
