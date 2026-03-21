@@ -13,7 +13,7 @@ AIRCRAFT_SEED = [
     {
         "model_name": "DJI Matrice 30T",
         "manufacturer": "DJI",
-        "image_filename": "dji_m30t.svg",
+        "image_filename": "dji_m30t_official.png",
         "specs": {
             "max_flight_time": "41 min",
             "max_speed": "51 mph",
@@ -29,23 +29,31 @@ AIRCRAFT_SEED = [
     {
         "model_name": "DJI Matrice 4TD",
         "manufacturer": "DJI",
-        "image_filename": "dji_m4td.svg",
+        "image_filename": "dji_m4td_official.png",
         "specs": {
-            "max_flight_time": "38 min",
-            "max_speed": "50 mph",
-            "camera": "Wide + Zoom + Thermal + Laser Rangefinder",
-            "thermal": "High-res Radiometric Thermal",
-            "sensors": "Omnidirectional Obstacle Sensing",
-            "weight": "5.1 lbs",
+            "max_flight_time": "54 min",
+            "max_speed": "47 mph (21 m/s)",
+            "camera": "48MP Wide (24mm f/1.7) + 48MP Medium Tele (70mm) + 48MP Tele (168mm, 112x hybrid zoom)",
+            "thermal": "640×512 Radiometric (UHR 1280×1024), -40°C to 500°C",
+            "laser_rangefinder": "1800m range, ±(0.2m + 0.15%D) accuracy",
+            "sensors": "Omnidirectional Binocular Vision + 3D Infrared, 0.5–200m detection",
+            "weight": "4.1 lbs (1850g with battery)",
             "ip_rating": "IP55",
-            "wind_resistance": "33 mph",
-            "transmission": "O4 Enterprise, 12.4 mi range",
+            "wind_resistance": "27 mph (12 m/s)",
+            "transmission": "O4 Enterprise, 15.5 mi / 25 km (FCC)",
+            "gnss": "GPS + Galileo + BeiDou + GLONASS + QZSS",
+            "rtk": "Centimeter-level positioning (integrated module)",
+            "operating_temp": "-20°C to 50°C",
+            "max_altitude": "21,325 ft (6500m)",
+            "night_vision": "ISO 100–409600 (Night Scene Mode)",
+            "dock_compatible": "DJI Dock 3 — autonomous 24/7 operations",
+            "highlights": "Quad-sensor payload, dock-ready autonomous ops, IP55 all-weather, RTK precision",
         },
     },
     {
         "model_name": "DJI Mavic 3 Pro",
         "manufacturer": "DJI",
-        "image_filename": "dji_mavic3pro.svg",
+        "image_filename": "dji_mavic3pro_official.png",
         "specs": {
             "max_flight_time": "43 min",
             "max_speed": "47 mph",
@@ -60,7 +68,7 @@ AIRCRAFT_SEED = [
     {
         "model_name": "DJI Avata 2",
         "manufacturer": "DJI",
-        "image_filename": "dji_avata2.svg",
+        "image_filename": "dji_avata2_official.png",
         "specs": {
             "max_flight_time": "23 min",
             "max_speed": "60 mph",
@@ -75,7 +83,7 @@ AIRCRAFT_SEED = [
     {
         "model_name": "DJI FPV",
         "manufacturer": "DJI",
-        "image_filename": "dji_fpv.svg",
+        "image_filename": "dji_fpv_official.png",
         "specs": {
             "max_flight_time": "20 min",
             "max_speed": "87 mph",
@@ -90,7 +98,7 @@ AIRCRAFT_SEED = [
     {
         "model_name": "DJI Mini 5 Pro",
         "manufacturer": "DJI",
-        "image_filename": "dji_mini5pro.svg",
+        "image_filename": "dji_mini5pro_official.png",
         "specs": {
             "max_flight_time": "38 min",
             "max_speed": "36 mph",

@@ -412,8 +412,8 @@
   <div class="aircraft-grid">
     {% for aircraft in aircraft_list %}
     <div class="aircraft-card">
-      {% if aircraft.image_filename %}
-      <img src="{{ aircraft.image_filename }}" alt="{{ aircraft.model_name }}">
+      {% if aircraft.image_path %}
+      <img src="file://{{ aircraft.image_path }}" alt="{{ aircraft.model_name }}">
       {% endif %}
       <div class="model-name">{{ aircraft.model_name }}</div>
       <div class="manufacturer">{{ aircraft.manufacturer }}</div>

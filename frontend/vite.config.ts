@@ -1,28 +1,7 @@
-import { defineConfig, Plugin } from 'vite';
+import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
 import fs from 'fs';
-
-// Copy pdf.js worker to dist with a stable filename (no content hash)
-// so it survives redeploys without stale-cache 404s
-function copyPdfWorker(): Plugin {
-  return {
-    name: 'copy-pdf-worker',
-    writeBundle(options) {
-      const outDir = options.dir || 'dist';
-      const workerSrc = path.resolve(
-        __dirname,
-        'node_modules/pdfjs-dist/build/pdf.worker.min.mjs',
-      );
-      const workerDest = path.resolve(outDir, 'pdf.worker.min.mjs');
-      if (!fs.existsSync(workerSrc)) {
-        console.error(`[copy-pdf-worker] PDF worker not found: ${workerSrc}`);
-        return;
-      }
-      fs.copyFileSync(workerSrc, workerDest);
-    },
-  };
-}
 
 const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, 'package.json'), 'utf-8'));
 
@@ -30,7 +9,7 @@ export default defineConfig({
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version),
   },
-  plugins: [react(), copyPdfWorker()],
+  plugins: [react()],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),

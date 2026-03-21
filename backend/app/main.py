@@ -173,7 +173,7 @@ limiter = Limiter(key_func=get_remote_address)
 app = FastAPI(
     title="D.O.C — Drone Operations Command",
     description="Mission management, flight data, and after-action reporting for drone operations",
-    version="2.24.1",
+    version="2.28.4",
     lifespan=lifespan,
 )
 
@@ -200,18 +200,23 @@ _bundled_aircraft_dir = os.path.join(os.path.dirname(__file__), "static", "aircr
 @app.get("/uploads/{filename:path}")
 async def serve_upload_with_fallback(filename: str):
     """Serve uploaded files, falling back to bundled defaults for aircraft SVGs."""
+    import mimetypes
     # Prevent path traversal
     if ".." in filename:
         raise HTTPException(status_code=400, detail="Invalid path")
     # Try the uploads directory first
     upload_path = os.path.join(settings.upload_dir, filename)
     if os.path.isfile(upload_path):
-        return FileResponse(upload_path)
-    # Fallback: if it's a default aircraft SVG, serve from bundled static
-    if filename.endswith(".svg") and "/" not in filename:
+        media_type, _ = mimetypes.guess_type(upload_path)
+        if filename.endswith(".svg"):
+            media_type = "image/svg+xml"
+        return FileResponse(upload_path, media_type=media_type)
+    # Fallback: if it's a default aircraft image, serve from bundled static
+    if "/" not in filename:
         bundled_path = os.path.join(_bundled_aircraft_dir, filename)
         if os.path.isfile(bundled_path):
-            return FileResponse(bundled_path, media_type="image/svg+xml")
+            mt = "image/svg+xml" if filename.endswith(".svg") else None
+            return FileResponse(bundled_path, media_type=mt)
     raise HTTPException(status_code=404, detail="File not found")
 
 

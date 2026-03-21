@@ -190,8 +190,15 @@ export default function MissionNew() {
 
     const loadMission = async () => {
       try {
-        const missionResp = await api.get(`/missions/${editId}`);
-        const m: Mission = missionResp.data;
+        // Load mission + report + invoice in parallel (all fast DB queries)
+        const [missionResp, reportResult, invoiceResult] = await Promise.allSettled([
+          api.get(`/missions/${editId}`),
+          api.get(`/missions/${editId}/report`),
+          api.get(`/missions/${editId}/invoice`),
+        ]);
+
+        if (missionResp.status !== 'fulfilled') throw new Error('Mission load failed');
+        const m: Mission = missionResp.value.data;
 
         // Populate form
         form.setValues({
@@ -232,16 +239,6 @@ export default function MissionNew() {
           })));
         }
 
-        // Load report, invoice, and map data in parallel
-        const [reportResult, invoiceResult, mapResult] = await Promise.allSettled([
-          api.get(`/missions/${editId}/report`),
-          api.get(`/missions/${editId}/invoice`),
-          Promise.all([
-            api.get(`/missions/${editId}/map`),
-            api.get(`/missions/${editId}/map/coverage`),
-          ]),
-        ]);
-
         if (reportResult.status === 'fulfilled') {
           setNarrative(reportResult.value.data.user_narrative || '');
           setReportContent(reportResult.value.data.final_content || '');
@@ -263,24 +260,22 @@ export default function MissionNew() {
           }
         }
 
-        if (mapResult.status === 'fulfilled') {
-          const [mapResp, covResp] = mapResult.value;
-          setMapGeojson(mapResp.data);
-          setCoverage(covResp.data);
-        }
-
         // Determine which step to land on
         let startStep = 0;
         if (m.flights.length > 0) startStep = 1;
         if (m.images.length > 0) startStep = 2;
-        // Report check — we loaded it above
-        // Invoice check — we loaded it above
-        // We'll update step after all loads are done via a microtask
         setTimeout(() => {
-          // Re-check with loaded state
           setMissionLoaded(true);
         }, 0);
         setActive(startStep);
+
+        // Load map data in background — CPU-intensive, don't block the form
+        if (m.flights.length > 0) {
+          api.get(`/missions/${editId}/map?include_coverage=true`).then((resp) => {
+            setMapGeojson(resp.data.geojson);
+            setCoverage(resp.data.coverage);
+          }).catch(() => {});
+        }
       } catch {
         notifications.show({ title: 'Error', message: 'Failed to load mission', color: 'red' });
         navigate('/missions');
@@ -343,12 +338,9 @@ export default function MissionNew() {
     if (mapDebounceRef.current) clearTimeout(mapDebounceRef.current);
     mapDebounceRef.current = setTimeout(async () => {
       try {
-        const [mapResp, covResp] = await Promise.all([
-          api.get(`/missions/${missionId}/map`),
-          api.get(`/missions/${missionId}/map/coverage`),
-        ]);
-        setMapGeojson(mapResp.data);
-        setCoverage(covResp.data);
+        const resp = await api.get(`/missions/${missionId}/map?include_coverage=true`);
+        setMapGeojson(resp.data.geojson);
+        setCoverage(resp.data.coverage);
       } catch {}
     }, 800);
   }, [missionId]);
@@ -1128,7 +1120,8 @@ export default function MissionNew() {
                 placeholder="Describe what happened during the mission, conditions, findings, outcome..."
                 value={narrative}
                 onChange={(e) => setNarrative(e.target.value)}
-                minRows={5}
+                minRows={8}
+                autosize
                 styles={inputStyles}
               />
               <Switch

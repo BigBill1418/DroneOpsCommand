@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 import time
 from datetime import datetime
 from functools import partial
@@ -12,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.auth.jwt import get_current_user
+from app.config import settings
 from app.database import get_db
 from app.models.invoice import Invoice
 from app.models.mission import Mission, MissionFlight
@@ -288,13 +290,23 @@ async def generate_report_pdf(
     # Aircraft used
     aircraft_list = []
     seen_aircraft = set()
+    bundled_aircraft_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "aircraft")
     for f in mission.flights:
         if f.aircraft and f.aircraft.id not in seen_aircraft:
             seen_aircraft.add(f.aircraft.id)
+            # Resolve full image path for WeasyPrint
+            img_path = None
+            if f.aircraft.image_filename:
+                upload_path = os.path.join(settings.upload_dir, f.aircraft.image_filename)
+                bundled_path = os.path.join(bundled_aircraft_dir, f.aircraft.image_filename)
+                if os.path.isfile(upload_path):
+                    img_path = upload_path
+                elif os.path.isfile(bundled_path):
+                    img_path = bundled_path
             aircraft_list.append({
                 "model_name": f.aircraft.model_name,
                 "manufacturer": f.aircraft.manufacturer,
-                "image_filename": f.aircraft.image_filename,
+                "image_path": img_path,
                 "specs": f.aircraft.specs,
             })
 
@@ -366,7 +378,7 @@ async def generate_report_pdf(
         )
     except Exception as exc:
         logger.error("Mission %s PDF generation failed: %s", mission_id, exc, exc_info=True)
-        raise HTTPException(status_code=500, detail="PDF generation failed")
+        raise HTTPException(status_code=500, detail=f"PDF generation failed: {exc}")
 
     report.pdf_path = pdf_path
     await db.flush()
