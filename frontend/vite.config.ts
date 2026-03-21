@@ -15,9 +15,11 @@ function copyPdfWorker(): Plugin {
         'node_modules/pdfjs-dist/build/pdf.worker.min.mjs',
       );
       const workerDest = path.resolve(outDir, 'pdf.worker.min.mjs');
-      if (fs.existsSync(workerSrc)) {
-        fs.copyFileSync(workerSrc, workerDest);
+      if (!fs.existsSync(workerSrc)) {
+        console.error(`[copy-pdf-worker] PDF worker not found: ${workerSrc}`);
+        return;
       }
+      fs.copyFileSync(workerSrc, workerDest);
     },
   };
 }
