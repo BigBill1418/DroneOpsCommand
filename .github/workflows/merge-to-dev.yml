@@ -1,0 +1,28 @@
+name: Auto-merge to claude/dev
+
+on:
+  push:
+    branches:
+      - 'claude/fresh-session-setup-uw6vw'
+
+jobs:
+  merge-to-dev:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Merge into claude/dev
+        run: |
+          git fetch origin claude/dev
+          git checkout claude/dev
+          git merge origin/claude/fresh-session-setup-uw6vw --no-edit
+          git push origin claude/dev

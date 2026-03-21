@@ -5,10 +5,15 @@
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Rajdhani:wght@400;500;600;700&family=Share+Tech+Mono&display=swap');
 
+  /* System font fallbacks in case Google Fonts are unreachable */
+  @font-face { font-family: 'Bebas Neue'; src: local('Bebas Neue'), local('Impact'); }
+  @font-face { font-family: 'Rajdhani'; src: local('Rajdhani'), local('Arial'); }
+  @font-face { font-family: 'Share Tech Mono'; src: local('Share Tech Mono'), local('Courier New'); }
+
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
   body {
-    font-family: 'Rajdhani', sans-serif;
+    font-family: 'Rajdhani', Arial, Helvetica, sans-serif;
     font-size: 11pt;
     color: #1a1a2e;
     line-height: 1.5;
@@ -26,7 +31,7 @@
   }
 
   .logo {
-    font-family: 'Bebas Neue', sans-serif;
+    font-family: 'Bebas Neue', Impact, sans-serif;
     font-size: 32pt;
     letter-spacing: 3px;
   }
@@ -35,13 +40,13 @@
 
   .header-right {
     text-align: right;
-    font-family: 'Share Tech Mono', monospace;
+    font-family: 'Share Tech Mono', 'Courier New', monospace;
     font-size: 9pt;
     color: #5a6478;
   }
 
   .header-right .report-title {
-    font-family: 'Rajdhani', sans-serif;
+    font-family: 'Rajdhani', Arial, sans-serif;
     font-size: 14pt;
     font-weight: 600;
     color: #00d4ff;
@@ -49,7 +54,7 @@
   }
 
   h1 {
-    font-family: 'Bebas Neue', sans-serif;
+    font-family: 'Bebas Neue', Impact, sans-serif;
     font-size: 20pt;
     color: #050608;
     border-bottom: 3px solid #d0eeff;
@@ -59,7 +64,7 @@
   }
 
   h2 {
-    font-family: 'Bebas Neue', sans-serif;
+    font-family: 'Bebas Neue', Impact, sans-serif;
     font-size: 16pt;
     color: #0e1117;
     border-left: 4px solid #ff6b1a;
@@ -84,7 +89,7 @@
   }
 
   .info-label {
-    font-family: 'Share Tech Mono', monospace;
+    font-family: 'Share Tech Mono', 'Courier New', monospace;
     font-size: 8pt;
     color: #5a6478;
     text-transform: uppercase;
@@ -122,14 +127,14 @@
   }
 
   .stat-cell .stat {
-    font-family: 'Bebas Neue', sans-serif;
+    font-family: 'Bebas Neue', Impact, sans-serif;
     font-size: 26pt;
     color: #00d4ff;
     line-height: 1.1;
   }
 
   .stat-cell .stat-label {
-    font-family: 'Share Tech Mono', monospace;
+    font-family: 'Share Tech Mono', 'Courier New', monospace;
     font-size: 7pt;
     color: #5a6478;
     letter-spacing: 1px;
@@ -160,14 +165,14 @@
   }
 
   .aircraft-card .model-name {
-    font-family: 'Bebas Neue', sans-serif;
+    font-family: 'Bebas Neue', Impact, sans-serif;
     font-size: 14pt;
     color: #0e1117;
     letter-spacing: 1px;
   }
 
   .aircraft-card .manufacturer {
-    font-family: 'Share Tech Mono', monospace;
+    font-family: 'Share Tech Mono', 'Courier New', monospace;
     font-size: 8pt;
     color: #5a6478;
   }
@@ -185,7 +190,7 @@
   }
 
   .specs-table td:first-child {
-    font-family: 'Share Tech Mono', monospace;
+    font-family: 'Share Tech Mono', 'Courier New', monospace;
     color: #5a6478;
     font-size: 8pt;
     width: 45%;
@@ -214,7 +219,7 @@
   table.flights th {
     background: #0e1117;
     color: #00d4ff;
-    font-family: 'Share Tech Mono', monospace;
+    font-family: 'Share Tech Mono', 'Courier New', monospace;
     font-size: 8pt;
     text-transform: uppercase;
     letter-spacing: 1px;
@@ -270,7 +275,7 @@
 
   table.invoice th {
     background: #f5f7fa;
-    font-family: 'Share Tech Mono', monospace;
+    font-family: 'Share Tech Mono', 'Courier New', monospace;
     font-size: 8pt;
     text-transform: uppercase;
     padding: 8px 10px;
@@ -290,7 +295,7 @@
   }
 
   .invoice-totals .total-line {
-    font-family: 'Bebas Neue', sans-serif;
+    font-family: 'Bebas Neue', Impact, sans-serif;
     font-size: 18pt;
     color: #00d4ff;
   }
@@ -302,7 +307,7 @@
     background: linear-gradient(135deg, #050608 0%, #0e1117 100%);
     color: #5a6478;
     text-align: center;
-    font-family: 'Share Tech Mono', monospace;
+    font-family: 'Share Tech Mono', 'Courier New', monospace;
     font-size: 8pt;
     margin: 40px -10px -10px -10px;
   }
@@ -315,7 +320,7 @@
   }
 
   .footer .logo-small {
-    font-family: 'Bebas Neue', sans-serif;
+    font-family: 'Bebas Neue', Impact, sans-serif;
     font-size: 16pt;
     color: #e8edf2;
     letter-spacing: 2px;
@@ -335,7 +340,7 @@
 <div class="header">
   <div>
     <div class="logo">{{ company_name | upper }}</div>
-    <div style="font-family: 'Share Tech Mono', monospace; font-size: 8pt; color: #5a6478; letter-spacing: 2px;">
+    <div style="font-family: 'Share Tech Mono', 'Courier New', monospace; font-size: 8pt; color: #5a6478; letter-spacing: 2px;">
       {{ company_tagline | upper }}
     </div>
   </div>
@@ -484,16 +489,16 @@
 <div class="section">
   <h1>MISSION FOOTAGE DOWNLOAD</h1>
   <div style="padding: 20px; background: linear-gradient(135deg, #050608 0%, #0e1117 100%); border-radius: 6px; text-align: center;">
-    <div style="font-family: 'Bebas Neue', sans-serif; font-size: 14pt; color: #00d4ff; letter-spacing: 1px; margin-bottom: 8px;">
+    <div style="font-family: 'Bebas Neue', Impact, sans-serif; font-size: 14pt; color: #00d4ff; letter-spacing: 1px; margin-bottom: 8px;">
       HIGH RESOLUTION FILES
     </div>
     <p style="font-size: 10pt; color: #e8edf2; margin-bottom: 12px;">
       Download all high-resolution images and video from this mission:
     </p>
-    <a href="{{ download_link.url }}" style="display: inline-block; padding: 10px 30px; background: #00d4ff; color: #050608; font-family: 'Bebas Neue', sans-serif; font-size: 14pt; letter-spacing: 2px; text-decoration: none; border-radius: 4px;">
+    <a href="{{ download_link.url }}" style="display: inline-block; padding: 10px 30px; background: #00d4ff; color: #050608; font-family: 'Bebas Neue', Impact, sans-serif; font-size: 14pt; letter-spacing: 2px; text-decoration: none; border-radius: 4px;">
       DOWNLOAD FILES
     </a>
-    <div style="font-family: 'Share Tech Mono', monospace; font-size: 8pt; color: #ff6b1a; margin-top: 10px;">
+    <div style="font-family: 'Share Tech Mono', 'Courier New', monospace; font-size: 8pt; color: #ff6b1a; margin-top: 10px;">
       THIS LINK EXPIRES: {{ download_link.expires_at }}
     </div>
   </div>
@@ -540,12 +545,12 @@
 
   {% if invoice.paid_in_full %}
   <div style="margin-top: 15px; padding: 12px 20px; background: #e6f9e6; border: 2px solid #2ecc40; border-radius: 6px; text-align: center;">
-    <span style="font-family: 'Bebas Neue', sans-serif; font-size: 18pt; color: #2ecc40; letter-spacing: 2px;">PAID IN FULL</span>
+    <span style="font-family: 'Bebas Neue', Impact, sans-serif; font-size: 18pt; color: #2ecc40; letter-spacing: 2px;">PAID IN FULL</span>
   </div>
   {% else %}
   {% if payment_links and (payment_links.get('paypal_link') or payment_links.get('venmo_link')) %}
   <div style="margin-top: 20px; padding: 15px 20px; background: #f5f7fa; border: 1px solid #e0e4ea; border-radius: 6px;">
-    <div style="font-family: 'Bebas Neue', sans-serif; font-size: 14pt; color: #0e1117; letter-spacing: 1px; margin-bottom: 8px;">
+    <div style="font-family: 'Bebas Neue', Impact, sans-serif; font-size: 14pt; color: #0e1117; letter-spacing: 1px; margin-bottom: 8px;">
       PAYMENT OPTIONS
     </div>
     <div style="font-size: 10pt;">
@@ -575,7 +580,7 @@
 <!-- Confidentiality Notice -->
 <div class="section" style="margin-top: 30px;">
   <div style="padding: 16px 20px; border: 2px solid #0e1117; border-radius: 6px; background: #f8f9fb;">
-    <div style="font-family: 'Bebas Neue', sans-serif; font-size: 12pt; color: #0e1117; letter-spacing: 1px; margin-bottom: 6px;">
+    <div style="font-family: 'Bebas Neue', Impact, sans-serif; font-size: 12pt; color: #0e1117; letter-spacing: 1px; margin-bottom: 6px;">
       CONFIDENTIALITY NOTICE
     </div>
     <p style="font-size: 9pt; color: #333; line-height: 1.7; margin: 0;">
