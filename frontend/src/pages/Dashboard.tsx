@@ -316,7 +316,8 @@ export default function Dashboard() {
         </Group>
       </Group>
 
-      <SimpleGrid cols={{ base: 2, sm: 4 }} mb="sm" spacing="sm">
+      <SimpleGrid cols={{ base: 2, sm: 5 }} mb="sm" spacing="sm">
+        <StatCard icon={IconClock} label="FLIGHT HOURS" value={flightStats ? (flightStats.total_duration / 3600).toFixed(1) : '—'} sub={flightStats ? `${flightStats.total_flights} flights logged` : undefined} color="#00d4ff" />
         <StatCard icon={IconPlane} label="TOTAL FLIGHTS" value={flightStats ? String(flightStats.total_flights) : '—'} color="#00d4ff" />
         <StatCard icon={IconDrone} label="TOTAL MISSIONS" value={String(missions.length)} color="#00d4ff" />
         <StatCard icon={IconFileText} label="DRAFTS PENDING" value={String(draftCount)} color="#ff6b1a" />
