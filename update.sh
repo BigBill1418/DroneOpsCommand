@@ -75,8 +75,8 @@ detect_and_rebuild() {
   local changed
 
   if [ -n "$prev_commit" ] && git cat-file -t "$prev_commit" >/dev/null 2>&1; then
-    # Use merge-base to handle merge commits correctly
-    changed=$(git diff --name-only "$prev_commit" "$current_commit" 2>/dev/null || echo "all")
+    # Compare actual tree contents (not commit chain) — handles merge commits correctly
+    changed=$(git diff --name-only "$prev_commit".."$current_commit" 2>/dev/null || echo "all")
   else
     changed="all"
   fi
@@ -86,13 +86,8 @@ detect_and_rebuild() {
     rebuild_frontend=true
     rebuild_backend=true
     rebuild_parser=true
-  elif [ -z "$changed" ] && [ "$prev_commit" = "$current_commit" ]; then
-    echo -e "${GREEN}Already at latest ($(echo "$current_commit" | head -c 7)), nothing changed${NC}"
   elif [ -z "$changed" ]; then
-    echo -e "${YELLOW}New merge commit detected — rebuilding all${NC}"
-    rebuild_frontend=true
-    rebuild_backend=true
-    rebuild_parser=true
+    echo -e "${GREEN}Already at latest ($(echo "$current_commit" | head -c 7)), nothing changed${NC}"
   else
     echo -e "Changes: $(echo "${prev_commit:-none}" | head -c 7) → $(echo "$current_commit" | head -c 7)"
     echo "$changed" | grep -q "^frontend/" && rebuild_frontend=true
