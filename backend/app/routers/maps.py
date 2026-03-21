@@ -26,11 +26,14 @@ router = APIRouter(prefix="/api/missions", tags=["maps"])
 
 
 async def _load_mission(db: AsyncSession, mission_id: UUID) -> Mission:
-    """Load a mission with flights and aircraft eagerly loaded."""
+    """Load a mission with flights, aircraft, and linked flight records eagerly loaded."""
     result = await db.execute(
         select(Mission)
         .where(Mission.id == mission_id)
-        .options(selectinload(Mission.flights).selectinload(MissionFlight.aircraft))
+        .options(
+            selectinload(Mission.flights).selectinload(MissionFlight.aircraft),
+            selectinload(Mission.flights).selectinload(MissionFlight.flight),
+        )
     )
     mission = result.scalar_one_or_none()
     if not mission:
@@ -39,12 +42,27 @@ async def _load_mission(db: AsyncSession, mission_id: UUID) -> Mission:
 
 
 def _flights_to_dicts(mission: Mission) -> list[dict]:
-    """Convert mission flights to dict format for map services."""
+    """Convert mission flights to dict format for map services.
+
+    Falls back to the linked Flight record's gps_track if the cache
+    doesn't contain GPS data (handles flights added before cache enrichment).
+    """
     flights = []
     for f in mission.flights:
+        cache = f.flight_data_cache or {}
+
+        # If cache has no GPS track, pull from the linked Flight record
+        has_track = any(
+            key in cache and isinstance(cache[key], list) and len(cache[key]) > 0
+            for key in ("track", "gps_data", "coordinates")
+        )
+        if not has_track and f.flight and f.flight.gps_track:
+            cache = dict(cache)  # don't mutate the original
+            cache["track"] = f.flight.gps_track
+
         flight_dict = {
             "opendronelog_flight_id": f.opendronelog_flight_id,
-            "flight_data_cache": f.flight_data_cache,
+            "flight_data_cache": cache,
         }
         if f.aircraft:
             flight_dict["aircraft"] = {
@@ -74,32 +92,35 @@ async def get_map_data(
     loop = asyncio.get_running_loop()
 
     try:
-        if include_coverage:
-            # Run GeoJSON and coverage extraction in parallel threads
-            geojson_fut = loop.run_in_executor(None, generate_map_geojson, flights)
-            tracks_fut = loop.run_in_executor(None, extract_gps_tracks, flights)
-            geojson_result, tracks = await asyncio.gather(geojson_fut, tracks_fut)
-            acres = await loop.run_in_executor(
-                None, partial(calculate_area_acres, tracks, buffer_meters=buffer_meters)
-            )
-            logger.info("Map+coverage for mission %s: %.2f acres (%.2fs)",
-                        mission_id, acres, time.perf_counter() - start)
-            return {
-                "geojson": geojson_result,
-                "coverage": {
-                    "acres": round(acres, 2),
-                    "square_yards": round(acres * 4840, 0) if acres < 1 else None,
-                    "num_flights": len(tracks),
-                    "total_points": sum(len(t) for t in tracks),
-                },
-            }
-        else:
-            result = await loop.run_in_executor(None, generate_map_geojson, flights)
-            logger.info("Map GeoJSON for mission %s: %.2fs", mission_id, time.perf_counter() - start)
-            return result
+        geojson_result = await loop.run_in_executor(None, generate_map_geojson, flights)
     except Exception as exc:
         logger.error("Map GeoJSON failed for mission %s: %s", mission_id, exc, exc_info=True)
         raise HTTPException(status_code=500, detail="Map generation failed")
+
+    if not include_coverage:
+        logger.info("Map GeoJSON for mission %s: %.2fs", mission_id, time.perf_counter() - start)
+        return geojson_result
+
+    # Coverage is best-effort — don't let it break the map
+    coverage = None
+    try:
+        tracks = await loop.run_in_executor(None, extract_gps_tracks, flights)
+        acres = await loop.run_in_executor(
+            None, partial(calculate_area_acres, tracks, buffer_meters=buffer_meters)
+        )
+        coverage = {
+            "acres": round(acres, 2),
+            "square_yards": round(acres * 4840, 0) if acres < 1 else None,
+            "num_flights": len(tracks),
+            "total_points": sum(len(t) for t in tracks),
+        }
+        logger.info("Map+coverage for mission %s: %.2f acres (%.2fs)",
+                    mission_id, acres, time.perf_counter() - start)
+    except Exception as exc:
+        logger.error("Coverage calculation failed for mission %s (map still returned): %s",
+                     mission_id, exc, exc_info=True)
+
+    return {"geojson": geojson_result, "coverage": coverage}
 
 
 @router.get("/{mission_id}/map/coverage")
