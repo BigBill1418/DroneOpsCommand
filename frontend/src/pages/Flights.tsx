@@ -23,7 +23,7 @@ import {
   Title,
   Tooltip,
 } from '@mantine/core';
-import { DateTimePicker } from '@mantine/dates';
+import { DateTimePicker, DateInput } from '@mantine/dates';
 import { notifications } from '@mantine/notifications';
 import {
   IconArrowsMaximize,
@@ -47,8 +47,12 @@ import {
   IconSearch,
   IconSelector,
   IconTimeline,
+  IconCalendar,
+  IconFilter,
+  IconFilterOff,
   IconTrash,
   IconUpload,
+  IconX,
 } from '@tabler/icons-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
@@ -246,6 +250,10 @@ export default function Flights() {
   const [flights, setFlights] = useState<FlightRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [dateFrom, setDateFrom] = useState<Date | null>(null);
+  const [dateTo, setDateTo] = useState<Date | null>(null);
+  const [droneFilter, setDroneFilter] = useState<string | null>(null);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [manualOpen, setManualOpen] = useState(false);
   const [detailFlight, setDetailFlight] = useState<FlightRecord | null>(null);
@@ -425,6 +433,25 @@ export default function Flights() {
     return { totalFlights: n, totalDuration, totalDistance, maxAlt, maxSpd, totalPoints, avgDuration: n ? totalDuration / n : 0, avgDistance: n ? totalDistance / n : 0 };
   }, [flights]);
 
+  // Unique drone models for filter dropdown
+  const droneOptions = useMemo(() => {
+    const models = new Set<string>();
+    for (const f of flights) {
+      const model = getDroneModel(f);
+      if (model) models.add(model);
+    }
+    return [...models].sort().map((m) => ({ value: m, label: m }));
+  }, [flights]);
+
+  const hasActiveFilters = !!search || !!dateFrom || !!dateTo || !!droneFilter;
+
+  const clearAllFilters = () => {
+    setSearch('');
+    setDateFrom(null);
+    setDateTo(null);
+    setDroneFilter(null);
+  };
+
   const filtered = useMemo(() => {
     let result = flights;
     if (search) {
@@ -433,6 +460,26 @@ export default function Flights() {
         return [getDisplayName(f), getDroneModel(f), getDroneName(f), getStartTime(f), f.notes, f.drone_serial, f.source, f.original_filename]
           .filter(Boolean).join(' ').toLowerCase().includes(q);
       });
+    }
+    if (dateFrom) {
+      const from = dateFrom.getTime();
+      result = result.filter((f) => {
+        const t = getStartTime(f);
+        return t && new Date(t).getTime() >= from;
+      });
+    }
+    if (dateTo) {
+      // Include the entire "to" day
+      const to = new Date(dateTo);
+      to.setHours(23, 59, 59, 999);
+      const toMs = to.getTime();
+      result = result.filter((f) => {
+        const t = getStartTime(f);
+        return t && new Date(t).getTime() <= toMs;
+      });
+    }
+    if (droneFilter) {
+      result = result.filter((f) => getDroneModel(f) === droneFilter);
     }
     // Sort
     const sorted = [...result].sort((a, b) => {
@@ -454,7 +501,7 @@ export default function Flights() {
       return sortDir === 'asc' ? cmp : -cmp;
     });
     return sorted;
-  }, [flights, search, sortBy, sortDir]);
+  }, [flights, search, dateFrom, dateTo, droneFilter, sortBy, sortDir]);
 
   const toggleSort = (col: string) => {
     if (sortBy === col) {
@@ -566,19 +613,86 @@ export default function Flights() {
 
           {/* ── Flight Table ────────────────────────────────────────── */}
           <Card padding="lg" radius="md" style={cardStyle}>
-            <Group justify="space-between" mb="md" wrap="wrap">
-              <Text size="sm" c="#5a6478" style={monoFont}>
-                {filtered.length} FLIGHT{filtered.length !== 1 ? 'S' : ''}
-              </Text>
-              <TextInput
-                placeholder="Search flights..."
-                leftSection={<IconSearch size={14} />}
-                size="xs"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                styles={{ input: { background: '#050608', borderColor: '#1a1f2e', color: '#e8edf2' }, root: { flex: '1 1 200px', maxWidth: 300 } }}
-              />
-            </Group>
+            <Stack gap="xs" mb="md">
+              <Group justify="space-between" wrap="wrap">
+                <Group gap="xs">
+                  <Text size="sm" c="#5a6478" style={monoFont}>
+                    {filtered.length} FLIGHT{filtered.length !== 1 ? 'S' : ''}
+                  </Text>
+                  {hasActiveFilters && (
+                    <Badge size="xs" color="cyan" variant="light">{flights.length - filtered.length} filtered out</Badge>
+                  )}
+                </Group>
+                <Group gap="xs" wrap="wrap">
+                  <TextInput
+                    placeholder="Search name, drone, notes..."
+                    leftSection={<IconSearch size={14} />}
+                    size="xs"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    rightSection={search ? <ActionIcon size="xs" variant="subtle" color="gray" onClick={() => setSearch('')}><IconX size={12} /></ActionIcon> : undefined}
+                    styles={{ input: { background: '#050608', borderColor: '#1a1f2e', color: '#e8edf2' }, root: { flex: '1 1 200px', maxWidth: 280 } }}
+                  />
+                  <Tooltip label={filtersOpen ? 'Hide filters' : 'Show filters'}>
+                    <ActionIcon
+                      variant={hasActiveFilters ? 'filled' : 'light'}
+                      color="cyan"
+                      size="md"
+                      onClick={() => setFiltersOpen((v) => !v)}
+                    >
+                      <IconFilter size={16} />
+                    </ActionIcon>
+                  </Tooltip>
+                  {hasActiveFilters && (
+                    <Tooltip label="Clear all filters">
+                      <ActionIcon variant="light" color="red" size="md" onClick={clearAllFilters}>
+                        <IconFilterOff size={16} />
+                      </ActionIcon>
+                    </Tooltip>
+                  )}
+                </Group>
+              </Group>
+              {filtersOpen && (
+                <Group gap="sm" wrap="wrap">
+                  <DateInput
+                    placeholder="From date"
+                    value={dateFrom}
+                    onChange={setDateFrom}
+                    clearable
+                    size="xs"
+                    leftSection={<IconCalendar size={14} />}
+                    maxDate={dateTo || undefined}
+                    valueFormat="MMM D, YYYY"
+                    styles={{ input: { background: '#050608', borderColor: '#1a1f2e', color: '#e8edf2', width: 160 } }}
+                    popoverProps={{ styles: { dropdown: { background: '#0e1117', borderColor: '#1a1f2e' } } }}
+                  />
+                  <DateInput
+                    placeholder="To date"
+                    value={dateTo}
+                    onChange={setDateTo}
+                    clearable
+                    size="xs"
+                    leftSection={<IconCalendar size={14} />}
+                    minDate={dateFrom || undefined}
+                    valueFormat="MMM D, YYYY"
+                    styles={{ input: { background: '#050608', borderColor: '#1a1f2e', color: '#e8edf2', width: 160 } }}
+                    popoverProps={{ styles: { dropdown: { background: '#0e1117', borderColor: '#1a1f2e' } } }}
+                  />
+                  <Select
+                    placeholder="All aircraft"
+                    value={droneFilter}
+                    onChange={setDroneFilter}
+                    data={droneOptions}
+                    clearable
+                    searchable
+                    size="xs"
+                    leftSection={<IconDrone size={14} />}
+                    styles={{ input: { background: '#050608', borderColor: '#1a1f2e', color: '#e8edf2', width: 180 }, dropdown: { background: '#0e1117', borderColor: '#1a1f2e' } }}
+                    nothingFoundMessage="No aircraft found"
+                  />
+                </Group>
+              )}
+            </Stack>
 
             <ScrollArea>
               <Table
