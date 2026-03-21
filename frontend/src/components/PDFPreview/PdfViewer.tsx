@@ -11,11 +11,11 @@ import {
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
 
-// Configure PDF.js worker — use local copy built by vite copyPdfWorker plugin.
-// In dev mode, import directly from node_modules via Vite's dependency resolution.
-pdfjs.GlobalWorkerOptions.workerSrc = import.meta.env.DEV
-  ? new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).href
-  : '/pdf.worker.min.mjs';
+// Configure PDF.js worker — use Vite's ?url import so the worker file is
+// handled as a static asset in both dev and production builds. This avoids
+// the fragile custom copy plugin and works reliably through CDNs/proxies.
+import pdfjsWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+pdfjs.GlobalWorkerOptions.workerSrc = pdfjsWorkerUrl;
 
 interface PdfViewerProps {
   url: string;
