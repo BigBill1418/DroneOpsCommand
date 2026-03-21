@@ -2,7 +2,7 @@
 
 **Self-hosted mission management, AI report generation, and invoicing for commercial drone operators.**
 
-**Version 2.23.7** | [Quick Start](#quick-start) | [Features](#features) | [Configuration](#configuration) | [Contributing](CONTRIBUTING.md) | [License](LICENSE)
+**Version 2.23.8** | [Quick Start](#quick-start) | [Features](#features) | [Configuration](#configuration) | [Contributing](CONTRIBUTING.md) | [License](LICENSE)
 
 ---
 
@@ -451,10 +451,8 @@ Full interactive API documentation is available at `http://localhost:8000/docs` 
 
 ## Roadmap
 
-- **React Native Android App** — Mission creation, photo capture on-site, report review, and customer lookup from the field. Communicates with the stack via JWT-authenticated HTTPS API.
-- **Voice-to-Text** — On-device speech recognition in the Android app for dictating operator field notes hands-free during or after missions.
+- **Voice-to-Text** — On-device speech recognition in the [DroneOpsSync](https://github.com/BigBill1418/DroneOpsSync) Android app for dictating operator field notes hands-free during or after missions.
 - **Report Templates** — Multiple PDF templates for different mission types
-- **Analytics** — Revenue tracking and mission type breakdown
 - **Live Flight Tracking** — WebSocket integration for real-time drone position
 
 ---
