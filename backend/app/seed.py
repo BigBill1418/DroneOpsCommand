@@ -108,9 +108,12 @@ AIRCRAFT_SEED = [
 async def seed_database(db: AsyncSession):
     """Seed the database with initial data."""
 
-    # Seed admin user
+    # Seed admin user — always re-hash password to match current config
     result = await db.execute(select(User).where(User.username == settings.admin_username))
-    if not result.scalar_one_or_none():
+    existing_admin = result.scalar_one_or_none()
+    if existing_admin:
+        existing_admin.hashed_password = hash_password(settings.admin_password)
+    else:
         admin = User(
             username=settings.admin_username,
             hashed_password=hash_password(settings.admin_password),
