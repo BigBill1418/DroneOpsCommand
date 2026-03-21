@@ -2,7 +2,7 @@
 
 **Self-hosted mission management, AI report generation, and invoicing for commercial drone operators.**
 
-**Version 2.23.8** | [Quick Start](#quick-start) | [Features](#features) | [Configuration](#configuration) | [Contributing](CONTRIBUTING.md) | [License](LICENSE)
+**Version 2.23.9** | [Quick Start](#quick-start) | [Features](#features) | [Configuration](#configuration) | [Contributing](CONTRIBUTING.md) | [License](LICENSE)
 
 ---
 
@@ -453,6 +453,7 @@ Full interactive API documentation is available at `http://localhost:8000/docs` 
 
 - **Voice-to-Text** — On-device speech recognition in the [DroneOpsSync](https://github.com/BigBill1418/DroneOpsSync) Android app for dictating operator field notes hands-free during or after missions.
 - **Report Templates** — Multiple PDF templates for different mission types
+- **Claude API Integration** — Replace local Ollama/Mistral 7B with Claude API for faster, higher-quality report generation
 - **Live Flight Tracking** — WebSocket integration for real-time drone position
 
 ---
