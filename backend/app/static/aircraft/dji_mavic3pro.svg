@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 160" fill="none">
+  <!-- DJI Mavic 3 Pro - Foldable prosumer -->
+  <rect width="200" height="160" rx="8" fill="#050608"/>
+  <!-- Arms - swept back Mavic style -->
+  <line x1="68" y1="55" x2="35" y2="35" stroke="#1a1f2e" stroke-width="3.5" stroke-linecap="round"/>
+  <line x1="132" y1="55" x2="165" y2="35" stroke="#1a1f2e" stroke-width="3.5" stroke-linecap="round"/>
+  <line x1="68" y1="90" x2="40" y2="115" stroke="#1a1f2e" stroke-width="3.5" stroke-linecap="round"/>
+  <line x1="132" y1="90" x2="160" y2="115" stroke="#1a1f2e" stroke-width="3.5" stroke-linecap="round"/>
+  <!-- Rotors -->
+  <ellipse cx="35" cy="35" rx="20" ry="5" fill="#0e1117" stroke="#00d4ff" stroke-width="1" opacity="0.7"/>
+  <ellipse cx="165" cy="35" rx="20" ry="5" fill="#0e1117" stroke="#00d4ff" stroke-width="1" opacity="0.7"/>
+  <ellipse cx="40" cy="115" rx="20" ry="5" fill="#0e1117" stroke="#00d4ff" stroke-width="1" opacity="0.7"/>
+  <ellipse cx="160" cy="115" rx="20" ry="5" fill="#0e1117" stroke="#00d4ff" stroke-width="1" opacity="0.7"/>
+  <!-- Body - compact Mavic shape -->
+  <rect x="62" y="48" width="76" height="50" rx="10" fill="#0e1117" stroke="#1a1f2e" stroke-width="1.5"/>
+  <!-- Hasselblad camera -->
+  <rect x="85" y="98" width="30" height="14" rx="4" fill="#1a1f2e"/>
+  <circle cx="95" cy="105" r="5" fill="#050608" stroke="#ff6b1a" stroke-width="1"/>
+  <circle cx="110" cy="105" r="3" fill="#050608" stroke="#e8edf2" stroke-width="1"/>
+  <!-- Sensors -->
+  <circle cx="100" cy="48" r="2" fill="#5a6478"/>
+  <!-- Status LED -->
+  <circle cx="100" cy="68" r="2.5" fill="#00d4ff" opacity="0.8"/>
+  <!-- Label -->
+  <text x="100" y="148" text-anchor="middle" font-family="sans-serif" font-size="9" fill="#5a6478" letter-spacing="1">MAVIC 3 PRO</text>
+</svg>
