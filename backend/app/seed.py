@@ -221,8 +221,15 @@ async def seed_database(db: AsyncSession):
         existing = result.scalar_one_or_none()
         if existing:
             existing.specs = aircraft_data["specs"]
+            # Only set default image if user hasn't uploaded a custom one
+            # Custom uploads go to "aircraft/{id}/..." while defaults are "dji_*.svg"
             if "image_filename" in aircraft_data:
-                existing.image_filename = aircraft_data["image_filename"]
+                has_custom_upload = (
+                    existing.image_filename
+                    and existing.image_filename.startswith("aircraft/")
+                )
+                if not has_custom_upload:
+                    existing.image_filename = aircraft_data["image_filename"]
         else:
             aircraft = Aircraft(**aircraft_data)
             db.add(aircraft)
