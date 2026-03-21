@@ -378,7 +378,7 @@ async def generate_report_pdf(
         )
     except Exception as exc:
         logger.error("Mission %s PDF generation failed: %s", mission_id, exc, exc_info=True)
-        raise HTTPException(status_code=500, detail="PDF generation failed")
+        raise HTTPException(status_code=500, detail=f"PDF generation failed: {exc}")
 
     report.pdf_path = pdf_path
     await db.flush()

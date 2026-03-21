@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
-from weasyprint import HTML
+from weasyprint import HTML, default_url_fetcher
 
 from app.config import settings
 
@@ -13,6 +13,30 @@ logger = logging.getLogger("doc.pdf_generator")
 # Set up Jinja2 template environment
 template_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "templates")
 jinja_env = Environment(loader=FileSystemLoader(template_dir), autoescape=select_autoescape(["html"]))
+
+
+# Transparent 1x1 PNG used when an image can't be loaded
+_FALLBACK_PNG = (
+    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01"
+    b"\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89"
+    b"\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01"
+    b"\r\n\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+)
+
+
+def _safe_url_fetcher(url: str):
+    """URL fetcher that returns a transparent pixel for missing/broken resources."""
+    try:
+        # For file:// URLs, check existence first
+        if url.startswith("file://"):
+            path = url[7:]  # strip file://
+            if not os.path.isfile(path):
+                logger.warning("PDF resource not found, using fallback: %s", url)
+                return {"string": _FALLBACK_PNG, "mime_type": "image/png"}
+        return default_url_fetcher(url)
+    except Exception as exc:
+        logger.warning("PDF resource fetch failed (%s), using fallback: %s", exc, url)
+        return {"string": _FALLBACK_PNG, "mime_type": "image/png"}
 
 
 def generate_pdf(
@@ -61,7 +85,11 @@ def generate_pdf(
     pdf_path = os.path.join(settings.reports_dir, pdf_filename)
 
     try:
-        HTML(string=html_content, base_url=settings.reports_dir).write_pdf(pdf_path)
+        HTML(
+            string=html_content,
+            base_url=settings.reports_dir,
+            url_fetcher=_safe_url_fetcher,
+        ).write_pdf(pdf_path)
         if not os.path.exists(pdf_path) or os.path.getsize(pdf_path) == 0:
             raise RuntimeError("PDF file was not created or is empty")
         logger.info("PDF generated: %s (%d bytes)", pdf_path, os.path.getsize(pdf_path))
