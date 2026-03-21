@@ -66,8 +66,11 @@ export default function MissionDetail() {
     api.get(`/missions/${id}/map`).then((r) => setMapGeojson(r.data)).catch(() => {});
     api.get(`/missions/${id}/map/coverage`).then((r) => setCoverage(r.data)).catch(() => {});
     api.get('/aircraft').then((r) => setAircraftList(r.data)).catch(() => {});
-    return () => stopPolling();
-  }, [id, stopPolling]);
+    return () => {
+      stopPolling();
+      if (pdfBlobUrl) URL.revokeObjectURL(pdfBlobUrl);
+    };
+  }, [id, stopPolling]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!mission) return <Group justify="center" py="xl"><Loader color="cyan" /></Group>;
 
@@ -129,12 +132,17 @@ export default function MissionDetail() {
     await handleSaveReport();
     try {
       const resp = await api.post(`/missions/${id}/report/pdf`, {}, { responseType: 'blob', timeout: 120000 });
+      if (!resp.data || resp.data.size === 0) {
+        notifications.show({ title: 'Error', message: 'PDF returned empty', color: 'red' });
+        return;
+      }
       if (pdfBlobUrl) URL.revokeObjectURL(pdfBlobUrl);
       const blobUrl = URL.createObjectURL(new Blob([resp.data], { type: 'application/pdf' }));
       setPdfBlobUrl(blobUrl);
       notifications.show({ title: 'PDF Generated', message: 'Preview loaded below', color: 'cyan' });
-    } catch {
-      notifications.show({ title: 'Error', message: 'PDF generation failed', color: 'red' });
+    } catch (err: unknown) {
+      const axiosErr = err as { response?: { data?: { detail?: string } } };
+      notifications.show({ title: 'Error', message: axiosErr.response?.data?.detail || 'PDF generation failed', color: 'red' });
     }
   };
 

@@ -602,8 +602,11 @@ export default function MissionNew() {
     }
   }, []);
 
-  // Clean up polling on unmount
-  useEffect(() => () => stopPolling(), [stopPolling]);
+  // Clean up polling and blob URLs on unmount
+  useEffect(() => () => {
+    stopPolling();
+    if (pdfBlobUrl) URL.revokeObjectURL(pdfBlobUrl);
+  }, [stopPolling]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleGenerate = async () => {
     if (!missionId) return;
@@ -747,12 +750,17 @@ export default function MissionNew() {
       }
       // Generate PDF
       const resp = await api.post(`/missions/${missionId}/report/pdf`, {}, { responseType: 'blob', timeout: 120000 });
+      if (!resp.data || resp.data.size === 0) {
+        notifications.show({ title: 'Error', message: 'PDF returned empty', color: 'red' });
+        return;
+      }
       if (pdfBlobUrl) URL.revokeObjectURL(pdfBlobUrl);
       const blobUrl = URL.createObjectURL(new Blob([resp.data], { type: 'application/pdf' }));
       setPdfBlobUrl(blobUrl);
       notifications.show({ title: 'PDF Generated', message: 'Preview loaded below', color: 'cyan' });
-    } catch {
-      notifications.show({ title: 'Error', message: 'Failed to generate PDF', color: 'red' });
+    } catch (err: unknown) {
+      const axiosErr = err as { response?: { data?: { detail?: string } } };
+      notifications.show({ title: 'Error', message: axiosErr.response?.data?.detail || 'Failed to generate PDF', color: 'red' });
     }
   };
 
