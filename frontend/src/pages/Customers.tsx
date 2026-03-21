@@ -71,6 +71,13 @@ export default function Customers() {
   const [signedTosBlobUrl, setSignedTosBlobUrl] = useState<string | null>(null);
   const [signedTosLoading, setSignedTosLoading] = useState(false);
 
+  // Clean up signed TOS blob URL on unmount
+  useEffect(() => {
+    return () => {
+      if (signedTosBlobUrl) URL.revokeObjectURL(signedTosBlobUrl);
+    };
+  }, [signedTosBlobUrl]);
+
   const formatPhone = (value: string) => {
     const digits = value.replace(/\D/g, '').slice(0, 10);
     if (digits.length <= 3) return digits;

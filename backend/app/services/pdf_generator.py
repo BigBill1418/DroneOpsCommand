@@ -62,7 +62,9 @@ def generate_pdf(
 
     try:
         HTML(string=html_content, base_url=settings.reports_dir).write_pdf(pdf_path)
-        logger.info("PDF generated: %s", pdf_path)
+        if not os.path.exists(pdf_path) or os.path.getsize(pdf_path) == 0:
+            raise RuntimeError("PDF file was not created or is empty")
+        logger.info("PDF generated: %s (%d bytes)", pdf_path, os.path.getsize(pdf_path))
     except Exception as exc:
         logger.error("WeasyPrint failed for mission %s: %s", mission_id, exc, exc_info=True)
         # Clean up partial file

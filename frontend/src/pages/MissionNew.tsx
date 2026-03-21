@@ -43,6 +43,7 @@ import { Aircraft, Customer, CoverageData, RateTemplate, Mission, Invoice } from
 import FlightMap from '../components/FlightMap/FlightMap';
 import AircraftCard from '../components/AircraftCard/AircraftCard';
 import RichTextEditor from '../components/RichTextEditor/RichTextEditor';
+import PdfViewer from '../components/PDFPreview/PdfViewer';
 
 const inputStyles = {
   input: { background: '#050608', borderColor: '#1a1f2e', color: '#e8edf2' },
@@ -125,6 +126,7 @@ export default function MissionNew() {
   const [reportContent, setReportContent] = useState('');
   const [generating, setGenerating] = useState(false);
   const [savingDraft, setSavingDraft] = useState(false);
+  const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null);
 
   // Images
   const [uploadedImages, setUploadedImages] = useState<{ name: string; status: 'pending' | 'uploading' | 'done' | 'error'; imageId?: string }[]>([]);
@@ -600,8 +602,11 @@ export default function MissionNew() {
     }
   }, []);
 
-  // Clean up polling on unmount
-  useEffect(() => () => stopPolling(), [stopPolling]);
+  // Clean up polling and blob URLs on unmount
+  useEffect(() => () => {
+    stopPolling();
+    if (pdfBlobUrl) URL.revokeObjectURL(pdfBlobUrl);
+  }, [stopPolling]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleGenerate = async () => {
     if (!missionId) return;
@@ -745,12 +750,17 @@ export default function MissionNew() {
       }
       // Generate PDF
       const resp = await api.post(`/missions/${missionId}/report/pdf`, {}, { responseType: 'blob', timeout: 120000 });
+      if (!resp.data || resp.data.size === 0) {
+        notifications.show({ title: 'Error', message: 'PDF returned empty', color: 'red' });
+        return;
+      }
+      if (pdfBlobUrl) URL.revokeObjectURL(pdfBlobUrl);
       const blobUrl = URL.createObjectURL(new Blob([resp.data], { type: 'application/pdf' }));
-      window.open(blobUrl, '_blank');
-      setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
-      notifications.show({ title: 'PDF Generated', message: 'Opening PDF preview', color: 'cyan' });
-    } catch {
-      notifications.show({ title: 'Error', message: 'Failed to generate PDF', color: 'red' });
+      setPdfBlobUrl(blobUrl);
+      notifications.show({ title: 'PDF Generated', message: 'Preview loaded below', color: 'cyan' });
+    } catch (err: unknown) {
+      const axiosErr = err as { response?: { data?: { detail?: string } } };
+      notifications.show({ title: 'Error', message: axiosErr.response?.data?.detail || 'Failed to generate PDF', color: 'red' });
     }
   };
 
@@ -1346,6 +1356,11 @@ export default function MissionNew() {
                   EMAIL TO CUSTOMER
                 </Button>
               </Group>
+
+              {/* Inline PDF Preview */}
+              {pdfBlobUrl && (
+                <PdfViewer url={pdfBlobUrl} height={700} downloadFilename={`Report_${form.values.title?.replace(/\s+/g, '_') || 'Mission'}.pdf`} />
+              )}
 
               <Button
                 variant="subtle"

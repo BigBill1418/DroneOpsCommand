@@ -514,9 +514,12 @@ async def get_signed_tos(
 
             # Draw the signature image
             sig_buf = io.BytesIO()
-            sig_image.save(sig_buf, format="PNG")
-            sig_buf.seek(0)
-            c.drawImage(ImageReader(sig_buf), sig_x, sig_y, width=draw_w, height=draw_h, mask='auto')
+            try:
+                sig_image.save(sig_buf, format="PNG")
+                sig_buf.seek(0)
+                c.drawImage(ImageReader(sig_buf), sig_x, sig_y, width=draw_w, height=draw_h, mask='auto')
+            finally:
+                sig_buf.close()
 
             # Add signed date text below the line
             c.setFont("Helvetica", 8)

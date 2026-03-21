@@ -198,14 +198,14 @@ export default function CustomerIntake() {
           console.error('[Intake] Failed to load TOS PDF');
         });
     }
-  }, [step, tosPdfUrl, tosPdfBlobUrl]);
+  }, [step, tosPdfUrl]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Clean up blob URL on unmount
   useEffect(() => {
     return () => {
       if (tosPdfBlobUrl) URL.revokeObjectURL(tosPdfBlobUrl);
     };
-  }, [tosPdfBlobUrl]);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleNext = () => {
     if (!name.trim() || !email.trim()) {
