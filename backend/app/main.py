@@ -173,7 +173,7 @@ limiter = Limiter(key_func=get_remote_address)
 app = FastAPI(
     title="D.O.C — Drone Operations Command",
     description="Mission management, flight data, and after-action reporting for drone operations",
-    version="2.28.3",
+    version="2.28.4",
     lifespan=lifespan,
 )
 
