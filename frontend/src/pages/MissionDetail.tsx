@@ -64,8 +64,10 @@ export default function MissionDetail() {
       setReportContent(r.data.final_content || '');
       setIncludeDownloadLink(r.data.include_download_link || false);
     }).catch(() => {});
-    api.get(`/missions/${id}/map`).then((r) => setMapGeojson(r.data)).catch(() => {});
-    api.get(`/missions/${id}/map/coverage`).then((r) => setCoverage(r.data)).catch(() => {});
+    api.get(`/missions/${id}/map?include_coverage=true`).then((r) => {
+      setMapGeojson(r.data.geojson);
+      setCoverage(r.data.coverage);
+    }).catch(() => {});
     api.get('/aircraft').then((r) => setAircraftList(r.data)).catch(() => {});
     return () => {
       stopPolling();

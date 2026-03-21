@@ -58,18 +58,45 @@ def _flights_to_dicts(mission: Mission) -> list[dict]:
 @router.get("/{mission_id}/map")
 async def get_map_data(
     mission_id: UUID,
+    include_coverage: bool = False,
+    buffer_meters: float = 30.0,
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
-    """Get GeoJSON data for interactive flight path map."""
+    """Get GeoJSON data for interactive flight path map.
+
+    Pass ?include_coverage=true to also return area coverage in the same
+    response, avoiding a second round-trip and redundant DB/CPU work.
+    """
     start = time.perf_counter()
     mission = await _load_mission(db, mission_id)
     flights = _flights_to_dicts(mission)
     loop = asyncio.get_running_loop()
+
     try:
-        result = await loop.run_in_executor(None, generate_map_geojson, flights)
-        logger.info("Map GeoJSON for mission %s: %.2fs", mission_id, time.perf_counter() - start)
-        return result
+        if include_coverage:
+            # Run GeoJSON and coverage extraction in parallel threads
+            geojson_fut = loop.run_in_executor(None, generate_map_geojson, flights)
+            tracks_fut = loop.run_in_executor(None, extract_gps_tracks, flights)
+            geojson_result, tracks = await asyncio.gather(geojson_fut, tracks_fut)
+            acres = await loop.run_in_executor(
+                None, partial(calculate_area_acres, tracks, buffer_meters=buffer_meters)
+            )
+            logger.info("Map+coverage for mission %s: %.2f acres (%.2fs)",
+                        mission_id, acres, time.perf_counter() - start)
+            return {
+                "geojson": geojson_result,
+                "coverage": {
+                    "acres": round(acres, 2),
+                    "square_yards": round(acres * 4840, 0) if acres < 1 else None,
+                    "num_flights": len(tracks),
+                    "total_points": sum(len(t) for t in tracks),
+                },
+            }
+        else:
+            result = await loop.run_in_executor(None, generate_map_geojson, flights)
+            logger.info("Map GeoJSON for mission %s: %.2fs", mission_id, time.perf_counter() - start)
+            return result
     except Exception as exc:
         logger.error("Map GeoJSON failed for mission %s: %s", mission_id, exc, exc_info=True)
         raise HTTPException(status_code=500, detail="Map generation failed")
