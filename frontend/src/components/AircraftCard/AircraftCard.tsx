@@ -1,4 +1,4 @@
-import { Card, Group, Text, Stack, Badge, Table } from '@mantine/core';
+import { Card, Group, Text, Stack, Badge, Table, Image } from '@mantine/core';
 import { IconDrone } from '@tabler/icons-react';
 import { Aircraft } from '../../api/types';
 
@@ -9,6 +9,7 @@ interface AircraftCardProps {
 
 export default function AircraftCard({ aircraft, compact = false }: AircraftCardProps) {
   const specEntries = Object.entries(aircraft.specs || {});
+  const imageUrl = aircraft.image_filename ? `/uploads/${aircraft.image_filename}` : null;
 
   if (compact) {
     return (
@@ -16,7 +17,11 @@ export default function AircraftCard({ aircraft, compact = false }: AircraftCard
         variant="outline"
         color="cyan"
         size="lg"
-        leftSection={<IconDrone size={14} />}
+        leftSection={imageUrl ? (
+          <Image src={imageUrl} w={16} h={16} radius="sm" fit="cover" style={{ display: 'inline-block' }} />
+        ) : (
+          <IconDrone size={14} />
+        )}
         styles={{ root: { background: '#0e1117' } }}
       >
         {aircraft.model_name}
@@ -31,7 +36,18 @@ export default function AircraftCard({ aircraft, compact = false }: AircraftCard
       style={{ background: '#0e1117', border: '1px solid #1a1f2e', flex: 1, minWidth: 250 }}
     >
       <Stack gap="xs" align="center">
-        <IconDrone size={48} color="#00d4ff" />
+        {imageUrl ? (
+          <Image
+            src={imageUrl}
+            w={120}
+            h={80}
+            radius="md"
+            fit="contain"
+            style={{ background: '#050608', borderRadius: 8, padding: 4 }}
+          />
+        ) : (
+          <IconDrone size={48} color="#00d4ff" />
+        )}
         <Text
           size="lg"
           fw={700}

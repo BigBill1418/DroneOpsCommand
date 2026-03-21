@@ -120,22 +120,14 @@ so use wildcard paths to consolidate rules. Still in the same application:
 3. Add another Bypass policy for the intake API (covers form submission + TOS PDF):
    - **Path**: `/api/intake/*`
 
-4. Add another Bypass policy for **DroneOpsSync** field controllers (covers upload + health check):
-   - **Path**: `/api/flight-library/device-*`
-
-Only **3 bypass rules** needed:
+Only **2 bypass rules** needed:
 
 | Path | What it covers |
 |------|---------------|
 | `/intake/*` | Customer intake frontend SPA |
 | `/api/intake/*` | Intake form GET/POST + TOS PDF download |
-| `/api/flight-library/device-*` | DroneOpsSync upload + health check (secured by API key) |
 
 Everything else requires Cloudflare Access login.
-
-> **Note:** The device endpoints are still secured — they require a valid
-> `X-Device-Api-Key` header. The Cloudflare Access bypass just lets the
-> request reach your server so the API key authentication can happen.
 
 > **Note:** The PDF.js worker used for inline TOS viewing is loaded from
 > `cdnjs.cloudflare.com`, so it does not require a bypass rule.
@@ -195,6 +187,5 @@ Customer's Browser
 | `cloudflared` exits immediately | Check `CLOUDFLARE_TUNNEL_TOKEN` is set in `.env` |
 | Tunnel shows "Inactive" in dashboard | Run `docker compose --profile tunnel logs cloudflared` to check errors |
 | Intake form loads but API calls fail | Make sure the tunnel hostname points to `frontend:80`, not `backend:8000` |
-| "Access Denied" on intake form | Check your Cloudflare Access bypass policies include `/intake/*` and `/api/intake/form/*` |
-| TOS PDF won't load | Add bypass for `/api/intake/tos-pdf/*` in Access policies |
-| DroneOpsSync says "server unreachable" | Add a Cloudflare Access bypass for `/api/flight-library/device-*`. If using direct IP, make sure the device is on the same LAN and try port 3080 (nginx) or 8000 (backend direct). |
+| "Access Denied" on intake form | Check your Cloudflare Access bypass policies include `/intake/*` and `/api/intake/*` |
+| TOS PDF won't load | Add bypass for `/api/intake/*` in Access policies |
