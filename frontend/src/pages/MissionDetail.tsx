@@ -14,6 +14,7 @@ import {
 import { notifications } from '@mantine/notifications';
 import PdfViewer from '../components/PDFPreview/PdfViewer';
 import {
+  IconDeviceFloppy,
   IconDownload,
   IconEdit,
   IconLink,
@@ -120,7 +121,11 @@ export default function MissionDetail() {
 
   const handleSaveReport = async () => {
     try {
-      await api.put(`/missions/${id}/report`, { final_content: reportContent });
+      await api.put(`/missions/${id}/report`, {
+        user_narrative: narrative || undefined,
+        final_content: reportContent || undefined,
+        include_download_link: includeDownloadLink,
+      });
       notifications.show({ title: 'Saved', message: 'Report updated', color: 'cyan' });
     } catch (err: unknown) {
       const axiosErr = err as { response?: { data?: { detail?: string } } };
@@ -286,7 +291,8 @@ export default function MissionDetail() {
             label="Operator Notes"
             value={narrative}
             onChange={(e) => setNarrative(e.target.value)}
-            minRows={4}
+            minRows={8}
+            autosize
             styles={inputStyles}
           />
           <Switch
@@ -315,6 +321,18 @@ export default function MissionDetail() {
               <RichTextEditor content={reportContent} onChange={setReportContent} minHeight="400px" />
             </>
           )}
+          <Group>
+            <Button
+              leftSection={<IconDeviceFloppy size={16} />}
+              color="cyan"
+              variant="light"
+              onClick={handleSaveReport}
+              disabled={!narrative && !reportContent}
+              styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}
+            >
+              SAVE REPORT
+            </Button>
+          </Group>
         </Stack>
       </Card>
 

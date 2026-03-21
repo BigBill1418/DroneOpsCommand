@@ -1128,7 +1128,8 @@ export default function MissionNew() {
                 placeholder="Describe what happened during the mission, conditions, findings, outcome..."
                 value={narrative}
                 onChange={(e) => setNarrative(e.target.value)}
-                minRows={5}
+                minRows={8}
+                autosize
                 styles={inputStyles}
               />
               <Switch
