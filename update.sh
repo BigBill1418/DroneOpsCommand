@@ -75,7 +75,8 @@ detect_and_rebuild() {
   local changed
 
   if [ -n "$prev_commit" ] && git cat-file -t "$prev_commit" >/dev/null 2>&1; then
-    changed=$(git diff --name-only "$prev_commit" "$current_commit")
+    # Compare actual tree contents (not commit chain) — handles merge commits correctly
+    changed=$(git diff --name-only "$prev_commit".."$current_commit" 2>/dev/null || echo "all")
   else
     changed="all"
   fi
@@ -169,7 +170,7 @@ do_promote() {
   git log --oneline "origin/main..origin/claude/dev"
   echo ""
 
-  echo -e "${YELLOW}This will merge claude/dev into main and rebuild production.${NC}"
+  echo -e "${YELLOW}This will merge claude/dev into main (no rebuild).${NC}"
   read -r -p "Continue? [y/N] " confirm
   if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
     echo "Aborted."
@@ -186,11 +187,12 @@ do_promote() {
   echo -e "${CYAN}Pushing main...${NC}"
   git push origin main
 
-  echo -e "${GREEN}Main updated to $(git rev-parse HEAD | head -c 7)${NC}"
-  echo ""
+  # Switch back to dev so the working tree stays on the running branch
+  echo -e "${CYAN}Switching back to claude/dev...${NC}"
+  git checkout claude/dev
 
-  # Rebuild production
-  detect_and_rebuild "main" ""
+  echo ""
+  echo -e "${GREEN}Done — main updated to $(echo "$dev_commit" | head -c 7)${NC}"
 }
 
 do_status() {

@@ -232,18 +232,24 @@ export default function MissionNew() {
           })));
         }
 
-        // Load report
-        try {
-          const reportResp = await api.get(`/missions/${editId}/report`);
-          setNarrative(reportResp.data.user_narrative || '');
-          setReportContent(reportResp.data.final_content || '');
-          setIncludeDownloadLink(reportResp.data.include_download_link || false);
-        } catch {}
+        // Load report, invoice, and map data in parallel
+        const [reportResult, invoiceResult, mapResult] = await Promise.allSettled([
+          api.get(`/missions/${editId}/report`),
+          api.get(`/missions/${editId}/invoice`),
+          Promise.all([
+            api.get(`/missions/${editId}/map`),
+            api.get(`/missions/${editId}/map/coverage`),
+          ]),
+        ]);
 
-        // Load invoice
-        try {
-          const invResp = await api.get(`/missions/${editId}/invoice`);
-          const inv: Invoice = invResp.data;
+        if (reportResult.status === 'fulfilled') {
+          setNarrative(reportResult.value.data.user_narrative || '');
+          setReportContent(reportResult.value.data.final_content || '');
+          setIncludeDownloadLink(reportResult.value.data.include_download_link || false);
+        }
+
+        if (invoiceResult.status === 'fulfilled') {
+          const inv: Invoice = invoiceResult.value.data;
           setInvoiceExists(true);
           setPaidInFull(inv.paid_in_full);
           if (inv.line_items.length > 0) {
@@ -255,17 +261,13 @@ export default function MissionNew() {
               unit_price: li.unit_price,
             })));
           }
-        } catch {}
+        }
 
-        // Load map data
-        try {
-          const [mapResp, covResp] = await Promise.all([
-            api.get(`/missions/${editId}/map`),
-            api.get(`/missions/${editId}/map/coverage`),
-          ]);
+        if (mapResult.status === 'fulfilled') {
+          const [mapResp, covResp] = mapResult.value;
           setMapGeojson(mapResp.data);
           setCoverage(covResp.data);
-        } catch {}
+        }
 
         // Determine which step to land on
         let startStep = 0;

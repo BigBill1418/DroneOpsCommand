@@ -1,6 +1,6 @@
 FROM python:3.12-slim
 
-# Install system dependencies for WeasyPrint and geospatial libs
+# Install system dependencies for WeasyPrint, fonts, and geospatial libs
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libpango-1.0-0 \
@@ -13,7 +13,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libproj-dev \
     shared-mime-info \
     postgresql-client \
-    && rm -rf /var/lib/apt/lists/*
+    fontconfig \
+    fonts-liberation \
+    fonts-dejavu-core \
+    fonts-noto-core \
+    && rm -rf /var/lib/apt/lists/* \
+    && fc-cache -f
 
 WORKDIR /app
 
