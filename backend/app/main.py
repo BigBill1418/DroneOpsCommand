@@ -3,8 +3,9 @@ import os
 import time
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi.staticfiles import StaticFiles
@@ -154,7 +155,13 @@ async def lifespan(app: FastAPI):
         for fname in os.listdir(bundled_aircraft_dir):
             dest = os.path.join(settings.upload_dir, fname)
             if not os.path.exists(dest):
-                shutil.copy2(os.path.join(bundled_aircraft_dir, fname), dest)
+                try:
+                    shutil.copy2(os.path.join(bundled_aircraft_dir, fname), dest)
+                except (PermissionError, OSError) as e:
+                    logger.warning(
+                        "Could not copy default aircraft image %s to uploads: %s "
+                        "(will serve from /static/aircraft/ instead)", fname, e
+                    )
 
     yield
 
@@ -166,7 +173,7 @@ limiter = Limiter(key_func=get_remote_address)
 app = FastAPI(
     title="D.O.C — Drone Operations Command",
     description="Mission management, flight data, and after-action reporting for drone operations",
-    version="2.24.0",
+    version="2.24.1",
     lifespan=lifespan,
 )
 
@@ -186,14 +193,32 @@ app.add_middleware(
     allow_headers=["Content-Type", "Authorization", "X-Device-Api-Key"],
 )
 
+# Fallback route: serve default aircraft SVGs from bundled static if not in uploads
+_bundled_aircraft_dir = os.path.join(os.path.dirname(__file__), "static", "aircraft")
+
+
+@app.get("/uploads/{filename:path}")
+async def serve_upload_with_fallback(filename: str):
+    """Serve uploaded files, falling back to bundled defaults for aircraft SVGs."""
+    # Prevent path traversal
+    if ".." in filename:
+        raise HTTPException(status_code=400, detail="Invalid path")
+    # Try the uploads directory first
+    upload_path = os.path.join(settings.upload_dir, filename)
+    if os.path.isfile(upload_path):
+        return FileResponse(upload_path)
+    # Fallback: if it's a default aircraft SVG, serve from bundled static
+    if filename.endswith(".svg") and "/" not in filename:
+        bundled_path = os.path.join(_bundled_aircraft_dir, filename)
+        if os.path.isfile(bundled_path):
+            return FileResponse(bundled_path, media_type="image/svg+xml")
+    raise HTTPException(status_code=404, detail="File not found")
+
+
 # Static files for aircraft images
 static_dir = os.path.join(os.path.dirname(__file__), "static")
 if os.path.exists(static_dir):
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
-
-# Mount upload directory for serving images
-if os.path.exists(settings.upload_dir):
-    app.mount("/uploads", StaticFiles(directory=settings.upload_dir), name="uploads")
 
 # Register routers
 app.include_router(auth.router)
