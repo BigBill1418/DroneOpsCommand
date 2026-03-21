@@ -13,7 +13,7 @@ AIRCRAFT_SEED = [
     {
         "model_name": "DJI Matrice 30T",
         "manufacturer": "DJI",
-        "image_filename": "dji_m30t.svg",
+        "image_filename": "dji_m30t_official.png",
         "specs": {
             "max_flight_time": "41 min",
             "max_speed": "51 mph",
@@ -29,7 +29,7 @@ AIRCRAFT_SEED = [
     {
         "model_name": "DJI Matrice 4TD",
         "manufacturer": "DJI",
-        "image_filename": "dji_m4td.svg",
+        "image_filename": "dji_m4td_official.png",
         "specs": {
             "max_flight_time": "38 min",
             "max_speed": "50 mph",
@@ -45,7 +45,7 @@ AIRCRAFT_SEED = [
     {
         "model_name": "DJI Mavic 3 Pro",
         "manufacturer": "DJI",
-        "image_filename": "dji_mavic3pro.svg",
+        "image_filename": "dji_mavic3pro_official.png",
         "specs": {
             "max_flight_time": "43 min",
             "max_speed": "47 mph",
@@ -60,7 +60,7 @@ AIRCRAFT_SEED = [
     {
         "model_name": "DJI Avata 2",
         "manufacturer": "DJI",
-        "image_filename": "dji_avata2.svg",
+        "image_filename": "dji_avata2_official.png",
         "specs": {
             "max_flight_time": "23 min",
             "max_speed": "60 mph",
@@ -75,7 +75,7 @@ AIRCRAFT_SEED = [
     {
         "model_name": "DJI FPV",
         "manufacturer": "DJI",
-        "image_filename": "dji_fpv.svg",
+        "image_filename": "dji_fpv_official.png",
         "specs": {
             "max_flight_time": "20 min",
             "max_speed": "87 mph",
@@ -90,7 +90,7 @@ AIRCRAFT_SEED = [
     {
         "model_name": "DJI Mini 5 Pro",
         "manufacturer": "DJI",
-        "image_filename": "dji_mini5pro.svg",
+        "image_filename": "dji_mini5pro_official.png",
         "specs": {
             "max_flight_time": "38 min",
             "max_speed": "36 mph",

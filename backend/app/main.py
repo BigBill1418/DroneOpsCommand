@@ -173,7 +173,7 @@ limiter = Limiter(key_func=get_remote_address)
 app = FastAPI(
     title="D.O.C — Drone Operations Command",
     description="Mission management, flight data, and after-action reporting for drone operations",
-    version="2.24.2",
+    version="2.25.0",
     lifespan=lifespan,
 )
 
@@ -211,11 +211,12 @@ async def serve_upload_with_fallback(filename: str):
         if filename.endswith(".svg"):
             media_type = "image/svg+xml"
         return FileResponse(upload_path, media_type=media_type)
-    # Fallback: if it's a default aircraft SVG, serve from bundled static
-    if filename.endswith(".svg") and "/" not in filename:
+    # Fallback: if it's a default aircraft image, serve from bundled static
+    if "/" not in filename:
         bundled_path = os.path.join(_bundled_aircraft_dir, filename)
         if os.path.isfile(bundled_path):
-            return FileResponse(bundled_path, media_type="image/svg+xml")
+            mt = "image/svg+xml" if filename.endswith(".svg") else None
+            return FileResponse(bundled_path, media_type=mt)
     raise HTTPException(status_code=404, detail="File not found")
 
 
