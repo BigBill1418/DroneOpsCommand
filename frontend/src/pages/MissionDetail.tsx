@@ -12,6 +12,7 @@ import {
   Title,
 } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
+import PdfViewer from '../components/PDFPreview/PdfViewer';
 import {
   IconDownload,
   IconEdit,
@@ -39,6 +40,7 @@ export default function MissionDetail() {
   const [reportContent, setReportContent] = useState('');
   const [generating, setGenerating] = useState(false);
   const [includeDownloadLink, setIncludeDownloadLink] = useState(false);
+  const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null);
   const navigate = useNavigate();
 
   // Polling for Celery report generation
@@ -127,10 +129,10 @@ export default function MissionDetail() {
     await handleSaveReport();
     try {
       const resp = await api.post(`/missions/${id}/report/pdf`, {}, { responseType: 'blob', timeout: 120000 });
+      if (pdfBlobUrl) URL.revokeObjectURL(pdfBlobUrl);
       const blobUrl = URL.createObjectURL(new Blob([resp.data], { type: 'application/pdf' }));
-      window.open(blobUrl, '_blank');
-      // Revoke after browser has had time to open the tab
-      setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+      setPdfBlobUrl(blobUrl);
+      notifications.show({ title: 'PDF Generated', message: 'Preview loaded below', color: 'cyan' });
     } catch {
       notifications.show({ title: 'Error', message: 'PDF generation failed', color: 'red' });
     }
@@ -310,6 +312,16 @@ export default function MissionDetail() {
           </Button>
         </Group>
       </Card>
+
+      {/* Inline PDF Preview */}
+      {pdfBlobUrl && (
+        <Card padding="lg" radius="md" style={cardStyle}>
+          <Text c="#5a6478" size="xs" mb="sm" style={{ fontFamily: "'Share Tech Mono', monospace", letterSpacing: '1px' }}>
+            PDF PREVIEW
+          </Text>
+          <PdfViewer url={pdfBlobUrl} height={700} downloadFilename={`Report_${mission.title.replace(/\s+/g, '_')}.pdf`} />
+        </Card>
+      )}
     </Stack>
   );
 }
