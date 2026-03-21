@@ -759,8 +759,19 @@ export default function MissionNew() {
       setPdfBlobUrl(blobUrl);
       notifications.show({ title: 'PDF Generated', message: 'Preview loaded below', color: 'cyan' });
     } catch (err: unknown) {
-      const axiosErr = err as { response?: { data?: { detail?: string } } };
-      notifications.show({ title: 'Error', message: axiosErr.response?.data?.detail || 'Failed to generate PDF', color: 'red' });
+      let message = 'Failed to generate PDF';
+      try {
+        const axiosErr = err as { response?: { data?: Blob | { detail?: string } } };
+        const data = axiosErr.response?.data;
+        if (data instanceof Blob) {
+          const text = await data.text();
+          const json = JSON.parse(text);
+          if (json.detail) message = json.detail;
+        } else if (data && typeof data === 'object' && 'detail' in data) {
+          message = (data as { detail: string }).detail;
+        }
+      } catch { /* keep default message */ }
+      notifications.show({ title: 'Error', message, color: 'red' });
     }
   };
 
