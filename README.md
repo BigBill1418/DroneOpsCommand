@@ -44,6 +44,8 @@ Designed for FAA Part 107 certified operators running missions such as search & 
 - 8GB+ RAM recommended (Ollama loads a 4GB quantized model)
 - x86_64 or ARM64 host
 
+> **Windows?** See the [Windows Self-Hosting Guide](docs/windows-self-hosting.md) for step-by-step Docker Desktop + WSL 2 setup.
+
 ### Setup
 
 ```bash
