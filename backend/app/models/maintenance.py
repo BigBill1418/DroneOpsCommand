@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime, date
 
-from sqlalchemy import String, Text, DateTime, Date, Float, Integer, ForeignKey
+from sqlalchemy import Text, DateTime, Date, Float, Integer, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -17,7 +17,7 @@ class MaintenanceRecord(Base):
     aircraft_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("aircraft.id", ondelete="CASCADE"), nullable=False
     )
-    maintenance_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    maintenance_type: Mapped[str] = mapped_column(Text, nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     performed_at: Mapped[date] = mapped_column(Date, nullable=False)
     flight_hours_at: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -37,7 +37,7 @@ class MaintenanceSchedule(Base):
     aircraft_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("aircraft.id", ondelete="CASCADE"), nullable=False
     )
-    maintenance_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    maintenance_type: Mapped[str] = mapped_column(Text, nullable=False)
     interval_hours: Mapped[float | None] = mapped_column(Float, nullable=True)
     interval_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
     last_performed: Mapped[date | None] = mapped_column(Date, nullable=True)

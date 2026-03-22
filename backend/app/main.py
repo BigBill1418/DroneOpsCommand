@@ -120,6 +120,14 @@ def _add_missing_columns(conn):
                     logger.info("Adding column %s.%s", table, col_name)
                     conn.execute(text(alter_sql))
 
+        # --- Widen maintenance_type columns from VARCHAR(100) to TEXT ---
+        for table in ("maintenance_records", "maintenance_schedules"):
+            if inspector.has_table(table):
+                for col in inspector.get_columns(table):
+                    if col["name"] == "maintenance_type" and hasattr(col["type"], "length") and col["type"].length:
+                        logger.info("Widening %s.maintenance_type to TEXT", table)
+                        conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN maintenance_type TYPE TEXT"))
+
         logger.info("Column migration check complete")
     except Exception as exc:
         logger.error("Column migration failed: %s", exc)
@@ -173,7 +181,7 @@ limiter = Limiter(key_func=get_remote_address)
 app = FastAPI(
     title="D.O.C — Drone Operations Command",
     description="Mission management, flight data, and after-action reporting for drone operations",
-    version="2.28.5",
+    version="2.29.0",
     lifespan=lifespan,
 )
 

@@ -6,6 +6,7 @@ import {
   Group,
   Loader,
   Modal,
+  MultiSelect,
   NumberInput,
   ScrollArea,
   Select,
@@ -54,7 +55,7 @@ export default function Maintenance() {
   const [addOpen, setAddOpen] = useState(false);
   const [form, setForm] = useState({
     aircraft_id: '',
-    maintenance_type: 'general_service',
+    maintenance_types: ['general_service'] as string[],
     description: '',
     performed_at: new Date(),
     flight_hours_at: null as number | null,
@@ -88,15 +89,24 @@ export default function Maintenance() {
       notifications.show({ title: 'Error', message: 'Select an aircraft', color: 'red' });
       return;
     }
+    if (form.maintenance_types.length === 0) {
+      notifications.show({ title: 'Error', message: 'Select at least one maintenance type', color: 'red' });
+      return;
+    }
     try {
       await api.post('/maintenance/records', {
-        ...form,
+        aircraft_id: form.aircraft_id,
+        maintenance_type: form.maintenance_types.join(','),
+        description: form.description,
         performed_at: form.performed_at.toISOString().split('T')[0],
+        flight_hours_at: form.flight_hours_at,
         next_due_date: form.next_due_date ? form.next_due_date.toISOString().split('T')[0] : null,
+        cost: form.cost,
+        notes: form.notes,
       });
       notifications.show({ title: 'Maintenance Logged', message: 'Record added successfully', color: 'cyan' });
       setAddOpen(false);
-      setForm({ aircraft_id: '', maintenance_type: 'general_service', description: '', performed_at: new Date(), flight_hours_at: null, next_due_date: null, cost: null, notes: '' });
+      setForm({ aircraft_id: '', maintenance_types: ['general_service'], description: '', performed_at: new Date(), flight_hours_at: null, next_due_date: null, cost: null, notes: '' });
       loadData();
     } catch (err: any) {
       notifications.show({ title: 'Error', message: err.response?.data?.detail || 'Failed to add record', color: 'red' });
@@ -120,6 +130,10 @@ export default function Maintenance() {
 
   const getTypeLabel = (type: string) => {
     return MAINTENANCE_TYPES.find((t) => t.value === type)?.label || type;
+  };
+
+  const getTypeLabels = (typeStr: string) => {
+    return typeStr.split(',').map((t) => t.trim()).filter(Boolean);
   };
 
   const overdueCount = alerts.filter((a) => a.overdue).length;
@@ -233,7 +247,11 @@ export default function Maintenance() {
                         <Text size="sm" fw={500}>{getAircraftName(rec.aircraft_id)}</Text>
                       </Table.Td>
                       <Table.Td>
-                        <Badge variant="light" color="cyan" size="sm">{getTypeLabel(rec.maintenance_type)}</Badge>
+                        <Group gap={4} wrap="wrap">
+                          {getTypeLabels(rec.maintenance_type).map((t) => (
+                            <Badge key={t} variant="light" color="cyan" size="sm">{getTypeLabel(t)}</Badge>
+                          ))}
+                        </Group>
                       </Table.Td>
                       <Table.Td className="hide-mobile">
                         <Text size="xs" c="#5a6478" lineClamp={1}>{rec.description || rec.notes || '—'}</Text>
@@ -278,11 +296,12 @@ export default function Maintenance() {
             onChange={(v) => setForm({ ...form, aircraft_id: v || '' })}
             styles={inputStyles}
           />
-          <Select
-            label="Maintenance Type"
+          <MultiSelect
+            label="Maintenance Type(s)"
             data={MAINTENANCE_TYPES}
-            value={form.maintenance_type}
-            onChange={(v) => setForm({ ...form, maintenance_type: v || 'general_service' })}
+            value={form.maintenance_types}
+            onChange={(v) => setForm({ ...form, maintenance_types: v.length > 0 ? v : ['general_service'] })}
+            placeholder="Select one or more categories"
             styles={inputStyles}
           />
           <Textarea
