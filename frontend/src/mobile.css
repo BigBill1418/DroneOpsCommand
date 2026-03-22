@@ -311,6 +311,80 @@
   }
 }
 
+/* ── Mobile landscape ─────────────────────────────────────────────── */
+/* Phones in landscape have width > 768px but height < 500px.
+   Without this, Mantine treats them as "desktop" and shows the navbar
+   as a permanent 220px sidebar, squishing content and getting stuck. */
+@media (orientation: landscape) and (max-height: 500px) {
+  /* Force the navbar to hide (same as mobile portrait behavior).
+     Mantine shows it above sm breakpoint — override that. */
+  .mantine-AppShell-navbar {
+    transform: translateX(-100%) !important;
+    transition: transform 200ms ease !important;
+  }
+
+  /* When opened via burger, slide it in */
+  .mantine-AppShell-navbar[data-hidden="false"],
+  .mantine-AppShell-navbar:not([data-hidden]) {
+    /* The navbar won't have data-hidden when it's "always visible" mode.
+       We rely on JS toggling below. For CSS-only, we hide by default. */
+  }
+
+  /* Show the burger menu in landscape too */
+  .mantine-Burger-root {
+    display: flex !important;
+  }
+
+  /* Shrink the header to save vertical space */
+  .mantine-AppShell-header {
+    height: 48px !important;
+    min-height: 48px !important;
+  }
+
+  /* Adjust main area top padding for shorter header */
+  .mantine-AppShell-main {
+    padding-top: 56px !important;
+    padding-left: 8px !important;
+    padding-right: 8px !important;
+  }
+
+  /* Shrink header text */
+  .mantine-AppShell-header .mantine-Text-root[style*="Bebas Neue"] {
+    font-size: 18px !important;
+  }
+
+  /* Hide tagline in landscape */
+  .mantine-AppShell-header .mantine-Text-root[style*="Share Tech Mono"] {
+    display: none !important;
+  }
+
+  /* Modals — use full viewport in landscape */
+  .mantine-Modal-content {
+    max-height: 95vh !important;
+    min-height: unset !important;
+  }
+
+  .mantine-Modal-body {
+    max-height: 80vh !important;
+    overflow-y: auto !important;
+  }
+
+  /* Tables — compact to fit landscape height */
+  .mantine-Table-td {
+    padding: 6px !important;
+  }
+
+  /* Stat cards — shrink in landscape */
+  .mantine-SimpleGrid-root {
+    gap: 6px !important;
+  }
+
+  /* Cards — less padding */
+  .mantine-Card-root {
+    padding: 8px !important;
+  }
+}
+
 /* ── Tablet-specific (769px - 1024px) ─────────────────────────────── */
 @media (min-width: 769px) and (max-width: 1024px) {
   .mantine-ActionIcon-root {
