@@ -43,30 +43,51 @@ async def create_record(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
-    record = MaintenanceRecord(
-        aircraft_id=data.aircraft_id,
-        maintenance_type=data.maintenance_type,
-        description=data.description,
-        performed_at=date.fromisoformat(data.performed_at),
-        flight_hours_at=data.flight_hours_at,
-        next_due_hours=data.next_due_hours,
-        next_due_date=date.fromisoformat(data.next_due_date) if data.next_due_date else None,
-        cost=data.cost,
-        notes=data.notes,
-    )
-    db.add(record)
-    await db.flush()
-    await db.refresh(record)
+    try:
+        performed = date.fromisoformat(data.performed_at)
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=422, detail=f"Invalid performed_at date: {exc}")
 
-    # Update schedule's last_performed if matching
-    schedules = await db.execute(
-        select(MaintenanceSchedule).where(
-            MaintenanceSchedule.aircraft_id == data.aircraft_id,
-            MaintenanceSchedule.maintenance_type == data.maintenance_type,
+    try:
+        next_due = date.fromisoformat(data.next_due_date) if data.next_due_date else None
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=422, detail=f"Invalid next_due_date: {exc}")
+
+    # maintenance_type may be comma-separated (multi-category)
+    maintenance_type = data.maintenance_type.strip() if data.maintenance_type else ""
+    if not maintenance_type:
+        raise HTTPException(status_code=422, detail="At least one maintenance type is required")
+
+    try:
+        record = MaintenanceRecord(
+            aircraft_id=data.aircraft_id,
+            maintenance_type=maintenance_type,
+            description=data.description,
+            performed_at=performed,
+            flight_hours_at=data.flight_hours_at,
+            next_due_hours=data.next_due_hours,
+            next_due_date=next_due,
+            cost=data.cost,
+            notes=data.notes,
         )
-    )
-    for sched in schedules.scalars().all():
-        sched.last_performed = record.performed_at
+        db.add(record)
+        await db.flush()
+        await db.refresh(record)
+    except Exception as exc:
+        logger.error("Failed to create maintenance record: %s", exc)
+        raise HTTPException(status_code=500, detail=f"Database error: {exc}")
+
+    # Update schedule's last_performed if matching any of the types
+    type_list = [t.strip() for t in maintenance_type.split(",")]
+    for mtype in type_list:
+        schedules = await db.execute(
+            select(MaintenanceSchedule).where(
+                MaintenanceSchedule.aircraft_id == data.aircraft_id,
+                MaintenanceSchedule.maintenance_type == mtype,
+            )
+        )
+        for sched in schedules.scalars().all():
+            sched.last_performed = record.performed_at
 
     return record
 
