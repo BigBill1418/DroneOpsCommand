@@ -341,7 +341,7 @@ async def upload_flights(
                         drone_model=parsed.get("drone_model"),
                         drone_serial=parsed.get("drone_serial"),
                         battery_serial=parsed.get("battery_serial"),
-                        start_time=parsed.get("start_time"),
+                        start_time=_parse_datetime(parsed.get("start_time")),
                         duration_secs=parsed.get("duration_secs", 0),
                         total_distance=parsed.get("total_distance", 0),
                         max_altitude=parsed.get("max_altitude", 0),
@@ -361,10 +361,15 @@ async def upload_flights(
                     await db.refresh(flight)
                     imported.append(flight)
 
-                    # Auto-track battery if data is available
+                    # Auto-track battery — best-effort via savepoint so failures
+                    # don't rollback the flight import
                     battery_data = parsed.get("battery_data")
                     if battery_data and battery_data.get("serial"):
-                        await _track_battery(db, flight, battery_data)
+                        try:
+                            async with db.begin_nested():
+                                await _track_battery(db, flight, battery_data)
+                        except Exception as bat_exc:
+                            logger.warning("Battery tracking failed for flight %s: %s", flight.id, bat_exc)
 
         except httpx.ConnectError:
             errors.append(f"{upload.filename}: flight-parser service unavailable")
@@ -463,7 +468,7 @@ async def device_upload_flights(
                         drone_model=parsed.get("drone_model"),
                         drone_serial=parsed.get("drone_serial"),
                         battery_serial=parsed.get("battery_serial"),
-                        start_time=parsed.get("start_time"),
+                        start_time=_parse_datetime(parsed.get("start_time")),
                         duration_secs=parsed.get("duration_secs", 0),
                         total_distance=parsed.get("total_distance", 0),
                         max_altitude=parsed.get("max_altitude", 0),
@@ -483,9 +488,15 @@ async def device_upload_flights(
                     await db.refresh(flight)
                     imported.append(flight)
 
+                    # Auto-track battery — best-effort via savepoint so failures
+                    # don't rollback the flight import
                     battery_data = parsed.get("battery_data")
                     if battery_data and battery_data.get("serial"):
-                        await _track_battery(db, flight, battery_data)
+                        try:
+                            async with db.begin_nested():
+                                await _track_battery(db, flight, battery_data)
+                        except Exception as bat_exc:
+                            logger.warning("Battery tracking failed for flight %s: %s", flight.id, bat_exc)
 
         except httpx.ConnectError:
             errors.append(f"{upload.filename}: flight-parser service unavailable")
