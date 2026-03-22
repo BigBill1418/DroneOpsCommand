@@ -2,7 +2,7 @@
 
 **Self-hosted mission management, AI report generation, and invoicing for commercial drone operators.**
 
-**Version 2.28.4** | [Quick Start](#quick-start) | [Features](#features) | [Configuration](#configuration) | [Contributing](CONTRIBUTING.md) | [License](LICENSE)
+**Version 2.28.5** | [Quick Start](#quick-start) | [Features](#features) | [Configuration](#configuration) | [Contributing](CONTRIBUTING.md) | [License](LICENSE)
 
 ---
 
@@ -43,6 +43,8 @@ Designed for FAA Part 107 certified operators running missions such as search & 
 - [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/install/) (v2+)
 - 8GB+ RAM recommended (Ollama loads a 4GB quantized model)
 - x86_64 or ARM64 host
+
+> **Windows?** See the [Windows Self-Hosting Guide](docs/windows-self-hosting.md) for step-by-step Docker Desktop + WSL 2 setup.
 
 ### Setup
 
