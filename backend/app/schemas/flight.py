@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from uuid import UUID
 
 from pydantic import BaseModel
@@ -156,10 +156,10 @@ class MaintenanceRecordResponse(BaseModel):
     aircraft_id: UUID
     maintenance_type: str
     description: str | None
-    performed_at: str
+    performed_at: date
     flight_hours_at: float | None
     next_due_hours: float | None
-    next_due_date: str | None
+    next_due_date: date | None
     cost: float | None
     notes: str | None
     created_at: datetime
@@ -181,7 +181,7 @@ class MaintenanceScheduleResponse(BaseModel):
     maintenance_type: str
     interval_hours: float | None
     interval_days: int | None
-    last_performed: str | None
+    last_performed: date | None
     description: str | None
     created_at: datetime
 

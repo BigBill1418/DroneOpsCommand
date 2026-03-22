@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   AppShell,
   Burger,
@@ -31,9 +31,22 @@ interface AppLayoutProps {
 
 export default function AppLayout({ onLogout }: AppLayoutProps) {
   const [opened, setOpened] = useState(false);
+  const [isPhoneLandscape, setIsPhoneLandscape] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
   const branding = useBranding();
+
+  // Detect phone-in-landscape: landscape orientation + short viewport height
+  useEffect(() => {
+    const mq = window.matchMedia('(orientation: landscape) and (max-height: 500px)');
+    const update = (e: MediaQueryListEvent | MediaQueryList) => {
+      setIsPhoneLandscape(e.matches);
+      if (e.matches) setOpened(false); // close navbar when rotating to landscape
+    };
+    update(mq);
+    mq.addEventListener('change', update);
+    return () => mq.removeEventListener('change', update);
+  }, []);
 
   const navItems = [
     { icon: IconDashboard, label: 'Dashboard', path: '/' },
@@ -48,8 +61,8 @@ export default function AppLayout({ onLogout }: AppLayoutProps) {
 
   return (
     <AppShell
-      header={{ height: 60 }}
-      navbar={{ width: 220, breakpoint: 'sm', collapsed: { mobile: !opened } }}
+      header={{ height: isPhoneLandscape ? 48 : 60 }}
+      navbar={{ width: 220, breakpoint: 'sm', collapsed: { mobile: !opened, desktop: isPhoneLandscape && !opened } }}
       padding="md"
       styles={{
         main: { background: '#050608' },
@@ -66,7 +79,7 @@ export default function AppLayout({ onLogout }: AppLayoutProps) {
       <AppShell.Header>
         <Group h="100%" px="md" justify="space-between">
           <Group>
-            <Burger opened={opened} onClick={() => setOpened(!opened)} hiddenFrom="sm" size="sm" color="#e8edf2" />
+            <Burger opened={opened} onClick={() => setOpened(!opened)} hiddenFrom={isPhoneLandscape ? undefined : 'sm'} size="sm" color="#e8edf2" />
             <Text
               size="xl"
               fw={700}
@@ -140,7 +153,7 @@ export default function AppLayout({ onLogout }: AppLayoutProps) {
               fontSize: '15px',
             }}
           >
-            v2.29.0
+            v2.29.1
           </Text>
           <Tooltip label="Star on GitHub" position="right">
             <ActionIcon
@@ -166,7 +179,7 @@ export default function AppLayout({ onLogout }: AppLayoutProps) {
             backgroundOpacity={0.5}
             color="#000"
             zIndex={199}
-            hiddenFrom="sm"
+            hiddenFrom={isPhoneLandscape ? undefined : 'sm'}
           />
         )}
         <Outlet />
