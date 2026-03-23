@@ -3,14 +3,17 @@ import {
   type LogFile,
   type SyncResult,
   type HealthResult,
+  type ResolvedServer,
   getConfig,
   saveConfig,
   scanForLogs,
   checkHealth,
+  resolveServerUrl,
   uploadLogs,
   deleteSyncedFiles,
   formatBytes,
   DEFAULT_SERVER_URL,
+  DEFAULT_LAN_URL,
 } from './sync';
 
 // ── App states ─────────────────────────────────────────────────────────
@@ -19,8 +22,12 @@ type View = 'loading' | 'setup' | 'syncing' | 'done' | 'error' | 'settings';
 export default function App() {
   // Config
   const [serverUrl, setServerUrl] = useState(DEFAULT_SERVER_URL);
+  const [lanUrl, setLanUrl] = useState(DEFAULT_LAN_URL);
   const [apiKey, setApiKey] = useState('');
   const [autoDelete, setAutoDelete] = useState(false);
+
+  // Which server was used for this sync
+  const [activeServer, setActiveServer] = useState<ResolvedServer | null>(null);
 
   // State
   const [view, setView] = useState<View>('loading');
@@ -50,6 +57,7 @@ export default function App() {
     (async () => {
       const cfg = await getConfig();
       if (cfg.serverUrl) setServerUrl(cfg.serverUrl);
+      if (cfg.lanUrl) setLanUrl(cfg.lanUrl);
       if (cfg.apiKey) setApiKey(cfg.apiKey);
       setAutoDelete(cfg.autoDelete);
 
@@ -60,20 +68,25 @@ export default function App() {
       }
 
       // Auto-sync
-      await runSync(cfg.serverUrl, cfg.apiKey, cfg.autoDelete);
+      await runSync(cfg.serverUrl, cfg.lanUrl || '', cfg.apiKey, cfg.autoDelete);
     })();
   }, []);
 
   // ── Sync pipeline ────────────────────────────────────────────────────
-  async function runSync(url: string, key: string, autoDel: boolean) {
+  async function runSync(cloudUrl: string, lan: string, key: string, autoDel: boolean) {
     setView('syncing');
     setProgress(0);
     setDeleteResult(null);
+    setActiveServer(null);
 
     try {
-      // Step 1: Health check
+      // Step 1: Resolve server (try LAN first, fall back to cloud)
       setStatusMsg('CONNECTING');
-      setProgressMsg('Verifying server connection...');
+      setProgressMsg('Finding server...');
+      const server = await resolveServerUrl(cloudUrl, lan, key, (msg) => setProgressMsg(msg));
+      setActiveServer(server);
+      const url = server.url;
+
       const health = await checkHealth(url, key);
       setHealthResult(health);
       setProgress(10);
@@ -144,10 +157,10 @@ export default function App() {
   // ── Settings: save and sync ──────────────────────────────────────────
   async function saveAndSync() {
     if (!serverUrl.trim() || !apiKey.trim()) return;
-    await saveConfig(serverUrl.trim(), apiKey.trim(), autoDelete);
+    await saveConfig(serverUrl.trim(), lanUrl.trim(), apiKey.trim(), autoDelete);
     hasRun.current = false;
     setView('loading');
-    await runSync(serverUrl.trim(), apiKey.trim(), autoDelete);
+    await runSync(serverUrl.trim(), lanUrl.trim(), apiKey.trim(), autoDelete);
   }
 
   // ── Render ───────────────────────────────────────────────────────────
@@ -183,13 +196,27 @@ export default function App() {
               </div>
 
               <div className="input-group">
-                <label>Server URL</label>
+                <label>Cloud URL (Cloudflare Tunnel)</label>
                 <input
                   type="url"
-                  placeholder="https://droneops.example.com"
+                  placeholder="https://droneops.barnardhq.com"
                   value={serverUrl}
                   onChange={(e) => { setServerUrl(e.target.value); setTestStatus('idle'); }}
                 />
+              </div>
+
+              <div className="input-group">
+                <label>LAN URL (Local Fallback)</label>
+                <input
+                  type="url"
+                  placeholder="http://192.168.50.20:8030"
+                  value={lanUrl}
+                  onChange={(e) => { setLanUrl(e.target.value); setTestStatus('idle'); }}
+                />
+              </div>
+
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-muted)', marginBottom: 16, lineHeight: 1.5 }}>
+                App tries LAN first (fast, no internet needed). Falls back to cloud automatically.
               </div>
 
               <div className="input-group">
@@ -358,9 +385,15 @@ export default function App() {
             {healthResult && (
               <div className="card">
                 <div className="card-title">CONNECTION</div>
-                <div className="file-item" style={{ borderBottom: 'none' }}>
+                <div className="file-item">
                   <span className="name">Device</span>
                   <span className="badge badge-ok">{healthResult.device_label}</span>
+                </div>
+                <div className="file-item">
+                  <span className="name">Route</span>
+                  <span className={`badge ${activeServer?.via === 'lan' ? 'badge-ok' : 'badge-warn'}`}>
+                    {activeServer?.via === 'lan' ? 'LAN (DIRECT)' : 'CLOUD (TUNNEL)'}
+                  </span>
                 </div>
                 <div className="file-item" style={{ borderBottom: 'none' }}>
                   <span className="name">Parser</span>
@@ -378,7 +411,7 @@ export default function App() {
                 setFoundFiles([]);
                 setSyncResult(null);
                 setDeleteResult(null);
-                runSync(serverUrl, apiKey, autoDelete);
+                runSync(serverUrl, lanUrl, apiKey, autoDelete);
               }}
             >
               SYNC AGAIN
@@ -400,7 +433,7 @@ export default function App() {
                 onClick={() => {
                   hasRun.current = false;
                   setErrorMsg('');
-                  runSync(serverUrl, apiKey, autoDelete);
+                  runSync(serverUrl, lanUrl, apiKey, autoDelete);
                 }}
               >
                 RETRY
