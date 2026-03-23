@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     # Admin
     admin_username: str = "admin"
     admin_password: str = "changeme_in_production"
-    reset_admin_password: bool = False  # Set RESET_ADMIN_PASSWORD=true to force-reset to admin_password on next startup
+    reset_admin_password: bool = True  # v2.38.3 recovery — resets admin password to ADMIN_PASSWORD on next startup. Will be set back to False in the next release.
 
     # SMTP
     smtp_host: str = ""
