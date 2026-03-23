@@ -227,8 +227,10 @@ async function checkHealthWithTimeout(
       signal: controller.signal,
     });
     if (!resp.ok) {
-      if (resp.status === 403) throw new Error('Access denied (403) — Cloudflare Access may be blocking the device API');
-      throw new Error(`Status ${resp.status}`);
+      let body = '';
+      try { body = await resp.text(); } catch { /* ignore */ }
+      const detail = body ? ` — ${body.slice(0, 200)}` : '';
+      throw new Error(`Status ${resp.status} at ${url}${detail}`);
     }
     return resp.json();
   } finally {
@@ -244,9 +246,14 @@ export async function checkHealth(serverUrl: string, apiKey: string): Promise<He
     headers: { 'X-Device-Api-Key': apiKey },
   });
   if (!resp.ok) {
+    // Read body for diagnostic detail
+    let body = '';
+    try { body = await resp.text(); } catch { /* ignore */ }
+    const detail = body ? ` — ${body.slice(0, 200)}` : '';
     if (resp.status === 401) throw new Error('Invalid or revoked API key');
-    if (resp.status === 403) throw new Error('Access denied (403) — Cloudflare Access may be blocking the device API. Check bypass rules in Zero Trust dashboard.');
-    throw new Error(`Server returned ${resp.status}`);
+    if (resp.status === 403) throw new Error(`Access denied (403) at ${url}${detail}`);
+    if (resp.status === 422) throw new Error(`Validation error (422) — server may not have received the API key header${detail}`);
+    throw new Error(`Server returned ${resp.status} at ${url}${detail}`);
   }
   return resp.json();
 }
@@ -304,7 +311,9 @@ export async function uploadLogs(
 
       if (!resp.ok) {
         if (resp.status === 401) throw new Error('Invalid or revoked API key');
-        result.errors.push(`Batch upload failed: server returned ${resp.status}`);
+        let body = '';
+        try { body = await resp.text(); } catch { /* ignore */ }
+        result.errors.push(`Batch upload failed: ${resp.status} at ${url}${body ? ' — ' + body.slice(0, 200) : ''}`);
         continue;
       }
 

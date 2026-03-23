@@ -502,7 +502,7 @@ export default function App() {
 
       {/* Footer */}
       <div className="footer">
-        DRONEOPSSYNC v1.1.0 — BARNARD HQ
+        DRONEOPSSYNC v1.2.0 — BARNARD HQ
       </div>
     </div>
   );
