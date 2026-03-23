@@ -74,6 +74,7 @@ const permissions = [
   'android.permission.INTERNET',
   'android.permission.READ_EXTERNAL_STORAGE',
   'android.permission.WRITE_EXTERNAL_STORAGE',
+  'android.permission.MANAGE_EXTERNAL_STORAGE',  // "All Files Access" — needed to read Android/data/ on API 30+
 ];
 
 for (const perm of permissions) {

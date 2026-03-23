@@ -21,11 +21,24 @@ export const PREF_SYNCED_HASHES = 'syncedHashes';
 export const DEFAULT_SERVER_URL = 'http://192.168.50.20:3080';
 
 // ── DJI log paths (relative to ExternalStorage = /storage/emulated/0/) ─
+// Verified paths from actual Barnard HQ fleet devices:
+//   4TD  (RC Plus 2) → DJI/com.dji.industry.pilot/FlightRecord
+//   M30T (RC Plus)   → DJI/com.dji.industry.pilot/FlightRecord
+//   M3P  (RC Pro)    → Android/data/dji.go.v5/files/FlightRecord
+//   M5P  (RC 2)      → Android/data/dji.go.v5/files/FlightRecord
+//   Phone (S25 Ultra) → Android/data/dji.go.v5/files/FlightRecord
 export const DJI_LOG_PATHS = [
-  'DJI/dji.go.v5/FlightRecord',          // DJI Fly v2 (Go 5 engine)
-  'DJI/dji.go.v4/FlightRecord',          // DJI Fly v1 (Go 4 engine)
-  'DJI/com.dji.industry.pilot/FlightRecord', // DJI Pilot (enterprise)
-  'DJI/com.dji.industry.pilot2/FlightRecord', // DJI Pilot 2
+  // Enterprise controllers (DJI Pilot / Pilot 2)
+  'DJI/com.dji.industry.pilot/FlightRecord',   // 4TD, M30T — RC Plus, RC Plus 2
+  'DJI/com.dji.industry.pilot2/FlightRecord',  // DJI Pilot 2
+
+  // Consumer controllers (DJI Fly / Go 5) — requires MANAGE_EXTERNAL_STORAGE
+  'Android/data/dji.go.v5/files/FlightRecord',  // M3P, M5P, phones — RC Pro, RC 2, Android
+  'Android/data/dji.go.v4/files/FlightRecord',  // DJI Fly v1 (Go 4 engine)
+
+  // Legacy paths (older firmware may store here)
+  'DJI/dji.go.v5/FlightRecord',
+  'DJI/dji.go.v4/FlightRecord',
 ];
 
 // File extensions we care about
@@ -128,13 +141,26 @@ export async function scanForLogs(
 
   const synced = await getSyncedPaths();
   const found: LogFile[] = [];
+  let androidDataBlocked = false;
 
   for (const basePath of DJI_LOG_PATHS) {
     onProgress?.(`Scanning ${basePath}...`);
-    if (!(await dirExists(basePath))) continue;
+    if (!(await dirExists(basePath))) {
+      // Track if Android/data paths specifically failed — likely needs "All Files Access"
+      if (basePath.startsWith('Android/data')) androidDataBlocked = true;
+      continue;
+    }
 
     // Recursively scan (DJI nests logs in date subfolders)
     await scanDir(basePath, basePath, synced, found);
+  }
+
+  // If nothing found and Android/data paths were inaccessible, give a helpful error
+  if (found.length === 0 && androidDataBlocked) {
+    throw new Error(
+      'No logs found. DJI Fly stores logs in Android/data/ which requires "All Files Access" permission. '
+      + 'Go to device Settings → Apps → DroneOpsSync → Permissions → Files → Allow management of all files.'
+    );
   }
 
   return found;
