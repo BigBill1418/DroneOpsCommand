@@ -29,15 +29,13 @@ fs.mkdirSync(RES_XML, { recursive: true });
 
 fs.writeFileSync(NET_SEC, `<?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <!-- Allow cleartext (HTTP) to local/private network IPs for LAN sync -->
-    <domain-config cleartextTrafficPermitted="true">
-        <domain includeSubdomains="true">10.0.0.0</domain>
-        <domain includeSubdomains="true">172.16.0.0</domain>
-        <domain includeSubdomains="true">192.168.0.0</domain>
-        <domain includeSubdomains="true">localhost</domain>
-    </domain-config>
-    <!-- Block cleartext to everything else (force HTTPS for cloud/tunnel) -->
-    <base-config cleartextTrafficPermitted="false">
+    <!--
+      Allow cleartext (HTTP) globally. DroneOpsSync is a LAN-only app that
+      connects to a local server via IP address. Android's <domain> tags only
+      match hostnames, not IP addresses or CIDR ranges, so we must permit
+      cleartext at the base-config level for IP-based connections to work.
+    -->
+    <base-config cleartextTrafficPermitted="true">
         <trust-anchors>
             <certificates src="system" />
         </trust-anchors>
@@ -54,6 +52,13 @@ let changed = false;
 if (!manifest.includes('networkSecurityConfig')) {
   manifest = manifest.replace('<application', '<application android:networkSecurityConfig="@xml/network_security_config"');
   console.log('  + Added networkSecurityConfig reference');
+  changed = true;
+}
+
+// Add usesCleartextTraffic to <application> (belt-and-suspenders for HTTP on LAN IPs)
+if (!manifest.includes('usesCleartextTraffic')) {
+  manifest = manifest.replace('<application', '<application android:usesCleartextTraffic="true"');
+  console.log('  + Added usesCleartextTraffic');
   changed = true;
 }
 
