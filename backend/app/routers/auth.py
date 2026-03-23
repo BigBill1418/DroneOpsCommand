@@ -40,10 +40,10 @@ class ForceResetRequest(BaseModel):
     new_password: str
 
 
-# ── Login lockout: 3 failed attempts in 120s → locked for 5 minutes ──
-LOCKOUT_MAX_ATTEMPTS = 3
+# ── Login lockout: 5 failed attempts in 120s → locked for 2 minutes ──
+LOCKOUT_MAX_ATTEMPTS = 5
 LOCKOUT_WINDOW_SECS = 120
-LOCKOUT_DURATION_SECS = 300
+LOCKOUT_DURATION_SECS = 120
 
 # {ip_address: [timestamp, timestamp, ...]}
 _failed_attempts: dict[str, list[float]] = defaultdict(list)
