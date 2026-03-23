@@ -21,7 +21,7 @@ import {
 import api from '../api/client';
 import { cardStyle, monoFont } from '../components/shared/styles';
 
-const VALID_EXTS = new Set(['csv', 'dat', 'log', 'txt', 'json']);
+const VALID_EXTS = new Set(['csv', 'dat', 'log', 'txt']);
 
 type FileStatus = 'pending' | 'uploading' | 'done' | 'skip' | 'error';
 
@@ -203,7 +203,7 @@ export default function UploadLogs() {
           ref={fileRef}
           type="file"
           multiple
-          accept=".csv,.dat,.log,.txt,.json"
+          accept=".csv,.dat,.log,.txt"
           style={{ display: 'none' }}
           onChange={e => { addFiles(e.target.files); e.target.value = ''; }}
         />
