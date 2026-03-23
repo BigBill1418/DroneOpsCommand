@@ -16,7 +16,7 @@ from slowapi.util import get_remote_address
 from app.config import settings
 from app.database import Base, async_session, engine, get_db
 import app.models  # noqa: F401 — ensure all models registered with Base before create_all
-from app.routers import auth, customers, aircraft, missions, flights, maps, reports, invoices, rate_templates, llm, system_settings, financials, weather, intake, flight_library, batteries, maintenance, backup
+from app.routers import auth, customers, aircraft, missions, flights, maps, reports, invoices, rate_templates, llm, system_settings, financials, weather, intake, flight_library, batteries, maintenance, backup, device_keys
 
 # Configure root logger for the app
 logging.basicConfig(
@@ -187,7 +187,7 @@ limiter = Limiter(key_func=get_remote_address)
 app = FastAPI(
     title="D.O.C — Drone Operations Command",
     description="Mission management, flight data, and after-action reporting for drone operations",
-    version="2.32.0",
+    version="2.32.1",
     lifespan=lifespan,
 )
 
@@ -258,6 +258,7 @@ app.include_router(flight_library.router)
 app.include_router(batteries.router)
 app.include_router(maintenance.router)
 app.include_router(backup.router)
+app.include_router(device_keys.router)
 
 
 @app.middleware("http")
