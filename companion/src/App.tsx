@@ -9,12 +9,12 @@ import {
   checkHealth,
   uploadLogs,
   deleteSyncedFiles,
+  checkStorageAccess,
   formatBytes,
   DEFAULT_SERVER_URL,
 } from './sync';
 
-// ── App states ─────────────────────────────────────────────────────────
-type View = 'loading' | 'setup' | 'syncing' | 'done' | 'error' | 'settings';
+type View = 'loading' | 'setup' | 'syncing' | 'done' | 'error' | 'settings' | 'diagnostic';
 
 export default function App() {
   // Config
@@ -26,7 +26,7 @@ export default function App() {
   const [view, setView] = useState<View>('loading');
   const [statusMsg, setStatusMsg] = useState('');
   const [progressMsg, setProgressMsg] = useState('');
-  const [progress, setProgress] = useState(0); // 0-100
+  const [progress, setProgress] = useState(0);
 
   // Results
   const [foundFiles, setFoundFiles] = useState<LogFile[]>([]);
@@ -34,15 +34,18 @@ export default function App() {
   const [healthResult, setHealthResult] = useState<HealthResult | null>(null);
   const [errorMsg, setErrorMsg] = useState('');
   const [deleteResult, setDeleteResult] = useState<{ deleted: number } | null>(null);
+  const [scanErrors, setScanErrors] = useState<string[]>([]);
+
+  // Diagnostics
+  const [diagInfo, setDiagInfo] = useState<any>(null);
 
   // Settings test
   const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle');
   const [testMsg, setTestMsg] = useState('');
 
-  // Prevent double-run
   const hasRun = useRef(false);
 
-  // ── Boot: load config and auto-sync ──────────────────────────────────
+  // ── Boot: load config, auto-sync ──────────────────────────────────
   useEffect(() => {
     if (hasRun.current) return;
     hasRun.current = true;
@@ -53,22 +56,21 @@ export default function App() {
       if (cfg.apiKey) setApiKey(cfg.apiKey);
       setAutoDelete(cfg.autoDelete);
 
-      // If not configured, show setup
       if (!cfg.serverUrl || !cfg.apiKey) {
         setView('setup');
         return;
       }
 
-      // Auto-sync
       await runSync(cfg.serverUrl, cfg.apiKey, cfg.autoDelete);
     })();
   }, []);
 
-  // ── Sync pipeline ────────────────────────────────────────────────────
+  // ── Sync pipeline ─────────────────────────────────────────────────
   async function runSync(url: string, key: string, autoDel: boolean) {
     setView('syncing');
     setProgress(0);
     setDeleteResult(null);
+    setScanErrors([]);
 
     try {
       // Step 1: Health check
@@ -86,8 +88,10 @@ export default function App() {
       // Step 2: Scan for logs
       setStatusMsg('SCANNING');
       setProgressMsg('Scanning DJI flight log folders...');
-      const files = await scanForLogs((msg) => setProgressMsg(msg));
+      const scanResult = await scanForLogs((msg) => setProgressMsg(msg));
+      const files = scanResult.files;
       setFoundFiles(files);
+      setScanErrors(scanResult.errors);
       setProgress(30);
 
       if (files.length === 0) {
@@ -127,11 +131,10 @@ export default function App() {
     }
   }
 
-  // ── Settings: test connection ────────────────────────────────────────
+  // ── Settings: test connection ─────────────────────────────────────
   async function testConnection() {
     setTestStatus('testing');
     setTestMsg('');
-
     try {
       const h = await checkHealth(serverUrl.trim(), apiKey);
       setTestStatus('ok');
@@ -142,7 +145,7 @@ export default function App() {
     }
   }
 
-  // ── Settings: save and sync ──────────────────────────────────────────
+  // ── Settings: save and sync ───────────────────────────────────────
   async function saveAndSync() {
     if (!serverUrl.trim() || !apiKey.trim()) return;
     await saveConfig(serverUrl.trim(), apiKey.trim(), autoDelete);
@@ -151,14 +154,26 @@ export default function App() {
     await runSync(serverUrl.trim(), apiKey.trim(), autoDelete);
   }
 
-  // ── Render ───────────────────────────────────────────────────────────
+  // ── Diagnostics ───────────────────────────────────────────────────
+  async function runDiagnostic() {
+    setDiagInfo(null);
+    setView('diagnostic');
+    try {
+      const info = await checkStorageAccess();
+      setDiagInfo(info);
+    } catch (err: any) {
+      setDiagInfo({ error: err.message });
+    }
+  }
+
+  // ── Render ────────────────────────────────────────────────────────
   return (
     <div className="app">
       {/* Header */}
       <div className="header">
         <img src="/icon.svg" alt="" className="header-icon" />
         <h1>DRONE<span>OPS</span> SYNC</h1>
-        {view !== 'setup' && view !== 'settings' && (
+        {view !== 'setup' && view !== 'settings' && view !== 'diagnostic' && (
           <button className="header-settings" onClick={() => setView('settings')}>
             SETTINGS
           </button>
@@ -166,7 +181,7 @@ export default function App() {
       </div>
 
       <div className="content">
-        {/* ── LOADING ────────────────────────────────────────────── */}
+        {/* ── LOADING ──────────────────────────────────────── */}
         {view === 'loading' && (
           <div className="card status-box">
             <div className="spinner" />
@@ -175,7 +190,7 @@ export default function App() {
           </div>
         )}
 
-        {/* ── SETUP (first run) ─────────────────────────────────── */}
+        {/* ── SETUP / SETTINGS ─────────────────────────────── */}
         {(view === 'setup' || view === 'settings') && (
           <>
             <div className="card">
@@ -253,19 +268,26 @@ export default function App() {
             </div>
 
             {view === 'settings' && (
-              <button
-                className="btn btn-outline"
-                onClick={() => {
-                  setView('done');
-                }}
-              >
-                BACK
-              </button>
+              <>
+                <button
+                  className="btn btn-outline"
+                  onClick={() => setView('done')}
+                  style={{ marginBottom: 8 }}
+                >
+                  BACK
+                </button>
+                <button
+                  className="btn btn-outline"
+                  onClick={runDiagnostic}
+                >
+                  RUN DIAGNOSTIC
+                </button>
+              </>
             )}
           </>
         )}
 
-        {/* ── SYNCING ───────────────────────────────────────────── */}
+        {/* ── SYNCING ─────────────────────────────────────── */}
         {view === 'syncing' && (
           <div className="card status-box">
             <div className="spinner" />
@@ -280,7 +302,7 @@ export default function App() {
           </div>
         )}
 
-        {/* ── DONE ──────────────────────────────────────────────── */}
+        {/* ── DONE ────────────────────────────────────────── */}
         {view === 'done' && syncResult && (
           <>
             <div className="card result-banner">
@@ -324,6 +346,22 @@ export default function App() {
               )}
             </div>
 
+            {/* Scan errors (e.g. permission denied on a path) */}
+            {scanErrors.length > 0 && (
+              <div className="card">
+                <div className="card-title" style={{ color: 'var(--orange)' }}>
+                  SCAN NOTES ({scanErrors.length})
+                </div>
+                <div className="file-list">
+                  {scanErrors.map((e, i) => (
+                    <div className="file-item" key={i}>
+                      <span className="name" style={{ color: 'var(--orange)' }}>{e}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* File details */}
             {foundFiles.length > 0 && (
               <div className="card">
@@ -341,7 +379,7 @@ export default function App() {
               </div>
             )}
 
-            {/* Errors */}
+            {/* Upload errors */}
             {syncResult.errors.length > 0 && (
               <div className="card">
                 <div className="card-title" style={{ color: 'var(--red)' }}>
@@ -395,7 +433,7 @@ export default function App() {
           </>
         )}
 
-        {/* ── ERROR ─────────────────────────────────────────────── */}
+        {/* ── ERROR ───────────────────────────────────────── */}
         {view === 'error' && (
           <div className="card status-box">
             <div style={{ fontSize: 48, marginBottom: 16 }}>&#9888;</div>
@@ -417,14 +455,69 @@ export default function App() {
               <button className="btn btn-outline" onClick={() => setView('settings')}>
                 CHECK SETTINGS
               </button>
+              <button className="btn btn-outline" onClick={runDiagnostic}>
+                RUN DIAGNOSTIC
+              </button>
             </div>
           </div>
+        )}
+
+        {/* ── DIAGNOSTIC ──────────────────────────────────── */}
+        {view === 'diagnostic' && (
+          <>
+            <div className="card">
+              <div className="card-title">STORAGE DIAGNOSTIC</div>
+              {!diagInfo ? (
+                <div style={{ textAlign: 'center', padding: 20 }}>
+                  <div className="spinner" />
+                  <div className="status-detail">Checking file access...</div>
+                </div>
+              ) : diagInfo.error ? (
+                <div className="status-detail" style={{ color: 'var(--red)' }}>
+                  Error: {diagInfo.error}
+                </div>
+              ) : (
+                <>
+                  <div className="file-item">
+                    <span className="name">Android SDK</span>
+                    <span className="badge badge-ok">API {diagInfo.sdkVersion}</span>
+                  </div>
+                  <div className="file-item">
+                    <span className="name">Storage Root</span>
+                    <span className="badge badge-ok">{diagInfo.storagePath}</span>
+                  </div>
+                  <div className="file-item">
+                    <span className="name">Root Accessible</span>
+                    <span className={`badge ${diagInfo.accessible ? 'badge-ok' : 'badge-err'}`}>
+                      {diagInfo.accessible ? 'YES' : 'NO'}
+                    </span>
+                  </div>
+
+                  <div className="card-title" style={{ marginTop: 16 }}>DJI LOG PATHS</div>
+                  {diagInfo.pathResults.map((p: any, i: number) => (
+                    <div className="file-item" key={i}>
+                      <span className="name" style={{ fontSize: 10 }}>
+                        {p.path.replace('Android/data/', 'A/d/').replace('DJI/', 'DJI/')}
+                      </span>
+                      <span className={`badge ${p.readable ? 'badge-ok' : p.exists ? 'badge-warn' : 'badge-err'}`}>
+                        {p.readable ? 'OK' : p.exists ? 'DENIED' : 'NOT FOUND'}
+                      </span>
+                    </div>
+                  ))}
+                </>
+              )}
+            </div>
+
+            <button className="btn btn-outline" onClick={() => setView('settings')}>
+              BACK TO SETTINGS
+            </button>
+          </>
         )}
       </div>
 
       {/* Footer */}
       <div className="footer">
-        DRONEOPSSYNC v2.0.0 LAN — BARNARD HQ
+        DRONEOPSSYNC v2.36.0 LAN — BARNARD HQ
       </div>
     </div>
   );

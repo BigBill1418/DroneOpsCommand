@@ -151,6 +151,18 @@ class MaintenanceRecordCreate(BaseModel):
     notes: str | None = None
 
 
+class MaintenanceRecordUpdate(BaseModel):
+    aircraft_id: UUID | None = None
+    maintenance_type: str | None = None
+    description: str | None = None
+    performed_at: str | None = None
+    flight_hours_at: float | None = None
+    next_due_hours: float | None = None
+    next_due_date: str | None = None
+    cost: float | None = None
+    notes: str | None = None
+
+
 class MaintenanceRecordResponse(BaseModel):
     id: UUID
     aircraft_id: UUID

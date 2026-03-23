@@ -1,21 +1,20 @@
 {
   "name": "droneopssync",
-  "version": "1.2.0",
+  "version": "2.36.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "cap:sync": "npx cap sync android && node scripts/patch-android.js",
-    "cap:patch": "node scripts/patch-android.js",
-    "cap:build": "npm run build && npx cap copy android && node scripts/patch-android.js && node scripts/gradlew.js assembleDebug",
-    "cap:build:release": "npm run build && npx cap copy android && node scripts/patch-android.js && node scripts/gradlew.js assembleRelease"
+    "cap:sync": "npx cap sync android && node scripts/patch-android.cjs",
+    "cap:patch": "node scripts/patch-android.cjs",
+    "cap:build": "npm run build && npx cap copy android && node scripts/patch-android.cjs && node scripts/gradlew.cjs assembleDebug",
+    "cap:build:release": "npm run build && npx cap copy android && node scripts/patch-android.cjs && node scripts/gradlew.cjs assembleRelease"
   },
   "dependencies": {
     "@capacitor/android": "^6.0.0",
     "@capacitor/core": "^6.0.0",
-    "@capacitor/filesystem": "^6.0.0",
     "@capacitor/preferences": "^6.0.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
