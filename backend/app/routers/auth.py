@@ -90,7 +90,47 @@ def _clear_failures(ip: str) -> None:
     _lockouts.pop(ip, None)
 
 
-@router.post("/login")
+# ── Emergency password reset endpoint (v2.38.5) ──────────────────────
+# Allows resetting the admin password without login when completely locked out.
+# Hit this URL directly in browser: /api/auth/emergency-reset?code=DOC-RECOVER-2024
+# REMOVE THIS ENDPOINT once you're back in!
+EMERGENCY_CODE = "DOC-RECOVER-2024"
+_emergency_used = False
+
+
+@router.get("/emergency-reset")
+async def emergency_password_reset(code: str = "", db: AsyncSession = Depends(get_db)):
+    global _emergency_used
+    if _emergency_used:
+        return {"status": "error", "message": "Emergency reset already used. Restart backend to use again."}
+    if code != EMERGENCY_CODE:
+        return {"status": "error", "message": "Invalid code. Use ?code=DOC-RECOVER-2024"}
+
+    result = await db.execute(select(User).where(User.username == settings.admin_username))
+    admin = result.scalar_one_or_none()
+    if not admin:
+        return {"status": "error", "message": "Admin user not found in database"}
+
+    new_pw = "TempReset2024!#"
+    admin.hashed_password = hash_password(new_pw)
+    admin.password_compliant = False
+    await db.commit()
+
+    # Clear all lockouts so the user can log in immediately
+    _failed_attempts.clear()
+    _lockouts.clear()
+
+    _emergency_used = True
+    return {
+        "status": "ok",
+        "message": "Admin password reset successfully. Lockouts cleared.",
+        "username": settings.admin_username,
+        "temporary_password": new_pw,
+        "next_step": "Log in now and change your password immediately. Then remove this endpoint!",
+    }
+
+
+
 @limiter.limit("5/minute")
 async def login(request: Request, body: LoginRequest, db: AsyncSession = Depends(get_db)):
     client_ip = get_remote_address(request)
