@@ -20,6 +20,7 @@ import {
   IconLogout,
   IconPlane,
   IconPlus,
+  IconCloudUpload,
 } from '@tabler/icons-react';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
 import { useBranding } from '../../hooks/useBranding';
@@ -42,6 +43,7 @@ export default function AppLayout({ onLogout }: AppLayoutProps) {
     { icon: IconBattery3, label: 'Batteries', path: '/batteries' },
     { icon: IconTool, label: 'Maintenance', path: '/maintenance' },
     { icon: IconChartBar, label: 'Financials', path: '/financials' },
+    { icon: IconCloudUpload, label: 'Device Sync', path: '/device-sync' },
     { icon: IconSettings, label: 'Settings', path: '/settings' },
   ];
 
