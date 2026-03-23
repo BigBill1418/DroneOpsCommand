@@ -10,6 +10,7 @@
 
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Preferences } from '@capacitor/preferences';
+import { isAllFilesAccessGranted } from './all-files-access';
 
 // ── Config keys ────────────────────────────────────────────────────────
 export const PREF_SERVER_URL = 'serverUrl';
@@ -139,28 +140,24 @@ export async function scanForLogs(
   const granted = await requestPermissions();
   if (!granted) throw new Error('Storage permission denied. Please grant access in device settings.');
 
+  // Check "All Files Access" — needed for Android/data/ paths on Android 11+
+  const allFilesGranted = await isAllFilesAccessGranted();
+
   const synced = await getSyncedPaths();
   const found: LogFile[] = [];
-  let androidDataBlocked = false;
 
   for (const basePath of DJI_LOG_PATHS) {
-    onProgress?.(`Scanning ${basePath}...`);
-    if (!(await dirExists(basePath))) {
-      // Track if Android/data paths specifically failed — likely needs "All Files Access"
-      if (basePath.startsWith('Android/data')) androidDataBlocked = true;
+    // Skip Android/data/ paths if we don't have All Files Access — no point trying
+    if (!allFilesGranted && basePath.startsWith('Android/data')) {
+      onProgress?.(`Skipping ${basePath} (needs All Files Access)...`);
       continue;
     }
 
+    onProgress?.(`Scanning ${basePath}...`);
+    if (!(await dirExists(basePath))) continue;
+
     // Recursively scan (DJI nests logs in date subfolders)
     await scanDir(basePath, basePath, synced, found);
-  }
-
-  // If nothing found and Android/data paths were inaccessible, give a helpful error
-  if (found.length === 0 && androidDataBlocked) {
-    throw new Error(
-      'No logs found. DJI Fly stores logs in Android/data/ which requires "All Files Access" permission. '
-      + 'Go to device Settings → Apps → DroneOpsSync → Permissions → Files → Allow management of all files.'
-    );
   }
 
   return found;
