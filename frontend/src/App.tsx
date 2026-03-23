@@ -15,6 +15,7 @@ import Maintenance from './pages/Maintenance';
 import Financials from './pages/Financials';
 import Settings from './pages/Settings';
 import CustomerIntake from './pages/CustomerIntake';
+import UploadLogs from './pages/UploadLogs';
 
 export default function App() {
   const { isAuthenticated, loading, login, logout } = useAuth();
@@ -48,6 +49,7 @@ export default function App() {
                 <Route path="/batteries" element={<Batteries />} />
                 <Route path="/maintenance" element={<Maintenance />} />
                 <Route path="/financials" element={<Financials />} />
+                <Route path="/upload-logs" element={<UploadLogs />} />
                 <Route path="/settings" element={<Settings />} />
                 <Route path="*" element={<Navigate to="/" />} />
               </Route>

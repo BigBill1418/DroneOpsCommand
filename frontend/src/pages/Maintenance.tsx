@@ -1,9 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
+  ActionIcon,
   Badge,
   Button,
   Card,
+  FileButton,
   Group,
+  Image,
   Loader,
   Modal,
   MultiSelect,
@@ -23,11 +26,14 @@ import { notifications } from '@mantine/notifications';
 import {
   IconAlertTriangle,
   IconCalendarEvent,
+  IconCamera,
+  IconPhoto,
   IconPlus,
   IconRefresh,
   IconSettings,
   IconTool,
   IconTrash,
+  IconX,
 } from '@tabler/icons-react';
 import api from '../api/client';
 import { Aircraft, MaintenanceRecordType, MaintenanceAlert } from '../api/types';
@@ -53,6 +59,8 @@ export default function Maintenance() {
   const [aircraft, setAircraft] = useState<Aircraft[]>([]);
   const [loading, setLoading] = useState(true);
   const [addOpen, setAddOpen] = useState(false);
+  const [selectedRecord, setSelectedRecord] = useState<MaintenanceRecordType | null>(null);
+  const [uploading, setUploading] = useState(false);
   const [form, setForm] = useState({
     aircraft_id: '',
     maintenance_types: ['general_service'] as string[],
@@ -118,14 +126,51 @@ export default function Maintenance() {
       await api.delete(`/maintenance/records/${id}`);
       notifications.show({ title: 'Deleted', message: 'Record removed', color: 'orange' });
       setRecords((prev) => prev.filter((r) => r.id !== id));
+      if (selectedRecord?.id === id) setSelectedRecord(null);
     } catch {
       notifications.show({ title: 'Error', message: 'Failed to delete', color: 'red' });
+    }
+  };
+
+  const handleImageUpload = async (file: File | null) => {
+    if (!file || !selectedRecord) return;
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const resp = await api.post(`/maintenance/records/${selectedRecord.id}/images`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      setSelectedRecord(resp.data);
+      setRecords((prev) => prev.map((r) => r.id === resp.data.id ? resp.data : r));
+      notifications.show({ title: 'Uploaded', message: 'Image added', color: 'cyan' });
+    } catch (err: any) {
+      notifications.show({ title: 'Upload Failed', message: err.response?.data?.detail || 'Could not upload image', color: 'red' });
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleImageDelete = async (idx: number) => {
+    if (!selectedRecord) return;
+    try {
+      const resp = await api.delete(`/maintenance/records/${selectedRecord.id}/images/${idx}`);
+      setSelectedRecord(resp.data);
+      setRecords((prev) => prev.map((r) => r.id === resp.data.id ? resp.data : r));
+      notifications.show({ title: 'Removed', message: 'Image deleted', color: 'orange' });
+    } catch {
+      notifications.show({ title: 'Error', message: 'Failed to remove image', color: 'red' });
     }
   };
 
   const getAircraftName = (id: string) => {
     const a = aircraft.find((ac) => ac.id === id);
     return a ? `${a.manufacturer} ${a.model_name}` : 'Unknown';
+  };
+
+  const getAircraftSerial = (id: string) => {
+    const a = aircraft.find((ac) => ac.id === id);
+    return a?.serial_number || null;
   };
 
   const getTypeLabel = (type: string) => {
@@ -139,6 +184,12 @@ export default function Maintenance() {
   const overdueCount = alerts.filter((a) => a.overdue).length;
   const dueCount = alerts.filter((a) => !a.overdue).length;
   const totalCost = records.reduce((s, r) => s + (r.cost || 0), 0);
+
+  const modalStyles = {
+    header: { background: '#0e1117', borderBottom: '1px solid #1a1f2e' },
+    body: { background: '#0e1117' },
+    content: { background: '#0e1117' },
+  };
 
   return (
     <Stack gap="lg">
@@ -167,7 +218,7 @@ export default function Maintenance() {
             <StatCard icon={IconSettings} label="Total Cost" value={totalCost > 0 ? `$${totalCost.toFixed(0)}` : '—'} />
           </SimpleGrid>
 
-          {/* ── Alerts ─────────────────────────────────────────────── */}
+          {/* Alerts */}
           {alerts.length > 0 && (
             <Card padding="md" radius="md" style={{ ...cardStyle, borderColor: alerts.some(a => a.overdue) ? '#ff6b6b' : '#ffd43b' }}>
               <Text size="11px" c={alerts.some(a => a.overdue) ? '#ff6b6b' : '#ffd43b'} mb="sm"
@@ -183,11 +234,7 @@ export default function Maintenance() {
                       <Text size="sm" c="#5a6478">—</Text>
                       <Text size="sm" c="#e8edf2">{getTypeLabel(alert.maintenance_type)}</Text>
                     </Group>
-                    <Badge
-                      color={alert.overdue ? 'red' : 'yellow'}
-                      variant="light"
-                      size="sm"
-                    >
+                    <Badge color={alert.overdue ? 'red' : 'yellow'} variant="light" size="sm">
                       {alert.overdue
                         ? `${Math.abs(alert.days_until)} DAYS OVERDUE`
                         : `DUE IN ${alert.days_until} DAYS`}
@@ -198,7 +245,7 @@ export default function Maintenance() {
             </Card>
           )}
 
-          {/* ── Records Table ──────────────────────────────────────── */}
+          {/* Records Table */}
           {records.length === 0 ? (
             <Card padding="xl" radius="md" style={cardStyle}>
               <Stack align="center" gap="md">
@@ -223,28 +270,34 @@ export default function Maintenance() {
                 styles={{
                   table: { color: '#e8edf2' },
                   th: { color: '#00d4ff', fontFamily: "'Share Tech Mono', monospace", fontSize: '12px', letterSpacing: '1px', borderBottom: '1px solid #1a1f2e', padding: '10px 12px', whiteSpace: 'nowrap' as const },
-                  td: { borderBottom: '1px solid #1a1f2e', padding: '8px 12px' },
+                  td: { borderBottom: '1px solid #1a1f2e', padding: '8px 12px', cursor: 'pointer' },
+                  tr: { '&:hover': { background: '#141922' } },
                 }}
               >
                 <Table.Thead>
                   <Table.Tr>
                     <Table.Th>DATE</Table.Th>
                     <Table.Th>AIRCRAFT</Table.Th>
+                    <Table.Th className="hide-mobile">S/N</Table.Th>
                     <Table.Th>TYPE</Table.Th>
                     <Table.Th className="hide-mobile">DESCRIPTION</Table.Th>
                     <Table.Th className="hide-mobile">COST</Table.Th>
-                    <Table.Th>NEXT DUE</Table.Th>
+                    <Table.Th className="hide-mobile">NEXT DUE</Table.Th>
+                    <Table.Th className="hide-mobile" w={30}><IconPhoto size={14} color="#5a6478" /></Table.Th>
                     <Table.Th w={40}></Table.Th>
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
                   {records.map((rec) => (
-                    <Table.Tr key={rec.id}>
+                    <Table.Tr key={rec.id} onClick={() => setSelectedRecord(rec)} style={{ cursor: 'pointer' }}>
                       <Table.Td>
                         <Text size="xs" style={monoFont} c="#5a6478">{rec.performed_at}</Text>
                       </Table.Td>
                       <Table.Td>
                         <Text size="sm" fw={500}>{getAircraftName(rec.aircraft_id)}</Text>
+                      </Table.Td>
+                      <Table.Td className="hide-mobile">
+                        <Text size="xs" style={monoFont} c="#5a6478">{getAircraftSerial(rec.aircraft_id) || '—'}</Text>
                       </Table.Td>
                       <Table.Td>
                         <Group gap={4} wrap="wrap">
@@ -261,10 +314,15 @@ export default function Maintenance() {
                           {rec.cost ? `$${rec.cost.toFixed(0)}` : '—'}
                         </Text>
                       </Table.Td>
-                      <Table.Td>
+                      <Table.Td className="hide-mobile">
                         <Text size="xs" style={monoFont} c="#5a6478">{rec.next_due_date || '—'}</Text>
                       </Table.Td>
-                      <Table.Td>
+                      <Table.Td className="hide-mobile">
+                        {(rec.images?.length ?? 0) > 0 && (
+                          <Badge variant="light" color="gray" size="xs">{rec.images!.length}</Badge>
+                        )}
+                      </Table.Td>
+                      <Table.Td onClick={(e) => e.stopPropagation()}>
                         <Button size="compact-xs" variant="subtle" color="red" onClick={() => handleDelete(rec.id)}>
                           <IconTrash size={14} />
                         </Button>
@@ -279,19 +337,178 @@ export default function Maintenance() {
         </>
       )}
 
-      {/* ── Add Record Modal ──────────────────────────────────────── */}
+      {/* Detail Modal */}
+      <Modal
+        opened={!!selectedRecord}
+        onClose={() => setSelectedRecord(null)}
+        title={<Text fw={700} c="#e8edf2" style={{ fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '2px' }}>MAINTENANCE DETAIL</Text>}
+        size="lg"
+        styles={modalStyles}
+      >
+        {selectedRecord && (() => {
+          const rec = selectedRecord;
+          const acName = getAircraftName(rec.aircraft_id);
+          const serial = getAircraftSerial(rec.aircraft_id);
+          const images = rec.images || [];
+          return (
+            <Stack gap="md">
+              {/* Aircraft info */}
+              <Card padding="sm" radius="sm" style={{ background: '#141922', border: '1px solid #1a1f2e' }}>
+                <Group justify="space-between" wrap="wrap">
+                  <div>
+                    <Text size="10px" c="#5a6478" style={{ ...monoFont, letterSpacing: '1px' }} tt="uppercase">AIRCRAFT</Text>
+                    <Text size="lg" fw={600} c="#e8edf2">{acName}</Text>
+                  </div>
+                  {serial && (
+                    <div>
+                      <Text size="10px" c="#5a6478" style={{ ...monoFont, letterSpacing: '1px' }} tt="uppercase">SERIAL NUMBER</Text>
+                      <Text size="sm" style={monoFont} c="#00d4ff">{serial}</Text>
+                    </div>
+                  )}
+                  <div>
+                    <Text size="10px" c="#5a6478" style={{ ...monoFont, letterSpacing: '1px' }} tt="uppercase">DATE PERFORMED</Text>
+                    <Text size="sm" style={monoFont} c="#e8edf2">{rec.performed_at}</Text>
+                  </div>
+                </Group>
+              </Card>
+
+              {/* Type badges */}
+              <div>
+                <Text size="10px" c="#5a6478" style={{ ...monoFont, letterSpacing: '1px' }} tt="uppercase" mb={4}>MAINTENANCE TYPE</Text>
+                <Group gap={6} wrap="wrap">
+                  {getTypeLabels(rec.maintenance_type).map((t) => (
+                    <Badge key={t} variant="light" color="cyan" size="md">{getTypeLabel(t)}</Badge>
+                  ))}
+                </Group>
+              </div>
+
+              {/* Details grid */}
+              <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="sm">
+                <div>
+                  <Text size="10px" c="#5a6478" style={{ ...monoFont, letterSpacing: '1px' }} tt="uppercase">FLIGHT HOURS</Text>
+                  <Text size="sm" style={monoFont} c="#e8edf2">{rec.flight_hours_at != null ? rec.flight_hours_at.toFixed(1) : '—'}</Text>
+                </div>
+                <div>
+                  <Text size="10px" c="#5a6478" style={{ ...monoFont, letterSpacing: '1px' }} tt="uppercase">COST</Text>
+                  <Text size="sm" style={monoFont} c="#e8edf2">{rec.cost != null ? `$${rec.cost.toFixed(2)}` : '—'}</Text>
+                </div>
+                <div>
+                  <Text size="10px" c="#5a6478" style={{ ...monoFont, letterSpacing: '1px' }} tt="uppercase">NEXT DUE HOURS</Text>
+                  <Text size="sm" style={monoFont} c="#e8edf2">{rec.next_due_hours != null ? rec.next_due_hours.toFixed(1) : '—'}</Text>
+                </div>
+                <div>
+                  <Text size="10px" c="#5a6478" style={{ ...monoFont, letterSpacing: '1px' }} tt="uppercase">NEXT DUE DATE</Text>
+                  <Text size="sm" style={monoFont} c={rec.next_due_date ? '#e8edf2' : '#5a6478'}>{rec.next_due_date || '—'}</Text>
+                </div>
+              </SimpleGrid>
+
+              {/* Description */}
+              {rec.description && (
+                <div>
+                  <Text size="10px" c="#5a6478" style={{ ...monoFont, letterSpacing: '1px' }} tt="uppercase" mb={4}>DESCRIPTION</Text>
+                  <Text size="sm" c="#e8edf2" style={{ whiteSpace: 'pre-wrap' }}>{rec.description}</Text>
+                </div>
+              )}
+
+              {/* Notes */}
+              {rec.notes && (
+                <div>
+                  <Text size="10px" c="#5a6478" style={{ ...monoFont, letterSpacing: '1px' }} tt="uppercase" mb={4}>NOTES</Text>
+                  <Text size="sm" c="#e8edf2" style={{ whiteSpace: 'pre-wrap' }}>{rec.notes}</Text>
+                </div>
+              )}
+
+              {/* Images */}
+              <div>
+                <Group justify="space-between" mb="xs">
+                  <Text size="10px" c="#5a6478" style={{ ...monoFont, letterSpacing: '1px' }} tt="uppercase">
+                    PHOTOS {images.length > 0 && `(${images.length})`}
+                  </Text>
+                  <FileButton onChange={handleImageUpload} accept="image/jpeg,image/png,image/webp">
+                    {(props) => (
+                      <Button
+                        {...props}
+                        size="compact-xs"
+                        variant="light"
+                        color="cyan"
+                        leftSection={<IconCamera size={14} />}
+                        loading={uploading}
+                        styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}
+                      >
+                        ADD PHOTO
+                      </Button>
+                    )}
+                  </FileButton>
+                </Group>
+                {images.length === 0 ? (
+                  <Card padding="md" radius="sm" style={{ background: '#141922', border: '1px dashed #1a1f2e' }}>
+                    <Stack align="center" gap="xs" py="sm">
+                      <IconPhoto size={32} color="#5a6478" />
+                      <Text size="xs" c="#5a6478">No photos attached</Text>
+                    </Stack>
+                  </Card>
+                ) : (
+                  <SimpleGrid cols={{ base: 2, sm: 3 }} spacing="sm">
+                    {images.map((imgPath, idx) => (
+                      <div key={idx} style={{ position: 'relative' }}>
+                        <Image
+                          src={`/uploads/${imgPath}`}
+                          radius="sm"
+                          h={140}
+                          fit="cover"
+                          style={{ border: '1px solid #1a1f2e', cursor: 'pointer' }}
+                          onClick={() => window.open(`/uploads/${imgPath}`, '_blank')}
+                        />
+                        <ActionIcon
+                          size="xs"
+                          color="red"
+                          variant="filled"
+                          radius="xl"
+                          style={{ position: 'absolute', top: 4, right: 4 }}
+                          onClick={() => handleImageDelete(idx)}
+                        >
+                          <IconX size={10} />
+                        </ActionIcon>
+                      </div>
+                    ))}
+                  </SimpleGrid>
+                )}
+              </div>
+
+              {/* Created */}
+              <Text size="10px" c="#5a6478" style={monoFont} ta="right">
+                Created: {new Date(rec.created_at).toLocaleString()}
+              </Text>
+
+              {/* Delete button */}
+              <Button
+                fullWidth
+                variant="light"
+                color="red"
+                leftSection={<IconTrash size={16} />}
+                onClick={() => { handleDelete(rec.id); }}
+                styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}
+              >
+                DELETE RECORD
+              </Button>
+            </Stack>
+          );
+        })()}
+      </Modal>
+
+      {/* Add Record Modal */}
       <Modal
         opened={addOpen}
         onClose={() => setAddOpen(false)}
         title={<Text fw={700} c="#e8edf2" style={{ fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '2px' }}>LOG MAINTENANCE</Text>}
         size="md"
-        styles={{ header: { background: '#0e1117', borderBottom: '1px solid #1a1f2e' }, body: { background: '#0e1117' }, content: { background: '#0e1117' } }}
+        styles={modalStyles}
       >
         <Stack gap="md">
           <Select
             label="Aircraft"
             required
-            data={aircraft.map((a) => ({ value: a.id, label: `${a.manufacturer} ${a.model_name}` }))}
+            data={aircraft.map((a) => ({ value: a.id, label: `${a.manufacturer} ${a.model_name}${a.serial_number ? ` (S/N: ${a.serial_number})` : ''}` }))}
             value={form.aircraft_id}
             onChange={(v) => setForm({ ...form, aircraft_id: v || '' })}
             styles={inputStyles}

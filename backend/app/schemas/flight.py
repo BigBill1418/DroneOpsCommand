@@ -162,6 +162,7 @@ class MaintenanceRecordResponse(BaseModel):
     next_due_date: date | None
     cost: float | None
     notes: str | None
+    images: list | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}

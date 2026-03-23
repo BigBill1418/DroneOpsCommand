@@ -58,9 +58,13 @@
     margin-right: 12px;
   }
 
-  /* Navbar overlay — ensure it covers content on mobile */
+  /* Navbar overlay — ensure it covers content and isn't clipped by overflow-x:hidden */
   .mantine-AppShell-navbar {
     z-index: 200;
+    position: fixed !important;
+    top: 0;
+    left: 0;
+    height: 100% !important;
   }
 
   /* Reduce page padding on mobile */
@@ -324,10 +328,8 @@
   }
 
   /* When opened via burger, slide it in */
-  .mantine-AppShell-navbar[data-hidden="false"],
   .mantine-AppShell-navbar:not([data-hidden]) {
-    /* The navbar won't have data-hidden when it's "always visible" mode.
-       We rely on JS toggling below. For CSS-only, we hide by default. */
+    transform: translateX(0) !important;
   }
 
   /* Show the burger menu in landscape too */

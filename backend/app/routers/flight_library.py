@@ -384,7 +384,6 @@ async def upload_flights(
     )
 
 
-
 # ── Device health check (test API key + connectivity) ────────────────
 @router.get("/device-health")
 async def device_health(
@@ -397,7 +396,6 @@ async def device_health(
     reachable.  DroneOpsSync can hit this endpoint on startup to verify the
     connection before attempting file uploads.
     """
-    # Check if the flight-parser service is reachable (non-blocking best effort)
     parser_ok = False
     try:
         async with httpx.AsyncClient(timeout=5) as client:
@@ -488,8 +486,6 @@ async def device_upload_flights(
                     await db.refresh(flight)
                     imported.append(flight)
 
-                    # Auto-track battery — best-effort via savepoint so failures
-                    # don't rollback the flight import
                     battery_data = parsed.get("battery_data")
                     if battery_data and battery_data.get("serial"):
                         try:
@@ -509,6 +505,7 @@ async def device_upload_flights(
         errors=errors,
         flights=imported,
     )
+
 
 # ── Manual flight entry ───────────────────────────────────────────────
 @router.post("/manual", response_model=FlightResponse, status_code=201)

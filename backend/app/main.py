@@ -103,6 +103,12 @@ def _add_missing_columns(conn):
             "batteries": [
                 ("name", "ALTER TABLE batteries ADD COLUMN name VARCHAR(255)"),
             ],
+            "aircraft": [
+                ("serial_number", "ALTER TABLE aircraft ADD COLUMN serial_number VARCHAR(255)"),
+            ],
+            "maintenance_records": [
+                ("images", "ALTER TABLE maintenance_records ADD COLUMN images JSONB DEFAULT '[]'"),
+            ],
         }
 
         # Make opendronelog_flight_id nullable for existing tables (new flights use flight_id)
@@ -181,7 +187,7 @@ limiter = Limiter(key_func=get_remote_address)
 app = FastAPI(
     title="D.O.C — Drone Operations Command",
     description="Mission management, flight data, and after-action reporting for drone operations",
-    version="2.29.1",
+    version="2.33.0",
     lifespan=lifespan,
 )
 
