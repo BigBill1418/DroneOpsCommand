@@ -1,7 +1,10 @@
 # DroneOpsSync — Build & Deploy Guide
 
 Companion app for DroneOps Command. Syncs DJI flight logs from your controller
-or phone directly to your server — no browser file picker needed.
+or phone directly to your server over LAN — no browser file picker needed.
+
+Uses a native file scanner (java.io.File) for direct filesystem access.
+No SAF, no MANAGE_EXTERNAL_STORAGE — just reads the files.
 
 ---
 
@@ -61,69 +64,37 @@ cd companion/
 npm install
 ```
 
-### Step 2: Update your server URL
+### Step 2: Update your server URL (optional)
 
-Edit `src/sync.ts` and change `DEFAULT_SERVER_URL` to your actual DroneOps Command URL:
+Edit `src/sync.ts` and change `DEFAULT_SERVER_URL` to your actual server:
 
 ```typescript
 export const DEFAULT_SERVER_URL = 'http://192.168.1.50:3080';
 ```
 
-This is the LAN IP and port of your DroneOpsCommand server.
+You can also change this in the app after install.
 
-### Step 3: Build the web app
-
-```bash
-npm run build
-```
-
-This creates the `dist/` folder with the compiled React app.
-
-### Step 4: Initialize the Android project (first time only)
+### Step 3: Build
 
 ```bash
-npx cap add android
+npm run cap:build
 ```
 
-### Step 5: Patch the Android manifest for DJI RC Pro
-
-```bash
-bash scripts/patch-manifest.sh
-```
-
-This adds the storage permissions and `requestLegacyExternalStorage="true"` needed
-for Android 10 (DJI RC Pro, RC 2, etc.).
-
-### Step 6: Copy web assets into Android project
-
-```bash
-npx cap copy android
-npx cap sync android
-```
-
-### Step 7: Build the APK
-
-```bash
-cd android
-./gradlew assembleDebug
-```
-
-First build downloads Gradle dependencies (~2-5 min). Subsequent builds are fast (~15 sec).
+This runs: build web app → copy to Android → patch manifest → assemble APK.
 
 **Your APK is at:**
 ```
 android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
-### Quick rebuild (after code changes)
+### Manual build steps (if npm script fails)
 
 ```bash
-npm run build && npx cap copy android && cd android && ./gradlew assembleDebug && cd ..
-```
-
-Or use the npm script:
-```bash
-npm run cap:build
+npm run build                          # Build React app → dist/
+npx cap copy android                   # Copy dist/ into Android project
+npx cap sync android                   # Sync Capacitor plugins
+node scripts/patch-android.cjs         # Patch targetSdk, permissions, cleartext
+cd android && ./gradlew assembleDebug  # Build APK
 ```
 
 ---
@@ -133,22 +104,19 @@ npm run cap:build
 ### Option A: USB cable (fastest)
 
 ```bash
-# With device connected via USB and USB debugging enabled:
 adb install android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
 ### Option B: File transfer
 
-1. Copy `app-debug.apk` to your device (USB, email, cloud drive, etc.)
+1. Copy `app-debug.apk` to your device (USB, email, etc.)
 2. Open the APK on the device
-3. Tap "Install" (you may need to allow "Install from unknown sources")
+3. Tap "Install" (allow "Install from unknown sources" if prompted)
 
 ### Option C: ADB over Wi-Fi (DJI RC Pro)
 
 ```bash
 # On the RC Pro, enable Developer Options → USB Debugging → ADB over network
-# Note the IP address shown
-
 adb connect 192.168.x.x:5555
 adb install android/app/build/outputs/apk/debug/app-debug.apk
 ```
@@ -158,35 +126,39 @@ adb install android/app/build/outputs/apk/debug/app-debug.apk
 ## First run setup
 
 1. Open **DroneOpsSync** on your device
-2. The app shows the **FIRST TIME SETUP** screen
-3. Enter your **Server URL** (pre-filled with default — verify it's correct)
-4. Go to DroneOps Command → **Settings → Device Access**
-5. Generate a new API key with a label like "RC Pro" or "Field Phone"
-6. Copy the key and paste it into the app's **Device API Key** field
-7. Tap **TEST CONNECTION** to verify
-8. Enable **Auto-delete after sync** if you want logs removed after upload
-9. Tap **SAVE & START SYNC**
-
-The app will immediately scan your DJI flight log folders, upload any new logs,
-and tell you exactly how many new flights were added to DroneOps Command.
+2. Enter your **Server URL** (LAN IP + port of your DroneOpsCommand server)
+3. Go to DroneOps Command → **Settings → Device Access** and generate an API key
+4. Paste the key into the app
+5. Tap **TEST CONNECTION** to verify
+6. Tap **SAVE & START SYNC**
 
 ---
 
 ## How it works
 
-1. **Scans** these DJI log directories on the device:
-   - `DJI/dji.go.v5/FlightRecord/` (DJI Fly v2)
-   - `DJI/dji.go.v4/FlightRecord/` (DJI Fly v1)
-   - `DJI/com.dji.industry.pilot/FlightRecord/` (DJI Pilot)
+1. **Scans** DJI log directories using native `java.io.File` API:
+   - `DJI/com.dji.industry.pilot/FlightRecord/` (DJI Pilot — 4TD, M30T)
    - `DJI/com.dji.industry.pilot2/FlightRecord/` (DJI Pilot 2)
+   - `Android/data/dji.go.v5/files/FlightRecord/` (DJI Fly — M3P, M5P, phones)
+   - `Android/data/dji.go.v4/files/FlightRecord/` (DJI Fly v1)
 
-2. **Uploads** new log files to `/api/flight-library/device-upload` using your API key
-   - Duplicates are automatically detected by file hash and skipped
-   - Files are uploaded in batches of 5
+2. **Uploads** new log files via `/api/flight-library/device-upload`
 
-3. **Verifies** the upload response — shows imported count, skipped duplicates, any errors
+3. **Tracks** synced files locally to avoid re-uploading duplicates
 
-4. **Cleans up** (optional) — deletes synced log files from the controller to free storage
+4. **Cleans up** (optional) — deletes synced logs from device
+
+---
+
+## Diagnostic mode
+
+If syncing doesn't work, go to **Settings → RUN DIAGNOSTIC**. This checks:
+- Android SDK version
+- Storage root path
+- Whether each DJI log path exists and is readable
+
+This helps identify if the issue is file access (permission problem) vs network
+(can't reach server) vs data (no log files on device).
 
 ---
 
@@ -195,11 +167,11 @@ and tell you exactly how many new flights were added to DroneOps Command.
 | Device | Android | Status |
 |--------|---------|--------|
 | DJI RC Pro | 10 (API 29) | Full support |
-| DJI RC 2 | 10 (API 29) | Full support |
+| DJI RC 2 | 10 (API 29) | Full support (if sideloading enabled) |
 | DJI RC Pro Enterprise | 10 (API 29) | Full support |
-| DJI RC-N1/N2 (phone required) | varies | Use on connected phone |
-| Any Android phone | 6+ (API 23+) | Full support |
 | DJI Smart Controller | 9 (API 28) | Full support |
+| Any Android phone | 6+ (API 23+) | Full support |
+| DJI RC-N1/N2 | N/A | No screen — use connected phone |
 
 ---
 
@@ -214,11 +186,12 @@ and tell you exactly how many new flights were added to DroneOps Command.
 **"flight-parser service unavailable"**
 → The parser container isn't running. On your server: `docker compose up -d flight-parser`
 
-**"No new flight logs found"**
-→ All logs have already been synced. Fly a new mission and try again.
+**Diagnostic shows paths as "NOT FOUND"**
+→ Normal if that DJI app isn't installed. Only the paths matching your drone/app matter.
+
+**Diagnostic shows paths as "DENIED"**
+→ Storage permission not granted, or targetSdkVersion wasn't patched to 29.
+  Rebuild with: `node scripts/patch-android.cjs && cd android && ./gradlew assembleDebug`
 
 **Build fails with "SDK not found"**
-→ Set `ANDROID_HOME` environment variable: `export ANDROID_HOME=~/android-sdk`
-
-**Gradle build fails**
-→ Make sure JDK 17 is installed and `JAVA_HOME` is set correctly
+→ Set `ANDROID_HOME`: `export ANDROID_HOME=~/android-sdk`
