@@ -37,6 +37,7 @@ import {
   IconTrash,
   IconUpload,
   IconX,
+  IconCalendarDue,
 } from '@tabler/icons-react';
 import api from '../api/client';
 import { Aircraft, MaintenanceRecordType, MaintenanceAlert } from '../api/types';
@@ -59,6 +60,10 @@ const MAINTENANCE_TYPES = [
 export default function Maintenance() {
   const [records, setRecords] = useState<MaintenanceRecordType[]>([]);
   const [alerts, setAlerts] = useState<MaintenanceAlert[]>([]);
+  const [nextServiceDue, setNextServiceDue] = useState<{
+    aircraft_name: string; maintenance_type: string; next_due_date: string;
+    days_until: number; overdue: boolean; description: string | null;
+  } | null>(null);
   const [aircraft, setAircraft] = useState<Aircraft[]>([]);
   const [loading, setLoading] = useState(true);
   const [addOpen, setAddOpen] = useState(false);
@@ -92,14 +97,16 @@ export default function Maintenance() {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [recordsResp, alertsResp, aircraftResp] = await Promise.all([
+      const [recordsResp, alertsResp, aircraftResp, nextDueResp] = await Promise.all([
         api.get('/maintenance/records'),
         api.get('/maintenance/due'),
         api.get('/aircraft'),
+        api.get('/maintenance/next-due').catch(() => ({ data: null })),
       ]);
       setRecords(recordsResp.data);
       setAlerts(alertsResp.data);
       setAircraft(aircraftResp.data);
+      setNextServiceDue(nextDueResp.data);
     } catch {
       // Silent fail — pages may not have data yet
     } finally {
@@ -328,6 +335,64 @@ export default function Maintenance() {
             <StatCard icon={IconCalendarEvent} label="Due Soon" value={String(dueCount)} color={dueCount > 0 ? '#ffd43b' : '#2ecc40'} />
             <StatCard icon={IconSettings} label="Total Cost" value={totalCost > 0 ? `$${totalCost.toFixed(0)}` : '—'} />
           </SimpleGrid>
+
+          {/* Next Service Due widget */}
+          {nextServiceDue && (
+            <Card padding="md" radius="md" style={{
+              ...cardStyle,
+              borderColor: nextServiceDue.overdue
+                ? '#ff6b6b'
+                : nextServiceDue.days_until <= 7
+                  ? '#ffd43b'
+                  : '#00d4ff',
+            }}>
+              <Group justify="space-between" wrap="wrap" align="flex-start">
+                <div>
+                  <Group gap={6} mb={6}>
+                    <IconCalendarDue size={16} color={
+                      nextServiceDue.overdue ? '#ff6b6b'
+                        : nextServiceDue.days_until <= 7 ? '#ffd43b' : '#00d4ff'
+                    } />
+                    <Text size="11px" fw={700} c={
+                      nextServiceDue.overdue ? '#ff6b6b'
+                        : nextServiceDue.days_until <= 7 ? '#ffd43b' : '#00d4ff'
+                    } style={{ ...monoFont, letterSpacing: '2px' }} tt="uppercase">
+                      NEXT SERVICE DUE
+                    </Text>
+                  </Group>
+                  <Text size="md" c="#e8edf2" fw={700} tt="capitalize">
+                    {nextServiceDue.maintenance_type.replace(/_/g, ' ')}
+                  </Text>
+                  <Text size="sm" c="#00d4ff" fw={600} mt={2}>
+                    {nextServiceDue.aircraft_name}
+                  </Text>
+                  {nextServiceDue.next_due_date && (
+                    <Text size="xs" c="#5a6478" mt={2}>
+                      {new Date(nextServiceDue.next_due_date).toLocaleDateString('en-US', {
+                        weekday: 'short', month: 'short', day: 'numeric', year: 'numeric',
+                      })}
+                    </Text>
+                  )}
+                </div>
+                <Badge
+                  size="xl"
+                  variant="light"
+                  color={
+                    nextServiceDue.overdue ? 'red'
+                      : nextServiceDue.days_until <= 7 ? 'yellow'
+                        : 'cyan'
+                  }
+                >
+                  {nextServiceDue.overdue
+                    ? `${Math.abs(nextServiceDue.days_until)} DAYS OVERDUE`
+                    : nextServiceDue.days_until === 0
+                      ? 'DUE TODAY'
+                      : `${nextServiceDue.days_until} DAYS`
+                  }
+                </Badge>
+              </Group>
+            </Card>
+          )}
 
           {/* Alerts */}
           {alerts.length > 0 && (
