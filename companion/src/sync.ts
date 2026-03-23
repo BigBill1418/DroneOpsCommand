@@ -20,7 +20,7 @@ export const PREF_SYNCED_HASHES = 'syncedHashes';
 // Cloud: works from anywhere (cell data, hotel wifi, job site)
 export const DEFAULT_SERVER_URL = 'https://droneops.barnardhq.com';
 // LAN: faster when on-site, works even if internet is down
-export const DEFAULT_LAN_URL = 'http://192.168.50.20:8030';
+export const DEFAULT_LAN_URL = 'http://192.168.50.20:3080';
 
 // ── DJI log paths (relative to ExternalStorage = /storage/emulated/0/) ─
 export const DJI_LOG_PATHS = [

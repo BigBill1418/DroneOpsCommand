@@ -145,9 +145,10 @@ export default function App() {
     setTestStatus('testing');
     setTestMsg('');
     try {
-      const health = await checkHealth(serverUrl, apiKey);
+      const server = await resolveServerUrl(serverUrl, lanUrl, apiKey);
+      const health = await checkHealth(server.url, apiKey);
       setTestStatus('ok');
-      setTestMsg(`Connected as "${health.device_label}" — parser ${health.parser_available ? 'online' : 'offline'}`);
+      setTestMsg(`Connected via ${server.via.toUpperCase()} as "${health.device_label}" — parser ${health.parser_available ? 'online' : 'offline'}`);
     } catch (err: any) {
       setTestStatus('fail');
       setTestMsg(err.message || 'Connection failed');
@@ -209,7 +210,7 @@ export default function App() {
                 <label>LAN URL (Local Fallback)</label>
                 <input
                   type="url"
-                  placeholder="http://192.168.50.20:8030"
+                  placeholder="http://192.168.50.20:3080"
                   value={lanUrl}
                   onChange={(e) => { setLanUrl(e.target.value); setTestStatus('idle'); }}
                 />
