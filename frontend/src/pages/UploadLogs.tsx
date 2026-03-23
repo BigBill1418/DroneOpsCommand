@@ -203,7 +203,7 @@ export default function UploadLogs() {
           ref={fileRef}
           type="file"
           multiple
-          accept=".csv,.dat,.log,.txt"
+          accept="*/*"
           style={{ display: 'none' }}
           onChange={e => { addFiles(e.target.files); e.target.value = ''; }}
         />
