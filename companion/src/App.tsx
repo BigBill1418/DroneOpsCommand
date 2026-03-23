@@ -3,17 +3,14 @@ import {
   type LogFile,
   type SyncResult,
   type HealthResult,
-  type ResolvedServer,
   getConfig,
   saveConfig,
   scanForLogs,
   checkHealth,
-  resolveServerUrl,
   uploadLogs,
   deleteSyncedFiles,
   formatBytes,
   DEFAULT_SERVER_URL,
-  DEFAULT_LAN_URL,
 } from './sync';
 
 // ── App states ─────────────────────────────────────────────────────────
@@ -22,12 +19,8 @@ type View = 'loading' | 'setup' | 'syncing' | 'done' | 'error' | 'settings';
 export default function App() {
   // Config
   const [serverUrl, setServerUrl] = useState(DEFAULT_SERVER_URL);
-  const [lanUrl, setLanUrl] = useState(DEFAULT_LAN_URL);
   const [apiKey, setApiKey] = useState('');
   const [autoDelete, setAutoDelete] = useState(false);
-
-  // Which server was used for this sync
-  const [activeServer, setActiveServer] = useState<ResolvedServer | null>(null);
 
   // State
   const [view, setView] = useState<View>('loading');
@@ -57,7 +50,6 @@ export default function App() {
     (async () => {
       const cfg = await getConfig();
       if (cfg.serverUrl) setServerUrl(cfg.serverUrl);
-      if (cfg.lanUrl) setLanUrl(cfg.lanUrl);
       if (cfg.apiKey) setApiKey(cfg.apiKey);
       setAutoDelete(cfg.autoDelete);
 
@@ -68,25 +60,20 @@ export default function App() {
       }
 
       // Auto-sync
-      await runSync(cfg.serverUrl, cfg.lanUrl || '', cfg.apiKey, cfg.autoDelete);
+      await runSync(cfg.serverUrl, cfg.apiKey, cfg.autoDelete);
     })();
   }, []);
 
   // ── Sync pipeline ────────────────────────────────────────────────────
-  async function runSync(cloudUrl: string, lan: string, key: string, autoDel: boolean) {
+  async function runSync(url: string, key: string, autoDel: boolean) {
     setView('syncing');
     setProgress(0);
     setDeleteResult(null);
-    setActiveServer(null);
 
     try {
-      // Step 1: Resolve server (try LAN first, fall back to cloud)
+      // Step 1: Health check
       setStatusMsg('CONNECTING');
-      setProgressMsg('Finding server...');
-      const server = await resolveServerUrl(cloudUrl, lan, key, (msg) => setProgressMsg(msg));
-      setActiveServer(server);
-      const url = server.url;
-
+      setProgressMsg(`Connecting to ${url.replace(/^https?:\/\//, '')}...`);
       const health = await checkHealth(url, key);
       setHealthResult(health);
       setProgress(10);
@@ -145,56 +132,23 @@ export default function App() {
     setTestStatus('testing');
     setTestMsg('');
 
-    const results: string[] = [];
-
-    // Test LAN if configured
-    if (lanUrl.trim()) {
-      try {
-        const h = await checkHealth(lanUrl.trim(), apiKey);
-        results.push(`LAN OK — "${h.device_label}", parser ${h.parser_available ? 'online' : 'offline'}`);
-      } catch (err: any) {
-        const msg = err.message || 'unknown error';
-        if (msg.includes('Failed to fetch') || msg.includes('NetworkError') || msg.includes('abort'))
-          results.push(`LAN FAIL — unreachable (${lanUrl.trim()} — check IP/port, cleartext blocked?)`);
-        else if (msg.includes('401'))
-          results.push('LAN FAIL — invalid API key');
-        else if (msg.includes('403'))
-          results.push('LAN FAIL — 403 forbidden (Cloudflare Access bypass needed)');
-        else if (msg.includes('CORS') || msg.includes('opaque'))
-          results.push('LAN FAIL — CORS blocked (server needs rebuild)');
-        else
-          results.push(`LAN FAIL — ${msg}`);
-      }
-    }
-
-    // Test Cloud
     try {
       const h = await checkHealth(serverUrl.trim(), apiKey);
-      results.push(`Cloud OK — "${h.device_label}", parser ${h.parser_available ? 'online' : 'offline'}`);
+      setTestStatus('ok');
+      setTestMsg(`Connected — "${h.device_label}", parser ${h.parser_available ? 'online' : 'offline'}`);
     } catch (err: any) {
-      const msg = err.message || 'unknown error';
-      if (msg.includes('Failed to fetch') || msg.includes('NetworkError'))
-        results.push(`Cloud FAIL — unreachable (${serverUrl.trim()})`);
-      else if (msg.includes('401'))
-        results.push('Cloud FAIL — invalid API key');
-      else if (msg.includes('403'))
-        results.push('Cloud FAIL — 403 forbidden (Cloudflare Access bypass needed for /api/flight-library/device-*)');
-      else
-        results.push(`Cloud FAIL — ${msg}`);
+      setTestStatus('fail');
+      setTestMsg(err.message || 'Connection failed');
     }
-
-    const anyOk = results.some((r) => r.includes(' OK'));
-    setTestStatus(anyOk ? 'ok' : 'fail');
-    setTestMsg(results.join('\n'));
   }
 
   // ── Settings: save and sync ──────────────────────────────────────────
   async function saveAndSync() {
     if (!serverUrl.trim() || !apiKey.trim()) return;
-    await saveConfig(serverUrl.trim(), lanUrl.trim(), apiKey.trim(), autoDelete);
+    await saveConfig(serverUrl.trim(), apiKey.trim(), autoDelete);
     hasRun.current = false;
     setView('loading');
-    await runSync(serverUrl.trim(), lanUrl.trim(), apiKey.trim(), autoDelete);
+    await runSync(serverUrl.trim(), apiKey.trim(), autoDelete);
   }
 
   // ── Render ───────────────────────────────────────────────────────────
@@ -230,27 +184,18 @@ export default function App() {
               </div>
 
               <div className="input-group">
-                <label>Cloud URL (Cloudflare Tunnel)</label>
+                <label>Server URL (LAN)</label>
                 <input
                   type="url"
-                  placeholder="https://droneops.barnardhq.com"
+                  placeholder="http://192.168.50.20:3080"
                   value={serverUrl}
                   onChange={(e) => { setServerUrl(e.target.value); setTestStatus('idle'); }}
                 />
               </div>
 
-              <div className="input-group">
-                <label>LAN URL (Local Fallback)</label>
-                <input
-                  type="url"
-                  placeholder="http://192.168.50.20:3080"
-                  value={lanUrl}
-                  onChange={(e) => { setLanUrl(e.target.value); setTestStatus('idle'); }}
-                />
-              </div>
-
               <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-muted)', marginBottom: 16, lineHeight: 1.5 }}>
-                App tries LAN first (fast, no internet needed). Falls back to cloud automatically.
+                Enter the LAN IP and port of your DroneOpsCommand server.
+                Connect to the same network as the server before syncing.
               </div>
 
               <div className="input-group">
@@ -274,13 +219,9 @@ export default function App() {
 
               {(testStatus === 'ok' || testStatus === 'fail') && (
                 <div style={{ marginBottom: 12 }}>
-                  {testMsg.split('\n').map((line, i) => (
-                    <div key={i} style={{ marginBottom: 4 }}>
-                      <span className={line.includes(' OK') ? 'badge badge-ok' : 'badge badge-err'}>
-                        {line}
-                      </span>
-                    </div>
-                  ))}
+                  <span className={testStatus === 'ok' ? 'badge badge-ok' : 'badge badge-err'}>
+                    {testMsg}
+                  </span>
                 </div>
               )}
 
@@ -330,13 +271,6 @@ export default function App() {
             <div className="spinner" />
             <div className="status-title pulse">{statusMsg}</div>
             <div className="status-detail">{progressMsg}</div>
-            {activeServer && (
-              <div style={{ marginTop: 8 }}>
-                <span className={`badge ${activeServer.via === 'lan' ? 'badge-ok' : 'badge-warn'}`}>
-                  {activeServer.via === 'lan' ? 'LAN' : 'CLOUD'} — {activeServer.url.replace(/^https?:\/\//, '')}
-                </span>
-              </div>
-            )}
             <div className="progress-bar">
               <div className="progress-fill" style={{ width: `${progress}%` }} />
             </div>
@@ -432,9 +366,9 @@ export default function App() {
                   <span className="badge badge-ok">{healthResult.device_label}</span>
                 </div>
                 <div className="file-item">
-                  <span className="name">Route</span>
-                  <span className={`badge ${activeServer?.via === 'lan' ? 'badge-ok' : 'badge-warn'}`}>
-                    {activeServer?.via === 'lan' ? 'LAN (DIRECT)' : 'CLOUD (TUNNEL)'}
+                  <span className="name">Server</span>
+                  <span className="badge badge-ok">
+                    {serverUrl.replace(/^https?:\/\//, '')}
                   </span>
                 </div>
                 <div className="file-item" style={{ borderBottom: 'none' }}>
@@ -453,7 +387,7 @@ export default function App() {
                 setFoundFiles([]);
                 setSyncResult(null);
                 setDeleteResult(null);
-                runSync(serverUrl, lanUrl, apiKey, autoDelete);
+                runSync(serverUrl, apiKey, autoDelete);
               }}
             >
               SYNC AGAIN
@@ -469,25 +403,13 @@ export default function App() {
             <div className="status-detail" style={{ color: 'var(--red)' }}>
               {errorMsg}
             </div>
-            {activeServer && (
-              <div style={{ marginTop: 12 }}>
-                <span className={`badge ${activeServer.via === 'lan' ? 'badge-ok' : 'badge-warn'}`}>
-                  {activeServer.via === 'lan' ? 'LAN' : 'CLOUD'} — {activeServer.url.replace(/^https?:\/\//, '')}
-                </span>
-              </div>
-            )}
-            {!activeServer && (
-              <div className="status-detail" style={{ marginTop: 8 }}>
-                Failed before server connection was established
-              </div>
-            )}
             <div style={{ marginTop: 24, display: 'flex', flexDirection: 'column', gap: 12 }}>
               <button
                 className="btn btn-primary"
                 onClick={() => {
                   hasRun.current = false;
                   setErrorMsg('');
-                  runSync(serverUrl, lanUrl, apiKey, autoDelete);
+                  runSync(serverUrl, apiKey, autoDelete);
                 }}
               >
                 RETRY
@@ -502,7 +424,7 @@ export default function App() {
 
       {/* Footer */}
       <div className="footer">
-        DRONEOPSSYNC v1.2.0 — BARNARD HQ
+        DRONEOPSSYNC v2.0.0 — BARNARD HQ
       </div>
     </div>
   );
