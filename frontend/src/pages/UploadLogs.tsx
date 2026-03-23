@@ -21,7 +21,12 @@ import {
 import api from '../api/client';
 import { cardStyle, monoFont } from '../components/shared/styles';
 
-const VALID_EXTS = new Set(['csv', 'dat', 'log', 'txt']);
+const VALID_EXTS = new Set([
+  'csv', 'dat', 'log', 'txt',           // generic
+  'flylog', 'flightlog', 'litchi',       // third-party planners
+  'kml', 'kmz', 'gpx',                  // geo tracks
+  'bin', 'tlog', 'ulg',                 // PX4 / ArduPilot
+]);
 
 type FileStatus = 'pending' | 'uploading' | 'done' | 'skip' | 'error';
 
@@ -197,13 +202,17 @@ export default function UploadLogs() {
             Clear
           </Button>
         </Group>
+        <Text size="xs" c="#5a6478" mt="xs" style={monoFont}>
+          Supports CSV, DAT, LOG, TXT, KML, GPX, BIN, TLOG, ULG and more.
+          On DJI RC&nbsp;Pro&nbsp;/ Android, copy logs from DJI/dji.go.v5/FlightRecord
+          to Downloads first — Android blocks direct access to app folders.
+        </Text>
 
         {/* Hidden native inputs */}
         <input
           ref={fileRef}
           type="file"
           multiple
-          accept="*/*"
           style={{ display: 'none' }}
           onChange={e => { addFiles(e.target.files); e.target.value = ''; }}
         />
