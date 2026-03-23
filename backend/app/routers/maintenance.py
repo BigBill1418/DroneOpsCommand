@@ -17,7 +17,7 @@ from app.database import get_db
 from app.models.maintenance import MaintenanceRecord, MaintenanceSchedule
 from app.models.user import User
 from app.schemas.flight import (
-    MaintenanceRecordCreate, MaintenanceRecordResponse,
+    MaintenanceRecordCreate, MaintenanceRecordUpdate, MaintenanceRecordResponse,
     MaintenanceScheduleCreate, MaintenanceScheduleResponse,
 )
 
@@ -93,6 +93,51 @@ async def create_record(
         for sched in schedules.scalars().all():
             sched.last_performed = record.performed_at
 
+    return record
+
+
+@router.put("/records/{record_id}", response_model=MaintenanceRecordResponse)
+async def update_record(
+    record_id: UUID,
+    data: MaintenanceRecordUpdate,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    result = await db.execute(select(MaintenanceRecord).where(MaintenanceRecord.id == record_id))
+    record = result.scalar_one_or_none()
+    if not record:
+        raise HTTPException(status_code=404, detail="Record not found")
+
+    if data.aircraft_id is not None:
+        record.aircraft_id = data.aircraft_id
+    if data.maintenance_type is not None:
+        mt = data.maintenance_type.strip()
+        if not mt:
+            raise HTTPException(status_code=422, detail="At least one maintenance type is required")
+        record.maintenance_type = mt
+    if data.description is not None:
+        record.description = data.description
+    if data.performed_at is not None:
+        try:
+            record.performed_at = date.fromisoformat(data.performed_at)
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(status_code=422, detail=f"Invalid performed_at date: {exc}")
+    if data.next_due_date is not None:
+        try:
+            record.next_due_date = date.fromisoformat(data.next_due_date) if data.next_due_date else None
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(status_code=422, detail=f"Invalid next_due_date: {exc}")
+    if data.flight_hours_at is not None:
+        record.flight_hours_at = data.flight_hours_at
+    if data.next_due_hours is not None:
+        record.next_due_hours = data.next_due_hours
+    if data.cost is not None:
+        record.cost = data.cost
+    if data.notes is not None:
+        record.notes = data.notes
+
+    await db.flush()
+    await db.refresh(record)
     return record
 
 
