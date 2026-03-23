@@ -3,26 +3,18 @@ import {
   type LogFile,
   type SyncResult,
   type HealthResult,
-  type ScanResult,
   getConfig,
   saveConfig,
   scanForLogs,
   checkHealth,
   uploadLogs,
   deleteSyncedFiles,
+  checkStorageAccess,
   formatBytes,
   DEFAULT_SERVER_URL,
 } from './sync';
-import {
-  isAllFilesAccessGranted,
-  requestAllFilesAccess,
-  getDeviceStorageInfo,
-  pickSAFFolder,
-  getPersistedFolders,
-} from './all-files-access';
 
-// ── App states ─────────────────────────────────────────────────────────
-type View = 'loading' | 'permission' | 'setup' | 'syncing' | 'done' | 'error' | 'settings';
+type View = 'loading' | 'setup' | 'syncing' | 'done' | 'error' | 'settings' | 'diagnostic';
 
 export default function App() {
   // Config
@@ -42,47 +34,23 @@ export default function App() {
   const [healthResult, setHealthResult] = useState<HealthResult | null>(null);
   const [errorMsg, setErrorMsg] = useState('');
   const [deleteResult, setDeleteResult] = useState<{ deleted: number } | null>(null);
+  const [scanErrors, setScanErrors] = useState<string[]>([]);
 
-  // Permission state
-  const [sdkVersion, setSdkVersion] = useState(0);
-  const [needsSAF, setNeedsSAF] = useState(false);
-  const [hasSAFFolder, setHasSAFFolder] = useState(false);
-  const [restrictedBlocked, setRestrictedBlocked] = useState(false);
+  // Diagnostics
+  const [diagInfo, setDiagInfo] = useState<any>(null);
 
   // Settings test
   const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle');
   const [testMsg, setTestMsg] = useState('');
 
-  // Prevent double-run
   const hasRun = useRef(false);
 
-  // ── Boot: check permissions, load config, auto-sync ─────────────────
+  // ── Boot: load config, auto-sync ──────────────────────────────────
   useEffect(() => {
     if (hasRun.current) return;
     hasRun.current = true;
 
     (async () => {
-      // Get device storage info
-      const info = await getDeviceStorageInfo();
-      setSdkVersion(info.sdkVersion);
-      setNeedsSAF(info.needsSAF);
-
-      // On Android 11+, check MANAGE_EXTERNAL_STORAGE
-      if (info.sdkVersion >= 30 && !info.manageGranted) {
-        setView('permission');
-        return;
-      }
-
-      // Check for SAF folders if on Android 12+
-      if (info.needsSAF) {
-        const folders = await getPersistedFolders();
-        const hasDjiFolder = folders.some(f =>
-          f.path?.includes('dji.go.v5') || f.path?.includes('dji.go.v4') ||
-          f.path?.includes('FlightRecord') || f.path?.includes('com.dji')
-        );
-        setHasSAFFolder(hasDjiFolder);
-      }
-
       const cfg = await getConfig();
       if (cfg.serverUrl) setServerUrl(cfg.serverUrl);
       if (cfg.apiKey) setApiKey(cfg.apiKey);
@@ -97,58 +65,12 @@ export default function App() {
     })();
   }, []);
 
-  // Re-check permission when app resumes (user returns from Settings)
-  useEffect(() => {
-    const handleResume = async () => {
-      if (view !== 'permission') return;
-      const granted = await isAllFilesAccessGranted();
-      if (granted) {
-        proceedAfterPermission();
-      }
-    };
-
-    document.addEventListener('resume', handleResume);
-    const handleVisibility = () => {
-      if (document.visibilityState === 'visible') handleResume();
-    };
-    document.addEventListener('visibilitychange', handleVisibility);
-
-    return () => {
-      document.removeEventListener('resume', handleResume);
-      document.removeEventListener('visibilitychange', handleVisibility);
-    };
-  }, [view]);
-
-  async function proceedAfterPermission() {
-    const cfg = await getConfig();
-    if (cfg.serverUrl) setServerUrl(cfg.serverUrl);
-    if (cfg.apiKey) setApiKey(cfg.apiKey);
-    setAutoDelete(cfg.autoDelete);
-
-    if (!cfg.serverUrl || !cfg.apiKey) {
-      setView('setup');
-    } else {
-      await runSync(cfg.serverUrl, cfg.apiKey, cfg.autoDelete);
-    }
-  }
-
-  // ── SAF folder picker ────────────────────────────────────────────────
-  async function handlePickFolder() {
-    const uri = await pickSAFFolder('Android/data/dji.go.v5/files/FlightRecord');
-    if (uri) {
-      setHasSAFFolder(true);
-      setRestrictedBlocked(false);
-      // Re-run sync with the new folder access
-      await runSync(serverUrl, apiKey, autoDelete);
-    }
-  }
-
-  // ── Sync pipeline ────────────────────────────────────────────────────
+  // ── Sync pipeline ─────────────────────────────────────────────────
   async function runSync(url: string, key: string, autoDel: boolean) {
     setView('syncing');
     setProgress(0);
     setDeleteResult(null);
-    setRestrictedBlocked(false);
+    setScanErrors([]);
 
     try {
       // Step 1: Health check
@@ -166,10 +88,10 @@ export default function App() {
       // Step 2: Scan for logs
       setStatusMsg('SCANNING');
       setProgressMsg('Scanning DJI flight log folders...');
-      const scanResult: ScanResult = await scanForLogs((msg) => setProgressMsg(msg));
+      const scanResult = await scanForLogs((msg) => setProgressMsg(msg));
       const files = scanResult.files;
       setFoundFiles(files);
-      setRestrictedBlocked(scanResult.restrictedBlocked);
+      setScanErrors(scanResult.errors);
       setProgress(30);
 
       if (files.length === 0) {
@@ -209,11 +131,10 @@ export default function App() {
     }
   }
 
-  // ── Settings: test connection ────────────────────────────────────────
+  // ── Settings: test connection ─────────────────────────────────────
   async function testConnection() {
     setTestStatus('testing');
     setTestMsg('');
-
     try {
       const h = await checkHealth(serverUrl.trim(), apiKey);
       setTestStatus('ok');
@@ -224,7 +145,7 @@ export default function App() {
     }
   }
 
-  // ── Settings: save and sync ──────────────────────────────────────────
+  // ── Settings: save and sync ───────────────────────────────────────
   async function saveAndSync() {
     if (!serverUrl.trim() || !apiKey.trim()) return;
     await saveConfig(serverUrl.trim(), apiKey.trim(), autoDelete);
@@ -233,14 +154,26 @@ export default function App() {
     await runSync(serverUrl.trim(), apiKey.trim(), autoDelete);
   }
 
-  // ── Render ───────────────────────────────────────────────────────────
+  // ── Diagnostics ───────────────────────────────────────────────────
+  async function runDiagnostic() {
+    setDiagInfo(null);
+    setView('diagnostic');
+    try {
+      const info = await checkStorageAccess();
+      setDiagInfo(info);
+    } catch (err: any) {
+      setDiagInfo({ error: err.message });
+    }
+  }
+
+  // ── Render ────────────────────────────────────────────────────────
   return (
     <div className="app">
       {/* Header */}
       <div className="header">
         <img src="/icon.svg" alt="" className="header-icon" />
         <h1>DRONE<span>OPS</span> SYNC</h1>
-        {view !== 'setup' && view !== 'settings' && view !== 'permission' && (
+        {view !== 'setup' && view !== 'settings' && view !== 'diagnostic' && (
           <button className="header-settings" onClick={() => setView('settings')}>
             SETTINGS
           </button>
@@ -248,7 +181,7 @@ export default function App() {
       </div>
 
       <div className="content">
-        {/* ── LOADING ────────────────────────────────────────────── */}
+        {/* ── LOADING ──────────────────────────────────────── */}
         {view === 'loading' && (
           <div className="card status-box">
             <div className="spinner" />
@@ -257,47 +190,7 @@ export default function App() {
           </div>
         )}
 
-        {/* ── PERMISSION GATE ─────────────────────────────────── */}
-        {view === 'permission' && (
-          <div className="card status-box">
-            <div style={{ fontSize: 48, marginBottom: 16 }}>&#128274;</div>
-            <div className="status-title" style={{ color: 'var(--cyan)' }}>FILE ACCESS REQUIRED</div>
-            <div className="status-detail" style={{ lineHeight: 1.6, marginBottom: 8 }}>
-              DroneOpsSync needs file access permission to read DJI flight logs.
-            </div>
-            <div className="status-detail" style={{ lineHeight: 1.6, marginBottom: 20, opacity: 0.7 }}>
-              Tap the button below to open Settings, then
-              enable <strong>"Allow access to manage all files"</strong>.
-            </div>
-            <button
-              className="btn btn-primary"
-              onClick={async () => {
-                await requestAllFilesAccess();
-              }}
-              style={{ marginBottom: 12 }}
-            >
-              OPEN FILE ACCESS SETTINGS
-            </button>
-            <button
-              className="btn btn-outline"
-              onClick={async () => {
-                const granted = await isAllFilesAccessGranted();
-                if (granted) {
-                  proceedAfterPermission();
-                }
-              }}
-            >
-              I'VE GRANTED PERMISSION
-            </button>
-            {sdkVersion > 0 && (
-              <div className="status-detail" style={{ marginTop: 16, opacity: 0.4 }}>
-                Android API {sdkVersion}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* ── SETUP (first run) ─────────────────────────────────── */}
+        {/* ── SETUP / SETTINGS ─────────────────────────────── */}
         {(view === 'setup' || view === 'settings') && (
           <>
             <div className="card">
@@ -375,19 +268,26 @@ export default function App() {
             </div>
 
             {view === 'settings' && (
-              <button
-                className="btn btn-outline"
-                onClick={() => {
-                  setView('done');
-                }}
-              >
-                BACK
-              </button>
+              <>
+                <button
+                  className="btn btn-outline"
+                  onClick={() => setView('done')}
+                  style={{ marginBottom: 8 }}
+                >
+                  BACK
+                </button>
+                <button
+                  className="btn btn-outline"
+                  onClick={runDiagnostic}
+                >
+                  RUN DIAGNOSTIC
+                </button>
+              </>
             )}
           </>
         )}
 
-        {/* ── SYNCING ───────────────────────────────────────────── */}
+        {/* ── SYNCING ─────────────────────────────────────── */}
         {view === 'syncing' && (
           <div className="card status-box">
             <div className="spinner" />
@@ -402,7 +302,7 @@ export default function App() {
           </div>
         )}
 
-        {/* ── DONE ──────────────────────────────────────────────── */}
+        {/* ── DONE ────────────────────────────────────────── */}
         {view === 'done' && syncResult && (
           <>
             <div className="card result-banner">
@@ -446,38 +346,18 @@ export default function App() {
               )}
             </div>
 
-            {/* SAF folder access prompt — shown when Android/data/ was blocked */}
-            {restrictedBlocked && (
+            {/* Scan errors (e.g. permission denied on a path) */}
+            {scanErrors.length > 0 && (
               <div className="card">
                 <div className="card-title" style={{ color: 'var(--orange)' }}>
-                  DJI FLY LOGS NOT ACCESSIBLE
+                  SCAN NOTES ({scanErrors.length})
                 </div>
-                <div style={{
-                  fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-muted)',
-                  lineHeight: 1.6, marginBottom: 16,
-                }}>
-                  DJI Fly / Go 5 stores flight logs in a protected folder
-                  (<code style={{ color: 'var(--orange)' }}>Android/data/</code>) that
-                  requires special access on this Android version.
-                  <br /><br />
-                  Tap below to select the DJI log folder. Navigate to:
-                  <br />
-                  <strong style={{ color: 'var(--text)' }}>
-                    Android &gt; data &gt; dji.go.v5 &gt; files &gt; FlightRecord
-                  </strong>
-                </div>
-                <button
-                  className="btn btn-primary"
-                  onClick={handlePickFolder}
-                  style={{ marginBottom: 8 }}
-                >
-                  SELECT DJI LOG FOLDER
-                </button>
-                <div style={{
-                  fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-muted)',
-                  textAlign: 'center', marginTop: 8, opacity: 0.6,
-                }}>
-                  You only need to do this once — access is saved for future syncs
+                <div className="file-list">
+                  {scanErrors.map((e, i) => (
+                    <div className="file-item" key={i}>
+                      <span className="name" style={{ color: 'var(--orange)' }}>{e}</span>
+                    </div>
+                  ))}
                 </div>
               </div>
             )}
@@ -499,7 +379,7 @@ export default function App() {
               </div>
             )}
 
-            {/* Errors */}
+            {/* Upload errors */}
             {syncResult.errors.length > 0 && (
               <div className="card">
                 <div className="card-title" style={{ color: 'var(--red)' }}>
@@ -553,7 +433,7 @@ export default function App() {
           </>
         )}
 
-        {/* ── ERROR ─────────────────────────────────────────────── */}
+        {/* ── ERROR ───────────────────────────────────────── */}
         {view === 'error' && (
           <div className="card status-box">
             <div style={{ fontSize: 48, marginBottom: 16 }}>&#9888;</div>
@@ -575,15 +455,69 @@ export default function App() {
               <button className="btn btn-outline" onClick={() => setView('settings')}>
                 CHECK SETTINGS
               </button>
+              <button className="btn btn-outline" onClick={runDiagnostic}>
+                RUN DIAGNOSTIC
+              </button>
             </div>
           </div>
+        )}
+
+        {/* ── DIAGNOSTIC ──────────────────────────────────── */}
+        {view === 'diagnostic' && (
+          <>
+            <div className="card">
+              <div className="card-title">STORAGE DIAGNOSTIC</div>
+              {!diagInfo ? (
+                <div style={{ textAlign: 'center', padding: 20 }}>
+                  <div className="spinner" />
+                  <div className="status-detail">Checking file access...</div>
+                </div>
+              ) : diagInfo.error ? (
+                <div className="status-detail" style={{ color: 'var(--red)' }}>
+                  Error: {diagInfo.error}
+                </div>
+              ) : (
+                <>
+                  <div className="file-item">
+                    <span className="name">Android SDK</span>
+                    <span className="badge badge-ok">API {diagInfo.sdkVersion}</span>
+                  </div>
+                  <div className="file-item">
+                    <span className="name">Storage Root</span>
+                    <span className="badge badge-ok">{diagInfo.storagePath}</span>
+                  </div>
+                  <div className="file-item">
+                    <span className="name">Root Accessible</span>
+                    <span className={`badge ${diagInfo.accessible ? 'badge-ok' : 'badge-err'}`}>
+                      {diagInfo.accessible ? 'YES' : 'NO'}
+                    </span>
+                  </div>
+
+                  <div className="card-title" style={{ marginTop: 16 }}>DJI LOG PATHS</div>
+                  {diagInfo.pathResults.map((p: any, i: number) => (
+                    <div className="file-item" key={i}>
+                      <span className="name" style={{ fontSize: 10 }}>
+                        {p.path.replace('Android/data/', 'A/d/').replace('DJI/', 'DJI/')}
+                      </span>
+                      <span className={`badge ${p.readable ? 'badge-ok' : p.exists ? 'badge-warn' : 'badge-err'}`}>
+                        {p.readable ? 'OK' : p.exists ? 'DENIED' : 'NOT FOUND'}
+                      </span>
+                    </div>
+                  ))}
+                </>
+              )}
+            </div>
+
+            <button className="btn btn-outline" onClick={() => setView('settings')}>
+              BACK TO SETTINGS
+            </button>
+          </>
         )}
       </div>
 
       {/* Footer */}
       <div className="footer">
-        DRONEOPSSYNC v2.35.4 LAN — BARNARD HQ
-        {sdkVersion > 0 && <span style={{ opacity: 0.4 }}> — API {sdkVersion}</span>}
+        DRONEOPSSYNC v2.36.0 LAN — BARNARD HQ
       </div>
     </div>
   );
