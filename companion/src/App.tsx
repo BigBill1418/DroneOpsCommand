@@ -424,7 +424,7 @@ export default function App() {
 
       {/* Footer */}
       <div className="footer">
-        DRONEOPSSYNC v2.35.0 LAN — BARNARD HQ
+        DRONEOPSSYNC v2.35.1 LAN — BARNARD HQ
       </div>
     </div>
   );
