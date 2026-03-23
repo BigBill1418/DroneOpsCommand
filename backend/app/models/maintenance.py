@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime, date
 
-from sqlalchemy import Text, DateTime, Date, Float, Integer, ForeignKey
+from sqlalchemy import Text, DateTime, Date, Float, Integer, ForeignKey, JSON
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -25,6 +25,7 @@ class MaintenanceRecord(Base):
     next_due_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     cost: Mapped[float | None] = mapped_column(Float, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    images: Mapped[list | None] = mapped_column(JSON, nullable=True, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     aircraft = relationship("Aircraft", lazy="selectin")
