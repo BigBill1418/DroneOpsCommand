@@ -144,15 +144,44 @@ export default function App() {
   async function testConnection() {
     setTestStatus('testing');
     setTestMsg('');
-    try {
-      const server = await resolveServerUrl(serverUrl, lanUrl, apiKey);
-      const health = await checkHealth(server.url, apiKey);
-      setTestStatus('ok');
-      setTestMsg(`Connected via ${server.via.toUpperCase()} as "${health.device_label}" — parser ${health.parser_available ? 'online' : 'offline'}`);
-    } catch (err: any) {
-      setTestStatus('fail');
-      setTestMsg(err.message || 'Connection failed');
+
+    const results: string[] = [];
+
+    // Test LAN if configured
+    if (lanUrl.trim()) {
+      try {
+        const h = await checkHealth(lanUrl.trim(), apiKey);
+        results.push(`LAN OK — "${h.device_label}", parser ${h.parser_available ? 'online' : 'offline'}`);
+      } catch (err: any) {
+        const msg = err.message || 'unknown error';
+        if (msg.includes('Failed to fetch') || msg.includes('NetworkError') || msg.includes('abort'))
+          results.push(`LAN FAIL — unreachable (${lanUrl.trim()} — check IP/port, cleartext blocked?)`);
+        else if (msg.includes('401'))
+          results.push('LAN FAIL — invalid API key');
+        else if (msg.includes('CORS') || msg.includes('opaque'))
+          results.push('LAN FAIL — CORS blocked (server needs rebuild)');
+        else
+          results.push(`LAN FAIL — ${msg}`);
+      }
     }
+
+    // Test Cloud
+    try {
+      const h = await checkHealth(serverUrl.trim(), apiKey);
+      results.push(`Cloud OK — "${h.device_label}", parser ${h.parser_available ? 'online' : 'offline'}`);
+    } catch (err: any) {
+      const msg = err.message || 'unknown error';
+      if (msg.includes('Failed to fetch') || msg.includes('NetworkError'))
+        results.push(`Cloud FAIL — unreachable (${serverUrl.trim()})`);
+      else if (msg.includes('401'))
+        results.push('Cloud FAIL — invalid API key');
+      else
+        results.push(`Cloud FAIL — ${msg}`);
+    }
+
+    const anyOk = results.some((r) => r.includes(' OK'));
+    setTestStatus(anyOk ? 'ok' : 'fail');
+    setTestMsg(results.join('\n'));
   }
 
   // ── Settings: save and sync ──────────────────────────────────────────
@@ -239,14 +268,15 @@ export default function App() {
                 {testStatus === 'testing' ? 'TESTING...' : 'TEST CONNECTION'}
               </button>
 
-              {testStatus === 'ok' && (
+              {(testStatus === 'ok' || testStatus === 'fail') && (
                 <div style={{ marginBottom: 12 }}>
-                  <span className="badge badge-ok">{testMsg}</span>
-                </div>
-              )}
-              {testStatus === 'fail' && (
-                <div style={{ marginBottom: 12 }}>
-                  <span className="badge badge-err">{testMsg}</span>
+                  {testMsg.split('\n').map((line, i) => (
+                    <div key={i} style={{ marginBottom: 4 }}>
+                      <span className={line.includes(' OK') ? 'badge badge-ok' : 'badge badge-err'}>
+                        {line}
+                      </span>
+                    </div>
+                  ))}
                 </div>
               )}
 

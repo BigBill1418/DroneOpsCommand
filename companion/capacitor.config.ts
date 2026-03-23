@@ -5,8 +5,13 @@ const config: CapacitorConfig = {
   appName: 'DroneOpsSync',
   webDir: 'dist',
   android: {
-    // Allow HTTP for local development; in production use HTTPS via tunnel
+    // Allow HTTP for LAN connections (cleartext to local IPs)
     allowMixedContent: true,
+  },
+  server: {
+    // Capacitor WebView origin — needed so fetch() works to any host
+    androidScheme: 'https',
+    cleartext: true,
   },
   plugins: {
     Filesystem: {
