@@ -11,12 +11,16 @@ import { Preferences } from '@capacitor/preferences';
 
 // ── Config keys ────────────────────────────────────────────────────────
 export const PREF_SERVER_URL = 'serverUrl';
+export const PREF_LAN_URL = 'lanUrl';
 export const PREF_API_KEY = 'apiKey';
 export const PREF_AUTO_DELETE = 'autoDelete';
 export const PREF_SYNCED_HASHES = 'syncedHashes';
 
-// ── Default server URL (user should update in Settings → Device Access) ──
-export const DEFAULT_SERVER_URL = 'https://droneops.example.com';
+// ── Default URLs ───────────────────────────────────────────────────────
+// Cloud: works from anywhere (cell data, hotel wifi, job site)
+export const DEFAULT_SERVER_URL = 'https://droneops.barnardhq.com';
+// LAN: faster when on-site, works even if internet is down
+export const DEFAULT_LAN_URL = 'http://192.168.50.20:8030';
 
 // ── DJI log paths (relative to ExternalStorage = /storage/emulated/0/) ─
 export const DJI_LOG_PATHS = [
@@ -57,21 +61,29 @@ export interface HealthResult {
 
 // ── Preferences helpers ────────────────────────────────────────────────
 export async function getConfig() {
-  const [urlRes, keyRes, delRes] = await Promise.all([
+  const [urlRes, lanRes, keyRes, delRes] = await Promise.all([
     Preferences.get({ key: PREF_SERVER_URL }),
+    Preferences.get({ key: PREF_LAN_URL }),
     Preferences.get({ key: PREF_API_KEY }),
     Preferences.get({ key: PREF_AUTO_DELETE }),
   ]);
   return {
     serverUrl: urlRes.value || '',
+    lanUrl: lanRes.value || '',
     apiKey: keyRes.value || '',
     autoDelete: delRes.value === 'true',
   };
 }
 
-export async function saveConfig(serverUrl: string, apiKey: string, autoDelete: boolean) {
+export async function saveConfig(
+  serverUrl: string,
+  lanUrl: string,
+  apiKey: string,
+  autoDelete: boolean,
+) {
   await Promise.all([
     Preferences.set({ key: PREF_SERVER_URL, value: serverUrl }),
+    Preferences.set({ key: PREF_LAN_URL, value: lanUrl }),
     Preferences.set({ key: PREF_API_KEY, value: apiKey }),
     Preferences.set({ key: PREF_AUTO_DELETE, value: String(autoDelete) }),
   ]);
@@ -160,6 +172,64 @@ async function scanDir(
     }
   } catch {
     // Directory not readable — skip silently
+  }
+}
+
+// ── Server resolution (LAN-first with cloud fallback) ─────────────────
+export interface ResolvedServer {
+  url: string;
+  via: 'lan' | 'cloud';
+}
+
+/**
+ * Try the LAN URL first (fast, no internet needed). If it doesn't respond
+ * within 3 seconds, fall back to the cloud/tunnel URL. Returns whichever
+ * answered the health check successfully.
+ */
+export async function resolveServerUrl(
+  cloudUrl: string,
+  lanUrl: string,
+  apiKey: string,
+  onStatus?: (msg: string) => void,
+): Promise<ResolvedServer> {
+  // If no LAN URL configured, go straight to cloud
+  if (!lanUrl.trim()) {
+    onStatus?.('Connecting via cloud...');
+    await checkHealth(cloudUrl, apiKey);
+    return { url: cloudUrl, via: 'cloud' };
+  }
+
+  // Try LAN first with a short timeout
+  onStatus?.('Trying LAN connection...');
+  try {
+    await checkHealthWithTimeout(lanUrl, apiKey, 3000);
+    return { url: lanUrl, via: 'lan' };
+  } catch {
+    // LAN unreachable — fall back to cloud
+    onStatus?.('LAN unavailable — connecting via cloud...');
+    await checkHealth(cloudUrl, apiKey);
+    return { url: cloudUrl, via: 'cloud' };
+  }
+}
+
+async function checkHealthWithTimeout(
+  serverUrl: string,
+  apiKey: string,
+  timeoutMs: number,
+): Promise<HealthResult> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const url = `${serverUrl.replace(/\/+$/, '')}/api/flight-library/device-health`;
+    const resp = await fetch(url, {
+      method: 'GET',
+      headers: { 'X-Device-Api-Key': apiKey },
+      signal: controller.signal,
+    });
+    if (!resp.ok) throw new Error(`Status ${resp.status}`);
+    return resp.json();
+  } finally {
+    clearTimeout(timer);
   }
 }
 
