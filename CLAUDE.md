@@ -37,6 +37,16 @@ Include the version tag in the commit message (e.g. `— v1.7.8`).
 - `./update.sh status` — show branch info & running services
 - `./update.sh dev --clean` — full rebuild, no Docker cache
 
+## Decision-Making (REQUIRED)
+
+**Before proposing or making any major architectural change** (removing features, dropping platforms, decommissioning endpoints, changing core workflows), ALWAYS:
+1. Research the full context — read related code, git history, and understand WHY the feature exists
+2. Identify who/what depends on it and what breaks if it's removed
+3. Present findings and trade-offs to the user BEFORE taking action
+4. Do NOT remove working functionality just to "simplify" — if it works, keep it unless there's a clear reason to cut it
+
+**Example of what NOT to do:** The DroneOpsSync device upload API was decommissioned in v2.30.0 without fully considering that the browser file picker cannot access DJI app folders on Android/RC Pro. The companion app approach was correct and should not have been removed.
+
 ## Conventions
 
 - Commit messages: short summary, optional detail paragraph, always end with session link
