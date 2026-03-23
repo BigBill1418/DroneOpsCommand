@@ -44,6 +44,7 @@ import {
   IconCheck,
   IconCopy,
   IconMail,
+  IconCloudUpload,
 } from '@tabler/icons-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
@@ -312,6 +313,16 @@ export default function Dashboard() {
             styles={{ root: { ...bebasFont, letterSpacing: '1px' } }}
           >
             NEW MISSION
+          </Button>
+          <Button
+            leftSection={<IconCloudUpload size={16} />}
+            color="cyan"
+            variant="outline"
+            size="sm"
+            onClick={() => navigate('/upload-logs')}
+            styles={{ root: { ...bebasFont, letterSpacing: '1px' } }}
+          >
+            UPLOAD LOGS
           </Button>
         </Group>
       </Group>
