@@ -9,8 +9,8 @@
     "preview": "vite preview",
     "cap:sync": "npx cap sync android && node scripts/patch-android.js",
     "cap:patch": "node scripts/patch-android.js",
-    "cap:build": "npm run build && npx cap copy android && node scripts/patch-android.js && cd android && ./gradlew assembleDebug",
-    "cap:build:release": "npm run build && npx cap copy android && node scripts/patch-android.js && cd android && ./gradlew assembleRelease"
+    "cap:build": "npm run build && npx cap copy android && node scripts/patch-android.js && node scripts/gradlew.js assembleDebug",
+    "cap:build:release": "npm run build && npx cap copy android && node scripts/patch-android.js && node scripts/gradlew.js assembleRelease"
   },
   "dependencies": {
     "@capacitor/android": "^6.0.0",
