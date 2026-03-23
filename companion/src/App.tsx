@@ -158,6 +158,8 @@ export default function App() {
           results.push(`LAN FAIL — unreachable (${lanUrl.trim()} — check IP/port, cleartext blocked?)`);
         else if (msg.includes('401'))
           results.push('LAN FAIL — invalid API key');
+        else if (msg.includes('403'))
+          results.push('LAN FAIL — 403 forbidden (Cloudflare Access bypass needed)');
         else if (msg.includes('CORS') || msg.includes('opaque'))
           results.push('LAN FAIL — CORS blocked (server needs rebuild)');
         else
@@ -175,6 +177,8 @@ export default function App() {
         results.push(`Cloud FAIL — unreachable (${serverUrl.trim()})`);
       else if (msg.includes('401'))
         results.push('Cloud FAIL — invalid API key');
+      else if (msg.includes('403'))
+        results.push('Cloud FAIL — 403 forbidden (Cloudflare Access bypass needed for /api/flight-library/device-*)');
       else
         results.push(`Cloud FAIL — ${msg}`);
     }
@@ -326,6 +330,13 @@ export default function App() {
             <div className="spinner" />
             <div className="status-title pulse">{statusMsg}</div>
             <div className="status-detail">{progressMsg}</div>
+            {activeServer && (
+              <div style={{ marginTop: 8 }}>
+                <span className={`badge ${activeServer.via === 'lan' ? 'badge-ok' : 'badge-warn'}`}>
+                  {activeServer.via === 'lan' ? 'LAN' : 'CLOUD'} — {activeServer.url.replace(/^https?:\/\//, '')}
+                </span>
+              </div>
+            )}
             <div className="progress-bar">
               <div className="progress-fill" style={{ width: `${progress}%` }} />
             </div>
@@ -458,6 +469,18 @@ export default function App() {
             <div className="status-detail" style={{ color: 'var(--red)' }}>
               {errorMsg}
             </div>
+            {activeServer && (
+              <div style={{ marginTop: 12 }}>
+                <span className={`badge ${activeServer.via === 'lan' ? 'badge-ok' : 'badge-warn'}`}>
+                  {activeServer.via === 'lan' ? 'LAN' : 'CLOUD'} — {activeServer.url.replace(/^https?:\/\//, '')}
+                </span>
+              </div>
+            )}
+            {!activeServer && (
+              <div className="status-detail" style={{ marginTop: 8 }}>
+                Failed before server connection was established
+              </div>
+            )}
             <div style={{ marginTop: 24, display: 'flex', flexDirection: 'column', gap: 12 }}>
               <button
                 className="btn btn-primary"
@@ -479,7 +502,7 @@ export default function App() {
 
       {/* Footer */}
       <div className="footer">
-        DRONEOPSSYNC v1.0.0 — BARNARD HQ
+        DRONEOPSSYNC v1.1.0 — BARNARD HQ
       </div>
     </div>
   );
