@@ -7,10 +7,10 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "cap:sync": "npx cap sync android && node scripts/patch-android.js",
-    "cap:patch": "node scripts/patch-android.js",
-    "cap:build": "npm run build && npx cap copy android && node scripts/patch-android.js && node scripts/gradlew.js assembleDebug",
-    "cap:build:release": "npm run build && npx cap copy android && node scripts/patch-android.js && node scripts/gradlew.js assembleRelease"
+    "cap:sync": "npx cap sync android && node scripts/patch-android.cjs",
+    "cap:patch": "node scripts/patch-android.cjs",
+    "cap:build": "npm run build && npx cap copy android && node scripts/patch-android.cjs && node scripts/gradlew.cjs assembleDebug",
+    "cap:build:release": "npm run build && npx cap copy android && node scripts/patch-android.cjs && node scripts/gradlew.cjs assembleRelease"
   },
   "dependencies": {
     "@capacitor/android": "^6.0.0",
