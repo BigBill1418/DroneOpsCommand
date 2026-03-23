@@ -66,10 +66,10 @@ npm install
 Edit `src/sync.ts` and change `DEFAULT_SERVER_URL` to your actual DroneOps Command URL:
 
 ```typescript
-export const DEFAULT_SERVER_URL = 'https://your-actual-domain.com';
+export const DEFAULT_SERVER_URL = 'http://192.168.1.50:3080';
 ```
 
-This is the URL you access DroneOps Command at (your Cloudflare tunnel URL or LAN IP).
+This is the LAN IP and port of your DroneOpsCommand server.
 
 ### Step 3: Build the web app
 
