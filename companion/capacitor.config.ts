@@ -14,6 +14,11 @@ const config: CapacitorConfig = {
     cleartext: true,
   },
   plugins: {
+    CapacitorHttp: {
+      // Route all fetch() through native HTTP layer — bypasses WebView
+      // mixed-content blocks and CORS when talking to LAN servers over HTTP
+      enabled: true,
+    },
     Filesystem: {
       // Request legacy external storage access (required for Android 10 / DJI RC Pro)
       requestLegacyExternalStorage: true,
