@@ -325,7 +325,7 @@ If you fly newer DJI drones with encrypted flight logs, you need a DJI API key f
 
 ## Optional: Cloudflare Tunnel (Remote Access)
 
-To access your DroneOpsCommand instance from anywhere without opening router ports, see the [Cloudflare Tunnel Setup Guide](cloudflare-tunnel-setup.md).
+To access your DroneOpsCommand instance from anywhere without opening router ports, set `CLOUDFLARE_TUNNEL_TOKEN` in your `.env` file. Get a token from the Cloudflare Zero Trust dashboard under Networks → Tunnels.
 
 ---
 

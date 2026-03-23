@@ -2,7 +2,7 @@
 
 **Self-hosted mission management, AI report generation, and invoicing for commercial drone operators.**
 
-**Version 2.29.1** | [Quick Start](#quick-start) | [Features](#features) | [Configuration](#configuration) | [Contributing](CONTRIBUTING.md) | [License](LICENSE)
+**Version 2.34.0** | [Quick Start](#quick-start) | [Features](#features) | [Configuration](#configuration) | [Contributing](CONTRIBUTING.md) | [License](LICENSE)
 
 ---
 
@@ -68,7 +68,7 @@ docker compose logs -f ollama-setup
 
 # 5. Open the app
 #    Web UI:   http://localhost:3080
-#    API docs: http://localhost:8000/docs
+#    API docs: http://localhost:3080/docs
 #    Login:    admin / (your ADMIN_PASSWORD from .env)
 ```
 
@@ -232,7 +232,7 @@ After logging in, go to **Settings > Branding** to set your company name, taglin
 | Service | Technology | Port | Purpose |
 |---------|-----------|------|---------|
 | Frontend | React 18 + Vite + Mantine UI | 80 (nginx) | SPA web interface |
-| Backend | Python 3.12, FastAPI, SQLAlchemy 2.0 | 8000 | REST API |
+| Backend | Python 3.12, FastAPI, SQLAlchemy 2.0 | internal | REST API (via nginx) |
 | Database | PostgreSQL 16 Alpine | 5432 | Persistent storage |
 | LLM | Ollama (Mistral 7B quantized) | 11434 | Local AI report generation |
 | Queue | Redis 7 Alpine | 6379 | Celery task broker |
@@ -414,7 +414,7 @@ Aggregates data from 4 external APIs: Open-Meteo (current conditions), AviationW
 
 ## API Reference
 
-Full interactive API documentation is available at `http://localhost:8000/docs` (Swagger UI) when the backend is running.
+Full interactive API documentation is available at `http://localhost:3080/docs` (Swagger UI) when the app is running.
 
 ### Core Endpoints
 
@@ -453,7 +453,7 @@ Full interactive API documentation is available at `http://localhost:8000/docs` 
 
 ## Roadmap
 
-- **Voice-to-Text** — On-device speech recognition in the [DroneOpsSync](https://github.com/BigBill1418/DroneOpsSync) Android app for dictating operator field notes hands-free during or after missions.
+- **Voice-to-Text** — On-device speech recognition in the DroneOpsSync Android companion app for dictating operator field notes hands-free during or after missions.
 - **Report Templates** — Multiple PDF templates for different mission types
 - **Claude API Integration** — Replace local Ollama/Mistral 7B with Claude API for faster, higher-quality report generation
 - **Detailed Flight Visualization** — Altitude-colored paths, telemetry timeline, and flight replay for post-mission analysis

@@ -1,14 +1,18 @@
 """Aircraft maintenance tracking API."""
 
+import asyncio
 import logging
+import os
+import uuid as uuid_mod
 from datetime import date, datetime
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.jwt import get_current_user
+from app.config import settings
 from app.database import get_db
 from app.models.maintenance import MaintenanceRecord, MaintenanceSchedule
 from app.models.user import User
@@ -102,7 +106,90 @@ async def delete_record(
     record = result.scalar_one_or_none()
     if not record:
         raise HTTPException(status_code=404, detail="Record not found")
+    # Clean up any images on disk
+    for img_path in (record.images or []):
+        try:
+            os.remove(os.path.join(settings.upload_dir, img_path))
+        except OSError:
+            pass
     await db.delete(record)
+
+
+# ── Maintenance Record Images ─────────────────────────────────────────
+
+ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
+MAX_IMAGE_SIZE = 10_000_000  # 10 MB
+
+
+def _write_file(path: str, content: bytes):
+    with open(path, "wb") as f:
+        f.write(content)
+
+
+@router.post("/records/{record_id}/images", response_model=MaintenanceRecordResponse)
+async def upload_maintenance_image(
+    record_id: UUID,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    result = await db.execute(select(MaintenanceRecord).where(MaintenanceRecord.id == record_id))
+    record = result.scalar_one_or_none()
+    if not record:
+        raise HTTPException(status_code=404, detail="Record not found")
+
+    content = await file.read()
+    if len(content) > MAX_IMAGE_SIZE:
+        raise HTTPException(status_code=413, detail="Image too large (10MB max)")
+    if file.content_type and file.content_type not in ALLOWED_IMAGE_TYPES:
+        raise HTTPException(status_code=400, detail="Only JPEG, PNG, and WebP images are allowed")
+
+    upload_dir = os.path.join(settings.upload_dir, "maintenance", str(record_id))
+    os.makedirs(upload_dir, exist_ok=True)
+
+    ext = os.path.splitext(file.filename)[1] if file.filename else ".jpg"
+    filename = f"{uuid_mod.uuid4()}{ext}"
+    file_path = os.path.join(upload_dir, filename)
+
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, _write_file, file_path, content)
+
+    relative_path = os.path.join("maintenance", str(record_id), filename)
+    images = list(record.images or [])
+    images.append(relative_path)
+    record.images = images
+
+    await db.flush()
+    await db.refresh(record)
+    return record
+
+
+@router.delete("/records/{record_id}/images/{image_idx}", response_model=MaintenanceRecordResponse)
+async def delete_maintenance_image(
+    record_id: UUID,
+    image_idx: int,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    result = await db.execute(select(MaintenanceRecord).where(MaintenanceRecord.id == record_id))
+    record = result.scalar_one_or_none()
+    if not record:
+        raise HTTPException(status_code=404, detail="Record not found")
+
+    images = list(record.images or [])
+    if image_idx < 0 or image_idx >= len(images):
+        raise HTTPException(status_code=404, detail="Image not found")
+
+    removed = images.pop(image_idx)
+    try:
+        os.remove(os.path.join(settings.upload_dir, removed))
+    except OSError:
+        pass
+
+    record.images = images
+    await db.flush()
+    await db.refresh(record)
+    return record
 
 
 # ── Maintenance Schedules ─────────────────────────────────────────────
