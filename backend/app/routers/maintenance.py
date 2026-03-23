@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.jwt import get_current_user
 from app.config import settings
 from app.database import get_db
+from app.models.aircraft import Aircraft
 from app.models.maintenance import MaintenanceRecord, MaintenanceSchedule
 from app.models.user import User
 from app.schemas.flight import (
@@ -285,9 +286,13 @@ async def maintenance_due(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
-    """Get maintenance items that are due or overdue."""
+    """Get maintenance items that are due or overdue (includes aircraft name)."""
     today = date.today()
     alerts = []
+
+    # Build aircraft name lookup
+    aircraft_result = await db.execute(select(Aircraft))
+    aircraft_map = {str(a.id): a.model_name for a in aircraft_result.scalars().all()}
 
     # Check date-based schedules
     schedules = await db.execute(select(MaintenanceSchedule))
@@ -295,6 +300,7 @@ async def maintenance_due(
         if not sched.interval_days:
             continue
 
+        aid = str(sched.aircraft_id)
         if sched.last_performed:
             from datetime import timedelta
             next_due = sched.last_performed + timedelta(days=sched.interval_days)
@@ -302,7 +308,8 @@ async def maintenance_due(
             if days_until <= 7:  # Due within a week or overdue
                 alerts.append({
                     "schedule_id": str(sched.id),
-                    "aircraft_id": str(sched.aircraft_id),
+                    "aircraft_id": aid,
+                    "aircraft_name": aircraft_map.get(aid, "Unknown"),
                     "maintenance_type": sched.maintenance_type,
                     "description": sched.description,
                     "next_due_date": next_due.isoformat(),
@@ -313,7 +320,8 @@ async def maintenance_due(
             # Never performed — always due
             alerts.append({
                 "schedule_id": str(sched.id),
-                "aircraft_id": str(sched.aircraft_id),
+                "aircraft_id": aid,
+                "aircraft_name": aircraft_map.get(aid, "Unknown"),
                 "maintenance_type": sched.maintenance_type,
                 "description": sched.description,
                 "next_due_date": None,
@@ -327,11 +335,13 @@ async def maintenance_due(
     )
     for rec in records.scalars().all():
         if rec.next_due_date:
+            aid = str(rec.aircraft_id)
             days_until = (rec.next_due_date - today).days
             if days_until <= 7:
                 alerts.append({
                     "record_id": str(rec.id),
-                    "aircraft_id": str(rec.aircraft_id),
+                    "aircraft_id": aid,
+                    "aircraft_name": aircraft_map.get(aid, "Unknown"),
                     "maintenance_type": rec.maintenance_type,
                     "description": rec.description,
                     "next_due_date": rec.next_due_date.isoformat(),
@@ -340,3 +350,66 @@ async def maintenance_due(
                 })
 
     return sorted(alerts, key=lambda a: a.get("days_until", 0))
+
+
+@router.get("/next-due")
+async def maintenance_next_due(
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """Get the single next upcoming maintenance item across all aircraft.
+
+    Unlike /due which only shows items within 7 days, this looks at ALL
+    future maintenance to always show what's coming next — even if it's
+    months away. Used by the dashboard 'Next Service Due' widget.
+    """
+    today = date.today()
+    candidates: list[dict] = []
+
+    # Build aircraft name lookup
+    aircraft_result = await db.execute(select(Aircraft))
+    aircraft_map = {str(a.id): a.model_name for a in aircraft_result.scalars().all()}
+
+    # From schedules with interval_days
+    schedules = await db.execute(select(MaintenanceSchedule))
+    for sched in schedules.scalars().all():
+        if not sched.interval_days:
+            continue
+        aid = str(sched.aircraft_id)
+        if sched.last_performed:
+            from datetime import timedelta
+            next_due = sched.last_performed + timedelta(days=sched.interval_days)
+        else:
+            next_due = today  # Never performed — due now
+        candidates.append({
+            "aircraft_id": aid,
+            "aircraft_name": aircraft_map.get(aid, "Unknown"),
+            "maintenance_type": sched.maintenance_type,
+            "description": sched.description,
+            "next_due_date": next_due.isoformat(),
+            "days_until": (next_due - today).days,
+            "overdue": (next_due - today).days < 0,
+        })
+
+    # From records with next_due_date
+    records = await db.execute(
+        select(MaintenanceRecord).where(MaintenanceRecord.next_due_date != None)
+    )
+    for rec in records.scalars().all():
+        if rec.next_due_date:
+            aid = str(rec.aircraft_id)
+            candidates.append({
+                "aircraft_id": aid,
+                "aircraft_name": aircraft_map.get(aid, "Unknown"),
+                "maintenance_type": rec.maintenance_type,
+                "description": rec.description,
+                "next_due_date": rec.next_due_date.isoformat(),
+                "days_until": (rec.next_due_date - today).days,
+                "overdue": (rec.next_due_date - today).days < 0,
+            })
+
+    if not candidates:
+        return None
+
+    # Return the one with the smallest days_until (most urgent)
+    return sorted(candidates, key=lambda c: c["days_until"])[0]
