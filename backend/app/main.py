@@ -187,7 +187,7 @@ limiter = Limiter(key_func=get_remote_address)
 app = FastAPI(
     title="D.O.C — Drone Operations Command",
     description="Mission management, flight data, and after-action reporting for drone operations",
-    version="2.33.1",
+    version="2.33.2",
     lifespan=lifespan,
 )
 
@@ -199,6 +199,12 @@ _cors_origins = [settings.frontend_url.rstrip("/")]
 # Also allow localhost for local development
 if not any("localhost" in o for o in _cors_origins):
     _cors_origins.append("http://localhost:3080")
+# Capacitor WebView origins (companion app)
+_cors_origins.extend([
+    "capacitor://localhost",
+    "https://localhost",
+    "http://localhost",
+])
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
