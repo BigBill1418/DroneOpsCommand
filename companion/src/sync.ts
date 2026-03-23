@@ -8,7 +8,7 @@
  * LAN-only — connects directly to the DroneOpsCommand server on your network.
  */
 
-import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
+import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Preferences } from '@capacitor/preferences';
 
 // ── Config keys ────────────────────────────────────────────────────────
