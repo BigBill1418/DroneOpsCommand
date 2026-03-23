@@ -12,9 +12,10 @@ import {
   formatBytes,
   DEFAULT_SERVER_URL,
 } from './sync';
+import { isAllFilesAccessGranted, requestAllFilesAccess } from './all-files-access';
 
 // ── App states ─────────────────────────────────────────────────────────
-type View = 'loading' | 'setup' | 'syncing' | 'done' | 'error' | 'settings';
+type View = 'loading' | 'permission' | 'setup' | 'syncing' | 'done' | 'error' | 'settings';
 
 export default function App() {
   // Config
@@ -42,12 +43,19 @@ export default function App() {
   // Prevent double-run
   const hasRun = useRef(false);
 
-  // ── Boot: load config and auto-sync ──────────────────────────────────
+  // ── Boot: check permissions, load config, auto-sync ─────────────────
   useEffect(() => {
     if (hasRun.current) return;
     hasRun.current = true;
 
     (async () => {
+      // Check "All Files Access" permission first
+      const hasAllFiles = await isAllFilesAccessGranted();
+      if (!hasAllFiles) {
+        setView('permission');
+        return;
+      }
+
       const cfg = await getConfig();
       if (cfg.serverUrl) setServerUrl(cfg.serverUrl);
       if (cfg.apiKey) setApiKey(cfg.apiKey);
@@ -63,6 +71,39 @@ export default function App() {
       await runSync(cfg.serverUrl, cfg.apiKey, cfg.autoDelete);
     })();
   }, []);
+
+  // Re-check permission when app resumes (user returns from Settings)
+  useEffect(() => {
+    const handleResume = async () => {
+      if (view !== 'permission') return;
+      const granted = await isAllFilesAccessGranted();
+      if (granted) {
+        // Permission granted — proceed to config check
+        const cfg = await getConfig();
+        if (cfg.serverUrl) setServerUrl(cfg.serverUrl);
+        if (cfg.apiKey) setApiKey(cfg.apiKey);
+        setAutoDelete(cfg.autoDelete);
+
+        if (!cfg.serverUrl || !cfg.apiKey) {
+          setView('setup');
+        } else {
+          await runSync(cfg.serverUrl, cfg.apiKey, cfg.autoDelete);
+        }
+      }
+    };
+
+    document.addEventListener('resume', handleResume);
+    // Also check on visibility change (covers more cases)
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') handleResume();
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    return () => {
+      document.removeEventListener('resume', handleResume);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, [view]);
 
   // ── Sync pipeline ────────────────────────────────────────────────────
   async function runSync(url: string, key: string, autoDel: boolean) {
@@ -172,6 +213,53 @@ export default function App() {
             <div className="spinner" />
             <div className="status-title">INITIALIZING</div>
             <div className="status-detail">Loading configuration...</div>
+          </div>
+        )}
+
+        {/* ── PERMISSION GATE ─────────────────────────────────── */}
+        {view === 'permission' && (
+          <div className="card status-box">
+            <div style={{ fontSize: 48, marginBottom: 16 }}>&#128274;</div>
+            <div className="status-title" style={{ color: 'var(--cyan)' }}>FILE ACCESS REQUIRED</div>
+            <div className="status-detail" style={{ lineHeight: 1.6, marginBottom: 8 }}>
+              DroneOpsSync needs <strong>"All Files Access"</strong> to read DJI flight logs
+              from <code style={{ color: 'var(--cyan)', fontSize: 11 }}>Android/data/</code>.
+            </div>
+            <div className="status-detail" style={{ lineHeight: 1.6, marginBottom: 20, opacity: 0.7 }}>
+              Tap the button below to open Settings, then enable
+              <strong> "Allow access to manage all files"</strong>.
+            </div>
+            <button
+              className="btn btn-primary"
+              onClick={async () => {
+                await requestAllFilesAccess();
+              }}
+              style={{ marginBottom: 12 }}
+            >
+              OPEN FILE ACCESS SETTINGS
+            </button>
+            <button
+              className="btn btn-outline"
+              onClick={async () => {
+                // Manual re-check for when auto-resume doesn't fire
+                const granted = await isAllFilesAccessGranted();
+                if (granted) {
+                  hasRun.current = false;
+                  setView('loading');
+                  const cfg = await getConfig();
+                  if (cfg.serverUrl) setServerUrl(cfg.serverUrl);
+                  if (cfg.apiKey) setApiKey(cfg.apiKey);
+                  setAutoDelete(cfg.autoDelete);
+                  if (!cfg.serverUrl || !cfg.apiKey) {
+                    setView('setup');
+                  } else {
+                    await runSync(cfg.serverUrl, cfg.apiKey, cfg.autoDelete);
+                  }
+                }
+              }}
+            >
+              I'VE GRANTED PERMISSION
+            </button>
           </div>
         )}
 
@@ -424,7 +512,7 @@ export default function App() {
 
       {/* Footer */}
       <div className="footer">
-        DRONEOPSSYNC v2.35.2 LAN — BARNARD HQ
+        DRONEOPSSYNC v2.35.3 LAN — BARNARD HQ
       </div>
     </div>
   );

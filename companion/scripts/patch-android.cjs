@@ -95,4 +95,89 @@ if (changed) {
   console.log('\n  Manifest already patched — no changes needed.');
 }
 
+// ── 3. Install AllFilesAccessPlugin (native Capacitor plugin) ─────────
+const JAVA_DIR = path.join(ANDROID_MAIN, 'java', 'com', 'barnardhq', 'droneopssync');
+const PLUGIN_SRC = path.join(JAVA_DIR, 'AllFilesAccessPlugin.java');
+const MAIN_ACTIVITY = path.join(JAVA_DIR, 'MainActivity.java');
+
+// Copy plugin if missing
+if (!fs.existsSync(PLUGIN_SRC)) {
+  const pluginCode = `package com.barnardhq.droneopssync;
+
+import android.content.Intent;
+import android.net.Uri;
+import android.os.Build;
+import android.os.Environment;
+import android.provider.Settings;
+
+import com.getcapacitor.Plugin;
+import com.getcapacitor.PluginCall;
+import com.getcapacitor.PluginMethod;
+import com.getcapacitor.annotation.CapacitorPlugin;
+import com.getcapacitor.JSObject;
+
+@CapacitorPlugin(name = "AllFilesAccess")
+public class AllFilesAccessPlugin extends Plugin {
+    @PluginMethod()
+    public void isGranted(PluginCall call) {
+        JSObject ret = new JSObject();
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            ret.put("granted", Environment.isExternalStorageManager());
+        } else {
+            ret.put("granted", true);
+        }
+        call.resolve(ret);
+    }
+
+    @PluginMethod()
+    public void request(PluginCall call) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            try {
+                Intent intent = new Intent(
+                    Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                    Uri.parse("package:" + getActivity().getPackageName())
+                );
+                getActivity().startActivity(intent);
+                call.resolve();
+            } catch (Exception e) {
+                try {
+                    Intent fallback = new Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION);
+                    getActivity().startActivity(fallback);
+                    call.resolve();
+                } catch (Exception e2) {
+                    call.reject("Could not open settings: " + e2.getMessage());
+                }
+            }
+        } else {
+            call.resolve();
+        }
+    }
+}
+`;
+  fs.writeFileSync(PLUGIN_SRC, pluginCode, 'utf8');
+  console.log('  + Created AllFilesAccessPlugin.java');
+}
+
+// Patch MainActivity to register the plugin
+if (fs.existsSync(MAIN_ACTIVITY)) {
+  let mainAct = fs.readFileSync(MAIN_ACTIVITY, 'utf8');
+  if (!mainAct.includes('AllFilesAccessPlugin')) {
+    mainAct = `package com.barnardhq.droneopssync;
+
+import android.os.Bundle;
+import com.getcapacitor.BridgeActivity;
+
+public class MainActivity extends BridgeActivity {
+    @Override
+    public void onCreate(Bundle savedInstanceState) {
+        registerPlugin(AllFilesAccessPlugin.class);
+        super.onCreate(savedInstanceState);
+    }
+}
+`;
+    fs.writeFileSync(MAIN_ACTIVITY, mainAct, 'utf8');
+    console.log('  + Patched MainActivity to register AllFilesAccessPlugin');
+  }
+}
+
 console.log('\nDone. Ready to build.');
