@@ -226,7 +226,10 @@ async function checkHealthWithTimeout(
       headers: { 'X-Device-Api-Key': apiKey },
       signal: controller.signal,
     });
-    if (!resp.ok) throw new Error(`Status ${resp.status}`);
+    if (!resp.ok) {
+      if (resp.status === 403) throw new Error('Access denied (403) — Cloudflare Access may be blocking the device API');
+      throw new Error(`Status ${resp.status}`);
+    }
     return resp.json();
   } finally {
     clearTimeout(timer);
@@ -242,6 +245,7 @@ export async function checkHealth(serverUrl: string, apiKey: string): Promise<He
   });
   if (!resp.ok) {
     if (resp.status === 401) throw new Error('Invalid or revoked API key');
+    if (resp.status === 403) throw new Error('Access denied (403) — Cloudflare Access may be blocking the device API. Check bypass rules in Zero Trust dashboard.');
     throw new Error(`Server returned ${resp.status}`);
   }
   return resp.json();
