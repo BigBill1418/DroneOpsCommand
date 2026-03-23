@@ -14,6 +14,7 @@ class Aircraft(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     model_name: Mapped[str] = mapped_column(String(255), nullable=False)
     manufacturer: Mapped[str] = mapped_column(String(255), default="DJI")
+    serial_number: Mapped[str | None] = mapped_column(String(255), nullable=True)
     image_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
     specs: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
