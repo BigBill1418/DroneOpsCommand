@@ -6,11 +6,22 @@
  * synced logs from the controller after confirmed transfer.
  *
  * LAN-only — connects directly to the DroneOpsCommand server on your network.
+ *
+ * File access strategy:
+ *   - Android 10-11 (RC Pro): Legacy storage via requestLegacyExternalStorage
+ *   - Android 12+: MANAGE_EXTERNAL_STORAGE for public DJI/ paths,
+ *     SAF folder picker for Android/data/ paths (only way to access them)
  */
 
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Preferences } from '@capacitor/preferences';
-import { isAllFilesAccessGranted } from './all-files-access';
+import {
+  isAllFilesAccessGranted,
+  getPersistedFolders,
+  listSAFFiles,
+  readSAFFile,
+  type SAFFile,
+} from './all-files-access';
 
 // ── Config keys ────────────────────────────────────────────────────────
 export const PREF_SERVER_URL = 'serverUrl';
@@ -28,19 +39,24 @@ export const DEFAULT_SERVER_URL = 'http://192.168.50.20:3080';
 //   M3P  (RC Pro)    → Android/data/dji.go.v5/files/FlightRecord
 //   M5P  (RC 2)      → Android/data/dji.go.v5/files/FlightRecord
 //   Phone (S25 Ultra) → Android/data/dji.go.v5/files/FlightRecord
-export const DJI_LOG_PATHS = [
-  // Enterprise controllers (DJI Pilot / Pilot 2)
+
+/** Public paths — accessible with normal storage permissions */
+export const PUBLIC_LOG_PATHS = [
   'DJI/com.dji.industry.pilot/FlightRecord',   // 4TD, M30T — RC Plus, RC Plus 2
   'DJI/com.dji.industry.pilot2/FlightRecord',  // DJI Pilot 2
+  'DJI/dji.go.v5/FlightRecord',                // Legacy DJI Fly v2
+  'DJI/dji.go.v4/FlightRecord',                // Legacy DJI Fly v1
+];
 
-  // Consumer controllers (DJI Fly / Go 5) — requires MANAGE_EXTERNAL_STORAGE
+/** Restricted paths — require MANAGE_EXTERNAL_STORAGE on Android 11,
+ *  or SAF folder access on Android 12+ */
+export const RESTRICTED_LOG_PATHS = [
   'Android/data/dji.go.v5/files/FlightRecord',  // M3P, M5P, phones — RC Pro, RC 2, Android
   'Android/data/dji.go.v4/files/FlightRecord',  // DJI Fly v1 (Go 4 engine)
-
-  // Legacy paths (older firmware may store here)
-  'DJI/dji.go.v5/FlightRecord',
-  'DJI/dji.go.v4/FlightRecord',
 ];
+
+// All paths combined for legacy access
+export const DJI_LOG_PATHS = [...PUBLIC_LOG_PATHS, ...RESTRICTED_LOG_PATHS];
 
 // File extensions we care about
 const LOG_EXTENSIONS = new Set(['txt', 'csv', 'dat', 'log']);
@@ -49,12 +65,14 @@ const LOG_EXTENSIONS = new Set(['txt', 'csv', 'dat', 'log']);
 export interface LogFile {
   /** Display name */
   name: string;
-  /** Full path relative to ExternalStorage */
+  /** Full path relative to ExternalStorage, or SAF URI */
   path: string;
-  /** File size in bytes (approximate from base64) */
+  /** File size in bytes */
   size: number;
   /** Which DJI log directory it came from */
   source: string;
+  /** If from SAF, the document URI for reading */
+  safUri?: string;
 }
 
 export interface SyncResult {
@@ -69,6 +87,14 @@ export interface HealthResult {
   device_label: string;
   parser_available: boolean;
   upload_endpoint: string;
+}
+
+export interface ScanResult {
+  files: LogFile[];
+  /** True if restricted Android/data/ paths were inaccessible (needs SAF) */
+  restrictedBlocked: boolean;
+  /** True if SAF folders were used to find files */
+  usedSAF: boolean;
 }
 
 // ── Preferences helpers ────────────────────────────────────────────────
@@ -118,7 +144,6 @@ async function requestPermissions(): Promise<boolean> {
     const req = await Filesystem.requestPermissions();
     return req.publicStorage === 'granted';
   } catch {
-    // On web/dev, permissions API may not exist
     return true;
   }
 }
@@ -136,31 +161,68 @@ async function dirExists(path: string): Promise<boolean> {
 // ── Scan ───────────────────────────────────────────────────────────────
 export async function scanForLogs(
   onProgress?: (msg: string) => void,
-): Promise<LogFile[]> {
-  const granted = await requestPermissions();
-  if (!granted) throw new Error('Storage permission denied. Please grant access in device settings.');
+): Promise<ScanResult> {
+  await requestPermissions();
 
-  // Check "All Files Access" — needed for Android/data/ paths on Android 11+
   const allFilesGranted = await isAllFilesAccessGranted();
-
   const synced = await getSyncedPaths();
   const found: LogFile[] = [];
+  let restrictedBlocked = false;
+  let usedSAF = false;
 
-  for (const basePath of DJI_LOG_PATHS) {
-    // Skip Android/data/ paths if we don't have All Files Access — no point trying
-    if (!allFilesGranted && basePath.startsWith('Android/data')) {
-      onProgress?.(`Skipping ${basePath} (needs All Files Access)...`);
-      continue;
-    }
-
+  // 1. Scan public paths (always accessible with storage permission)
+  for (const basePath of PUBLIC_LOG_PATHS) {
     onProgress?.(`Scanning ${basePath}...`);
     if (!(await dirExists(basePath))) continue;
-
-    // Recursively scan (DJI nests logs in date subfolders)
     await scanDir(basePath, basePath, synced, found);
   }
 
-  return found;
+  // 2. Try restricted paths via direct file access
+  //    Works on: Android 10-11 (legacy storage), Android 11 with MANAGE_EXTERNAL_STORAGE
+  for (const basePath of RESTRICTED_LOG_PATHS) {
+    onProgress?.(`Scanning ${basePath}...`);
+    if (!(await dirExists(basePath))) {
+      restrictedBlocked = true;
+      continue;
+    }
+    await scanDir(basePath, basePath, synced, found);
+    restrictedBlocked = false; // At least one restricted path was accessible
+  }
+
+  // 3. If restricted paths were blocked, try SAF-granted folders
+  if (restrictedBlocked) {
+    onProgress?.('Checking saved folder access...');
+    const safFolders = await getPersistedFolders();
+
+    for (const folder of safFolders) {
+      // Check if this SAF folder covers a DJI path
+      const isDjiFolder = folder.path &&
+        (folder.path.includes('dji.go.v5') || folder.path.includes('dji.go.v4') ||
+         folder.path.includes('FlightRecord') || folder.path.includes('com.dji'));
+
+      if (!isDjiFolder) continue;
+
+      onProgress?.(`Reading ${folder.path} via folder access...`);
+      try {
+        const safFiles = await listSAFFiles(folder.uri);
+        for (const sf of safFiles) {
+          if (synced.has(sf.uri)) continue;
+          found.push({
+            name: sf.name,
+            path: sf.uri, // Use URI as the unique path
+            size: sf.size,
+            source: folder.path || 'SAF folder',
+            safUri: sf.uri,
+          });
+        }
+        usedSAF = true;
+      } catch {
+        // SAF folder access failed — permission may have been revoked
+      }
+    }
+  }
+
+  return { files: found, restrictedBlocked: restrictedBlocked && !usedSAF, usedSAF };
 }
 
 async function scanDir(
@@ -202,7 +264,6 @@ export async function checkHealth(serverUrl: string, apiKey: string): Promise<He
       headers: { 'X-Device-Api-Key': apiKey },
     });
   } catch (err: any) {
-    // Network-level failure — server unreachable
     throw new Error(`Cannot reach server at ${serverUrl} — check IP address, port, and that the server is running`);
   }
   if (!resp.ok) {
@@ -228,7 +289,6 @@ export async function uploadLogs(
   const result: SyncResult = { imported: 0, skipped: 0, errors: [], files: [] };
   const syncedPaths: string[] = [];
 
-  // Upload in batches of 5 to avoid overwhelming the server
   const batchSize = 5;
   let uploaded = 0;
 
@@ -239,20 +299,34 @@ export async function uploadLogs(
     for (const file of batch) {
       onProgress?.(uploaded, files.length, file.name);
       try {
-        const fileData = await Filesystem.readFile({
-          path: file.path,
-          directory: Directory.ExternalStorage,
-        });
-
-        // Convert base64 to Blob
         let blob: Blob;
-        if (typeof fileData.data === 'string') {
-          const binary = atob(fileData.data);
+
+        if (file.safUri) {
+          // Read via SAF plugin (for Android/data/ files)
+          const safData = await readSAFFile(file.safUri);
+          if (!safData) {
+            result.errors.push(`${file.name}: failed to read via folder access`);
+            continue;
+          }
+          const binary = atob(safData.data);
           const bytes = new Uint8Array(binary.length);
           for (let j = 0; j < binary.length; j++) bytes[j] = binary.charCodeAt(j);
           blob = new Blob([bytes], { type: 'application/octet-stream' });
         } else {
-          blob = fileData.data;
+          // Read via Capacitor Filesystem (standard paths)
+          const fileData = await Filesystem.readFile({
+            path: file.path,
+            directory: Directory.ExternalStorage,
+          });
+
+          if (typeof fileData.data === 'string') {
+            const binary = atob(fileData.data);
+            const bytes = new Uint8Array(binary.length);
+            for (let j = 0; j < binary.length; j++) bytes[j] = binary.charCodeAt(j);
+            blob = new Blob([bytes], { type: 'application/octet-stream' });
+          } else {
+            blob = fileData.data;
+          }
         }
 
         formData.append('files', blob, file.name);
@@ -281,9 +355,8 @@ export async function uploadLogs(
       result.skipped += data.skipped || 0;
       if (data.errors) result.errors.push(...data.errors);
 
-      // Mark successfully processed files as synced
       for (const file of batch) {
-        syncedPaths.push(file.path);
+        syncedPaths.push(file.safUri || file.path);
         result.files.push(file);
       }
     } catch (err: any) {
@@ -295,7 +368,6 @@ export async function uploadLogs(
     onProgress?.(uploaded, files.length, '');
   }
 
-  // Persist synced paths
   if (syncedPaths.length > 0) {
     await addSyncedPaths(syncedPaths);
   }
@@ -309,6 +381,9 @@ export async function deleteSyncedFiles(files: LogFile[]): Promise<{ deleted: nu
   const errors: string[] = [];
 
   for (const file of files) {
+    // Can't delete SAF files (no write permission requested)
+    if (file.safUri) continue;
+
     try {
       await Filesystem.deleteFile({
         path: file.path,

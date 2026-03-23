@@ -3,6 +3,7 @@ import {
   type LogFile,
   type SyncResult,
   type HealthResult,
+  type ScanResult,
   getConfig,
   saveConfig,
   scanForLogs,
@@ -12,7 +13,13 @@ import {
   formatBytes,
   DEFAULT_SERVER_URL,
 } from './sync';
-import { isAllFilesAccessGranted, requestAllFilesAccess } from './all-files-access';
+import {
+  isAllFilesAccessGranted,
+  requestAllFilesAccess,
+  getDeviceStorageInfo,
+  pickSAFFolder,
+  getPersistedFolders,
+} from './all-files-access';
 
 // ── App states ─────────────────────────────────────────────────────────
 type View = 'loading' | 'permission' | 'setup' | 'syncing' | 'done' | 'error' | 'settings';
@@ -27,7 +34,7 @@ export default function App() {
   const [view, setView] = useState<View>('loading');
   const [statusMsg, setStatusMsg] = useState('');
   const [progressMsg, setProgressMsg] = useState('');
-  const [progress, setProgress] = useState(0); // 0-100
+  const [progress, setProgress] = useState(0);
 
   // Results
   const [foundFiles, setFoundFiles] = useState<LogFile[]>([]);
@@ -35,6 +42,12 @@ export default function App() {
   const [healthResult, setHealthResult] = useState<HealthResult | null>(null);
   const [errorMsg, setErrorMsg] = useState('');
   const [deleteResult, setDeleteResult] = useState<{ deleted: number } | null>(null);
+
+  // Permission state
+  const [sdkVersion, setSdkVersion] = useState(0);
+  const [needsSAF, setNeedsSAF] = useState(false);
+  const [hasSAFFolder, setHasSAFFolder] = useState(false);
+  const [restrictedBlocked, setRestrictedBlocked] = useState(false);
 
   // Settings test
   const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle');
@@ -49,11 +62,25 @@ export default function App() {
     hasRun.current = true;
 
     (async () => {
-      // Check "All Files Access" permission first
-      const hasAllFiles = await isAllFilesAccessGranted();
-      if (!hasAllFiles) {
+      // Get device storage info
+      const info = await getDeviceStorageInfo();
+      setSdkVersion(info.sdkVersion);
+      setNeedsSAF(info.needsSAF);
+
+      // On Android 11+, check MANAGE_EXTERNAL_STORAGE
+      if (info.sdkVersion >= 30 && !info.manageGranted) {
         setView('permission');
         return;
+      }
+
+      // Check for SAF folders if on Android 12+
+      if (info.needsSAF) {
+        const folders = await getPersistedFolders();
+        const hasDjiFolder = folders.some(f =>
+          f.path?.includes('dji.go.v5') || f.path?.includes('dji.go.v4') ||
+          f.path?.includes('FlightRecord') || f.path?.includes('com.dji')
+        );
+        setHasSAFFolder(hasDjiFolder);
       }
 
       const cfg = await getConfig();
@@ -61,13 +88,11 @@ export default function App() {
       if (cfg.apiKey) setApiKey(cfg.apiKey);
       setAutoDelete(cfg.autoDelete);
 
-      // If not configured, show setup
       if (!cfg.serverUrl || !cfg.apiKey) {
         setView('setup');
         return;
       }
 
-      // Auto-sync
       await runSync(cfg.serverUrl, cfg.apiKey, cfg.autoDelete);
     })();
   }, []);
@@ -78,22 +103,11 @@ export default function App() {
       if (view !== 'permission') return;
       const granted = await isAllFilesAccessGranted();
       if (granted) {
-        // Permission granted — proceed to config check
-        const cfg = await getConfig();
-        if (cfg.serverUrl) setServerUrl(cfg.serverUrl);
-        if (cfg.apiKey) setApiKey(cfg.apiKey);
-        setAutoDelete(cfg.autoDelete);
-
-        if (!cfg.serverUrl || !cfg.apiKey) {
-          setView('setup');
-        } else {
-          await runSync(cfg.serverUrl, cfg.apiKey, cfg.autoDelete);
-        }
+        proceedAfterPermission();
       }
     };
 
     document.addEventListener('resume', handleResume);
-    // Also check on visibility change (covers more cases)
     const handleVisibility = () => {
       if (document.visibilityState === 'visible') handleResume();
     };
@@ -105,11 +119,36 @@ export default function App() {
     };
   }, [view]);
 
+  async function proceedAfterPermission() {
+    const cfg = await getConfig();
+    if (cfg.serverUrl) setServerUrl(cfg.serverUrl);
+    if (cfg.apiKey) setApiKey(cfg.apiKey);
+    setAutoDelete(cfg.autoDelete);
+
+    if (!cfg.serverUrl || !cfg.apiKey) {
+      setView('setup');
+    } else {
+      await runSync(cfg.serverUrl, cfg.apiKey, cfg.autoDelete);
+    }
+  }
+
+  // ── SAF folder picker ────────────────────────────────────────────────
+  async function handlePickFolder() {
+    const uri = await pickSAFFolder('Android/data/dji.go.v5/files/FlightRecord');
+    if (uri) {
+      setHasSAFFolder(true);
+      setRestrictedBlocked(false);
+      // Re-run sync with the new folder access
+      await runSync(serverUrl, apiKey, autoDelete);
+    }
+  }
+
   // ── Sync pipeline ────────────────────────────────────────────────────
   async function runSync(url: string, key: string, autoDel: boolean) {
     setView('syncing');
     setProgress(0);
     setDeleteResult(null);
+    setRestrictedBlocked(false);
 
     try {
       // Step 1: Health check
@@ -127,8 +166,10 @@ export default function App() {
       // Step 2: Scan for logs
       setStatusMsg('SCANNING');
       setProgressMsg('Scanning DJI flight log folders...');
-      const files = await scanForLogs((msg) => setProgressMsg(msg));
+      const scanResult: ScanResult = await scanForLogs((msg) => setProgressMsg(msg));
+      const files = scanResult.files;
       setFoundFiles(files);
+      setRestrictedBlocked(scanResult.restrictedBlocked);
       setProgress(30);
 
       if (files.length === 0) {
@@ -199,7 +240,7 @@ export default function App() {
       <div className="header">
         <img src="/icon.svg" alt="" className="header-icon" />
         <h1>DRONE<span>OPS</span> SYNC</h1>
-        {view !== 'setup' && view !== 'settings' && (
+        {view !== 'setup' && view !== 'settings' && view !== 'permission' && (
           <button className="header-settings" onClick={() => setView('settings')}>
             SETTINGS
           </button>
@@ -222,12 +263,11 @@ export default function App() {
             <div style={{ fontSize: 48, marginBottom: 16 }}>&#128274;</div>
             <div className="status-title" style={{ color: 'var(--cyan)' }}>FILE ACCESS REQUIRED</div>
             <div className="status-detail" style={{ lineHeight: 1.6, marginBottom: 8 }}>
-              DroneOpsSync needs <strong>"All Files Access"</strong> to read DJI flight logs
-              from <code style={{ color: 'var(--cyan)', fontSize: 11 }}>Android/data/</code>.
+              DroneOpsSync needs file access permission to read DJI flight logs.
             </div>
             <div className="status-detail" style={{ lineHeight: 1.6, marginBottom: 20, opacity: 0.7 }}>
-              Tap the button below to open Settings, then enable
-              <strong> "Allow access to manage all files"</strong>.
+              Tap the button below to open Settings, then
+              enable <strong>"Allow access to manage all files"</strong>.
             </div>
             <button
               className="btn btn-primary"
@@ -241,25 +281,19 @@ export default function App() {
             <button
               className="btn btn-outline"
               onClick={async () => {
-                // Manual re-check for when auto-resume doesn't fire
                 const granted = await isAllFilesAccessGranted();
                 if (granted) {
-                  hasRun.current = false;
-                  setView('loading');
-                  const cfg = await getConfig();
-                  if (cfg.serverUrl) setServerUrl(cfg.serverUrl);
-                  if (cfg.apiKey) setApiKey(cfg.apiKey);
-                  setAutoDelete(cfg.autoDelete);
-                  if (!cfg.serverUrl || !cfg.apiKey) {
-                    setView('setup');
-                  } else {
-                    await runSync(cfg.serverUrl, cfg.apiKey, cfg.autoDelete);
-                  }
+                  proceedAfterPermission();
                 }
               }}
             >
               I'VE GRANTED PERMISSION
             </button>
+            {sdkVersion > 0 && (
+              <div className="status-detail" style={{ marginTop: 16, opacity: 0.4 }}>
+                Android API {sdkVersion}
+              </div>
+            )}
           </div>
         )}
 
@@ -412,6 +446,42 @@ export default function App() {
               )}
             </div>
 
+            {/* SAF folder access prompt — shown when Android/data/ was blocked */}
+            {restrictedBlocked && (
+              <div className="card">
+                <div className="card-title" style={{ color: 'var(--orange)' }}>
+                  DJI FLY LOGS NOT ACCESSIBLE
+                </div>
+                <div style={{
+                  fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-muted)',
+                  lineHeight: 1.6, marginBottom: 16,
+                }}>
+                  DJI Fly / Go 5 stores flight logs in a protected folder
+                  (<code style={{ color: 'var(--orange)' }}>Android/data/</code>) that
+                  requires special access on this Android version.
+                  <br /><br />
+                  Tap below to select the DJI log folder. Navigate to:
+                  <br />
+                  <strong style={{ color: 'var(--text)' }}>
+                    Android &gt; data &gt; dji.go.v5 &gt; files &gt; FlightRecord
+                  </strong>
+                </div>
+                <button
+                  className="btn btn-primary"
+                  onClick={handlePickFolder}
+                  style={{ marginBottom: 8 }}
+                >
+                  SELECT DJI LOG FOLDER
+                </button>
+                <div style={{
+                  fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-muted)',
+                  textAlign: 'center', marginTop: 8, opacity: 0.6,
+                }}>
+                  You only need to do this once — access is saved for future syncs
+                </div>
+              </div>
+            )}
+
             {/* File details */}
             {foundFiles.length > 0 && (
               <div className="card">
@@ -512,7 +582,8 @@ export default function App() {
 
       {/* Footer */}
       <div className="footer">
-        DRONEOPSSYNC v2.35.3 LAN — BARNARD HQ
+        DRONEOPSSYNC v2.35.4 LAN — BARNARD HQ
+        {sdkVersion > 0 && <span style={{ opacity: 0.4 }}> — API {sdkVersion}</span>}
       </div>
     </div>
   );
