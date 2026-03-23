@@ -53,6 +53,14 @@ else
   echo "  = WRITE_EXTERNAL_STORAGE already present"
 fi
 
+# Add MANAGE_EXTERNAL_STORAGE permission if missing (Android 11+ "All Files Access")
+if ! grep -q "MANAGE_EXTERNAL_STORAGE" "$MANIFEST"; then
+  sed -i '/<manifest/a\    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />' "$MANIFEST"
+  echo "  + Added MANAGE_EXTERNAL_STORAGE permission"
+else
+  echo "  = MANAGE_EXTERNAL_STORAGE already present"
+fi
+
 # Create network_security_config.xml — allows cleartext HTTP to private/LAN IPs
 echo "Creating network security config..."
 mkdir -p "$RES_XML"
