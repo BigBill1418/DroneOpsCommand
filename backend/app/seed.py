@@ -116,14 +116,22 @@ AIRCRAFT_SEED = [
 async def seed_database(db: AsyncSession):
     """Seed the database with initial data."""
 
-    # Seed admin user — always re-hash password to match current config
+    # Seed admin user — only create if missing. Never overwrite an existing
+    # password because the user may have changed it via Settings or force-reset.
     result = await db.execute(select(User).where(User.username == settings.admin_username))
     existing_admin = result.scalar_one_or_none()
-    compliant = is_password_compliant(settings.admin_password)
     if existing_admin:
-        existing_admin.hashed_password = hash_password(settings.admin_password)
-        existing_admin.password_compliant = compliant
+        # Only reset password if explicitly requested via RESET_ADMIN_PASSWORD=true
+        if settings.reset_admin_password:
+            import logging
+            logging.getLogger("doc.seed").warning(
+                "RESET_ADMIN_PASSWORD is set — resetting admin password to ADMIN_PASSWORD env value"
+            )
+            compliant = is_password_compliant(settings.admin_password)
+            existing_admin.hashed_password = hash_password(settings.admin_password)
+            existing_admin.password_compliant = compliant
     else:
+        compliant = is_password_compliant(settings.admin_password)
         admin = User(
             username=settings.admin_username,
             hashed_password=hash_password(settings.admin_password),
