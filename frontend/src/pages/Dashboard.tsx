@@ -370,16 +370,26 @@ export default function Dashboard() {
         <StatCard icon={IconUsers} label="CUSTOMERS" value={String(customers.length)} color="#00d4ff" />
       </SimpleGrid>
 
-      {/* Main grid: 2 columns on desktop, single column on mobile */}
-      <div className="dashboard-grid" style={{ flex: 1, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', minHeight: 0, gridTemplateRows: 'minmax(0, 1fr) minmax(0, 1fr)', maxHeight: 'calc(100vh - 220px)' }}>
+      {/* Main grid: asymmetric layout — left stacks 3 panels, right stacks 2 */}
+      <div className="dashboard-grid" style={{
+        flex: 1, display: 'grid', gap: '10px', minHeight: 0,
+        gridTemplateColumns: '1fr 1fr',
+        gridTemplateRows: 'auto auto minmax(0, 1fr)',
+        gridTemplateAreas: `
+          "missions weather"
+          "nextdue  weather"
+          "stats    equip"
+        `,
+        maxHeight: 'calc(100vh - 220px)',
+      }}>
 
-        {/* ═══ RECENT MISSIONS ═══ */}
-        <Card padding="sm" radius="md" style={panelStyle}>
-          <Title order={4} c="#e8edf2" mb="xs" style={{ letterSpacing: '1px' }}>
+        {/* ═══ RECENT MISSIONS — compact ═══ */}
+        <Card padding="sm" radius="md" style={{ ...panelStyle, gridArea: 'missions', maxHeight: '200px' }}>
+          <Title order={4} c="#e8edf2" mb={4} style={{ letterSpacing: '1px', fontSize: '14px' }}>
             RECENT MISSIONS
           </Title>
           {recentMissions.length === 0 ? (
-            <Text c="#5a6478" ta="center" py="xl">
+            <Text c="#5a6478" ta="center" py="sm" size="sm">
               No missions yet. Create your first mission to get started.
             </Text>
           ) : (
@@ -388,9 +398,8 @@ export default function Dashboard() {
                 highlightOnHover
                 styles={{
                   table: { color: '#e8edf2', minWidth: 400 },
-                  th: { color: '#00d4ff', ...monoSm, borderBottom: '1px solid #1a1f2e', padding: '6px 8px' },
-                  td: { borderBottom: '1px solid #1a1f2e', padding: '6px 8px', fontSize: '13px' },
-                  tr: { '&:hover': { backgroundColor: 'rgba(0, 212, 255, 0.05)' } },
+                  th: { color: '#00d4ff', ...monoXs, borderBottom: '1px solid #1a1f2e', padding: '4px 8px' },
+                  td: { borderBottom: '1px solid #1a1f2e', padding: '4px 8px', fontSize: '12px' },
                 }}
               >
                 <Table.Thead>
@@ -402,7 +411,7 @@ export default function Dashboard() {
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
-                  {recentMissions.map((mission) => (
+                  {recentMissions.slice(0, 4).map((mission) => (
                     <Table.Tr
                       key={mission.id}
                       style={{ cursor: 'pointer' }}
@@ -433,8 +442,81 @@ export default function Dashboard() {
           )}
         </Card>
 
+        {/* ═══ NEXT SERVICE DUE — below recent missions ═══ */}
+        <div style={{ gridArea: 'nextdue' }}>
+          {nextServiceDue ? (
+            <Card padding="sm" radius="md" style={{
+              ...panelStyle,
+              borderColor: nextServiceDue.overdue
+                ? 'rgba(255, 68, 68, 0.3)'
+                : nextServiceDue.days_until <= 7
+                  ? 'rgba(255, 107, 26, 0.3)'
+                  : 'rgba(0, 212, 255, 0.2)',
+            }}>
+              <Group gap={6} mb={6}>
+                <IconCalendarDue size={14} color={
+                  nextServiceDue.overdue ? '#ff4444'
+                    : nextServiceDue.days_until <= 7 ? '#ff6b1a' : '#00d4ff'
+                } />
+                <Text size="xs" fw={700} c={
+                  nextServiceDue.overdue ? '#ff4444'
+                    : nextServiceDue.days_until <= 7 ? '#ff6b1a' : '#00d4ff'
+                } style={{ ...monoXs, letterSpacing: '2px' }}>
+                  NEXT SERVICE DUE
+                </Text>
+              </Group>
+              <Group justify="space-between" wrap="nowrap" align="center">
+                <div style={{ minWidth: 0 }}>
+                  <Group gap="xs" wrap="nowrap">
+                    <Text size="sm" c="#e8edf2" fw={700} tt="capitalize" lineClamp={1}>
+                      {nextServiceDue.maintenance_type.replace(/_/g, ' ')}
+                    </Text>
+                    <Text size="xs" c="#5a6478">—</Text>
+                    <Text size="xs" c="#00d4ff" fw={600} style={{ ...monoXs, fontSize: '11px' }}>
+                      {nextServiceDue.aircraft_name}
+                    </Text>
+                  </Group>
+                  {nextServiceDue.next_due_date && (
+                    <Text size="xs" c="#5a6478" mt={2} style={{ fontSize: '11px' }}>
+                      {new Date(nextServiceDue.next_due_date).toLocaleDateString('en-US', {
+                        month: 'short', day: 'numeric', year: 'numeric',
+                      })}
+                    </Text>
+                  )}
+                </div>
+                <Badge
+                  size="lg"
+                  variant="light"
+                  color={
+                    nextServiceDue.overdue ? 'red'
+                      : nextServiceDue.days_until <= 7 ? 'orange'
+                        : 'cyan'
+                  }
+                  styles={{ root: { flexShrink: 0 } }}
+                >
+                  {nextServiceDue.overdue
+                    ? `${Math.abs(nextServiceDue.days_until)}d OVERDUE`
+                    : nextServiceDue.days_until === 0
+                      ? 'DUE TODAY'
+                      : `${nextServiceDue.days_until}d`
+                  }
+                </Badge>
+              </Group>
+            </Card>
+          ) : (
+            <Card padding="sm" radius="md" style={panelStyle}>
+              <Group gap="xs">
+                <IconTool size={14} color="#00ff88" />
+                <Text size="xs" c="#00ff88" fw={600} style={monoXs}>
+                  ALL MAINTENANCE CURRENT
+                </Text>
+              </Group>
+            </Card>
+          )}
+        </div>
+
         {/* ═══ FLIGHT CONDITIONS — live weather ═══ */}
-        <Card padding="sm" radius="md" style={panelStyle}>
+        <Card padding="sm" radius="md" style={{ ...panelStyle, gridArea: 'weather' }}>
           <Group justify="space-between" mb="xs">
             <Group gap="xs">
               <Title order={4} c="#e8edf2" style={{ letterSpacing: '1px' }}>
@@ -690,7 +772,7 @@ export default function Dashboard() {
         </Card>
 
         {/* ═══ FLIGHT STATS ═══ */}
-        <Card padding="sm" radius="md" style={panelStyle}>
+        <Card padding="sm" radius="md" style={{ ...panelStyle, gridArea: 'stats' }}>
           <Title order={4} c="#e8edf2" mb="xs" style={{ letterSpacing: '1px' }}>
             FLIGHT STATISTICS
           </Title>
@@ -838,11 +920,11 @@ export default function Dashboard() {
           )}
         </Card>
 
-        {/* ═══ MAINTENANCE & BATTERY ALERTS ═══ */}
-        <Card padding="sm" radius="md" style={panelStyle}>
-          <Group justify="space-between" mb="xs">
+        {/* ═══ EQUIPMENT STATUS — compact ═══ */}
+        <Card padding="sm" radius="md" style={{ ...panelStyle, gridArea: 'equip' }}>
+          <Group justify="space-between" mb={4}>
             <Group gap="xs">
-              <Title order={4} c="#e8edf2" style={{ letterSpacing: '1px' }}>
+              <Title order={4} c="#e8edf2" style={{ letterSpacing: '1px', fontSize: '14px' }}>
                 EQUIPMENT STATUS
               </Title>
               {hasAlerts && (
@@ -856,123 +938,44 @@ export default function Dashboard() {
               variant="subtle"
               color="cyan"
               onClick={() => navigate('/maintenance')}
-              styles={{ root: { ...monoSm, padding: '0 8px' } }}
+              styles={{ root: { ...monoXs, padding: '0 6px' } }}
             >
               VIEW ALL
             </Button>
           </Group>
 
           <ScrollArea style={{ flex: 1 }} type="auto">
-            <Stack gap="xs">
-              {/* Next Service Due widget */}
-              {nextServiceDue && (
-                <div style={{
-                  padding: '12px 14px', borderRadius: '8px',
-                  background: nextServiceDue.overdue
-                    ? 'rgba(255, 68, 68, 0.06)'
-                    : nextServiceDue.days_until <= 7
-                      ? 'rgba(255, 107, 26, 0.06)'
-                      : 'rgba(0, 212, 255, 0.04)',
-                  border: `1px solid ${
-                    nextServiceDue.overdue
-                      ? 'rgba(255, 68, 68, 0.25)'
-                      : nextServiceDue.days_until <= 7
-                        ? 'rgba(255, 107, 26, 0.25)'
-                        : 'rgba(0, 212, 255, 0.15)'
-                  }`,
-                }}>
-                  <Group gap={6} mb={8}>
-                    <IconCalendarDue size={14} color={
-                      nextServiceDue.overdue ? '#ff4444'
-                        : nextServiceDue.days_until <= 7 ? '#ff6b1a' : '#00d4ff'
-                    } />
-                    <Text size="xs" fw={700} c={
-                      nextServiceDue.overdue ? '#ff4444'
-                        : nextServiceDue.days_until <= 7 ? '#ff6b1a' : '#00d4ff'
-                    } style={{ ...monoXs, letterSpacing: '2px' }}>
-                      NEXT SERVICE DUE
-                    </Text>
-                  </Group>
-                  <Group justify="space-between" wrap="nowrap" align="flex-start">
-                    <div style={{ minWidth: 0 }}>
-                      <Text size="sm" c="#e8edf2" fw={700} tt="capitalize" lineClamp={1}>
-                        {nextServiceDue.maintenance_type.replace(/_/g, ' ')}
-                      </Text>
-                      <Text size="xs" c="#00d4ff" fw={600} mt={2} style={{ ...monoXs, fontSize: '11px' }}>
-                        {nextServiceDue.aircraft_name}
-                      </Text>
-                      {nextServiceDue.next_due_date && (
-                        <Text size="xs" c="#5a6478" mt={2} style={{ fontSize: '11px' }}>
-                          {new Date(nextServiceDue.next_due_date).toLocaleDateString('en-US', {
-                            month: 'short', day: 'numeric', year: 'numeric',
-                          })}
-                        </Text>
-                      )}
-                    </div>
-                    <Badge
-                      size="lg"
-                      variant="light"
-                      color={
-                        nextServiceDue.overdue ? 'red'
-                          : nextServiceDue.days_until <= 7 ? 'orange'
-                            : 'cyan'
-                      }
-                      styles={{ root: { flexShrink: 0 } }}
-                    >
-                      {nextServiceDue.overdue
-                        ? `${Math.abs(nextServiceDue.days_until)}d OVERDUE`
-                        : nextServiceDue.days_until === 0
-                          ? 'DUE TODAY'
-                          : `${nextServiceDue.days_until}d`
-                      }
-                    </Badge>
-                  </Group>
-                </div>
-              )}
-
+            <Stack gap={6}>
               {/* Maintenance alerts */}
               {maintenanceAlerts.length > 0 ? (
                 <div>
-                  <Group gap={4} mb={6}>
-                    <IconTool size={14} color="#ff6b1a" />
+                  <Group gap={4} mb={4}>
+                    <IconTool size={12} color="#ff6b1a" />
                     <Text size="xs" c="#ff6b1a" fw={700} style={{ ...monoXs, letterSpacing: '2px' }}>
                       MAINTENANCE ALERTS
                     </Text>
                   </Group>
-                  <Stack gap={4}>
-                    {maintenanceAlerts.slice(0, 5).map((alert, i) => (
+                  <Stack gap={3}>
+                    {maintenanceAlerts.slice(0, 3).map((alert, i) => (
                       <div key={i} style={{
-                        padding: '8px 10px', borderRadius: '6px',
+                        padding: '5px 8px', borderRadius: '4px',
                         background: alert.overdue ? 'rgba(255, 68, 68, 0.08)' : 'rgba(255, 107, 26, 0.08)',
                         border: `1px solid ${alert.overdue ? 'rgba(255, 68, 68, 0.3)' : 'rgba(255, 107, 26, 0.25)'}`,
                       }}>
                         <Group justify="space-between" wrap="nowrap">
-                          <Group gap="xs" wrap="nowrap">
-                            <IconCalendarDue size={14} color={alert.overdue ? '#ff4444' : '#ff6b1a'} />
-                            <div>
-                              <Text size="xs" c="#e8edf2" fw={600} tt="capitalize">
-                                {alert.maintenance_type.replace(/_/g, ' ')}
-                              </Text>
-                              <Text size="xs" c="#00d4ff" style={{ fontSize: '10px' }}>
-                                {alert.aircraft_name || 'Unknown aircraft'}
-                              </Text>
-                              {alert.description && (
-                                <Text size="xs" c="#5a6478" lineClamp={1} style={{ fontSize: '10px' }}>
-                                  {alert.description}
-                                </Text>
-                              )}
-                            </div>
+                          <Group gap={6} wrap="nowrap">
+                            <IconCalendarDue size={12} color={alert.overdue ? '#ff4444' : '#ff6b1a'} />
+                            <Text size="xs" c="#e8edf2" fw={600} tt="capitalize" style={{ fontSize: '11px' }}>
+                              {alert.maintenance_type.replace(/_/g, ' ')}
+                            </Text>
+                            <Text size="xs" c="#00d4ff" style={{ fontSize: '10px' }}>
+                              {alert.aircraft_name || ''}
+                            </Text>
                           </Group>
-                          <Badge
-                            color={alert.overdue ? 'red' : 'orange'}
-                            variant="light"
-                            size="xs"
-                          >
+                          <Badge color={alert.overdue ? 'red' : 'orange'} variant="light" size="xs">
                             {alert.overdue
                               ? `${Math.abs(alert.days_until)}d OVERDUE`
-                              : alert.days_until === 0
-                                ? 'DUE TODAY'
-                                : `${alert.days_until}d`
+                              : alert.days_until === 0 ? 'TODAY' : `${alert.days_until}d`
                             }
                           </Badge>
                         </Group>
@@ -982,22 +985,20 @@ export default function Dashboard() {
                 </div>
               ) : (
                 <div style={{
-                  padding: '10px', borderRadius: '6px',
+                  padding: '6px 8px', borderRadius: '4px',
                   background: 'rgba(0, 255, 136, 0.05)', border: '1px solid rgba(0, 255, 136, 0.15)',
                 }}>
                   <Group gap="xs">
-                    <IconTool size={14} color="#00ff88" />
-                    <Text size="xs" c="#00ff88" fw={600} style={monoXs}>
-                      ALL MAINTENANCE CURRENT
-                    </Text>
+                    <IconTool size={12} color="#00ff88" />
+                    <Text size="xs" c="#00ff88" fw={600} style={monoXs}>ALL MAINTENANCE CURRENT</Text>
                   </Group>
                 </div>
               )}
 
-              {/* Battery status */}
+              {/* Battery status — compact */}
               <div>
-                <Group gap={4} mb={6}>
-                  <IconBattery size={14} color="#00d4ff" />
+                <Group gap={4} mb={4}>
+                  <IconBattery size={12} color="#00d4ff" />
                   <Text size="xs" c="#00d4ff" fw={700} style={{ ...monoXs, letterSpacing: '2px' }}>
                     BATTERY FLEET
                   </Text>
@@ -1008,39 +1009,36 @@ export default function Dashboard() {
                     No batteries tracked. Add batteries in Fleet settings.
                   </Text>
                 ) : (
-                  <Stack gap={4}>
+                  <Stack gap={3}>
                     {batteries
                       .filter((b) => b.status === 'active')
                       .sort((a, b) => a.health_pct - b.health_pct)
-                      .slice(0, 6)
+                      .slice(0, 4)
                       .map((b) => {
                         const healthColor = b.health_pct >= 70 ? '#00ff88' : b.health_pct >= 40 ? '#ff6b1a' : '#ff4444';
                         const needsAttention = b.health_pct < 40 || b.cycle_count > 200;
                         return (
                           <div key={b.id} style={{
-                            padding: '6px 10px', borderRadius: '4px',
+                            padding: '4px 8px', borderRadius: '4px',
                             background: needsAttention ? 'rgba(255, 68, 68, 0.06)' : '#050608',
                             border: `1px solid ${needsAttention ? 'rgba(255, 68, 68, 0.2)' : '#1a1f2e'}`,
                           }}>
-                            <Group justify="space-between" wrap="nowrap" mb={4}>
-                              <Group gap="xs" wrap="nowrap">
+                            <Group justify="space-between" wrap="nowrap" mb={2}>
+                              <Group gap={6} wrap="nowrap">
                                 {needsAttention ? (
-                                  <IconBatteryOff size={14} color="#ff4444" />
+                                  <IconBatteryOff size={12} color="#ff4444" />
                                 ) : (
-                                  <IconBattery size={14} color={healthColor} />
+                                  <IconBattery size={12} color={healthColor} />
                                 )}
-                                <Text size="xs" c="#e8edf2" fw={600}>
+                                <Text size="xs" c="#e8edf2" fw={600} style={{ fontSize: '11px' }}>
                                   {b.serial}
                                 </Text>
-                                {b.model && (
-                                  <Text size="xs" c="#5a6478" style={{ fontSize: '10px' }}>{b.model}</Text>
-                                )}
                               </Group>
                               <Group gap={6} wrap="nowrap">
-                                <Text size="xs" c="#5a6478" style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: '10px' }}>
-                                  {b.cycle_count} cycles
+                                <Text size="xs" c="#5a6478" style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: '9px' }}>
+                                  {b.cycle_count}cy
                                 </Text>
-                                <Text size="xs" c={healthColor} fw={700} style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: '11px' }}>
+                                <Text size="xs" c={healthColor} fw={700} style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: '10px' }}>
                                   {b.health_pct}%
                                 </Text>
                               </Group>
@@ -1048,7 +1046,7 @@ export default function Dashboard() {
                             <Progress
                               value={b.health_pct}
                               color={healthColor}
-                              size="xs"
+                              size={3}
                               radius="xl"
                               styles={{ root: { background: '#1a1f2e' } }}
                             />
