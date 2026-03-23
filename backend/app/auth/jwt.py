@@ -11,8 +11,30 @@ from app.config import settings
 from app.database import get_db
 from app.models.user import User
 
+import re
+
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto", bcrypt__truncate_error=False)
 security = HTTPBearer()
+
+# ── Password complexity requirements ──────────────────────────────────
+PASSWORD_MIN_LENGTH = 10
+PASSWORD_RULES = [
+    ("At least 10 characters", lambda p: len(p) >= 10),
+    ("At least one uppercase letter", lambda p: bool(re.search(r"[A-Z]", p))),
+    ("At least one lowercase letter", lambda p: bool(re.search(r"[a-z]", p))),
+    ("At least one number", lambda p: bool(re.search(r"\d", p))),
+    ("At least one special character (!@#$%^&*...)", lambda p: bool(re.search(r"[^A-Za-z0-9]", p))),
+]
+
+
+def check_password_complexity(password: str) -> list[str]:
+    """Return list of unmet complexity requirements. Empty list = compliant."""
+    return [desc for desc, check in PASSWORD_RULES if not check(password)]
+
+
+def is_password_compliant(password: str) -> bool:
+    """Check if a password meets all complexity requirements."""
+    return len(check_password_complexity(password)) == 0
 
 
 def _truncate(password: str) -> str:

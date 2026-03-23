@@ -3,7 +3,7 @@
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.jwt import hash_password
+from app.auth.jwt import hash_password, is_password_compliant
 from app.config import settings
 from app.models.aircraft import Aircraft
 from app.models.invoice import RateTemplate, LineItemCategory
@@ -119,12 +119,15 @@ async def seed_database(db: AsyncSession):
     # Seed admin user — always re-hash password to match current config
     result = await db.execute(select(User).where(User.username == settings.admin_username))
     existing_admin = result.scalar_one_or_none()
+    compliant = is_password_compliant(settings.admin_password)
     if existing_admin:
         existing_admin.hashed_password = hash_password(settings.admin_password)
+        existing_admin.password_compliant = compliant
     else:
         admin = User(
             username=settings.admin_username,
             hashed_password=hash_password(settings.admin_password),
+            password_compliant=compliant,
         )
         db.add(admin)
 

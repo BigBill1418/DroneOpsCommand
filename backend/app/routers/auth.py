@@ -17,6 +17,9 @@ from app.auth.jwt import (
     get_current_user,
     hash_password,
     verify_password,
+    check_password_complexity,
+    is_password_compliant,
+    PASSWORD_RULES,
 )
 from app.config import settings
 from app.database import get_db
@@ -30,6 +33,11 @@ class AccountUpdateRequest(BaseModel):
     current_password: str
     new_username: str | None = None
     new_password: str | None = None
+
+
+class ForceResetRequest(BaseModel):
+    current_password: str
+    new_password: str
 
 
 # ── Login lockout: 3 failed attempts in 120s → locked for 5 minutes ──
@@ -82,7 +90,7 @@ def _clear_failures(ip: str) -> None:
     _lockouts.pop(ip, None)
 
 
-@router.post("/login", response_model=TokenResponse)
+@router.post("/login")
 @limiter.limit("5/minute")
 async def login(request: Request, body: LoginRequest, db: AsyncSession = Depends(get_db)):
     client_ip = get_remote_address(request)
@@ -96,16 +104,29 @@ async def login(request: Request, body: LoginRequest, db: AsyncSession = Depends
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
     _clear_failures(client_ip)
-    return TokenResponse(
-        access_token=create_access_token({"sub": user.username}),
-        refresh_token=create_refresh_token({"sub": user.username}),
-    )
+
+    # Check if the user's password meets current complexity requirements.
+    # We can verify the plaintext here (it was just submitted) to update the flag.
+    compliant = is_password_compliant(body.password)
+    if user.password_compliant != compliant:
+        user.password_compliant = compliant
+        await db.flush()
+
+    return {
+        "access_token": create_access_token({"sub": user.username}),
+        "refresh_token": create_refresh_token({"sub": user.username}),
+        "token_type": "bearer",
+        "password_compliant": user.password_compliant,
+    }
 
 
 @router.get("/account")
 async def get_account(user: User = Depends(get_current_user)):
     """Get current account info."""
-    return {"username": user.username}
+    return {
+        "username": user.username,
+        "password_compliant": user.password_compliant,
+    }
 
 
 @router.put("/account")
@@ -128,9 +149,14 @@ async def update_account(
         user.username = body.new_username
 
     if body.new_password:
-        if len(body.new_password) < 6:
-            raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+        failures = check_password_complexity(body.new_password)
+        if failures:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Password does not meet complexity requirements: {'; '.join(failures)}",
+            )
         user.hashed_password = hash_password(body.new_password)
+        user.password_compliant = True
 
     await db.flush()
 
@@ -138,8 +164,47 @@ async def update_account(
     return {
         "status": "ok",
         "username": user.username,
+        "password_compliant": user.password_compliant,
         "access_token": create_access_token({"sub": user.username}),
         "refresh_token": create_refresh_token({"sub": user.username}),
+    }
+
+
+@router.post("/force-reset")
+async def force_password_reset(
+    body: ForceResetRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Force password reset for users with non-compliant passwords."""
+    if not verify_password(body.current_password, user.hashed_password):
+        raise HTTPException(status_code=403, detail="Current password is incorrect")
+
+    failures = check_password_complexity(body.new_password)
+    if failures:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Password does not meet complexity requirements: {'; '.join(failures)}",
+        )
+
+    user.hashed_password = hash_password(body.new_password)
+    user.password_compliant = True
+    await db.flush()
+
+    return {
+        "status": "ok",
+        "username": user.username,
+        "password_compliant": True,
+        "access_token": create_access_token({"sub": user.username}),
+        "refresh_token": create_refresh_token({"sub": user.username}),
+    }
+
+
+@router.get("/password-rules")
+async def get_password_rules():
+    """Return the current password complexity rules (for frontend display)."""
+    return {
+        "rules": [desc for desc, _ in PASSWORD_RULES],
     }
 
 
