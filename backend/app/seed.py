@@ -116,20 +116,25 @@ AIRCRAFT_SEED = [
 async def seed_database(db: AsyncSession):
     """Seed the database with initial data."""
 
-    # Seed admin user — only create if missing. Never overwrite an existing
-    # password because the user may have changed it via Settings or force-reset.
+    # Seed admin user.
+    # IMPORTANT: Never overwrite an existing user's password on startup — the user
+    # may have changed it via Settings or force-reset. The old code (pre-v2.38.2)
+    # re-hashed the env password on every startup, which caused lockouts after
+    # password changes. Only overwrite if RESET_ADMIN_PASSWORD=true (recovery).
+    import logging
+    _seed_log = logging.getLogger("doc.seed")
     result = await db.execute(select(User).where(User.username == settings.admin_username))
     existing_admin = result.scalar_one_or_none()
     if existing_admin:
-        # Only reset password if explicitly requested via RESET_ADMIN_PASSWORD=true
         if settings.reset_admin_password:
-            import logging
-            logging.getLogger("doc.seed").warning(
+            _seed_log.warning(
                 "RESET_ADMIN_PASSWORD is set — resetting admin password to ADMIN_PASSWORD env value"
             )
             compliant = is_password_compliant(settings.admin_password)
             existing_admin.hashed_password = hash_password(settings.admin_password)
             existing_admin.password_compliant = compliant
+        else:
+            _seed_log.info("Admin user exists — password preserved (set RESET_ADMIN_PASSWORD=true to force-reset)")
     else:
         compliant = is_password_compliant(settings.admin_password)
         admin = User(
@@ -138,6 +143,7 @@ async def seed_database(db: AsyncSession):
             password_compliant=compliant,
         )
         db.add(admin)
+        _seed_log.info("Created admin user '%s'", settings.admin_username)
 
     # Seed rate templates
     rate_templates = [
