@@ -4,6 +4,7 @@ import { useAuth } from './hooks/useAuth';
 import ErrorBoundary from './components/ErrorBoundary';
 import AppLayout from './components/Layout/AppShell';
 import Login from './pages/Login';
+import ForcePasswordReset from './pages/ForcePasswordReset';
 import Dashboard from './pages/Dashboard';
 import Missions from './pages/Missions';
 import MissionNew from './pages/MissionNew';
@@ -18,7 +19,7 @@ import CustomerIntake from './pages/CustomerIntake';
 import UploadLogs from './pages/UploadLogs';
 
 export default function App() {
-  const { isAuthenticated, loading, login, logout } = useAuth();
+  const { isAuthenticated, loading, login, logout, passwordCompliant, markPasswordCompliant } = useAuth();
 
   if (loading) {
     return (
@@ -36,7 +37,8 @@ export default function App() {
 
         {/* All other routes require authentication */}
         <Route path="*" element={
-          !isAuthenticated ? <Login onLogin={login} /> : (
+          !isAuthenticated ? <Login onLogin={login} /> :
+          !passwordCompliant ? <ForcePasswordReset onComplete={markPasswordCompliant} onLogout={logout} /> : (
             <Routes>
               <Route element={<AppLayout onLogout={logout} />}>
                 <Route path="/" element={<Dashboard />} />

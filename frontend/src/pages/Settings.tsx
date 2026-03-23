@@ -27,6 +27,7 @@ import api from '../api/client';
 import { Aircraft, RateTemplate } from '../api/types';
 import { inputStyles, cardStyle } from '../components/shared/styles';
 import { invalidateBrandingCache } from '../hooks/useBranding';
+import PasswordStrengthMeter, { isPasswordValid } from '../components/PasswordStrengthMeter';
 
 const tabStyles = {
   tab: {
@@ -123,7 +124,7 @@ export default function Settings() {
     initialValues: { current_password: '', new_username: '', new_password: '', confirm_password: '' },
     validate: {
       current_password: (v) => (v.length === 0 ? 'Current password is required' : null),
-      new_password: (v) => (v && v.length > 0 && v.length < 6 ? 'Password must be at least 6 characters' : null),
+      new_password: (v) => (v && v.length > 0 && !isPasswordValid(v) ? 'Password does not meet complexity requirements' : null),
       confirm_password: (v, values) => (v !== values.new_password ? 'Passwords do not match' : null),
     },
   });
@@ -1572,6 +1573,7 @@ export default function Settings() {
                     {...accountForm.getInputProps('new_password')}
                     styles={inputStyles}
                   />
+                  <PasswordStrengthMeter password={accountForm.values.new_password} />
                   <PasswordInput
                     label="Confirm New Password"
                     placeholder="Re-enter new password"

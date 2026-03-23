@@ -4,13 +4,17 @@ import api from '../api/client';
 export function useAuth() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [passwordCompliant, setPasswordCompliant] = useState(true);
 
   useEffect(() => {
     const token = localStorage.getItem('access_token');
     if (token) {
-      // Verify token by calling health endpoint
-      api.get('/health')
-        .then(() => setIsAuthenticated(true))
+      // Verify token and check password compliance
+      api.get('/auth/account')
+        .then((r) => {
+          setIsAuthenticated(true);
+          setPasswordCompliant(r.data.password_compliant ?? true);
+        })
         .catch(() => {
           localStorage.removeItem('access_token');
           localStorage.removeItem('refresh_token');
@@ -27,13 +31,19 @@ export function useAuth() {
     localStorage.setItem('access_token', resp.data.access_token);
     localStorage.setItem('refresh_token', resp.data.refresh_token);
     setIsAuthenticated(true);
+    setPasswordCompliant(resp.data.password_compliant ?? true);
   }, []);
 
   const logout = useCallback(() => {
     localStorage.removeItem('access_token');
     localStorage.removeItem('refresh_token');
     setIsAuthenticated(false);
+    setPasswordCompliant(true);
   }, []);
 
-  return { isAuthenticated, loading, login, logout };
+  const markPasswordCompliant = useCallback(() => {
+    setPasswordCompliant(true);
+  }, []);
+
+  return { isAuthenticated, loading, login, logout, passwordCompliant, markPasswordCompliant };
 }
