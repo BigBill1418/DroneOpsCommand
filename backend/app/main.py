@@ -187,30 +187,22 @@ limiter = Limiter(key_func=get_remote_address)
 app = FastAPI(
     title="D.O.C — Drone Operations Command",
     description="Mission management, flight data, and after-action reporting for drone operations",
-    version="2.33.6",
+    version="2.34.0",
     lifespan=lifespan,
 )
 
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-# CORS - restrict to configured frontend URL
-_cors_origins = [settings.frontend_url.rstrip("/")]
-# Also allow localhost for local development
-if not any("localhost" in o for o in _cors_origins):
-    _cors_origins.append("http://localhost:3080")
-# Capacitor WebView origins (companion app)
-_cors_origins.extend([
-    "capacitor://localhost",
-    "https://localhost",
-    "http://localhost",
-])
+# CORS — allow any origin for LAN-only self-hosted deployment.
+# All endpoints are behind JWT or device-API-key auth so origin
+# restriction adds no real security on a private network.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_cors_origins,
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization", "X-Device-Api-Key"],
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Fallback route: serve default aircraft SVGs from bundled static if not in uploads
