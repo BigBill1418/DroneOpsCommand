@@ -120,12 +120,21 @@ so use wildcard paths to consolidate rules. Still in the same application:
 3. Add another Bypass policy for the intake API (covers form submission + TOS PDF):
    - **Path**: `/api/intake/*`
 
-Only **2 bypass rules** needed:
+4. Add another Bypass policy for the companion app (DroneOpsSync device upload/health):
+   - **Policy name**: `Device Sync API`
+   - **Action**: **Bypass**
+   - **Selector**: `Everyone`
+   - **Path**: `/api/flight-library/device-*`
+
+   > These endpoints are already secured by `X-Device-Api-Key` header auth — unauthorized requests get a 401. Cloudflare Access bypass is safe here.
+
+**3 bypass rules** needed:
 
 | Path | What it covers |
 |------|---------------|
 | `/intake/*` | Customer intake frontend SPA |
 | `/api/intake/*` | Intake form GET/POST + TOS PDF download |
+| `/api/flight-library/device-*` | DroneOpsSync companion app (health check + upload) |
 
 Everything else requires Cloudflare Access login.
 
@@ -189,3 +198,4 @@ Customer's Browser
 | Intake form loads but API calls fail | Make sure the tunnel hostname points to `frontend:80`, not `backend:8000` |
 | "Access Denied" on intake form | Check your Cloudflare Access bypass policies include `/intake/*` and `/api/intake/*` |
 | TOS PDF won't load | Add bypass for `/api/intake/*` in Access policies |
+| DroneOpsSync companion app won't connect via cloud | Add bypass for `/api/flight-library/device-*` in Access policies |
