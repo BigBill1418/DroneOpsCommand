@@ -16,7 +16,7 @@ from slowapi.util import get_remote_address
 from app.config import settings
 from app.database import Base, async_session, engine, get_db
 import app.models  # noqa: F401 — ensure all models registered with Base before create_all
-from app.routers import auth, customers, aircraft, missions, flights, maps, reports, invoices, rate_templates, llm, system_settings, financials, weather, intake, flight_library, batteries, maintenance, backup
+from app.routers import auth, customers, aircraft, missions, flights, maps, reports, invoices, rate_templates, llm, system_settings, financials, weather, intake, flight_library, batteries, maintenance, backup, device_keys
 
 # Configure root logger for the app
 logging.basicConfig(
@@ -103,6 +103,12 @@ def _add_missing_columns(conn):
             "batteries": [
                 ("name", "ALTER TABLE batteries ADD COLUMN name VARCHAR(255)"),
             ],
+            "aircraft": [
+                ("serial_number", "ALTER TABLE aircraft ADD COLUMN serial_number VARCHAR(255)"),
+            ],
+            "maintenance_records": [
+                ("images", "ALTER TABLE maintenance_records ADD COLUMN images JSONB DEFAULT '[]'"),
+            ],
         }
 
         # Make opendronelog_flight_id nullable for existing tables (new flights use flight_id)
@@ -181,24 +187,22 @@ limiter = Limiter(key_func=get_remote_address)
 app = FastAPI(
     title="D.O.C — Drone Operations Command",
     description="Mission management, flight data, and after-action reporting for drone operations",
-    version="2.30.0",
+    version="2.34.0",
     lifespan=lifespan,
 )
 
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-# CORS - restrict to configured frontend URL
-_cors_origins = [settings.frontend_url.rstrip("/")]
-# Also allow localhost for local development
-if not any("localhost" in o for o in _cors_origins):
-    _cors_origins.append("http://localhost:3080")
+# CORS — allow any origin for LAN-only self-hosted deployment.
+# All endpoints are behind JWT or device-API-key auth so origin
+# restriction adds no real security on a private network.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_cors_origins,
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization", "X-Device-Api-Key"],
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Fallback route: serve default aircraft SVGs from bundled static if not in uploads
@@ -252,6 +256,7 @@ app.include_router(flight_library.router)
 app.include_router(batteries.router)
 app.include_router(maintenance.router)
 app.include_router(backup.router)
+app.include_router(device_keys.router)
 
 
 @app.middleware("http")

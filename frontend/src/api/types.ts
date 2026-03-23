@@ -22,6 +22,7 @@ export interface Aircraft {
   id: string;
   model_name: string;
   manufacturer: string;
+  serial_number: string | null;
   image_filename: string | null;
   specs: Record<string, string>;
   created_at: string;
@@ -248,6 +249,7 @@ export interface MaintenanceRecordType {
   next_due_date: string | null;
   cost: number | null;
   notes: string | null;
+  images: string[] | null;
   created_at: string;
 }
 

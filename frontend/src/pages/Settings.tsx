@@ -1398,19 +1398,13 @@ export default function Settings() {
               </Text>
               <Stack gap={4} mt="sm">
                 <Text c="#e8edf2" size="sm" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
-                  1. Server URL: your DroneOpsCommand tunnel/URL
+                  1. Server URL: your server's LAN IP and port (e.g. http://192.168.1.50:3080)
                 </Text>
                 <Text c="#e8edf2" size="sm" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
                   2. API Key: paste the key generated above
                 </Text>
                 <Text c="#e8edf2" size="sm" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
-                  3. Header name: X-Device-Api-Key
-                </Text>
-                <Text c="#e8edf2" size="sm" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
-                  4. Upload endpoint: /api/flight-library/device-upload
-                </Text>
-                <Text c="#e8edf2" size="sm" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
-                  5. Health check: GET /api/flight-library/device-health
+                  3. Connect the device to the same network as the server
                 </Text>
               </Stack>
             </Card>
