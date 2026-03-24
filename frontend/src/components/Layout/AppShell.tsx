@@ -147,12 +147,12 @@ export default function AppLayout({ onLogout }: AppLayoutProps) {
           ))}
         </ScrollArea>
 
-        {/* Drone visual */}
+        {/* Drone visual — centered between nav items and version footer */}
         <div style={{
-          flexShrink: 0, display: 'flex', justifyContent: 'center',
-          padding: '12px 0 8px', opacity: 0.35,
+          flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+          minHeight: 80, opacity: 0.35,
         }}>
-          <svg width="80" height="40" viewBox="0 0 120 60" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <svg width="140" height="70" viewBox="0 0 120 60" fill="none" xmlns="http://www.w3.org/2000/svg">
             {/* Propeller arms */}
             <line x1="30" y1="20" x2="60" y2="30" stroke="#00d4ff" strokeWidth="1.5" />
             <line x1="90" y1="20" x2="60" y2="30" stroke="#00d4ff" strokeWidth="1.5" />
@@ -204,7 +204,7 @@ export default function AppLayout({ onLogout }: AppLayoutProps) {
               fontSize: '15px',
             }}
           >
-            v2.39.0
+            v2.39.1
           </Text>
           <Tooltip label="Star on GitHub" position="right">
             <ActionIcon
