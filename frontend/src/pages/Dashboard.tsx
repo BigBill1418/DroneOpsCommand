@@ -370,21 +370,17 @@ export default function Dashboard() {
         <StatCard icon={IconUsers} label="CUSTOMERS" value={String(customers.length)} color="#00d4ff" />
       </SimpleGrid>
 
-      {/* Main grid: asymmetric layout — left stacks 3 panels, right stacks 2 */}
-      <div className="dashboard-grid" style={{
-        flex: 1, display: 'grid', gap: '10px', minHeight: 0,
-        gridTemplateColumns: '1fr 1fr',
-        gridTemplateRows: 'auto auto minmax(0, 1fr)',
-        gridTemplateAreas: `
-          "missions weather"
-          "nextdue  weather"
-          "stats    equip"
-        `,
+      {/* Main layout: two independent flex columns so cards stack tight */}
+      <div style={{
+        flex: 1, display: 'flex', gap: '10px', minHeight: 0,
         maxHeight: 'calc(100vh - 220px)',
       }}>
 
+        {/* ═══ LEFT COLUMN — cards stack naturally, no dead space ═══ */}
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '10px', minHeight: 0 }}>
+
         {/* ═══ RECENT MISSIONS — compact ═══ */}
-        <Card padding="sm" radius="md" style={{ ...panelStyle, gridArea: 'missions', maxHeight: '200px' }}>
+        <Card padding="sm" radius="md" style={{ ...panelStyle, maxHeight: '200px', flexShrink: 0 }}>
           <Title order={4} c="#e8edf2" mb={4} style={{ letterSpacing: '1px', fontSize: '14px' }}>
             RECENT MISSIONS
           </Title>
@@ -443,7 +439,7 @@ export default function Dashboard() {
         </Card>
 
         {/* ═══ NEXT SERVICE DUE — below recent missions ═══ */}
-        <div style={{ gridArea: 'nextdue' }}>
+        <div style={{ flexShrink: 0 }}>
           {nextServiceDue ? (
             <Card padding="sm" radius="md" style={{
               ...panelStyle,
@@ -515,8 +511,162 @@ export default function Dashboard() {
           )}
         </div>
 
+        {/* ═══ FLIGHT STATS ═══ */}
+        <Card padding="sm" radius="md" style={{ ...panelStyle, flex: 1, minHeight: 0 }}>
+          <Title order={4} c="#e8edf2" mb="xs" style={{ letterSpacing: '1px' }}>
+            FLIGHT STATISTICS
+          </Title>
+
+          {!flightStats ? (
+            <Text c="#5a6478" ta="center" py="xl">No flight data available.</Text>
+          ) : flightStats.total_flights === 0 ? (
+            <Text c="#5a6478" ta="center" py="xl">
+              No flights in library. Upload flight logs or import from OpenDroneLog.
+            </Text>
+          ) : (
+            <ScrollArea style={{ flex: 1 }} type="auto">
+              <Stack gap="xs">
+                {/* Aggregate stats row */}
+                <SimpleGrid cols={2} spacing="xs">
+                  <div style={{ padding: '8px', background: '#050608', borderRadius: '6px', border: '1px solid #1a1f2e' }}>
+                    <Group gap={4} mb={2}>
+                      <IconClock size={12} color="#5a6478" />
+                      <Text size="xs" c="#5a6478" style={monoXs}>TOTAL FLIGHT TIME</Text>
+                    </Group>
+                    <Text c="#e8edf2" fw={700} style={{ ...bebasFont, fontSize: '20px', lineHeight: 1.1 }}>
+                      {formatDuration(flightStats.total_duration)}
+                    </Text>
+                    <Text size="xs" c="#5a6478" style={{ fontSize: '10px' }}>
+                      avg {formatDuration(flightStats.avg_duration)} / flight
+                    </Text>
+                  </div>
+                  <div style={{ padding: '8px', background: '#050608', borderRadius: '6px', border: '1px solid #1a1f2e' }}>
+                    <Group gap={4} mb={2}>
+                      <IconRuler size={12} color="#5a6478" />
+                      <Text size="xs" c="#5a6478" style={monoXs}>TOTAL DISTANCE</Text>
+                    </Group>
+                    <Text c="#e8edf2" fw={700} style={{ ...bebasFont, fontSize: '20px', lineHeight: 1.1 }}>
+                      {formatDistance(flightStats.total_distance)}
+                    </Text>
+                    <Text size="xs" c="#5a6478" style={{ fontSize: '10px' }}>
+                      avg {formatDistance(flightStats.avg_distance)} / flight
+                    </Text>
+                  </div>
+                  <div style={{ padding: '8px', background: '#050608', borderRadius: '6px', border: '1px solid #1a1f2e' }}>
+                    <Group gap={4} mb={2}>
+                      <IconArrowUp size={12} color="#5a6478" />
+                      <Text size="xs" c="#5a6478" style={monoXs}>MAX ALTITUDE</Text>
+                    </Group>
+                    <Text c="#e8edf2" fw={700} style={{ ...bebasFont, fontSize: '20px', lineHeight: 1.1 }}>
+                      {Math.round(flightStats.max_altitude * 3.28084)} ft
+                    </Text>
+                  </div>
+                  <div style={{ padding: '8px', background: '#050608', borderRadius: '6px', border: '1px solid #1a1f2e' }}>
+                    <Group gap={4} mb={2}>
+                      <IconBolt size={12} color="#5a6478" />
+                      <Text size="xs" c="#5a6478" style={monoXs}>MAX SPEED</Text>
+                    </Group>
+                    <Text c="#e8edf2" fw={700} style={{ ...bebasFont, fontSize: '20px', lineHeight: 1.1 }}>
+                      {(flightStats.max_speed * 2.23694).toFixed(1)} mph
+                    </Text>
+                  </div>
+                </SimpleGrid>
+
+                {/* Record holders */}
+                {(flightStats.longest_flight || flightStats.farthest_flight) && (
+                  <div style={{ padding: '10px', background: 'rgba(0, 212, 255, 0.04)', borderRadius: '6px', border: '1px solid rgba(0, 212, 255, 0.15)' }}>
+                    <Text size="xs" c="#00d4ff" fw={700} mb={6} style={{ ...monoXs, letterSpacing: '2px' }}>
+                      FLIGHT RECORDS
+                    </Text>
+                    <Stack gap={6}>
+                      {flightStats.longest_flight && (
+                        <Group gap="xs" wrap="nowrap">
+                          <ThemeIcon size="sm" variant="light" color="cyan" radius="xl">
+                            <IconClock size={12} />
+                          </ThemeIcon>
+                          <div style={{ minWidth: 0 }}>
+                            <Text size="xs" c="#e8edf2" fw={600} lineClamp={1}>
+                              LONGEST: {flightStats.longest_flight.name}
+                            </Text>
+                            <Text size="xs" c="#5a6478" style={{ fontSize: '10px' }}>
+                              {formatDuration(flightStats.longest_flight.duration_secs)}
+                              {flightStats.longest_flight.drone_model ? ` — ${flightStats.longest_flight.drone_model}` : ''}
+                            </Text>
+                          </div>
+                        </Group>
+                      )}
+                      {flightStats.farthest_flight && (
+                        <Group gap="xs" wrap="nowrap">
+                          <ThemeIcon size="sm" variant="light" color="cyan" radius="xl">
+                            <IconRuler size={12} />
+                          </ThemeIcon>
+                          <div style={{ minWidth: 0 }}>
+                            <Text size="xs" c="#e8edf2" fw={600} lineClamp={1}>
+                              FARTHEST: {flightStats.farthest_flight.name}
+                            </Text>
+                            <Text size="xs" c="#5a6478" style={{ fontSize: '10px' }}>
+                              {formatDistance(flightStats.farthest_flight.total_distance)}
+                              {flightStats.farthest_flight.drone_model ? ` — ${flightStats.farthest_flight.drone_model}` : ''}
+                            </Text>
+                          </div>
+                        </Group>
+                      )}
+                    </Stack>
+                  </div>
+                )}
+
+                {/* Recent flights list */}
+                {flightStats.recent_flights.length > 0 && (
+                  <div>
+                    <Text size="xs" c="#5a6478" fw={700} mb={4} style={{ ...monoXs, letterSpacing: '2px' }}>
+                      RECENT FLIGHTS
+                    </Text>
+                    <Stack gap={4}>
+                      {flightStats.recent_flights.map((f) => (
+                        <div key={f.id} style={{
+                          padding: '6px 8px', background: '#050608', borderRadius: '4px',
+                          border: '1px solid #1a1f2e', cursor: 'pointer',
+                        }}
+                          onClick={() => navigate(`/flights/${f.id}`)}
+                        >
+                          <Group justify="space-between" wrap="nowrap">
+                            <Text size="xs" c="#e8edf2" fw={600} lineClamp={1} style={{ flex: 1 }}>
+                              {f.name}
+                            </Text>
+                            <Text size="xs" c="#5a6478" style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: '10px', flexShrink: 0 }}>
+                              {f.start_time ? new Date(f.start_time).toLocaleDateString() : '—'}
+                            </Text>
+                          </Group>
+                          <Group gap="md" mt={2}>
+                            <Text size="xs" c="#00d4ff" style={{ fontSize: '10px' }}>
+                              {formatDuration(f.duration_secs)}
+                            </Text>
+                            <Text size="xs" c="#5a6478" style={{ fontSize: '10px' }}>
+                              {formatDistance(f.total_distance)}
+                            </Text>
+                            {f.drone_model && (
+                              <Text size="xs" c="#5a6478" style={{ fontSize: '10px' }}>
+                                {f.drone_model}
+                              </Text>
+                            )}
+                          </Group>
+                        </div>
+                      ))}
+                    </Stack>
+                  </div>
+                )}
+              </Stack>
+            </ScrollArea>
+          )}
+        </Card>
+
+        </div>{/* end left column */}
+
+        {/* ═══ RIGHT COLUMN — weather + equipment ═══ */}
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '10px', minHeight: 0 }}>
+
         {/* ═══ FLIGHT CONDITIONS — live weather ═══ */}
-        <Card padding="sm" radius="md" style={{ ...panelStyle, gridArea: 'weather' }}>
+        <Card padding="sm" radius="md" style={{ ...panelStyle, flex: 1, minHeight: 0 }}>
           <Group justify="space-between" mb="xs">
             <Group gap="xs">
               <Title order={4} c="#e8edf2" style={{ letterSpacing: '1px' }}>
@@ -771,157 +921,8 @@ export default function Dashboard() {
           )}
         </Card>
 
-        {/* ═══ FLIGHT STATS ═══ */}
-        <Card padding="sm" radius="md" style={{ ...panelStyle, gridArea: 'stats' }}>
-          <Title order={4} c="#e8edf2" mb="xs" style={{ letterSpacing: '1px' }}>
-            FLIGHT STATISTICS
-          </Title>
-
-          {!flightStats ? (
-            <Text c="#5a6478" ta="center" py="xl">No flight data available.</Text>
-          ) : flightStats.total_flights === 0 ? (
-            <Text c="#5a6478" ta="center" py="xl">
-              No flights in library. Upload flight logs or import from OpenDroneLog.
-            </Text>
-          ) : (
-            <ScrollArea style={{ flex: 1 }} type="auto">
-              <Stack gap="xs">
-                {/* Aggregate stats row */}
-                <SimpleGrid cols={2} spacing="xs">
-                  <div style={{ padding: '8px', background: '#050608', borderRadius: '6px', border: '1px solid #1a1f2e' }}>
-                    <Group gap={4} mb={2}>
-                      <IconClock size={12} color="#5a6478" />
-                      <Text size="xs" c="#5a6478" style={monoXs}>TOTAL FLIGHT TIME</Text>
-                    </Group>
-                    <Text c="#e8edf2" fw={700} style={{ ...bebasFont, fontSize: '20px', lineHeight: 1.1 }}>
-                      {formatDuration(flightStats.total_duration)}
-                    </Text>
-                    <Text size="xs" c="#5a6478" style={{ fontSize: '10px' }}>
-                      avg {formatDuration(flightStats.avg_duration)} / flight
-                    </Text>
-                  </div>
-                  <div style={{ padding: '8px', background: '#050608', borderRadius: '6px', border: '1px solid #1a1f2e' }}>
-                    <Group gap={4} mb={2}>
-                      <IconRuler size={12} color="#5a6478" />
-                      <Text size="xs" c="#5a6478" style={monoXs}>TOTAL DISTANCE</Text>
-                    </Group>
-                    <Text c="#e8edf2" fw={700} style={{ ...bebasFont, fontSize: '20px', lineHeight: 1.1 }}>
-                      {formatDistance(flightStats.total_distance)}
-                    </Text>
-                    <Text size="xs" c="#5a6478" style={{ fontSize: '10px' }}>
-                      avg {formatDistance(flightStats.avg_distance)} / flight
-                    </Text>
-                  </div>
-                  <div style={{ padding: '8px', background: '#050608', borderRadius: '6px', border: '1px solid #1a1f2e' }}>
-                    <Group gap={4} mb={2}>
-                      <IconArrowUp size={12} color="#5a6478" />
-                      <Text size="xs" c="#5a6478" style={monoXs}>MAX ALTITUDE</Text>
-                    </Group>
-                    <Text c="#e8edf2" fw={700} style={{ ...bebasFont, fontSize: '20px', lineHeight: 1.1 }}>
-                      {Math.round(flightStats.max_altitude * 3.28084)} ft
-                    </Text>
-                  </div>
-                  <div style={{ padding: '8px', background: '#050608', borderRadius: '6px', border: '1px solid #1a1f2e' }}>
-                    <Group gap={4} mb={2}>
-                      <IconBolt size={12} color="#5a6478" />
-                      <Text size="xs" c="#5a6478" style={monoXs}>MAX SPEED</Text>
-                    </Group>
-                    <Text c="#e8edf2" fw={700} style={{ ...bebasFont, fontSize: '20px', lineHeight: 1.1 }}>
-                      {(flightStats.max_speed * 2.23694).toFixed(1)} mph
-                    </Text>
-                  </div>
-                </SimpleGrid>
-
-                {/* Record holders */}
-                {(flightStats.longest_flight || flightStats.farthest_flight) && (
-                  <div style={{ padding: '10px', background: 'rgba(0, 212, 255, 0.04)', borderRadius: '6px', border: '1px solid rgba(0, 212, 255, 0.15)' }}>
-                    <Text size="xs" c="#00d4ff" fw={700} mb={6} style={{ ...monoXs, letterSpacing: '2px' }}>
-                      FLIGHT RECORDS
-                    </Text>
-                    <Stack gap={6}>
-                      {flightStats.longest_flight && (
-                        <Group gap="xs" wrap="nowrap">
-                          <ThemeIcon size="sm" variant="light" color="cyan" radius="xl">
-                            <IconClock size={12} />
-                          </ThemeIcon>
-                          <div style={{ minWidth: 0 }}>
-                            <Text size="xs" c="#e8edf2" fw={600} lineClamp={1}>
-                              LONGEST: {flightStats.longest_flight.name}
-                            </Text>
-                            <Text size="xs" c="#5a6478" style={{ fontSize: '10px' }}>
-                              {formatDuration(flightStats.longest_flight.duration_secs)}
-                              {flightStats.longest_flight.drone_model ? ` — ${flightStats.longest_flight.drone_model}` : ''}
-                            </Text>
-                          </div>
-                        </Group>
-                      )}
-                      {flightStats.farthest_flight && (
-                        <Group gap="xs" wrap="nowrap">
-                          <ThemeIcon size="sm" variant="light" color="cyan" radius="xl">
-                            <IconRuler size={12} />
-                          </ThemeIcon>
-                          <div style={{ minWidth: 0 }}>
-                            <Text size="xs" c="#e8edf2" fw={600} lineClamp={1}>
-                              FARTHEST: {flightStats.farthest_flight.name}
-                            </Text>
-                            <Text size="xs" c="#5a6478" style={{ fontSize: '10px' }}>
-                              {formatDistance(flightStats.farthest_flight.total_distance)}
-                              {flightStats.farthest_flight.drone_model ? ` — ${flightStats.farthest_flight.drone_model}` : ''}
-                            </Text>
-                          </div>
-                        </Group>
-                      )}
-                    </Stack>
-                  </div>
-                )}
-
-                {/* Recent flights list */}
-                {flightStats.recent_flights.length > 0 && (
-                  <div>
-                    <Text size="xs" c="#5a6478" fw={700} mb={4} style={{ ...monoXs, letterSpacing: '2px' }}>
-                      RECENT FLIGHTS
-                    </Text>
-                    <Stack gap={4}>
-                      {flightStats.recent_flights.map((f) => (
-                        <div key={f.id} style={{
-                          padding: '6px 8px', background: '#050608', borderRadius: '4px',
-                          border: '1px solid #1a1f2e', cursor: 'pointer',
-                        }}
-                          onClick={() => navigate(`/flights/${f.id}`)}
-                        >
-                          <Group justify="space-between" wrap="nowrap">
-                            <Text size="xs" c="#e8edf2" fw={600} lineClamp={1} style={{ flex: 1 }}>
-                              {f.name}
-                            </Text>
-                            <Text size="xs" c="#5a6478" style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: '10px', flexShrink: 0 }}>
-                              {f.start_time ? new Date(f.start_time).toLocaleDateString() : '—'}
-                            </Text>
-                          </Group>
-                          <Group gap="md" mt={2}>
-                            <Text size="xs" c="#00d4ff" style={{ fontSize: '10px' }}>
-                              {formatDuration(f.duration_secs)}
-                            </Text>
-                            <Text size="xs" c="#5a6478" style={{ fontSize: '10px' }}>
-                              {formatDistance(f.total_distance)}
-                            </Text>
-                            {f.drone_model && (
-                              <Text size="xs" c="#5a6478" style={{ fontSize: '10px' }}>
-                                {f.drone_model}
-                              </Text>
-                            )}
-                          </Group>
-                        </div>
-                      ))}
-                    </Stack>
-                  </div>
-                )}
-              </Stack>
-            </ScrollArea>
-          )}
-        </Card>
-
         {/* ═══ EQUIPMENT STATUS — compact ═══ */}
-        <Card padding="sm" radius="md" style={{ ...panelStyle, gridArea: 'equip' }}>
+        <Card padding="sm" radius="md" style={{ ...panelStyle, flexShrink: 0 }}>
           <Group justify="space-between" mb={4}>
             <Group gap="xs">
               <Title order={4} c="#e8edf2" style={{ letterSpacing: '1px', fontSize: '14px' }}>
@@ -1059,6 +1060,8 @@ export default function Dashboard() {
             </Stack>
           </ScrollArea>
         </Card>
+
+        </div>{/* end right column */}
       </div>
 
       {/* ═══ INITIATE SERVICES MODAL ═══ */}
