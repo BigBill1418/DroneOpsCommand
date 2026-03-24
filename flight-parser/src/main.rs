@@ -170,34 +170,41 @@ async fn validate_dji_key(headers: HeaderMap) -> Json<DjiKeyValidation> {
 
     let key = api_key.unwrap();
 
-    // Test the key against DJI's API
-    let client = match ureq::AgentBuilder::new()
-        .timeout(std::time::Duration::from_secs(10))
-        .build()
-        .get("https://developer-api.dji.com/openapi/v1/manage/user/info")
+    // Test the key against DJI's actual keychain endpoint (same one the parser uses)
+    // Send a minimal empty keychains request — a valid key returns a structured response,
+    // an invalid key returns 403.
+    let test_body = serde_json::json!({
+        "version": 1,
+        "department": 0,
+        "keychainsArray": []
+    });
+
+    let result = ureq::post("https://dev.dji.com/openapi/v1/flight-records/keychains")
+        .set("Content-Type", "application/json")
         .set("Api-Key", &key)
-        .call()
-    {
+        .timeout(std::time::Duration::from_secs(10))
+        .send_string(&test_body.to_string());
+
+    match result {
         Ok(resp) => {
             let status = resp.status();
-            return Json(DjiKeyValidation {
+            Json(DjiKeyValidation {
                 status: "online".to_string(),
                 key_source,
                 key_present: true,
                 key_length,
                 dji_api_reachable: true,
                 dji_api_status: Some(status),
-                message: "DJI API key verified — authenticated successfully".to_string(),
-            });
+                message: "DJI API key verified — flight log decryption enabled".to_string(),
+            })
         }
         Err(ureq::Error::Status(status, _resp)) => {
             let (s, msg) = match status {
-                401 => ("error", "DJI API key is invalid (401 Unauthorized)".to_string()),
-                403 => ("online", "DJI API key accepted — flight log decryption enabled".to_string()),
+                401 | 403 => ("error", "DJI API key is invalid or expired (rejected by DJI)".to_string()),
                 429 => ("online", "DJI API key accepted (rate limited — try again later)".to_string()),
-                _ => ("online", format!("DJI API reachable (HTTP {})", status)),
+                _ => ("online", format!("DJI API reachable (HTTP {}) — key configured", status)),
             };
-            return Json(DjiKeyValidation {
+            Json(DjiKeyValidation {
                 status: s.to_string(),
                 key_source,
                 key_present: true,
@@ -205,22 +212,22 @@ async fn validate_dji_key(headers: HeaderMap) -> Json<DjiKeyValidation> {
                 dji_api_reachable: true,
                 dji_api_status: Some(status),
                 message: msg,
-            });
+            })
         }
-        Err(e) => e,
-    };
-
-    // Network error — can't reach DJI (might be Docker networking)
-    tracing::warn!("DJI API unreachable during key validation: {}", client);
-    Json(DjiKeyValidation {
-        status: "warning".to_string(),
-        key_source,
-        key_present: true,
-        key_length,
-        dji_api_reachable: false,
-        dji_api_status: None,
-        message: "DJI API key configured but could not reach DJI servers to verify. Key will be used for flight log decryption.".to_string(),
-    })
+        Err(e) => {
+            // Network error — can't reach DJI (might be Docker networking)
+            tracing::warn!("DJI API unreachable during key validation: {}", e);
+            Json(DjiKeyValidation {
+                status: "warning".to_string(),
+                key_source,
+                key_present: true,
+                key_length,
+                dji_api_reachable: false,
+                dji_api_status: None,
+                message: "Key saved but cannot reach DJI servers (dev.dji.com) to verify. Check container DNS/internet access.".to_string(),
+            })
+        }
+    }
 }
 
 async fn parse(headers: HeaderMap, mut multipart: Multipart) -> Result<Json<ParseResponse>, StatusCode> {
