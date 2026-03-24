@@ -1,5 +1,5 @@
 use axum::{
-    extract::Multipart,
+    extract::{DefaultBodyLimit, Multipart},
     http::StatusCode,
     response::Json,
     routing::{get, post},
@@ -166,10 +166,11 @@ async fn main() {
         .route("/health", get(health))
         .route("/formats", get(formats))
         .route("/parse", post(parse))
+        .layer(DefaultBodyLimit::max(50 * 1024 * 1024)) // 50 MB — DJI logs can be 5-20 MB
         .layer(CorsLayer::permissive());
 
     let addr = format!("0.0.0.0:{}", port);
-    tracing::info!("flight-parser listening on {}", addr);
+    tracing::info!("flight-parser listening on {} (max body: 50 MB)", addr);
 
     let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();
