@@ -63,9 +63,10 @@ export default function Settings() {
   const [tosUploaded, setTosUploaded] = useState(false);
   const [tosUploading, setTosUploading] = useState(false);
   const [brandingSaving, setBrandingSaving] = useState(false);
-  const [reprocessStatus, setReprocessStatus] = useState<{ reprocessable: number; total_dji: number } | null>(null);
+  const [reprocessStatus, setReprocessStatus] = useState<{ reprocessable: number; total_dji: number; stored_on_disk: number; need_manual_upload: number } | null>(null);
   const [reprocessing, setReprocessing] = useState(false);
-  const [reprocessResult, setReprocessResult] = useState<{ updated: number; imported: number; errors: string[] } | null>(null);
+  const [reprocessingAll, setReprocessingAll] = useState(false);
+  const [reprocessResult, setReprocessResult] = useState<{ updated: number; imported?: number; skipped_no_file?: number; errors: string[] } | null>(null);
   const [djiSaving, setDjiSaving] = useState(false);
   const [djiTesting, setDjiTesting] = useState(false);
   const [djiStatus, setDjiStatus] = useState<{
@@ -461,6 +462,28 @@ export default function Settings() {
     }
   };
 
+  const handleReprocessAll = async () => {
+    setReprocessingAll(true);
+    setReprocessResult(null);
+    try {
+      const r = await api.post('/flight-library/reprocess/all', {}, { timeout: 600000 });
+      setReprocessResult(r.data);
+      const msg = r.data.skipped_no_file > 0
+        ? `${r.data.updated} updated, ${r.data.skipped_no_file} skipped (no stored file), ${r.data.errors.length} errors`
+        : `${r.data.updated} updated, ${r.data.errors.length} errors`;
+      notifications.show({
+        title: 'Re-process Complete',
+        message: msg,
+        color: r.data.errors.length > 0 ? 'yellow' : 'green',
+      });
+      api.get('/flight-library/reprocess/status').then((r2) => setReprocessStatus(r2.data)).catch(() => {});
+    } catch {
+      notifications.show({ title: 'Error', message: 'Re-processing failed', color: 'red' });
+    } finally {
+      setReprocessingAll(false);
+    }
+  };
+
   const handleReprocessUpload = async (fileList: FileList | null) => {
     if (!fileList || fileList.length === 0) return;
     setReprocessing(true);
@@ -475,12 +498,12 @@ export default function Settings() {
         timeout: 300000,
       });
       setReprocessResult(r.data);
+      const msg = `${r.data.updated} updated, ${r.data.imported} new, ${r.data.errors.length} errors`;
       notifications.show({
         title: 'Re-process Complete',
-        message: `${r.data.updated} updated, ${r.data.imported} new, ${r.data.errors.length} errors`,
+        message: msg,
         color: r.data.errors.length > 0 ? 'yellow' : 'green',
       });
-      // Refresh the status
       api.get('/flight-library/reprocess/status').then((r2) => setReprocessStatus(r2.data)).catch(() => {});
     } catch {
       notifications.show({ title: 'Error', message: 'Re-processing failed', color: 'red' });
@@ -1286,12 +1309,12 @@ export default function Settings() {
                 <Title order={3} c="#e8edf2" style={{ letterSpacing: '1px' }}>RE-PROCESS FLIGHT LOGS</Title>
               </Group>
               <Text c="#5a6478" size="xs" mb="sm" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
-                Re-upload your original .txt flight log files to update existing flights with full decrypted data
-                (GPS tracks, telemetry, battery curves). Existing flights are matched by file hash and updated in place —
-                no duplicates created.
+                Re-parse flight logs with the current DJI API key to get full decrypted data
+                (GPS tracks, telemetry, battery curves). Original files are now saved on upload —
+                flights uploaded going forward can be re-processed automatically.
               </Text>
               {reprocessStatus && (
-                <Group gap="sm" mb="sm">
+                <Stack gap="xs" mb="sm">
                   <Badge
                     color={reprocessStatus.reprocessable > 0 ? 'yellow' : 'green'}
                     variant="light"
@@ -1302,18 +1325,45 @@ export default function Settings() {
                       ? `${reprocessStatus.reprocessable} of ${reprocessStatus.total_dji} DJI flights missing GPS data`
                       : `All ${reprocessStatus.total_dji} DJI flights have full data`}
                   </Badge>
-                </Group>
+                  {reprocessStatus.reprocessable > 0 && (
+                    <Group gap="xs">
+                      {reprocessStatus.stored_on_disk > 0 && (
+                        <Badge color="cyan" variant="dot" size="sm" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+                          {reprocessStatus.stored_on_disk} have stored files (auto re-process)
+                        </Badge>
+                      )}
+                      {reprocessStatus.need_manual_upload > 0 && (
+                        <Badge color="orange" variant="dot" size="sm" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+                          {reprocessStatus.need_manual_upload} need manual re-upload
+                        </Badge>
+                      )}
+                    </Group>
+                  )}
+                </Stack>
               )}
               <Group gap="sm">
+                {/* Primary action: re-process all from stored files */}
+                {reprocessStatus && reprocessStatus.stored_on_disk > 0 && (
+                  <Button
+                    color="cyan"
+                    loading={reprocessingAll}
+                    leftSection={<IconDatabaseImport size={14} />}
+                    onClick={handleReprocessAll}
+                    styles={{ root: { fontFamily: "'Bebas Neue', sans-serif" } }}
+                  >
+                    {reprocessingAll ? 'RE-PROCESSING...' : `RE-PROCESS ${reprocessStatus.stored_on_disk} FLIGHTS`}
+                  </Button>
+                )}
+                {/* Fallback: manual re-upload for flights without stored files */}
                 <Button
                   component="label"
-                  color="cyan"
+                  color="gray"
                   variant="light"
                   loading={reprocessing}
                   leftSection={<IconDatabaseImport size={14} />}
                   styles={{ root: { fontFamily: "'Bebas Neue', sans-serif" } }}
                 >
-                  {reprocessing ? 'PROCESSING...' : 'SELECT FILES TO RE-PROCESS'}
+                  {reprocessing ? 'PROCESSING...' : 'MANUAL RE-UPLOAD'}
                   <input
                     type="file"
                     multiple
@@ -1331,9 +1381,14 @@ export default function Settings() {
                         {reprocessResult.updated} updated
                       </Badge>
                     )}
-                    {reprocessResult.imported > 0 && (
+                    {(reprocessResult.imported ?? 0) > 0 && (
                       <Badge color="cyan" variant="light" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
                         {reprocessResult.imported} new
+                      </Badge>
+                    )}
+                    {(reprocessResult.skipped_no_file ?? 0) > 0 && (
+                      <Badge color="orange" variant="light" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+                        {reprocessResult.skipped_no_file} skipped (no stored file)
                       </Badge>
                     )}
                     {reprocessResult.errors.length > 0 && (
