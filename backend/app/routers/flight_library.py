@@ -101,7 +101,23 @@ def _parse_datetime(value: object) -> _dt | None:
         logger.warning("Could not parse date: %r", value)
     return None
 
+from app.models.system_settings import SystemSetting
+
 PARSER_URL = "http://flight-parser:8100"
+
+
+async def _get_dji_api_key(db: AsyncSession) -> str | None:
+    """Read the DJI API key from system settings (set in Settings > Flight Data)."""
+    try:
+        result = await db.execute(
+            select(SystemSetting).where(SystemSetting.key == "dji_api_key")
+        )
+        row = result.scalar_one_or_none()
+        if row and row.value and row.value.strip():
+            return row.value.strip()
+    except Exception as e:
+        logger.warning("Could not read DJI API key from settings: %s", e)
+    return None
 
 
 # ── List flights ──────────────────────────────────────────────────────
@@ -269,6 +285,12 @@ async def device_upload_flights(
     skipped = 0
     errors = []
 
+    # Fetch DJI API key from settings to pass to the parser
+    dji_key = await _get_dji_api_key(db)
+    parser_headers = {}
+    if dji_key:
+        parser_headers["X-DJI-Api-Key"] = dji_key
+
     for upload in files:
         try:
             content = await upload.read()
@@ -285,6 +307,7 @@ async def device_upload_flights(
                 resp = await client.post(
                     f"{PARSER_URL}/parse",
                     files={"file": (upload.filename or "upload.txt", content)},
+                    headers=parser_headers,
                 )
                 if resp.status_code != 200:
                     errors.append(f"{upload.filename}: parser returned {resp.status_code}")
@@ -423,6 +446,12 @@ async def upload_flights(
     skipped = 0
     errors = []
 
+    # Fetch DJI API key from settings to pass to the parser
+    dji_key = await _get_dji_api_key(db)
+    parser_headers = {}
+    if dji_key:
+        parser_headers["X-DJI-Api-Key"] = dji_key
+
     # Send files to the parser service
     for upload in files:
         try:
@@ -442,6 +471,7 @@ async def upload_flights(
                 resp = await client.post(
                     f"{PARSER_URL}/parse",
                     files={"file": (upload.filename or "upload.txt", content)},
+                    headers=parser_headers,
                 )
                 if resp.status_code != 200:
                     errors.append(f"{upload.filename}: parser returned {resp.status_code}")
