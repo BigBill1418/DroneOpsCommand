@@ -95,6 +95,8 @@ services:
         condition: service_healthy
       ollama:
         condition: service_started
+      flight-parser:
+        condition: service_healthy
 
   worker:
     build:
@@ -132,6 +134,12 @@ services:
     environment:
       - DJI_API_KEY=${DJI_API_KEY:-}
       - PARSER_PORT=8100
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8100/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
 
   frontend:
     build:

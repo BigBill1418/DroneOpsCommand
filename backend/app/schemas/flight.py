@@ -75,11 +75,19 @@ class FlightDetailResponse(FlightResponse):
     raw_metadata: dict | None = None
 
 
+class FileResult(BaseModel):
+    """Per-file outcome returned by the upload endpoint."""
+    filename: str
+    status: str  # "imported" | "skipped" | "error" | "unsupported"
+    note: str = ""
+
+
 class FlightUploadResponse(BaseModel):
     imported: int
     skipped: int
     errors: list[str]
     flights: list[FlightResponse]
+    file_results: list[FileResult] = []
 
 
 class BatteryResponse(BaseModel):

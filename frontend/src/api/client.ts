@@ -2,7 +2,9 @@ import axios from 'axios';
 
 const api = axios.create({
   baseURL: '/api',
-  timeout: 30000, // 30s default timeout — prevents indefinite hangs
+  // 180 s — must exceed backend's 120 s parser timeout so we don't abort
+  // a slow upload before the server finishes processing it.
+  timeout: 180000,
 });
 
 // Attach JWT token to requests

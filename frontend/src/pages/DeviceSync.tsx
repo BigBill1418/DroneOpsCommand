@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import {
+  Alert,
   Badge,
   Button,
   Card,
@@ -13,6 +14,7 @@ import {
 } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import {
+  IconAlertCircle,
   IconCloudUpload,
   IconFolder,
   IconTrash,
@@ -21,14 +23,22 @@ import {
 import api from '../api/client';
 import { cardStyle, monoFont } from '../components/shared/styles';
 
-const VALID_EXTS = new Set(['csv', 'dat', 'log', 'txt', 'json']);
+// Parser accepts only these two formats
+const VALID_EXTS = new Set(['txt', 'csv']);
 
-type FileStatus = 'pending' | 'uploading' | 'done' | 'skip' | 'error';
+type FileStatus = 'pending' | 'uploading' | 'imported' | 'skipped' | 'error' | 'unsupported';
 
 interface QueueEntry {
   id: number;
   file: File;
   status: FileStatus;
+  note: string;
+}
+
+// Matches the FileResult schema returned by the backend
+interface FileResult {
+  filename: string;
+  status: string;
   note: string;
 }
 
@@ -45,32 +55,56 @@ function fmtSize(b: number) {
 }
 
 const statusMeta: Record<FileStatus, { color: string; label: string }> = {
-  pending:   { color: 'gray',   label: 'Pending' },
-  uploading: { color: 'yellow', label: 'Uploading' },
-  done:      { color: 'cyan',   label: 'Imported' },
-  skip:      { color: 'violet', label: 'Already on server' },
-  error:     { color: 'red',    label: 'Error' },
+  pending:     { color: 'gray',   label: 'Pending' },
+  uploading:   { color: 'yellow', label: 'Uploading' },
+  imported:    { color: 'cyan',   label: 'Imported' },
+  skipped:     { color: 'violet', label: 'Already on server' },
+  error:       { color: 'red',    label: 'Error' },
+  unsupported: { color: 'orange', label: 'Wrong format' },
 };
 
 export default function DeviceSync() {
-  const [queue, setQueue]       = useState<QueueEntry[]>([]);
+  const [queue, setQueue]         = useState<QueueEntry[]>([]);
   const [uploading, setUploading] = useState(false);
-  const [progress, setProgress] = useState(0);
+  const [progress, setProgress]   = useState(0);
+  const [parserOnline, setParserOnline] = useState<boolean | null>(null);
 
   const fileRef   = useRef<HTMLInputElement>(null);
   const folderRef = useRef<HTMLInputElement>(null);
 
-  // ── File intake ─────────────────────────────────────────────────────────
+  // ── Parser health probe (run once on first render) ───────────────────
+  const checkedRef = useRef(false);
+  if (!checkedRef.current) {
+    checkedRef.current = true;
+    api.get('/flight-library/parser/status')
+      .then(r => setParserOnline(r.data?.status === 'healthy'))
+      .catch(() => setParserOnline(false));
+  }
+
+  // ── File intake ─────────────────────────────────────────────────────
   function addFiles(raw: FileList | null) {
     if (!raw) return;
-    const incoming = Array.from(raw).filter(f => VALID_EXTS.has(ext(f.name)));
+
     const toAdd: QueueEntry[] = [];
-    for (const f of incoming) {
-      const dup = queue.find(q => q.file.name === f.name && q.file.size === f.size);
-      if (!dup) toAdd.push({ id: _nextId++, file: f, status: 'pending', note: '' });
+    let rejected = 0;
+
+    for (const f of Array.from(raw)) {
+      const e = ext(f.name);
+      if (!VALID_EXTS.has(e)) { rejected++; continue; }
+      // Local dedup by name + size
+      if (queue.some(q => q.file.name === f.name && q.file.size === f.size)) continue;
+      toAdd.push({ id: _nextId++, file: f, status: 'pending', note: '' });
     }
-    if (toAdd.length === 0) {
-      notifications.show({ color: 'yellow', message: 'No new log files found (duplicates or wrong extension).' });
+
+    if (rejected > 0) {
+      notifications.show({
+        color: 'orange',
+        title: 'Files skipped',
+        message: `${rejected} file(s) ignored — only .txt (DJI) and .csv (Litchi/Airdata) are supported`,
+      });
+    }
+    if (toAdd.length === 0 && rejected === 0) {
+      notifications.show({ color: 'yellow', message: 'No new files found (duplicates already queued).' });
       return;
     }
     setQueue(prev => [...prev, ...toAdd]);
@@ -90,13 +124,15 @@ export default function DeviceSync() {
     ));
   }
 
-  // ── Upload ───────────────────────────────────────────────────────────────
+  // ── Upload ─────────────────────────────────────────────────────────
   async function uploadAll() {
     const pending = queue.filter(q => q.status === 'pending');
     if (pending.length === 0) return;
 
     setUploading(true);
-    setProgress(10);
+    setProgress(5);
+
+    // Mark all pending → uploading
     setQueue(prev => prev.map(q =>
       q.status === 'pending' ? { ...q, status: 'uploading' } : q
     ));
@@ -105,35 +141,72 @@ export default function DeviceSync() {
       const form = new FormData();
       pending.forEach(q => form.append('files', q.file, q.file.name));
 
+      setProgress(20);
       const resp = await api.post('/flight-library/upload', form);
-      const { imported = 0, skipped = 0, errors = [] }: {
-        imported: number; skipped: number; errors: string[];
+      setProgress(95);
+
+      const {
+        imported = 0,
+        skipped  = 0,
+        errors   = [],
+        file_results = [] as FileResult[],
       } = resp.data;
 
-      setProgress(100);
+      // ── Map per-file results back to queue entries ──────────────────
+      // Build a lookup: filename → FileResult (last one wins on collision)
+      const resultMap = new Map<string, FileResult>();
+      for (const r of file_results) resultMap.set(r.filename, r);
 
       setQueue(prev => prev.map(q => {
         if (q.status !== 'uploading') return q;
-        if (errors.length > 0 && imported === 0) return { ...q, status: 'error',  note: errors[0] ?? 'Parse error' };
-        if (skipped > 0 && imported === 0)       return { ...q, status: 'skip',   note: '' };
-        return { ...q, status: 'done', note: '' };
+
+        const result = resultMap.get(q.file.name);
+        if (result) {
+          const s = result.status as FileStatus;
+          return { ...q, status: s, note: result.note ?? '' };
+        }
+
+        // Fallback: no per-file result (shouldn't happen with updated backend)
+        if (errors.length > 0 && imported === 0 && skipped === 0) {
+          return { ...q, status: 'error', note: errors[0] ?? 'Unknown error' };
+        }
+        return { ...q, status: 'imported', note: '' };
       }));
 
+      setProgress(100);
+
+      // ── Summary notification ────────────────────────────────────────
       const parts: string[] = [];
-      if (imported > 0)     parts.push(`${imported} imported`);
-      if (skipped  > 0)     parts.push(`${skipped} already on server`);
-      if (errors.length > 0) parts.push(`${errors.length} parse error(s)`);
+      if (imported > 0) parts.push(`${imported} imported`);
+      if (skipped  > 0) parts.push(`${skipped} already on server`);
+      if (errors.length > 0) parts.push(`${errors.length} error(s)`);
 
       notifications.show({
         color:   errors.length > 0 && imported === 0 ? 'red' : 'cyan',
         title:   'Upload complete',
         message: parts.join(' · ') || 'No files processed',
       });
+
+      // Show each individual error as its own notification so nothing is buried
+      if (errors.length > 0) {
+        errors.slice(0, 5).forEach((e: string) =>
+          notifications.show({ color: 'red', title: 'Parse error', message: e })
+        );
+        if (errors.length > 5) {
+          notifications.show({
+            color: 'red',
+            message: `…and ${errors.length - 5} more error(s). Check the table above.`,
+          });
+        }
+      }
     } catch (err: any) {
+      const status  = err?.response?.status;
+      const detail  = err?.response?.data?.detail;
       const msg =
-        err?.response?.status === 401 ? 'Not authorised — please log in again' :
-        err?.response?.status === 404 ? 'Upload endpoint not found' :
-        err?.message ?? 'Upload failed';
+        status === 401 ? 'Not authorised — please log in again' :
+        status === 404 ? 'Upload endpoint not found — is the backend running?' :
+        status === 503 ? 'flight-parser service unavailable — check container logs' :
+        detail ?? err?.message ?? 'Upload failed';
 
       setQueue(prev => prev.map(q =>
         q.status === 'uploading' ? { ...q, status: 'error', note: msg } : q
@@ -141,15 +214,15 @@ export default function DeviceSync() {
       notifications.show({ color: 'red', title: 'Upload failed', message: msg });
     } finally {
       setUploading(false);
-      setProgress(0);
+      setTimeout(() => setProgress(0), 800);
     }
   }
 
-  // ── Derived state ────────────────────────────────────────────────────────
+  // ── Derived counts ──────────────────────────────────────────────────
   const pendingCount = queue.filter(q => q.status === 'pending').length;
   const hasErrors    = queue.some(q => q.status === 'error');
 
-  // ── Render ───────────────────────────────────────────────────────────────
+  // ── Render ──────────────────────────────────────────────────────────
   return (
     <Stack gap="lg">
       <Group justify="space-between" align="flex-end">
@@ -158,18 +231,28 @@ export default function DeviceSync() {
             Device Sync
           </Title>
           <Text size="sm" c="#5a6478" style={monoFont}>
-            Upload flight logs from a controller or SD card
+            Upload .txt (DJI) or .csv (Litchi / Airdata) logs from a controller or SD card
           </Text>
         </div>
       </Group>
 
+      {/* ── Parser status banner ── */}
+      {parserOnline === false && (
+        <Alert icon={<IconAlertCircle size={16} />} color="red" variant="light">
+          <Text size="sm" fw={600}>flight-parser service is offline</Text>
+          <Text size="xs" c="dimmed" mt={4} style={monoFont}>
+            Uploads will fail until the parser container is running.
+            Run: <code>docker compose up flight-parser</code>
+          </Text>
+        </Alert>
+      )}
+
       {/* ── Picker card ── */}
       <Card style={cardStyle} p="lg">
         <Text size="xs" c="#5a6478" style={{ ...monoFont, letterSpacing: 1, marginBottom: 12 }}>
-          SELECT FILES
+          SELECT FILES — accepts .txt (DJI) and .csv (Litchi / Airdata) only
         </Text>
         <Group gap="sm" wrap="wrap">
-          {/* Individual files */}
           <Button
             leftSection={<IconUpload size={16} />}
             variant="default"
@@ -178,8 +261,6 @@ export default function DeviceSync() {
           >
             Add Files
           </Button>
-
-          {/* Entire folder — picks all matching files recursively */}
           <Button
             leftSection={<IconFolder size={16} />}
             variant="default"
@@ -188,7 +269,6 @@ export default function DeviceSync() {
           >
             Add Folder
           </Button>
-
           <Button
             leftSection={<IconTrash size={16} />}
             variant="subtle"
@@ -205,14 +285,14 @@ export default function DeviceSync() {
           ref={fileRef}
           type="file"
           multiple
-          accept=".csv,.dat,.log,.txt,.json"
+          accept=".txt,.csv"
           style={{ display: 'none' }}
           onChange={e => { addFiles(e.target.files); e.target.value = ''; }}
         />
         <input
           ref={folderRef}
           type="file"
-          // @ts-ignore — webkitdirectory is not in React's type defs but works in all target browsers
+          // @ts-ignore — webkitdirectory not in React's typedefs but works in all target browsers
           webkitdirectory=""
           multiple
           style={{ display: 'none' }}
@@ -254,7 +334,7 @@ export default function DeviceSync() {
             No files queued. Use Add Files or Add Folder above.
           </Text>
         ) : (
-          <ScrollArea mah={420}>
+          <ScrollArea mah={460}>
             <Table verticalSpacing="xs" styles={{ th: { color: '#5a6478', ...monoFont, fontSize: 11 } }}>
               <Table.Thead>
                 <Table.Tr>
@@ -267,14 +347,17 @@ export default function DeviceSync() {
               <Table.Tbody>
                 {queue.map(q => {
                   const meta = statusMeta[q.status];
+                  const displayPath = (q.file as any).webkitRelativePath || q.file.name;
                   return (
                     <Table.Tr key={q.id}>
                       <Table.Td>
-                        <Text size="sm" c="#e8edf2" style={monoFont} truncate maw={360}>
-                          {(q.file as any).webkitRelativePath || q.file.name}
+                        <Text size="sm" c="#e8edf2" style={monoFont} truncate maw={380}>
+                          {displayPath}
                         </Text>
                         {q.note && (
-                          <Text size="xs" c="red" style={monoFont}>{q.note.slice(0, 80)}</Text>
+                          <Text size="xs" c={q.status === 'skipped' ? '#5a6478' : 'red'} style={monoFont}>
+                            {q.note.slice(0, 120)}
+                          </Text>
                         )}
                       </Table.Td>
                       <Table.Td>

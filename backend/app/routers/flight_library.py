@@ -19,7 +19,8 @@ from app.models.device_api_key import DeviceApiKey
 from app.models.flight import Flight
 from app.models.user import User
 from app.schemas.flight import (
-    FlightCreate, FlightDetailResponse, FlightResponse, FlightUpdate, FlightUploadResponse,
+    FileResult, FlightCreate, FlightDetailResponse, FlightResponse,
+    FlightUpdate, FlightUploadResponse,
 )
 
 logger = logging.getLogger("doc.flights")
@@ -27,6 +28,9 @@ logger = logging.getLogger("doc.flights")
 router = APIRouter(prefix="/api/flight-library", tags=["flight-library"])
 
 PARSER_URL = "http://flight-parser:8100"
+
+# Parser only handles these two extensions — reject everything else up front
+ALLOWED_EXTENSIONS = {".txt", ".csv"}
 
 
 # ── List flights ──────────────────────────────────────────────────────
@@ -123,94 +127,183 @@ async def get_track(
     return flight.gps_track or []
 
 
-# ── Upload flight logs ────────────────────────────────────────────────
+# ── Shared upload processing ──────────────────────────────────────────
+async def _process_upload_files(
+    files: list[UploadFile],
+    db: AsyncSession,
+) -> FlightUploadResponse:
+    """Process uploaded flight log files through the parser and into the database.
+
+    Each file is handled independently — one bad file never affects others.
+    Battery tracking failures are isolated so they never roll back a successfully
+    imported flight.  Per-file results are returned so the UI can show exactly
+    which files succeeded, were skipped, or failed.
+    """
+    imported: list[Flight] = []
+    skipped = 0
+    errors: list[str] = []
+    file_results: list[FileResult] = []
+
+    for upload in files:
+        fname = upload.filename or "upload"
+        dot = fname.rfind(".")
+        ext = fname[dot:].lower() if dot != -1 else ""
+
+        # ── Extension gate: parser only handles .txt and .csv ─────────
+        if ext not in ALLOWED_EXTENSIONS:
+            msg = f"unsupported format '{ext}' — only .txt (DJI) and .csv (Litchi/Airdata) accepted"
+            logger.warning("doc.flights: rejected %s — %s", fname, msg)
+            errors.append(f"{fname}: {msg}")
+            file_results.append(FileResult(filename=fname, status="unsupported", note=msg))
+            continue
+
+        try:
+            content = await upload.read()
+            file_hash = hashlib.sha256(content).hexdigest()
+
+            # ── Deduplication check ───────────────────────────────────
+            existing = await db.execute(
+                select(Flight).where(Flight.source_file_hash == file_hash)
+            )
+            if existing.scalar_one_or_none():
+                logger.debug("doc.flights: skipping %s — already in library (hash %s…)", fname, file_hash[:8])
+                skipped += 1
+                file_results.append(FileResult(filename=fname, status="skipped", note="already in library"))
+                continue
+
+            # ── Call parser service ───────────────────────────────────
+            try:
+                async with httpx.AsyncClient(timeout=120) as client:
+                    resp = await client.post(
+                        f"{PARSER_URL}/parse",
+                        files={"file": (fname, content)},
+                    )
+            except httpx.ConnectError:
+                msg = "flight-parser service unavailable — check that the flight-parser container is running"
+                logger.error("doc.flights: connect error for %s — %s", fname, msg)
+                errors.append(f"{fname}: {msg}")
+                file_results.append(FileResult(filename=fname, status="error", note=msg))
+                continue
+            except httpx.TimeoutException:
+                msg = "flight-parser timed out after 120 s — file may be too large or parser is overloaded"
+                logger.error("doc.flights: timeout parsing %s", fname)
+                errors.append(f"{fname}: {msg}")
+                file_results.append(FileResult(filename=fname, status="error", note=msg))
+                continue
+
+            if resp.status_code != 200:
+                msg = f"parser returned HTTP {resp.status_code}"
+                logger.error("doc.flights: %s for %s — body: %.200s", msg, fname, resp.text)
+                errors.append(f"{fname}: {msg}")
+                file_results.append(FileResult(filename=fname, status="error", note=msg))
+                continue
+
+            # ── Parse JSON response safely ────────────────────────────
+            try:
+                data = resp.json()
+            except Exception:
+                msg = "parser returned a non-JSON response (unexpected error in flight-parser)"
+                logger.error("doc.flights: %s for %s — raw: %.200s", msg, fname, resp.text)
+                errors.append(f"{fname}: {msg}")
+                file_results.append(FileResult(filename=fname, status="error", note=msg))
+                continue
+
+            parser_errors: list[str] = data.get("errors", [])
+            parsed_flights: list[dict] = data.get("flights", [])
+
+            if parser_errors:
+                logger.warning("doc.flights: parser errors for %s: %s", fname, parser_errors)
+                errors.extend(parser_errors)
+
+            # ── No flights returned = parse failed ────────────────────
+            if not parsed_flights:
+                note = parser_errors[0] if parser_errors else "no flight data found in file"
+                if not parser_errors:
+                    errors.append(f"{fname}: {note}")
+                file_results.append(FileResult(filename=fname, status="error", note=note))
+                continue
+
+            # ── Insert each flight record ─────────────────────────────
+            file_imported = 0
+            for parsed in parsed_flights:
+                ph = parsed.get("file_hash", file_hash)
+                dup = await db.execute(select(Flight).where(Flight.source_file_hash == ph))
+                if dup.scalar_one_or_none():
+                    skipped += 1
+                    continue
+
+                flight = Flight(
+                    name=parsed.get("name", fname),
+                    drone_model=parsed.get("drone_model"),
+                    drone_serial=parsed.get("drone_serial"),
+                    battery_serial=parsed.get("battery_serial"),
+                    start_time=parsed.get("start_time"),
+                    duration_secs=parsed.get("duration_secs", 0),
+                    total_distance=parsed.get("total_distance", 0),
+                    max_altitude=parsed.get("max_altitude", 0),
+                    max_speed=parsed.get("max_speed", 0),
+                    home_lat=parsed.get("home_lat"),
+                    home_lon=parsed.get("home_lon"),
+                    point_count=parsed.get("point_count", 0),
+                    gps_track=parsed.get("gps_track"),
+                    telemetry=parsed.get("telemetry"),
+                    raw_metadata=parsed.get("raw_metadata"),
+                    source=parsed.get("source", "dji_txt"),
+                    source_file_hash=ph,
+                    original_filename=parsed.get("original_filename", fname),
+                )
+                db.add(flight)
+                await db.flush()
+                await db.refresh(flight)
+                imported.append(flight)
+                file_imported += 1
+                logger.info("doc.flights: imported flight %s from %s", flight.id, fname)
+
+                # ── Battery tracking — isolated, never rolls back the flight ──
+                battery_data = parsed.get("battery_data")
+                if battery_data and battery_data.get("serial"):
+                    try:
+                        await _track_battery(db, flight, battery_data)
+                    except Exception as bat_err:
+                        logger.warning(
+                            "doc.flights: battery tracking failed for %s (flight %s still saved): %s",
+                            fname, flight.id, bat_err,
+                        )
+
+            if file_imported > 0:
+                file_results.append(FileResult(filename=fname, status="imported"))
+            elif parser_errors:
+                file_results.append(FileResult(filename=fname, status="error", note=parser_errors[0]))
+            else:
+                # All parsed flights were already in the library
+                file_results.append(FileResult(filename=fname, status="skipped", note="already in library"))
+
+        except Exception as exc:
+            logger.exception("doc.flights: unexpected error processing %s", fname)
+            errors.append(f"{fname}: {exc}")
+            file_results.append(FileResult(filename=fname, status="error", note=str(exc)))
+
+    logger.info(
+        "doc.flights: upload complete — imported=%d skipped=%d errors=%d files=%d",
+        len(imported), skipped, len(errors), len(file_results),
+    )
+    return FlightUploadResponse(
+        imported=len(imported),
+        skipped=skipped,
+        errors=errors,
+        flights=imported,
+        file_results=file_results,
+    )
+
+
+# ── Upload flight logs (JWT-authenticated — web UI) ───────────────────
 @router.post("/upload", response_model=FlightUploadResponse)
 async def upload_flights(
     files: list[UploadFile] = File(...),
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
-    imported = []
-    skipped = 0
-    errors = []
-
-    # Send files to the parser service
-    for upload in files:
-        try:
-            content = await upload.read()
-            file_hash = hashlib.sha256(content).hexdigest()
-
-            # Check for duplicate
-            existing = await db.execute(
-                select(Flight).where(Flight.source_file_hash == file_hash)
-            )
-            if existing.scalar_one_or_none():
-                skipped += 1
-                continue
-
-            # Call parser service
-            async with httpx.AsyncClient(timeout=120) as client:
-                resp = await client.post(
-                    f"{PARSER_URL}/parse",
-                    files={"file": (upload.filename or "upload.txt", content)},
-                )
-                if resp.status_code != 200:
-                    errors.append(f"{upload.filename}: parser returned {resp.status_code}")
-                    continue
-
-                data = resp.json()
-                if data.get("errors"):
-                    errors.extend(data["errors"])
-
-                for parsed in data.get("flights", []):
-                    # Check hash dedup again (parser may return multiple flights)
-                    ph = parsed.get("file_hash", file_hash)
-                    dup = await db.execute(select(Flight).where(Flight.source_file_hash == ph))
-                    if dup.scalar_one_or_none():
-                        skipped += 1
-                        continue
-
-                    flight = Flight(
-                        name=parsed.get("name", upload.filename or "Unknown"),
-                        drone_model=parsed.get("drone_model"),
-                        drone_serial=parsed.get("drone_serial"),
-                        battery_serial=parsed.get("battery_serial"),
-                        start_time=parsed.get("start_time"),
-                        duration_secs=parsed.get("duration_secs", 0),
-                        total_distance=parsed.get("total_distance", 0),
-                        max_altitude=parsed.get("max_altitude", 0),
-                        max_speed=parsed.get("max_speed", 0),
-                        home_lat=parsed.get("home_lat"),
-                        home_lon=parsed.get("home_lon"),
-                        point_count=parsed.get("point_count", 0),
-                        gps_track=parsed.get("gps_track"),
-                        telemetry=parsed.get("telemetry"),
-                        raw_metadata=parsed.get("raw_metadata"),
-                        source=parsed.get("source", "dji_txt"),
-                        source_file_hash=ph,
-                        original_filename=parsed.get("original_filename", upload.filename),
-                    )
-                    db.add(flight)
-                    await db.flush()
-                    await db.refresh(flight)
-                    imported.append(flight)
-
-                    # Auto-track battery if data is available
-                    battery_data = parsed.get("battery_data")
-                    if battery_data and battery_data.get("serial"):
-                        await _track_battery(db, flight, battery_data)
-
-        except httpx.ConnectError:
-            errors.append(f"{upload.filename}: flight-parser service unavailable")
-        except Exception as e:
-            errors.append(f"{upload.filename}: {str(e)}")
-
-    return FlightUploadResponse(
-        imported=len(imported),
-        skipped=skipped,
-        errors=errors,
-        flights=imported,
-    )
+    return await _process_upload_files(files, db)
 
 
 # ── Device upload (field controllers via X-Device-Api-Key) ───────────
@@ -220,88 +313,12 @@ async def device_upload_flights(
     db: AsyncSession = Depends(get_db),
     _device: DeviceApiKey = Depends(validate_device_api_key),
 ):
-    """Upload flight logs from a field controller using a static device API key.
+    """Upload via static device API key (automated sync from field controllers).
 
     Identical processing to /upload but authenticates via X-Device-Api-Key header
-    instead of a user JWT, allowing automated sync from DroneOpsSync without
-    requiring a human login session on the controller.
+    instead of a user JWT.
     """
-    imported = []
-    skipped = 0
-    errors = []
-
-    for upload in files:
-        try:
-            content = await upload.read()
-            file_hash = hashlib.sha256(content).hexdigest()
-
-            existing = await db.execute(
-                select(Flight).where(Flight.source_file_hash == file_hash)
-            )
-            if existing.scalar_one_or_none():
-                skipped += 1
-                continue
-
-            async with httpx.AsyncClient(timeout=120) as client:
-                resp = await client.post(
-                    f"{PARSER_URL}/parse",
-                    files={"file": (upload.filename or "upload.txt", content)},
-                )
-                if resp.status_code != 200:
-                    errors.append(f"{upload.filename}: parser returned {resp.status_code}")
-                    continue
-
-                data = resp.json()
-                if data.get("errors"):
-                    errors.extend(data["errors"])
-
-                for parsed in data.get("flights", []):
-                    ph = parsed.get("file_hash", file_hash)
-                    dup = await db.execute(select(Flight).where(Flight.source_file_hash == ph))
-                    if dup.scalar_one_or_none():
-                        skipped += 1
-                        continue
-
-                    flight = Flight(
-                        name=parsed.get("name", upload.filename or "Unknown"),
-                        drone_model=parsed.get("drone_model"),
-                        drone_serial=parsed.get("drone_serial"),
-                        battery_serial=parsed.get("battery_serial"),
-                        start_time=parsed.get("start_time"),
-                        duration_secs=parsed.get("duration_secs", 0),
-                        total_distance=parsed.get("total_distance", 0),
-                        max_altitude=parsed.get("max_altitude", 0),
-                        max_speed=parsed.get("max_speed", 0),
-                        home_lat=parsed.get("home_lat"),
-                        home_lon=parsed.get("home_lon"),
-                        point_count=parsed.get("point_count", 0),
-                        gps_track=parsed.get("gps_track"),
-                        telemetry=parsed.get("telemetry"),
-                        raw_metadata=parsed.get("raw_metadata"),
-                        source=parsed.get("source", "dji_txt"),
-                        source_file_hash=ph,
-                        original_filename=parsed.get("original_filename", upload.filename),
-                    )
-                    db.add(flight)
-                    await db.flush()
-                    await db.refresh(flight)
-                    imported.append(flight)
-
-                    battery_data = parsed.get("battery_data")
-                    if battery_data and battery_data.get("serial"):
-                        await _track_battery(db, flight, battery_data)
-
-        except httpx.ConnectError:
-            errors.append(f"{upload.filename}: flight-parser service unavailable")
-        except Exception as e:
-            errors.append(f"{upload.filename}: {str(e)}")
-
-    return FlightUploadResponse(
-        imported=len(imported),
-        skipped=skipped,
-        errors=errors,
-        flights=imported,
-    )
+    return await _process_upload_files(files, db)
 
 
 # ── Manual flight entry ───────────────────────────────────────────────
