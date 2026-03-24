@@ -20,6 +20,7 @@ from app.auth.device import validate_device_api_key
 from app.auth.jwt import get_current_user
 from app.config import settings
 from app.database import get_db, async_session
+from app.models.aircraft import Aircraft
 from app.models.battery import Battery, BatteryLog
 from app.models.device_api_key import DeviceApiKey
 from app.models.flight import Flight
@@ -355,6 +356,7 @@ async def telemetry_stats(
             Flight.max_speed,
             Flight.drone_serial,
             Flight.drone_model,
+            Flight.drone_name,
             Flight.home_lat,
             Flight.home_lon,
             Flight.start_time,
@@ -362,7 +364,8 @@ async def telemetry_stats(
             Flight.source,
             Flight.point_count,
             Flight.name,
-        )
+            Aircraft.model_name.label("aircraft_model_name"),
+        ).outerjoin(Aircraft, Flight.aircraft_id == Aircraft.id)
     )
     rows = result.all()
 
@@ -405,9 +408,16 @@ async def telemetry_stats(
         if row.drone_serial:
             drone_serials.add(row.drone_serial)
 
-        drone_key = row.drone_model or row.drone_serial or "Unknown"
-        drone_stats[drone_key]["flights"] += 1
-        drone_stats[drone_key]["duration"] += dur
+        # Best display name: drone_name (nickname) > aircraft model > flight drone_model > serial > Unknown
+        drone_display = (
+            row.drone_name
+            or row.aircraft_model_name
+            or row.drone_model
+            or row.drone_serial
+            or "Unknown"
+        )
+        drone_stats[drone_display]["flights"] += 1
+        drone_stats[drone_display]["duration"] += dur
 
         if row.home_lat is not None and row.home_lon is not None:
             flight_locations.append({
@@ -415,7 +425,7 @@ async def telemetry_stats(
                 "lon": row.home_lon,
                 "name": row.name or "",
                 "date": row.start_time.isoformat() if row.start_time else "",
-                "drone": row.drone_model,
+                "drone": drone_display,
             })
             st = _lat_lon_to_state(row.home_lat, row.home_lon)
             if st:
