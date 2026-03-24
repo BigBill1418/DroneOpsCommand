@@ -154,11 +154,25 @@ async def seed_database(db: AsyncSession):
             existing_admin.hashed_password = new_hash
             existing_admin.password_compliant = is_password_compliant(reset_pw)
         else:
+            # Verify the existing hash is a valid bcrypt hash that can be checked
+            _hash = existing_admin.hashed_password or ""
+            _hash_valid = _hash.startswith("$2b$") and len(_hash) == 60
             _seed_log.info(
                 "Admin user '%s' exists — password PRESERVED (not overwritten). "
+                "hash_valid=%s, hash_prefix=%s, hash_len=%d. "
                 "Set RESET_ADMIN_PASSWORD=true to force-reset.",
                 existing_admin.username,
+                _hash_valid,
+                _hash[:7] if _hash else "EMPTY",
+                len(_hash),
             )
+            if not _hash_valid:
+                _seed_log.critical(
+                    "ADMIN PASSWORD HASH IS INVALID OR CORRUPT (prefix=%s, len=%d). "
+                    "Login will fail! Set RESET_ADMIN_PASSWORD=true to fix.",
+                    _hash[:10] if _hash else "EMPTY",
+                    len(_hash),
+                )
     else:
         compliant = is_password_compliant(settings.admin_password)
         new_hash = hash_password(settings.admin_password)
@@ -175,6 +189,24 @@ async def seed_database(db: AsyncSession):
             password_compliant=compliant,
         )
         db.add(admin)
+
+    # Flush and verify admin password can be read back from DB
+    await db.flush()
+    verify_result = await db.execute(select(User).where(User.username == settings.admin_username))
+    verify_admin = verify_result.scalar_one_or_none()
+    if verify_admin:
+        db_hash = verify_admin.hashed_password or ""
+        db_roundtrip = _verify(settings.admin_password, db_hash) if settings.reset_admin_password or not existing_admin else None
+        _seed_log.info(
+            "POST-SEED VERIFY: admin='%s', hash_prefix=%s, hash_len=%d, "
+            "db_roundtrip=%s",
+            verify_admin.username,
+            db_hash[:7] if db_hash else "EMPTY",
+            len(db_hash),
+            db_roundtrip,
+        )
+    else:
+        _seed_log.critical("POST-SEED VERIFY FAILED: admin user not found after seed!")
 
     # Seed rate templates
     rate_templates = [
