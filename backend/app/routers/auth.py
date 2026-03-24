@@ -95,65 +95,6 @@ def _clear_failures(ip: str) -> None:
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# Emergency password reset — no auth required, hit directly in browser
-# GET /api/auth/emergency-reset?code=DOC-RECOVER-2024
-# REMOVE THIS ENDPOINT once you are back in!
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-EMERGENCY_CODE = "DOC-RECOVER-2024"
-
-
-@router.get("/emergency-reset")
-async def emergency_password_reset(code: str = "", db: AsyncSession = Depends(get_db)):
-    """Reset admin password without login. Use ?code=DOC-RECOVER-2024"""
-    logger.warning("Emergency reset endpoint hit (code provided: %s)", "yes" if code else "no")
-
-    if code != EMERGENCY_CODE:
-        logger.warning("Emergency reset: invalid code")
-        return {"status": "error", "message": "Invalid code. Use ?code=DOC-RECOVER-2024"}
-
-    result = await db.execute(select(User).where(User.username == settings.admin_username))
-    admin = result.scalar_one_or_none()
-    if not admin:
-        logger.error("Emergency reset: admin user '%s' not found in database!", settings.admin_username)
-        return {"status": "error", "message": f"Admin user '{settings.admin_username}' not found in database"}
-
-    new_pw = "TempReset2024!#"
-    new_hash = hash_password(new_pw)
-
-    # Verify the hash works BEFORE saving — this catches bcrypt issues at reset time
-    if not verify_password(new_pw, new_hash):
-        logger.critical("BCRYPT IS BROKEN: hash_password + verify_password roundtrip FAILED")
-        return {
-            "status": "error",
-            "message": "CRITICAL: Password hashing is broken on this system. "
-                       "bcrypt hash/verify roundtrip failed. Check bcrypt package version.",
-        }
-
-    admin.hashed_password = new_hash
-    admin.password_compliant = False
-    await db.commit()
-
-    # Clear ALL lockouts and rate limits
-    _failed_attempts.clear()
-    _lockouts.clear()
-
-    logger.warning(
-        "Emergency reset SUCCEEDED for user '%s' — password reset, lockouts cleared, hash_prefix=%s",
-        settings.admin_username,
-        new_hash[:7],
-    )
-
-    return {
-        "status": "ok",
-        "message": "Admin password reset. All lockouts cleared.",
-        "username": settings.admin_username,
-        "temporary_password": new_pw,
-        "hash_verification": "PASSED — bcrypt roundtrip confirmed working",
-        "next_step": "Log in now with the temporary password, then change it in Settings.",
-    }
-
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Login
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 @router.post("/login")
