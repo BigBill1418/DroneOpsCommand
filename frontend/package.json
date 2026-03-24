@@ -1,7 +1,7 @@
 {
   "name": "doc-frontend",
   "private": true,
-  "version": "2.38.9",
+  "version": "2.39.0",
   "type": "module",
   "scripts": {
     "dev": "vite",

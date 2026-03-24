@@ -303,6 +303,12 @@ async def auth_diagnostics(db: AsyncSession = Depends(get_db)):
             diag["admin_hash_length"] = len(admin.hashed_password) if admin.hashed_password else 0
             diag["admin_is_active"] = admin.is_active
             diag["admin_password_compliant"] = admin.password_compliant
+            # Check if the env ADMIN_PASSWORD matches the DB hash
+            # (tells you if the password was changed via UI vs what env expects)
+            diag["env_password_matches_db"] = verify_password(
+                settings.admin_password, admin.hashed_password
+            ) if admin.hashed_password else False
+            diag["reset_admin_password_flag"] = settings.reset_admin_password
     except Exception as exc:
         diag["db_error"] = str(exc)
 
