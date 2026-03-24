@@ -65,7 +65,10 @@ export default function Settings() {
   const [brandingSaving, setBrandingSaving] = useState(false);
   const [djiSaving, setDjiSaving] = useState(false);
   const [djiTesting, setDjiTesting] = useState(false);
-  const [djiStatus, setDjiStatus] = useState<{ status: string; message?: string } | null>(null);
+  const [djiStatus, setDjiStatus] = useState<{
+    status: string; message?: string; parser_online?: boolean;
+    dji_api_reachable?: boolean; key_source?: string;
+  } | null>(null);
   const [purgeConfirmOpen, setPurgeConfirmOpen] = useState(false);
   const [purgeChecked, setPurgeChecked] = useState(false);
   const [purging, setPurging] = useState(false);
@@ -1178,7 +1181,8 @@ export default function Settings() {
                 <Title order={3} c="#e8edf2" style={{ letterSpacing: '1px' }}>DJI API KEY</Title>
               </Group>
               <Text c="#5a6478" size="xs" mb="sm" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
-                Enter your DJI Developer API key for direct integration with DJI cloud services.
+                Required for decrypting DJI flight logs (v13+ encryption). Register at developer.dji.com to obtain a key.
+                Without a key, basic flight summary data (duration, distance, altitude) is still extracted from log headers.
               </Text>
               <form onSubmit={djiForm.onSubmit(handleSaveDji)}>
                 <Stack gap="sm">
@@ -1195,24 +1199,49 @@ export default function Settings() {
                     </Button>
                     <Button
                       variant="light"
-                      color={djiStatus?.status === 'online' ? 'green' : djiStatus?.status === 'error' ? 'red' : 'gray'}
+                      color={djiStatus?.status === 'online' ? 'green' : djiStatus?.status === 'error' ? 'red' : djiStatus?.status === 'warning' ? 'yellow' : 'gray'}
                       loading={djiTesting}
                       onClick={handleTestDji}
                       leftSection={djiStatus?.status === 'online' ? <IconCheck size={14} /> : djiStatus?.status === 'error' ? <IconX size={14} /> : <IconPlugConnected size={14} />}
                       styles={{ root: { fontFamily: "'Bebas Neue', sans-serif" } }}
                     >
-                      TEST KEY
+                      VALIDATE KEY
                     </Button>
                   </Group>
                   {djiStatus && (
-                    <Badge
-                      color={djiStatus.status === 'online' ? 'green' : djiStatus.status === 'unknown' ? 'yellow' : 'red'}
-                      variant="light"
-                      size="lg"
-                      leftSection={djiStatus.status === 'online' ? <IconCheck size={12} /> : <IconX size={12} />}
-                    >
-                      {djiStatus.message || djiStatus.status}
-                    </Badge>
+                    <Stack gap={6}>
+                      <Badge
+                        color={djiStatus.status === 'online' ? 'green' : djiStatus.status === 'warning' ? 'yellow' : 'red'}
+                        variant="light"
+                        size="lg"
+                        leftSection={djiStatus.status === 'online' ? <IconCheck size={12} /> : djiStatus.status === 'warning' ? <IconPlugConnected size={12} /> : <IconX size={12} />}
+                      >
+                        {djiStatus.message || djiStatus.status}
+                      </Badge>
+                      <Group gap="xs">
+                        <Badge
+                          color={djiStatus.parser_online ? 'green' : 'red'}
+                          variant="dot"
+                          size="sm"
+                        >
+                          Parser {djiStatus.parser_online ? 'Online' : 'Offline'}
+                        </Badge>
+                        {djiStatus.dji_api_reachable !== undefined && (
+                          <Badge
+                            color={djiStatus.dji_api_reachable ? 'green' : 'yellow'}
+                            variant="dot"
+                            size="sm"
+                          >
+                            DJI API {djiStatus.dji_api_reachable ? 'Reachable' : 'Unreachable'}
+                          </Badge>
+                        )}
+                        {djiStatus.key_source && (
+                          <Badge variant="dot" color="gray" size="sm">
+                            Key: {djiStatus.key_source === 'settings_db' ? 'Settings' : djiStatus.key_source === 'environment' ? '.env' : djiStatus.key_source}
+                          </Badge>
+                        )}
+                      </Group>
+                    </Stack>
                   )}
                 </Stack>
               </form>
