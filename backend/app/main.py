@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
+from starlette.formparsers import MultiPartParser
 
 from app.config import settings
 from app.database import Base, async_session, engine, get_db
@@ -187,10 +188,15 @@ async def lifespan(app: FastAPI):
 
 limiter = Limiter(key_func=get_remote_address)
 
+# Raise Starlette's default multipart file-size limit (1 MB) so DJI flight logs,
+# mission images, and backup restores can upload without being silently rejected.
+MultiPartParser.max_file_size = 50 * 1024 * 1024  # 50 MB
+logger.info("MultiPartParser max_file_size set to 50 MB")
+
 app = FastAPI(
     title="D.O.C — Drone Operations Command",
     description="Mission management, flight data, and after-action reporting for drone operations",
-    version="2.39.2",
+    version="2.39.3",
     lifespan=lifespan,
 )
 
