@@ -1,3 +1,9 @@
+"""Authentication router — login, account management, token refresh.
+
+v2.38.6: Rebuilt with direct bcrypt (passlib removed), full logging,
+and emergency recovery endpoint.
+"""
+
 import logging
 import time
 from collections import defaultdict
@@ -65,7 +71,6 @@ def _check_lockout(ip: str) -> None:
             detail=f"Too many failed attempts. Account locked for {remaining} seconds.",
         )
     elif until:
-        # Lockout expired — clean up
         del _lockouts[ip]
         _failed_attempts.pop(ip, None)
 
@@ -74,7 +79,6 @@ def _record_failure(ip: str) -> None:
     """Record a failed login and trigger lockout if threshold exceeded."""
     now = time.time()
     attempts = _failed_attempts[ip]
-    # Prune attempts outside the window
     attempts[:] = [t for t in attempts if now - t < LOCKOUT_WINDOW_SECS]
     attempts.append(now)
     logger.warning("Failed login from %s (attempt %d/%d in window)", ip, len(attempts), LOCKOUT_MAX_ATTEMPTS)
@@ -90,67 +94,109 @@ def _clear_failures(ip: str) -> None:
     _lockouts.pop(ip, None)
 
 
-# ── Emergency password reset endpoint (v2.38.5) ──────────────────────
-# Allows resetting the admin password without login when completely locked out.
-# Hit this URL directly in browser: /api/auth/emergency-reset?code=DOC-RECOVER-2024
-# REMOVE THIS ENDPOINT once you're back in!
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Emergency password reset — no auth required, hit directly in browser
+# GET /api/auth/emergency-reset?code=DOC-RECOVER-2024
+# REMOVE THIS ENDPOINT once you are back in!
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 EMERGENCY_CODE = "DOC-RECOVER-2024"
-_emergency_used = False
 
 
 @router.get("/emergency-reset")
 async def emergency_password_reset(code: str = "", db: AsyncSession = Depends(get_db)):
-    global _emergency_used
-    if _emergency_used:
-        return {"status": "error", "message": "Emergency reset already used. Restart backend to use again."}
+    """Reset admin password without login. Use ?code=DOC-RECOVER-2024"""
+    logger.warning("Emergency reset endpoint hit (code provided: %s)", "yes" if code else "no")
+
     if code != EMERGENCY_CODE:
+        logger.warning("Emergency reset: invalid code")
         return {"status": "error", "message": "Invalid code. Use ?code=DOC-RECOVER-2024"}
 
     result = await db.execute(select(User).where(User.username == settings.admin_username))
     admin = result.scalar_one_or_none()
     if not admin:
-        return {"status": "error", "message": "Admin user not found in database"}
+        logger.error("Emergency reset: admin user '%s' not found in database!", settings.admin_username)
+        return {"status": "error", "message": f"Admin user '{settings.admin_username}' not found in database"}
 
     new_pw = "TempReset2024!#"
-    admin.hashed_password = hash_password(new_pw)
+    new_hash = hash_password(new_pw)
+
+    # Verify the hash works BEFORE saving — this catches bcrypt issues at reset time
+    if not verify_password(new_pw, new_hash):
+        logger.critical("BCRYPT IS BROKEN: hash_password + verify_password roundtrip FAILED")
+        return {
+            "status": "error",
+            "message": "CRITICAL: Password hashing is broken on this system. "
+                       "bcrypt hash/verify roundtrip failed. Check bcrypt package version.",
+        }
+
+    admin.hashed_password = new_hash
     admin.password_compliant = False
     await db.commit()
 
-    # Clear all lockouts so the user can log in immediately
+    # Clear ALL lockouts and rate limits
     _failed_attempts.clear()
     _lockouts.clear()
 
-    _emergency_used = True
+    logger.warning(
+        "Emergency reset SUCCEEDED for user '%s' — password reset, lockouts cleared, hash_prefix=%s",
+        settings.admin_username,
+        new_hash[:7],
+    )
+
     return {
         "status": "ok",
-        "message": "Admin password reset successfully. Lockouts cleared.",
+        "message": "Admin password reset. All lockouts cleared.",
         "username": settings.admin_username,
         "temporary_password": new_pw,
-        "next_step": "Log in now and change your password immediately. Then remove this endpoint!",
+        "hash_verification": "PASSED — bcrypt roundtrip confirmed working",
+        "next_step": "Log in now with the temporary password, then change it in Settings.",
     }
 
 
-
-@limiter.limit("5/minute")
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Login
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+@router.post("/login")
+@limiter.limit("10/minute")
 async def login(request: Request, body: LoginRequest, db: AsyncSession = Depends(get_db)):
     client_ip = get_remote_address(request)
+    logger.info("Login attempt: user='%s' ip=%s", body.username, client_ip)
+
     _check_lockout(client_ip)
 
     result = await db.execute(select(User).where(User.username == body.username))
     user = result.scalar_one_or_none()
 
-    if not user or not verify_password(body.password, user.hashed_password):
+    if not user:
+        logger.warning("Login failed: user '%s' not found (ip=%s)", body.username, client_ip)
+        _record_failure(client_ip)
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+
+    if not user.is_active:
+        logger.warning("Login failed: user '%s' is deactivated (ip=%s)", body.username, client_ip)
+        _record_failure(client_ip)
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+
+    pw_ok = verify_password(body.password, user.hashed_password)
+    if not pw_ok:
+        logger.warning(
+            "Login failed: wrong password for user '%s' (ip=%s, hash_prefix=%s)",
+            body.username,
+            client_ip,
+            user.hashed_password[:7] if user.hashed_password else "NONE",
+        )
         _record_failure(client_ip)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
     _clear_failures(client_ip)
 
-    # Check if the user's password meets current complexity requirements.
-    # We can verify the plaintext here (it was just submitted) to update the flag.
+    # Update password compliance flag
     compliant = is_password_compliant(body.password)
     if user.password_compliant != compliant:
         user.password_compliant = compliant
         await db.flush()
+
+    logger.info("Login SUCCESS: user='%s' ip=%s compliant=%s", user.username, client_ip, compliant)
 
     return {
         "access_token": create_access_token({"sub": user.username}),
@@ -160,6 +206,9 @@ async def login(request: Request, body: LoginRequest, db: AsyncSession = Depends
     }
 
 
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Account management
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 @router.get("/account")
 async def get_account(user: User = Depends(get_current_user)):
     """Get current account info."""
@@ -186,6 +235,7 @@ async def update_account(
         existing = await db.execute(select(User).where(User.username == body.new_username))
         if existing.scalar_one_or_none():
             raise HTTPException(status_code=409, detail="Username already taken")
+        logger.info("Username change: '%s' -> '%s'", user.username, body.new_username)
         user.username = body.new_username
 
     if body.new_password:
@@ -197,10 +247,10 @@ async def update_account(
             )
         user.hashed_password = hash_password(body.new_password)
         user.password_compliant = True
+        logger.info("Password changed for user '%s'", user.username)
 
     await db.flush()
 
-    # Return fresh tokens with (potentially new) username
     return {
         "status": "ok",
         "username": user.username,
@@ -230,6 +280,7 @@ async def force_password_reset(
     user.hashed_password = hash_password(body.new_password)
     user.password_compliant = True
     await db.flush()
+    logger.info("Force password reset completed for user '%s'", user.username)
 
     return {
         "status": "ok",
@@ -266,7 +317,53 @@ async def refresh(request: RefreshRequest, db: AsyncSession = Depends(get_db)):
     if not user or not user.is_active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
 
+    logger.info("Token refreshed for user '%s'", user.username)
     return TokenResponse(
         access_token=create_access_token({"sub": user.username}),
         refresh_token=create_refresh_token({"sub": user.username}),
     )
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Auth diagnostics — GET /api/auth/diag (no auth required)
+# Checks bcrypt, database connectivity, and admin user status.
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+@router.get("/diag")
+async def auth_diagnostics(db: AsyncSession = Depends(get_db)):
+    """Public diagnostic endpoint — checks auth system health."""
+    import bcrypt as _bcrypt
+
+    diag = {
+        "bcrypt_version": _bcrypt.__version__,
+        "bcrypt_roundtrip": False,
+        "admin_user_exists": False,
+        "admin_username": settings.admin_username,
+        "admin_hash_prefix": None,
+        "admin_is_active": None,
+        "lockouts_active": len(_lockouts),
+        "failed_attempt_ips": len(_failed_attempts),
+    }
+
+    # Test bcrypt roundtrip
+    try:
+        test_pw = "DiagTest123!@#"
+        test_hash = hash_password(test_pw)
+        diag["bcrypt_roundtrip"] = verify_password(test_pw, test_hash)
+    except Exception as exc:
+        diag["bcrypt_error"] = str(exc)
+
+    # Check admin user in DB
+    try:
+        result = await db.execute(select(User).where(User.username == settings.admin_username))
+        admin = result.scalar_one_or_none()
+        if admin:
+            diag["admin_user_exists"] = True
+            diag["admin_hash_prefix"] = admin.hashed_password[:7] if admin.hashed_password else "EMPTY"
+            diag["admin_hash_length"] = len(admin.hashed_password) if admin.hashed_password else 0
+            diag["admin_is_active"] = admin.is_active
+            diag["admin_password_compliant"] = admin.password_compliant
+    except Exception as exc:
+        diag["db_error"] = str(exc)
+
+    logger.info("Auth diagnostics: %s", diag)
+    return diag

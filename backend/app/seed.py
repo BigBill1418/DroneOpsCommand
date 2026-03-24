@@ -117,34 +117,54 @@ async def seed_database(db: AsyncSession):
     """Seed the database with initial data."""
 
     # Seed admin user.
-    # IMPORTANT: Never overwrite an existing user's password on startup — the user
-    # may have changed it via Settings or force-reset. The old code (pre-v2.38.2)
-    # re-hashed the env password on every startup, which caused lockouts after
-    # password changes. Only overwrite if RESET_ADMIN_PASSWORD=true (recovery).
+    # v2.38.6: Uses direct bcrypt (passlib removed). Always verifies hash roundtrip.
     import logging
     _seed_log = logging.getLogger("doc.seed")
+
+    from app.auth.jwt import verify_password as _verify
+
     result = await db.execute(select(User).where(User.username == settings.admin_username))
     existing_admin = result.scalar_one_or_none()
     if existing_admin:
         if settings.reset_admin_password:
-            # v2.38.3 emergency recovery — use a known temporary password
             _recovery_pw = "TempReset2024!#"
+            new_hash = hash_password(_recovery_pw)
+            # Verify the hash actually works before saving
+            roundtrip_ok = _verify(_recovery_pw, new_hash)
             _seed_log.warning(
-                "RESET_ADMIN_PASSWORD is set — resetting admin password to temporary recovery password"
+                "RESET_ADMIN_PASSWORD=true — resetting admin password "
+                "(hash_prefix=%s, roundtrip=%s)",
+                new_hash[:7],
+                roundtrip_ok,
             )
-            existing_admin.hashed_password = hash_password(_recovery_pw)
-            existing_admin.password_compliant = False  # Force user to change it on login
+            if not roundtrip_ok:
+                _seed_log.critical(
+                    "BCRYPT ROUNDTRIP FAILED — password hash cannot be verified! "
+                    "This means login will always fail. Check bcrypt package."
+                )
+            existing_admin.hashed_password = new_hash
+            existing_admin.password_compliant = False
         else:
-            _seed_log.info("Admin user exists — password preserved (set RESET_ADMIN_PASSWORD=true to force-reset)")
+            _seed_log.info(
+                "Admin user exists — password preserved "
+                "(set RESET_ADMIN_PASSWORD=true to force-reset)"
+            )
     else:
         compliant = is_password_compliant(settings.admin_password)
+        new_hash = hash_password(settings.admin_password)
+        roundtrip_ok = _verify(settings.admin_password, new_hash)
+        _seed_log.info(
+            "Creating admin user '%s' (compliant=%s, roundtrip=%s)",
+            settings.admin_username,
+            compliant,
+            roundtrip_ok,
+        )
         admin = User(
             username=settings.admin_username,
-            hashed_password=hash_password(settings.admin_password),
+            hashed_password=new_hash,
             password_compliant=compliant,
         )
         db.add(admin)
-        _seed_log.info("Created admin user '%s'", settings.admin_username)
 
     # Seed rate templates
     rate_templates = [

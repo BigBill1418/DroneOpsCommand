@@ -1,9 +1,18 @@
+"""Authentication utilities — JWT tokens and password hashing.
+
+v2.38.6: Replaced passlib with direct bcrypt usage.
+passlib 1.7.4 is unmaintained and silently fails password verification
+with bcrypt >= 4.0, causing login to always reject valid passwords.
+"""
+
+import logging
+import re
 from datetime import datetime, timedelta
 
+import bcrypt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,9 +20,8 @@ from app.config import settings
 from app.database import get_db
 from app.models.user import User
 
-import re
+logger = logging.getLogger("doc.auth")
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto", bcrypt__truncate_error=False)
 security = HTTPBearer()
 
 # ── Password complexity requirements ──────────────────────────────────
@@ -37,17 +45,31 @@ def is_password_compliant(password: str) -> bool:
     return len(check_password_complexity(password)) == 0
 
 
-def _truncate(password: str) -> str:
-    """Bcrypt only uses the first 72 bytes of a password."""
-    return password.encode("utf-8")[:72].decode("utf-8", errors="ignore")
-
-
 def hash_password(password: str) -> str:
-    return pwd_context.hash(_truncate(password))
+    """Hash a password using bcrypt directly (no passlib)."""
+    # bcrypt only uses first 72 bytes — truncate to avoid silent mismatch
+    pw_bytes = password.encode("utf-8")[:72]
+    salt = bcrypt.gensalt(rounds=12)
+    hashed = bcrypt.hashpw(pw_bytes, salt)
+    result = hashed.decode("utf-8")
+    logger.debug("Password hashed successfully (length=%d, hash_prefix=%s)", len(password), result[:7])
+    return result
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(_truncate(plain_password), hashed_password)
+    """Verify a password against a bcrypt hash directly (no passlib)."""
+    try:
+        pw_bytes = plain_password.encode("utf-8")[:72]
+        hash_bytes = hashed_password.encode("utf-8")
+        result = bcrypt.checkpw(pw_bytes, hash_bytes)
+        logger.debug(
+            "Password verify: result=%s, plain_len=%d, hash_prefix=%s",
+            result, len(plain_password), hashed_password[:7],
+        )
+        return result
+    except Exception as exc:
+        logger.error("Password verification crashed: %s (hash_prefix=%s)", exc, hashed_password[:7] if hashed_password else "EMPTY")
+        return False
 
 
 def create_access_token(data: dict) -> str:
