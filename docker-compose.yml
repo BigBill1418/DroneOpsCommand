@@ -133,6 +133,9 @@ services:
       context: ./flight-parser
       dockerfile: Dockerfile
     restart: unless-stopped
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     environment:
       - DJI_API_KEY=${DJI_API_KEY:-}
       - PARSER_PORT=8100
