@@ -402,6 +402,7 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-subscriber",
+ "ureq",
 ]
 
 [[package]]
