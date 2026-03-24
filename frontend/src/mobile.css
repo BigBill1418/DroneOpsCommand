@@ -65,6 +65,12 @@
     top: 0;
     left: 0;
     height: 100% !important;
+    width: 180px !important; /* Narrower on mobile — save screen real estate */
+  }
+
+  /* Hide decorative drone SVG on mobile — wastes precious screen space */
+  .nav-drone-visual {
+    display: none !important;
   }
 
   /* Reduce page padding on mobile */
@@ -325,6 +331,12 @@
   .mantine-AppShell-navbar {
     transform: translateX(-100%) !important;
     transition: transform 200ms ease !important;
+    width: 180px !important; /* Narrower on mobile landscape too */
+  }
+
+  /* Hide decorative drone SVG in landscape */
+  .nav-drone-visual {
+    display: none !important;
   }
 
   /* When opened via burger, slide it in */

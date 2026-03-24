@@ -9,6 +9,7 @@ import {
   ActionIcon,
   Tooltip,
   ScrollArea,
+  Portal,
 } from '@mantine/core';
 import {
   IconBattery3,
@@ -22,6 +23,7 @@ import {
   IconLogout,
   IconPlane,
   IconCloudUpload,
+  IconX,
 } from '@tabler/icons-react';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
 import { useBranding } from '../../hooks/useBranding';
@@ -36,6 +38,11 @@ export default function AppLayout({ onLogout }: AppLayoutProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const branding = useBranding();
+
+  // Auto-close navbar on route change (safety net for mobile)
+  useEffect(() => {
+    setOpened(false);
+  }, [location.pathname]);
 
   // Detect phone-in-landscape: landscape orientation + short viewport height
   useEffect(() => {
@@ -116,6 +123,18 @@ export default function AppLayout({ onLogout }: AppLayoutProps) {
       </AppShell.Header>
 
       <AppShell.Navbar p="xs" style={{ display: 'flex', flexDirection: 'column' }}>
+        {/* Close button — visible only on mobile/landscape for easy dismissal */}
+        <Group justify="flex-end" hiddenFrom={isPhoneLandscape ? undefined : 'sm'} mb={4}>
+          <ActionIcon
+            variant="subtle"
+            color="gray"
+            size="md"
+            onClick={() => setOpened(false)}
+            aria-label="Close menu"
+          >
+            <IconX size={18} />
+          </ActionIcon>
+        </Group>
         <ScrollArea style={{ flex: 1 }} type="auto" offsetScrollbars>
           {navItems.map((item) => (
             <NavLink
@@ -147,8 +166,8 @@ export default function AppLayout({ onLogout }: AppLayoutProps) {
           ))}
         </ScrollArea>
 
-        {/* Drone visual — centered between nav items and version footer */}
-        <div style={{
+        {/* Drone visual — centered between nav items and version footer (hidden on mobile) */}
+        <div className="nav-drone-visual" style={{
           flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
           minHeight: 80, opacity: 0.35,
         }}>
@@ -204,7 +223,7 @@ export default function AppLayout({ onLogout }: AppLayoutProps) {
               fontSize: '15px',
             }}
           >
-            v2.39.1
+            v2.39.2
           </Text>
           <Tooltip label="Star on GitHub" position="right">
             <ActionIcon
@@ -222,17 +241,21 @@ export default function AppLayout({ onLogout }: AppLayoutProps) {
         </Group>
       </AppShell.Navbar>
 
-      <AppShell.Main>
-        {/* Backdrop overlay when mobile navbar is open — lets users tap outside to close */}
-        {opened && (
+      {/* Backdrop overlay — Portal renders at document root so it reliably catches taps */}
+      {opened && (
+        <Portal>
           <Overlay
             onClick={() => setOpened(false)}
             backgroundOpacity={0.5}
             color="#000"
             zIndex={199}
+            fixed
             hiddenFrom={isPhoneLandscape ? undefined : 'sm'}
           />
-        )}
+        </Portal>
+      )}
+
+      <AppShell.Main>
         <Outlet />
       </AppShell.Main>
     </AppShell>
