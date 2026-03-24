@@ -24,6 +24,7 @@ import {
   IconPlane,
   IconCloudUpload,
   IconX,
+  IconTimeline,
 } from '@tabler/icons-react';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
 import { useBranding } from '../../hooks/useBranding';
@@ -64,6 +65,7 @@ export default function AppLayout({ onLogout }: AppLayoutProps) {
     { icon: IconBattery3, label: 'Batteries', path: '/batteries' },
     { icon: IconTool, label: 'Maintenance', path: '/maintenance' },
     { icon: IconChartBar, label: 'Financials', path: '/financials' },
+    { icon: IconTimeline, label: 'Telemetry', path: '/telemetry' },
     { icon: IconCloudUpload, label: 'Upload Logs', path: '/upload-logs' },
     { icon: IconSettings, label: 'Settings', path: '/settings' },
   ];
@@ -223,7 +225,7 @@ export default function AppLayout({ onLogout }: AppLayoutProps) {
               fontSize: '15px',
             }}
           >
-            v2.39.7
+            v2.40.0
           </Text>
           <Tooltip label="Star on GitHub" position="right">
             <ActionIcon

@@ -63,6 +63,9 @@ export default function Settings() {
   const [tosUploaded, setTosUploaded] = useState(false);
   const [tosUploading, setTosUploading] = useState(false);
   const [brandingSaving, setBrandingSaving] = useState(false);
+  const [reprocessStatus, setReprocessStatus] = useState<{ reprocessable: number; total_dji: number } | null>(null);
+  const [reprocessing, setReprocessing] = useState(false);
+  const [reprocessResult, setReprocessResult] = useState<{ updated: number; imported: number; errors: string[] } | null>(null);
   const [djiSaving, setDjiSaving] = useState(false);
   const [djiTesting, setDjiTesting] = useState(false);
   const [djiStatus, setDjiStatus] = useState<{
@@ -154,6 +157,7 @@ export default function Settings() {
     api.get('/settings/payment').then((r) => paymentForm.setValues(r.data)).catch(() => {});
     api.get('/settings/opendronelog').then((r) => odlForm.setValues(r.data)).catch(() => {});
     api.get('/settings/dji').then((r) => djiForm.setValues(r.data)).catch(() => {});
+    api.get('/flight-library/reprocess/status').then((r) => setReprocessStatus(r.data)).catch(() => {});
     api.get('/auth/account').then((r) => { setCurrentUsername(r.data.username); accountForm.setFieldValue('new_username', r.data.username); }).catch(() => {});
     api.get('/settings/weather').then((r) => weatherForm.setValues(r.data)).catch(() => {});
     api.get('/intake/default-tos-status').then((r) => setTosUploaded(r.data.uploaded)).catch(() => {});
@@ -454,6 +458,34 @@ export default function Settings() {
       setDjiStatus({ status: 'error', message: axiosErr.response?.data?.detail || 'Test failed' });
     } finally {
       setDjiTesting(false);
+    }
+  };
+
+  const handleReprocessUpload = async (fileList: FileList | null) => {
+    if (!fileList || fileList.length === 0) return;
+    setReprocessing(true);
+    setReprocessResult(null);
+    try {
+      const formData = new FormData();
+      for (let i = 0; i < fileList.length; i++) {
+        formData.append('files', fileList[i]);
+      }
+      const r = await api.post('/flight-library/reprocess', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: 300000,
+      });
+      setReprocessResult(r.data);
+      notifications.show({
+        title: 'Re-process Complete',
+        message: `${r.data.updated} updated, ${r.data.imported} new, ${r.data.errors.length} errors`,
+        color: r.data.errors.length > 0 ? 'yellow' : 'green',
+      });
+      // Refresh the status
+      api.get('/flight-library/reprocess/status').then((r2) => setReprocessStatus(r2.data)).catch(() => {});
+    } catch {
+      notifications.show({ title: 'Error', message: 'Re-processing failed', color: 'red' });
+    } finally {
+      setReprocessing(false);
     }
   };
 
@@ -1245,6 +1277,78 @@ export default function Settings() {
                   )}
                 </Stack>
               </form>
+            </Card>
+
+            {/* Re-process DJI Flights */}
+            <Card padding="lg" radius="md" style={{ ...cardStyle, border: '1px solid rgba(0, 212, 255, 0.15)' }}>
+              <Group gap="sm" mb="md">
+                <IconDatabaseImport size={20} color="#00d4ff" />
+                <Title order={3} c="#e8edf2" style={{ letterSpacing: '1px' }}>RE-PROCESS FLIGHT LOGS</Title>
+              </Group>
+              <Text c="#5a6478" size="xs" mb="sm" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+                Re-upload your original .txt flight log files to update existing flights with full decrypted data
+                (GPS tracks, telemetry, battery curves). Existing flights are matched by file hash and updated in place —
+                no duplicates created.
+              </Text>
+              {reprocessStatus && (
+                <Group gap="sm" mb="sm">
+                  <Badge
+                    color={reprocessStatus.reprocessable > 0 ? 'yellow' : 'green'}
+                    variant="light"
+                    size="lg"
+                    style={{ fontFamily: "'Share Tech Mono', monospace" }}
+                  >
+                    {reprocessStatus.reprocessable > 0
+                      ? `${reprocessStatus.reprocessable} of ${reprocessStatus.total_dji} DJI flights missing GPS data`
+                      : `All ${reprocessStatus.total_dji} DJI flights have full data`}
+                  </Badge>
+                </Group>
+              )}
+              <Group gap="sm">
+                <Button
+                  component="label"
+                  color="cyan"
+                  variant="light"
+                  loading={reprocessing}
+                  leftSection={<IconDatabaseImport size={14} />}
+                  styles={{ root: { fontFamily: "'Bebas Neue', sans-serif" } }}
+                >
+                  {reprocessing ? 'PROCESSING...' : 'SELECT FILES TO RE-PROCESS'}
+                  <input
+                    type="file"
+                    multiple
+                    accept=".txt,.csv"
+                    style={{ display: 'none' }}
+                    onChange={(e) => handleReprocessUpload(e.target.files)}
+                  />
+                </Button>
+              </Group>
+              {reprocessResult && (
+                <Stack gap={4} mt="sm">
+                  <Group gap="xs">
+                    {reprocessResult.updated > 0 && (
+                      <Badge color="green" variant="light" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+                        {reprocessResult.updated} updated
+                      </Badge>
+                    )}
+                    {reprocessResult.imported > 0 && (
+                      <Badge color="cyan" variant="light" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+                        {reprocessResult.imported} new
+                      </Badge>
+                    )}
+                    {reprocessResult.errors.length > 0 && (
+                      <Badge color="red" variant="light" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+                        {reprocessResult.errors.length} errors
+                      </Badge>
+                    )}
+                  </Group>
+                  {reprocessResult.errors.length > 0 && (
+                    <Text c="#ff6b6b" size="xs" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+                      {reprocessResult.errors.slice(0, 3).join('; ')}
+                    </Text>
+                  )}
+                </Stack>
+              )}
             </Card>
           </Stack>
         </Tabs.Panel>
