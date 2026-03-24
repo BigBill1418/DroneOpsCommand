@@ -3,9 +3,11 @@
 import hashlib
 import json
 import logging
+import os
 import traceback
 from collections import Counter, defaultdict
 from datetime import datetime as _dt
+from pathlib import Path
 from uuid import UUID
 
 import httpx
@@ -105,6 +107,32 @@ def _parse_datetime(value: object) -> _dt | None:
 from app.models.system_settings import SystemSetting
 
 PARSER_URL = "http://flight-parser:8100"
+
+# ── Original file storage ─────────────────────────────────────────────
+_FLIGHT_LOGS_DIR = Path(settings.upload_dir) / "flight_logs"
+
+
+def _save_original_file(file_hash: str, content: bytes, filename: str) -> None:
+    """Persist the original uploaded flight log to disk for future re-processing."""
+    try:
+        _FLIGHT_LOGS_DIR.mkdir(parents=True, exist_ok=True)
+        ext = Path(filename).suffix.lower() if filename else ".bin"
+        dest = _FLIGHT_LOGS_DIR / f"{file_hash}{ext}"
+        if not dest.exists():
+            dest.write_bytes(content)
+            logger.debug("Saved original flight log: %s (%d bytes)", dest.name, len(content))
+    except Exception as e:
+        logger.warning("Failed to save original flight log %s: %s", file_hash, e)
+
+
+def _get_stored_file_path(file_hash: str) -> Path | None:
+    """Find a stored original file by its hash (any extension)."""
+    if not _FLIGHT_LOGS_DIR.exists():
+        return None
+    for f in _FLIGHT_LOGS_DIR.iterdir():
+        if f.stem == file_hash:
+            return f
+    return None
 
 
 async def _get_dji_api_key(db: AsyncSession) -> str | None:
@@ -537,6 +565,9 @@ async def device_upload_flights(
             content = await upload.read()
             file_hash = hashlib.sha256(content).hexdigest()
 
+            # Save original file for future re-processing
+            _save_original_file(file_hash, content, upload.filename or "upload.bin")
+
             existing = await db.execute(
                 select(Flight).where(Flight.source_file_hash == file_hash)
             )
@@ -617,7 +648,8 @@ async def reprocess_status(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
-    """Return count of DJI flights that could benefit from re-processing."""
+    """Return counts of flights that could benefit from re-processing,
+    including how many have original files stored on disk."""
     from sqlalchemy import or_
 
     total_result = await db.execute(
@@ -625,8 +657,9 @@ async def reprocess_status(
     )
     total_dji = total_result.scalar() or 0
 
-    reprocess_result = await db.execute(
-        select(func.count(Flight.id)).where(
+    # DJI flights needing reprocess
+    reprocess_q = await db.execute(
+        select(Flight.source_file_hash).where(
             Flight.source == "dji_txt",
             or_(
                 Flight.point_count == 0,
@@ -635,13 +668,121 @@ async def reprocess_status(
             ),
         )
     )
-    reprocessable = reprocess_result.scalar() or 0
+    reprocess_hashes = [row[0] for row in reprocess_q.all() if row[0]]
+    reprocessable = len(reprocess_hashes)
 
-    logger.info("Reprocess status: %d/%d DJI flights need re-processing", reprocessable, total_dji)
-    return {"reprocessable": reprocessable, "total_dji": total_dji}
+    # How many have original files on disk?
+    stored_count = sum(1 for h in reprocess_hashes if _get_stored_file_path(h) is not None)
+
+    logger.info("Reprocess status: %d/%d DJI flights need re-processing (%d have stored files)",
+                reprocessable, total_dji, stored_count)
+    return {
+        "reprocessable": reprocessable,
+        "total_dji": total_dji,
+        "stored_on_disk": stored_count,
+        "need_manual_upload": reprocessable - stored_count,
+    }
 
 
-# ── Reprocess uploaded flight logs ────────────────────────────────
+# ── Reprocess ALL from stored files ──────────────────────────────
+@router.post("/reprocess/all")
+async def reprocess_all_from_stored(
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """Re-process all flights that have original files stored on disk.
+
+    Finds flights needing reprocess (missing GPS/telemetry data), reads
+    their original file from /data/uploads/flight_logs/, re-parses through
+    the flight-parser service with the current DJI API key, and updates
+    the flight records in place.
+    """
+    from sqlalchemy import or_
+
+    dji_key = await _get_dji_api_key(db)
+    parser_headers = {}
+    if dji_key:
+        parser_headers["X-DJI-Api-Key"] = dji_key
+
+    # Find all flights that need re-processing
+    result = await db.execute(
+        select(Flight).where(
+            Flight.source == "dji_txt",
+            or_(
+                Flight.point_count == 0,
+                Flight.point_count.is_(None),
+                Flight.gps_track.is_(None),
+            ),
+        )
+    )
+    flights_to_reprocess = list(result.scalars().all())
+
+    updated = 0
+    skipped_no_file = 0
+    errors = []
+
+    logger.info("Reprocess all: found %d flights needing re-processing", len(flights_to_reprocess))
+
+    for flight in flights_to_reprocess:
+        file_path = _get_stored_file_path(flight.source_file_hash) if flight.source_file_hash else None
+        if not file_path:
+            skipped_no_file += 1
+            continue
+
+        try:
+            content = file_path.read_bytes()
+            async with httpx.AsyncClient(timeout=120) as client:
+                resp = await client.post(
+                    f"{PARSER_URL}/parse",
+                    files={"file": (file_path.name, content)},
+                    headers=parser_headers,
+                )
+                if resp.status_code != 200:
+                    errors.append(f"{flight.name}: parser returned {resp.status_code}")
+                    continue
+
+                data = resp.json()
+                if data.get("errors"):
+                    errors.extend(data["errors"])
+
+                parsed_flights = data.get("flights", [])
+                if not parsed_flights:
+                    errors.append(f"{flight.name}: parser returned no flights")
+                    continue
+
+                parsed = parsed_flights[0]
+                flight.duration_secs = parsed.get("duration_secs", 0)
+                flight.total_distance = parsed.get("total_distance", 0)
+                flight.max_altitude = parsed.get("max_altitude", 0)
+                flight.max_speed = parsed.get("max_speed", 0)
+                flight.home_lat = parsed.get("home_lat")
+                flight.home_lon = parsed.get("home_lon")
+                flight.point_count = parsed.get("point_count", 0)
+                flight.gps_track = parsed.get("gps_track")
+                flight.telemetry = parsed.get("telemetry")
+                flight.raw_metadata = parsed.get("raw_metadata")
+                await db.flush()
+                updated += 1
+                logger.info("Reprocess all: updated flight %s (%s) — %d points",
+                            flight.id, flight.name, parsed.get("point_count", 0))
+
+        except httpx.ConnectError:
+            errors.append(f"{flight.name}: flight-parser service unavailable")
+            break  # No point continuing if parser is down
+        except Exception as e:
+            errors.append(f"{flight.name}: {str(e)}")
+
+    logger.info("Reprocess all complete: %d updated, %d skipped (no file), %d errors",
+                updated, skipped_no_file, len(errors))
+    return {
+        "updated": updated,
+        "skipped_no_file": skipped_no_file,
+        "errors": errors,
+        "total_attempted": len(flights_to_reprocess),
+    }
+
+
+# ── Reprocess uploaded flight logs (manual re-upload) ─────────────
 @router.post("/reprocess")
 async def reprocess_flights(
     files: list[UploadFile] = File(...),
@@ -667,6 +808,9 @@ async def reprocess_flights(
         try:
             content = await upload.read()
             file_hash = hashlib.sha256(content).hexdigest()
+
+            # Save/overwrite original file
+            _save_original_file(file_hash, content, upload.filename or "upload.bin")
 
             async with httpx.AsyncClient(timeout=120) as client:
                 resp = await client.post(
@@ -837,6 +981,9 @@ async def upload_flights(
         try:
             content = await upload.read()
             file_hash = hashlib.sha256(content).hexdigest()
+
+            # Save original file for future re-processing
+            _save_original_file(file_hash, content, upload.filename or "upload.bin")
 
             # Check for duplicate
             existing = await db.execute(
