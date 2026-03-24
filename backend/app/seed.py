@@ -117,37 +117,47 @@ async def seed_database(db: AsyncSession):
     """Seed the database with initial data."""
 
     # Seed admin user.
-    # v2.38.6: Uses direct bcrypt (passlib removed). Always verifies hash roundtrip.
+    # v2.38.9: Uses direct bcrypt (passlib removed). RESET_ADMIN_PASSWORD defaults
+    # to False so container restarts NEVER overwrite a user-changed password.
+    # Only set RESET_ADMIN_PASSWORD=true for one-time recovery, then remove it.
     import logging
     _seed_log = logging.getLogger("doc.seed")
 
     from app.auth.jwt import verify_password as _verify
 
+    _seed_log.info(
+        "Seed startup: admin_username=%s, reset_admin_password=%s",
+        settings.admin_username,
+        settings.reset_admin_password,
+    )
+
     result = await db.execute(select(User).where(User.username == settings.admin_username))
     existing_admin = result.scalar_one_or_none()
     if existing_admin:
         if settings.reset_admin_password:
-            _recovery_pw = "TempReset2024!#"
-            new_hash = hash_password(_recovery_pw)
-            # Verify the hash actually works before saving
-            roundtrip_ok = _verify(_recovery_pw, new_hash)
+            # Use the ADMIN_PASSWORD from environment (not a hardcoded temp password)
+            reset_pw = settings.admin_password
+            new_hash = hash_password(reset_pw)
+            roundtrip_ok = _verify(reset_pw, new_hash)
             _seed_log.warning(
-                "RESET_ADMIN_PASSWORD=true — resetting admin password "
-                "(hash_prefix=%s, roundtrip=%s)",
+                "RESET_ADMIN_PASSWORD=true — resetting admin password to ADMIN_PASSWORD env var "
+                "(hash_prefix=%s, roundtrip=%s). "
+                "Remove RESET_ADMIN_PASSWORD from env after recovery!",
                 new_hash[:7],
                 roundtrip_ok,
             )
             if not roundtrip_ok:
                 _seed_log.critical(
                     "BCRYPT ROUNDTRIP FAILED — password hash cannot be verified! "
-                    "This means login will always fail. Check bcrypt package."
+                    "Login will always fail. Check bcrypt package version."
                 )
             existing_admin.hashed_password = new_hash
-            existing_admin.password_compliant = False
+            existing_admin.password_compliant = is_password_compliant(reset_pw)
         else:
             _seed_log.info(
-                "Admin user exists — password preserved "
-                "(set RESET_ADMIN_PASSWORD=true to force-reset)"
+                "Admin user '%s' exists — password PRESERVED (not overwritten). "
+                "Set RESET_ADMIN_PASSWORD=true to force-reset.",
+                existing_admin.username,
             )
     else:
         compliant = is_password_compliant(settings.admin_password)

@@ -64,6 +64,19 @@ Every new feature or change MUST include logging and troubleshooting support, es
 
 **Lesson learned:** The v2.38.x login lockout took multiple attempts to diagnose because the axios interceptor silently swallowed 401 errors and reloaded the page — no error was logged or shown to the user.
 
+## Repair & Fix Quality Standard (REQUIRED)
+
+When asked to repair or fix something, you MUST be thorough. Do not apply a surface-level patch and move on. Follow this process:
+
+1. **Audit the full blast radius** — Find EVERY file, config, environment variable, Docker setting, and dependency that touches the broken system. Use grep/search across the entire codebase, not just the obvious files.
+2. **Research best practices** — Look at what others have done that works. Check for known incompatibilities (e.g. passlib + bcrypt >= 4.0). Don't just fix symptoms — fix root causes.
+3. **Check for secondary failures** — After making a fix, trace through what happens on container rebuild, server restart, database migration, and fresh deploy. If the fix only works until the next restart, it's not a fix.
+4. **Verify defaults and environment** — Check config defaults, docker-compose.yml env vars, .env files. A config that defaults to the wrong value will silently undo your fix on every restart.
+5. **Test the roundtrip** — If you change how data is written (e.g. password hashing), verify it can also be READ back correctly before committing. Don't assume it works.
+6. **Log everything** — Every fix must include logging that would make the NEXT failure diagnosable from logs alone, without needing another debugging session.
+
+**Lesson learned:** The v2.38.6 auth rebuild replaced passlib with direct bcrypt (correct fix) but missed that `reset_admin_password` defaulted to `True` in config.py, causing every container restart to overwrite the admin password. The fix only lasted until the next deploy.
+
 ## Conventions
 
 - Commit messages: short summary, optional detail paragraph, always end with session link
