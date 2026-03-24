@@ -441,47 +441,42 @@ export default function Dashboard() {
         {/* ═══ NEXT SERVICE DUE — below recent missions ═══ */}
         <div style={{ flexShrink: 0 }}>
           {nextServiceDue ? (
-            <Card padding="sm" radius="md" style={{
-              ...panelStyle,
-              borderColor: nextServiceDue.overdue
-                ? 'rgba(255, 68, 68, 0.3)'
-                : nextServiceDue.days_until <= 7
-                  ? 'rgba(255, 107, 26, 0.3)'
-                  : 'rgba(0, 212, 255, 0.2)',
-            }}>
-              <Group gap={6} mb={6}>
-                <IconCalendarDue size={14} color={
-                  nextServiceDue.overdue ? '#ff4444'
-                    : nextServiceDue.days_until <= 7 ? '#ff6b1a' : '#00d4ff'
-                } />
-                <Text size="xs" fw={700} c={
-                  nextServiceDue.overdue ? '#ff4444'
-                    : nextServiceDue.days_until <= 7 ? '#ff6b1a' : '#00d4ff'
-                } style={{ ...monoXs, letterSpacing: '2px' }}>
-                  NEXT SERVICE DUE
-                </Text>
-              </Group>
+            <Card
+              padding="sm"
+              radius="md"
+              style={{
+                ...panelStyle,
+                cursor: 'pointer',
+                borderColor: nextServiceDue.overdue
+                  ? 'rgba(255, 68, 68, 0.3)'
+                  : nextServiceDue.days_until <= 7
+                    ? 'rgba(255, 107, 26, 0.3)'
+                    : 'rgba(0, 212, 255, 0.2)',
+              }}
+              onClick={() => navigate('/maintenance')}
+            >
               <Group justify="space-between" wrap="nowrap" align="center">
-                <div style={{ minWidth: 0 }}>
-                  <Group gap="xs" wrap="nowrap">
-                    <Text size="sm" c="#e8edf2" fw={700} tt="capitalize" lineClamp={1}>
-                      {nextServiceDue.maintenance_type.replace(/_/g, ' ')}
-                    </Text>
-                    <Text size="xs" c="#5a6478">—</Text>
-                    <Text size="xs" c="#00d4ff" fw={600} style={{ ...monoXs, fontSize: '11px' }}>
-                      {nextServiceDue.aircraft_name}
-                    </Text>
-                  </Group>
+                <Group gap={8} wrap="nowrap" style={{ minWidth: 0 }}>
+                  <IconCalendarDue size={14} color={
+                    nextServiceDue.overdue ? '#ff4444'
+                      : nextServiceDue.days_until <= 7 ? '#ff6b1a' : '#00d4ff'
+                  } style={{ flexShrink: 0 }} />
+                  <Text size="xs" c="#00d4ff" fw={600} lineClamp={1} style={{ ...monoXs, fontSize: '12px' }}>
+                    {nextServiceDue.aircraft_name}
+                  </Text>
                   {nextServiceDue.next_due_date && (
-                    <Text size="xs" c="#5a6478" mt={2} style={{ fontSize: '11px' }}>
-                      {new Date(nextServiceDue.next_due_date).toLocaleDateString('en-US', {
-                        month: 'short', day: 'numeric', year: 'numeric',
-                      })}
-                    </Text>
+                    <>
+                      <Text size="xs" c="#5a6478">—</Text>
+                      <Text size="xs" c="#5a6478" style={{ ...monoXs, fontSize: '11px', flexShrink: 0 }}>
+                        {new Date(nextServiceDue.next_due_date).toLocaleDateString('en-US', {
+                          month: 'short', day: 'numeric', year: 'numeric',
+                        })}
+                      </Text>
+                    </>
                   )}
-                </div>
+                </Group>
                 <Badge
-                  size="lg"
+                  size="sm"
                   variant="light"
                   color={
                     nextServiceDue.overdue ? 'red'
