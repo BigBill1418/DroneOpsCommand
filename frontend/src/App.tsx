@@ -17,6 +17,7 @@ import Financials from './pages/Financials';
 import Settings from './pages/Settings';
 import CustomerIntake from './pages/CustomerIntake';
 import UploadLogs from './pages/UploadLogs';
+import Telemetry from './pages/Telemetry';
 
 export default function App() {
   const { isAuthenticated, loading, login, logout, passwordCompliant, markPasswordCompliant } = useAuth();
@@ -51,6 +52,7 @@ export default function App() {
                 <Route path="/batteries" element={<Batteries />} />
                 <Route path="/maintenance" element={<Maintenance />} />
                 <Route path="/financials" element={<Financials />} />
+                <Route path="/telemetry" element={<Telemetry />} />
                 <Route path="/upload-logs" element={<UploadLogs />} />
                 <Route path="/settings" element={<Settings />} />
                 <Route path="*" element={<Navigate to="/" />} />
