@@ -24,7 +24,6 @@ from app.auth.jwt import (
     hash_password,
     verify_password,
     check_password_complexity,
-    is_password_compliant,
     PASSWORD_RULES,
 )
 from app.config import settings
@@ -131,19 +130,13 @@ async def login(request: Request, body: LoginRequest, db: AsyncSession = Depends
 
     _clear_failures(client_ip)
 
-    # Update password compliance flag
-    compliant = is_password_compliant(body.password)
-    if user.password_compliant != compliant:
-        user.password_compliant = compliant
-        await db.flush()
-
-    logger.info("Login SUCCESS: user='%s' ip=%s compliant=%s", user.username, client_ip, compliant)
+    logger.info("Login SUCCESS: user='%s' ip=%s", user.username, client_ip)
 
     return {
         "access_token": create_access_token({"sub": user.username}),
         "refresh_token": create_refresh_token({"sub": user.username}),
         "token_type": "bearer",
-        "password_compliant": user.password_compliant,
+        "password_compliant": True,
     }
 
 

@@ -212,7 +212,7 @@ export default function AppLayout({ onLogout }: AppLayoutProps) {
                   fontSize: '15px',
                 }}
               >
-                v2.42.0
+                v2.42.1
               </Text>
               <Tooltip label="Star on GitHub" position="right">
                 <ActionIcon
