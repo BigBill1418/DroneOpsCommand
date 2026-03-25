@@ -2,7 +2,7 @@
 
 **Self-hosted mission management, flight log analysis, AI report generation, invoicing, and real-time airspace monitoring for commercial drone operators.**
 
-**Version 2.41.5** | [Quick Start](#quick-start) | [Features](#features) | [Configuration](#configuration) | [Contributing](CONTRIBUTING.md) | [License](LICENSE)
+**Version 2.41.6** | [Quick Start](#quick-start) | [Features](#features) | [Configuration](#configuration) | [Contributing](CONTRIBUTING.md) | [License](LICENSE)
 
 ---
 
