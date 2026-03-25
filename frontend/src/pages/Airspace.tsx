@@ -105,7 +105,7 @@ export default function Airspace() {
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isMobile = useMediaQuery('(max-width: 768px)');
 
-  // Load home location from weather settings (already configured)
+  // Load home location from Settings > Home Location
   useEffect(() => {
     api.get('/settings/weather').then((r) => {
       const lat = parseFloat(r.data.weather_lat);
@@ -192,8 +192,8 @@ export default function Airspace() {
           <Title order={3} c="#5a6478" style={heading}>NO LOCATION SET</Title>
           <Text c="#5a6478" size="sm" style={monoFont}>
             {gpsError
-              ? `GPS error: ${gpsError}. Configure a home location in Settings > Weather.`
-              : 'Allow GPS access or set a home location in Settings > Weather.'}
+              ? `GPS error: ${gpsError}. Set a home location in Settings > Home Location.`
+              : 'Allow GPS access or set a home location in Settings > Home Location.'}
           </Text>
         </Stack>
       </Center>
@@ -301,7 +301,7 @@ export default function Airspace() {
                     <Text size="xs" c="#5a6478" style={monoFont}>{homeLat.toFixed(4)}, {homeLon!.toFixed(4)}</Text>
                   </Group>
                 )}
-                {!useGps && !homeLat && <Text size="xs" c="#ff6b6b" style={monoFont}>No home set</Text>}
+                {!useGps && !homeLat && <Text size="xs" c="#ff6b6b" style={monoFont}>Set in Settings</Text>}
               </Card>
 
               <Card padding="sm" radius="md" style={cardStyle}>
@@ -458,7 +458,7 @@ export default function Airspace() {
                 </Group>
               )}
               {!useGps && !homeLat && (
-                <Text size="xs" c="#ff6b6b" style={monoFont}>No home set — go to Settings</Text>
+                <Text size="xs" c="#ff6b6b" style={monoFont}>No home set — Settings &gt; Home Location</Text>
               )}
             </Card>
 

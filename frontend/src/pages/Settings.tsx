@@ -667,9 +667,9 @@ export default function Settings() {
     setWeatherSaving(true);
     try {
       await api.put('/settings/weather', values);
-      notifications.show({ title: 'Saved', message: `Weather location set to ${values.weather_label || 'configured coordinates'}`, color: 'cyan' });
+      notifications.show({ title: 'Saved', message: `Home location set to ${values.weather_label || 'configured coordinates'}`, color: 'cyan' });
     } catch {
-      notifications.show({ title: 'Error', message: 'Failed to save weather location', color: 'red' });
+      notifications.show({ title: 'Error', message: 'Failed to save home location', color: 'red' });
     } finally {
       setWeatherSaving(false);
     }
@@ -840,10 +840,10 @@ export default function Settings() {
             <Card padding="lg" radius="md" style={cardStyle}>
               <Group gap="sm" mb="md">
                 <IconMapPin size={20} color="#00d4ff" />
-                <Title order={3} c="#e8edf2" style={{ letterSpacing: '1px' }}>WEATHER & AIRSPACE LOCATION</Title>
+                <Title order={3} c="#e8edf2" style={{ letterSpacing: '1px' }}>HOME LOCATION</Title>
               </Group>
               <Text c="#5a6478" size="xs" mb="sm" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
-                Set the location for dashboard weather, METAR, TFR, and NOTAM monitoring. Enter a zip code or city name to auto-fill.
+                Your home base for dashboard weather, METAR, TFR, NOTAM monitoring, and the default center for airspace tracking. The airspace page will also use GPS on mobile when available.
               </Text>
               <Group mb="md" align="end">
                 <TextInput
@@ -878,7 +878,7 @@ export default function Settings() {
                     ICAO airport code is used for METAR, TFR, and NOTAM data. The lookup fills this automatically.
                   </Text>
                   <Button type="submit" color="cyan" loading={weatherSaving} styles={{ root: { fontFamily: "'Bebas Neue', sans-serif" } }}>
-                    SAVE WEATHER LOCATION
+                    SAVE HOME LOCATION
                   </Button>
                 </Stack>
               </form>
