@@ -83,13 +83,13 @@ Generate the after-action report:"""
                     "stream": False,
                     "options": {
                         "temperature": 0.3,
-                        "num_predict": 768,
-                        # Use 6 of 8 threads — leaves headroom for the OS and other services
-                        "num_thread": 6,
-                        # Smaller context window — our prompts are well under 2k
-                        "num_ctx": 1536,
-                        # Batch size reduced to lower peak CPU load
-                        "num_batch": 192,
+                        "num_predict": 1024,
+                        # Use 4 of 6 threads — leaves headroom for other services
+                        "num_thread": 4,
+                        # Llama 3.1 benefits from slightly larger context
+                        "num_ctx": 2048,
+                        # Balanced batch size for throughput vs CPU load
+                        "num_batch": 256,
                     },
                 },
             )
