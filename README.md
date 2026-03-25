@@ -1,21 +1,23 @@
 # DroneOpsCommand
 
-**Self-hosted mission management, AI report generation, and invoicing for commercial drone operators.**
+**Self-hosted mission management, flight log analysis, AI report generation, invoicing, and real-time airspace monitoring for commercial drone operators.**
 
-**Version 2.41.4** | [Quick Start](#quick-start) | [Features](#features) | [Configuration](#configuration) | [Contributing](CONTRIBUTING.md) | [License](LICENSE)
+**Version 2.41.5** | [Quick Start](#quick-start) | [Features](#features) | [Configuration](#configuration) | [Contributing](CONTRIBUTING.md) | [License](LICENSE)
 
 ---
 
-DroneOpsCommand is a self-hosted, full-stack platform for managing commercial drone operations end-to-end. It covers the complete lifecycle from flight data ingestion through AI-powered report generation, invoicing, and client delivery.
+DroneOpsCommand is a self-hosted, full-stack platform for managing commercial drone operations end-to-end. It covers the complete lifecycle from flight data ingestion and GPS telemetry visualization through AI-powered report generation, invoicing, and client delivery — all running on your own hardware.
 
 Designed for FAA Part 107 certified operators running missions such as search & rescue, inspections, mapping, videography, and more.
 
 ### Why DroneOpsCommand?
 
-- **100% self-hosted** — runs on your own hardware via Docker Compose. No cloud dependencies, no per-seat licensing.
+- **100% self-hosted** — runs on your own hardware via Docker Compose. No cloud dependencies, no per-seat licensing, no subscription fees.
 - **AI stays local** — report generation uses Ollama (Mistral 7B) so client data never leaves your network.
 - **White-label ready** — company name, tagline, and branding are fully configurable from the Settings UI. No code changes needed to make it yours.
-- **Full lifecycle** — mission creation, flight log import, map generation, AI reports, PDF export, invoicing, and email delivery in one platform.
+- **Full lifecycle** — flight log upload, GPS path visualization, telemetry analysis, mission management, AI reports, PDF export, invoicing, and email delivery in one platform.
+- **Real-time airspace** — live aircraft tracking via OpenSky Network with anonymous or authenticated access.
+- **Mobile-friendly** — responsive dark-themed UI works on phones, tablets, and desktops.
 
 ---
 
@@ -95,27 +97,52 @@ After logging in, go to **Settings > Branding** to set your company name, taglin
 - Billable/non-billable designation per mission
 - Edit existing missions at any step
 
+### Flight Log Upload & Parsing
+- Drag-and-drop upload of DJI flight logs (.txt, .csv, .dat, .log)
+- Folder upload support — drop an entire SD card directory and all valid logs are extracted
+- Automatic batched uploads (40MB per batch) for large log sets — no more 413 errors
+- Dedicated flight-parser microservice for DJI TXT log decryption via DJI API
+- SHA-256 deduplication — re-uploading the same log is silently skipped
+- Original log files stored on disk for future re-processing
+- Manual flight entry for non-DJI aircraft
+
+### Flight Data & Statistics
+- Aggregate flight statistics: total flights, total time, total distance, max altitude, max speed
+- Per-drone breakdown of flight time (visual bar chart)
+- Top flights by duration and distance
+- Searchable, sortable flight log table with unit conversions (meters to feet/miles, m/s to mph)
+- Average distance and duration per flight
+- Flight detail drawer with interactive GPS flight path map over dark CartoDB tiles
+- Green takeoff marker, orange landing marker, cyan flight path trace
+- Export individual flights as GPX, KML, or CSV
+
+### Telemetry Visualization
+- Dedicated telemetry page with time-series charts
+- Altitude, speed, battery percentage, voltage, temperature, satellite count, signal strength, distance from home
+- Auto-downsampled to 2,000 points for smooth rendering of large datasets
+- Per-flight telemetry accessible from the flight detail view
+
+### Multi-Flight Path Maps
+- Interactive Leaflet map with dark CartoDB basemap matching the app's dark theme
+- Color-coded flight path overlays with start/end point markers
+- Convex hull polygon showing total coverage area boundary
+- Coverage area calculation in acres (with 30m buffer for camera swath simulation)
+- Static map PNG generation for PDF embedding
+- UTM coordinate conversion for accurate area measurement via Shapely/PyProj
+
+### Real-Time Airspace Monitoring
+- Live aircraft positions via OpenSky Network API
+- Works anonymously (no account needed) with optional authenticated mode for higher rate limits
+- Configurable search radius in nautical miles around your location
+- Aircraft callsign, altitude, speed, heading, vertical rate, squawk code, and ground status
+- Auto-refresh with configurable interval
+
 ### OpenDroneLog Integration
 - Pull flight logs from your self-hosted OpenDroneLog instance
 - Select and attach specific flights to each mission
 - GPS track extraction with telemetry data (altitude, speed, distance, duration)
 - Automatic data normalization across OpenDroneLog API versions
 - Connection testing from Settings page
-
-### Flight Data & Statistics
-- Aggregate flight statistics: total flights, total time, total distance, max altitude, max speed
-- Per-drone breakdown of flight time (visual bar chart)
-- Top flights by duration and distance
-- Searchable flight log table with unit conversions (meters to feet/miles, m/s to mph)
-- Average distance and duration per flight
-
-### Multi-Flight Path Maps
-- Interactive Leaflet map showing all flight paths with color-coded overlays
-- Convex hull polygon showing total coverage area boundary
-- Start/end point markers for each flight
-- Coverage area calculation in acres (with 30m buffer for camera swath simulation)
-- Static map PNG generation for PDF embedding (OpenStreetMap tiles)
-- UTM coordinate conversion for accurate area measurement via Shapely/PyProj
 
 ### AI Report Generation
 - Local LLM via Ollama (Mistral 7B by default) — your data stays on your hardware
@@ -161,12 +188,36 @@ After logging in, go to **Settings > Branding** to set your company name, taglin
 - Active/inactive toggle
 - Add/edit/delete from Settings page
 
-### Customer CRM
-- Customer profiles: name, company, email, phone, address, notes
+### Battery Management
+- Track individual batteries by serial number and custom name
+- Cycle count, health status, and usage history
+- Link batteries to flights for lifecycle tracking
+
+### Maintenance Tracking
+- Schedule and log maintenance records for each aircraft
+- Customizable maintenance types (no fixed-length limits)
+- Attach photos to maintenance records (up to 10MB per image)
+- Track completion dates and upcoming maintenance due dates
+
+### Backup & Restore
+- Full database backup export from the UI
+- Upload and restore backups to recover or migrate data
+- Validate backup files before restoring
+
+### Customer CRM & Intake
+- Customer profiles: name, company, email, phone, address (including city, state, zip), notes
 - Address auto-complete via OpenStreetMap/Nominatim geocoding
 - Search across all customer fields
 - Customer linked to missions for reporting and email delivery
 - Job history tracking
+- Digital customer intake with tokenized links and expiration
+- Terms of Service signature capture with PDF storage
+- Configurable default TOS document upload
+
+### Device API Keys
+- Generate API keys for field devices (DroneOpsSync companion app)
+- Device-authenticated upload endpoint for automated flight log sync from remote controllers
+- Key management (create, revoke) from the Settings page
 
 ### Email Delivery
 - Send PDF reports directly to customer email
@@ -208,13 +259,13 @@ After logging in, go to **Settings > Branding** to set your company name, taglin
 - Admin account seeded on first startup
 
 ### Dashboard
-- At-a-glance stats: total flights, total missions, drafts, customers
-- Recent missions table with status badges
+- At-a-glance stats: total flight hours, total flights, total missions, drafts, customers
+- Recent missions table with status badges and quick actions
 - Live weather conditions and flight conditions assessment
-- METAR aviation weather with color-coded flight categories
+- METAR aviation weather with color-coded flight categories (VFR/MVFR/IFR/LIFR)
 - FAA TFR and NOTAM alerts
-- NWS weather alerts with severity
-- Animated drone graphic with dark theme styling
+- NWS weather alerts with severity levels
+- Dark-themed UI with cyan accents, Bebas Neue headings, and Share Tech Mono data fonts
 
 ### Image Management
 - Upload mission images with drag-and-drop or file picker
@@ -234,6 +285,7 @@ After logging in, go to **Settings > Branding** to set your company name, taglin
 | Frontend | React 18 + Vite + Mantine UI | 80 (nginx) | SPA web interface |
 | Backend | Python 3.12, FastAPI, SQLAlchemy 2.0 | internal | REST API (via nginx) |
 | Database | PostgreSQL 16 Alpine | 5432 | Persistent storage |
+| Flight Parser | Python microservice | 8100 | DJI flight log decryption and parsing |
 | LLM | Ollama (Mistral 7B quantized) | 11434 | Local AI report generation |
 | Queue | Redis 7 Alpine | 6379 | Celery task broker |
 | Worker | Celery (same backend image) | — | Async report generation |
@@ -244,7 +296,7 @@ After logging in, go to **Settings > Branding** to set your company name, taglin
 - **Vite** build tool
 - **React Router** for SPA navigation
 - **TipTap** rich text editor
-- **Leaflet** interactive maps
+- **Leaflet** interactive maps with dark CartoDB basemap
 - **Axios** HTTP client with JWT interceptors and token refresh
 - **Mantine Dates** for date inputs
 - **Tabler Icons** icon set
@@ -269,7 +321,7 @@ After logging in, go to **Settings > Branding** to set your company name, taglin
 - Proxies `/static/` and `/uploads/` to backend
 - SPA fallback (`try_files` to `index.html`)
 - Gzip compression enabled
-- 50MB max upload size, 300s read timeout
+- 200MB max upload size, 300s read timeout
 
 ---
 
@@ -370,22 +422,39 @@ Multi-step wizard with 5 stages:
 Full mission view with metadata, assigned aircraft cards, interactive flight map, coverage stats, download link status, report content, and action buttons (edit, delete, generate PDF, email report).
 
 ### Flights (`/flights`)
-Aggregate flight statistics from OpenDroneLog with per-drone breakdowns, top flights, and a searchable table of all flights.
+Flight library with aggregate statistics, per-drone breakdowns, top flights, sortable/searchable table, and a detail drawer with interactive GPS flight path map, telemetry data, and export options (GPX/KML/CSV).
+
+### Upload Logs (`/upload-logs`)
+Drag-and-drop flight log upload with folder support. Batched uploads for large file sets. Progress tracking per file with duplicate detection and error reporting.
+
+### Telemetry (`/telemetry`)
+Time-series telemetry visualization with altitude, speed, battery, satellites, signal, and distance-from-home charts. Auto-downsampled for smooth rendering.
+
+### Airspace (`/airspace`)
+Live aircraft tracking via OpenSky Network. Works anonymously or with credentials for better rate limits. Configurable location and search radius.
+
+### Batteries (`/batteries`)
+Battery fleet management with serial numbers, cycle counts, health tracking, and per-battery flight history.
+
+### Maintenance (`/maintenance`)
+Maintenance scheduling and logging per aircraft. Custom maintenance types, photo attachments, and due-date tracking.
 
 ### Customers (`/customers`)
-Customer CRM with add/edit/delete, address auto-complete via OpenStreetMap geocoding, and search.
+Customer CRM with add/edit/delete, address auto-complete via OpenStreetMap geocoding, digital intake forms with TOS signature capture, and search.
 
 ### Financials (`/financials`)
 Revenue dashboard with total/average/outstanding metrics, breakdowns by drone, category, mission type, month, and customer. Full invoice table with search.
 
 ### Settings (`/settings`)
-System configuration:
+System configuration across multiple tabs:
 - **LLM Status** — Ollama connection status and loaded model
-- **OpenDroneLog** — Server URL with connection test
+- **Flight Data** — OpenSky Network credentials, DJI API key, OpenDroneLog server URL with connection test
 - **SMTP** — Email server configuration with test email
 - **Payment Links** — PayPal and Venmo URLs for invoices
 - **Aircraft Fleet** — Add/edit/delete aircraft with specifications
 - **Rate Templates** — Add/edit/delete billing rate presets
+- **Device Keys** — API key management for DroneOpsSync companion app
+- **Backup** — Database export and restore
 - **Branding** — Company name, tagline, website, social media, contact email — used in PDF reports, emails, login page, and customer-facing pages
 
 ---
@@ -406,6 +475,12 @@ REST client that fetches flight data from a self-hosted OpenDroneLog instance. H
 
 ### Map Renderer
 Generates GeoJSON FeatureCollections with flight path LineStrings, start/end markers, and convex hull polygons. Calculates coverage area in acres using UTM projection and Shapely geometry with configurable buffer distance. Renders static PNG maps using OpenStreetMap tiles.
+
+### Flight Parser Service
+Standalone microservice that decrypts and parses DJI flight logs using the DJI Cloud API. Extracts GPS tracks, telemetry time-series, drone metadata, and battery information from encrypted TXT log files.
+
+### Airspace Service
+Proxies requests to the OpenSky Network API for real-time aircraft position data. Supports anonymous and OAuth2-authenticated modes. Converts search radius to bounding box coordinates and normalizes the response into a clean aircraft list.
 
 ### Weather Service
 Aggregates data from 4 external APIs: Open-Meteo (current conditions), AviationWeather.gov (METAR, TFRs), aviationapi.com (NOTAMs fallback), and NWS (weather alerts). Location configurable from Settings.
@@ -438,6 +513,21 @@ Full interactive API documentation is available at `http://localhost:3080/docs` 
 | POST | `/api/missions/{id}/map/render` | Generate static map PNG |
 | GET/POST/PUT/DELETE | `/api/customers` | Customer CRUD |
 | GET/POST/PUT/DELETE | `/api/aircraft` | Aircraft CRUD |
+| GET | `/api/flight-library` | List all flights in the library |
+| GET | `/api/flight-library/{id}` | Flight detail with GPS track and telemetry |
+| GET | `/api/flight-library/{id}/track` | Raw GPS track points |
+| GET | `/api/flight-library/{id}/telemetry` | Downsampled telemetry time-series |
+| GET | `/api/flight-library/{id}/export/{format}` | Export flight as GPX, KML, or CSV |
+| POST | `/api/flight-library/upload` | Upload flight log files (batched) |
+| POST | `/api/flight-library/device-upload` | Device-authenticated log upload |
+| POST | `/api/flight-library/manual` | Create a manual flight entry |
+| POST | `/api/flight-library/reprocess/all` | Re-parse stored flight logs |
+| GET | `/api/flight-library/airspace/aircraft` | Live aircraft positions (OpenSky proxy) |
+| GET/POST/PUT/DELETE | `/api/batteries` | Battery CRUD |
+| GET/POST/PUT/DELETE | `/api/maintenance` | Maintenance record CRUD |
+| GET/POST | `/api/device-keys` | Device API key management |
+| POST | `/api/backup/validate-upload` | Validate a backup file |
+| POST | `/api/backup/restore-from-upload` | Restore database from backup |
 | GET | `/api/flights` | List flights from OpenDroneLog |
 | GET | `/api/financials/summary` | Financial dashboard data |
 | GET | `/api/weather/current` | Weather, METAR, TFRs, NOTAMs, NWS alerts |
@@ -453,11 +543,12 @@ Full interactive API documentation is available at `http://localhost:3080/docs` 
 
 ## Roadmap
 
-- **Voice-to-Text** — On-device speech recognition in the DroneOpsSync Android companion app for dictating operator field notes hands-free during or after missions.
+- **Voice-to-Text** — On-device speech recognition in the DroneOpsSync Android companion app for dictating operator field notes hands-free during or after missions
 - **Report Templates** — Multiple PDF templates for different mission types
 - **Claude API Integration** — Replace local Ollama/Mistral 7B with Claude API for faster, higher-quality report generation
-- **Detailed Flight Visualization** — Altitude-colored paths, telemetry timeline, and flight replay for post-mission analysis
+- **Flight Replay** — Animated playback of GPS flight paths with altitude-colored trails
 - **Live Flight Tracking** — WebSocket integration for real-time drone position
+- **Multi-User Roles** — Operator, admin, and client role-based access control
 
 ---
 

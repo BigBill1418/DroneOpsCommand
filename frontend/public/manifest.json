@@ -1,12 +1,13 @@
 {
   "name": "D.O.C — Drone Operations Command",
   "short_name": "DroneOps",
-  "description": "Mission management, flight data, and reporting for drone operations",
+  "description": "Self-hosted mission management, flight log analysis, AI report generation, invoicing, and real-time airspace monitoring for commercial drone operators.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#050608",
   "theme_color": "#050608",
   "orientation": "any",
+  "categories": ["business", "productivity", "utilities"],
   "icons": [
     {"src": "/logo.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any"},
     {"src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable"},
