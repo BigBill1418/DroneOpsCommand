@@ -1,13 +1,22 @@
-"""Seed database with default aircraft profiles and admin user."""
+"""Seed database with default aircraft profiles and admin user.
+
+v2.43.0: Simplified admin user seed. The seed will ONLY create the admin
+user on first boot. It will NEVER modify an existing user's password.
+To reset a password, use: docker compose exec backend python reset_admin.py
+"""
+
+import logging
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.jwt import hash_password, is_password_compliant
+from app.auth.jwt import hash_password, verify_password
 from app.config import settings
 from app.models.aircraft import Aircraft
 from app.models.invoice import RateTemplate, LineItemCategory
 from app.models.user import User
+
+_seed_log = logging.getLogger("doc.seed")
 
 AIRCRAFT_SEED = [
     {
@@ -114,101 +123,50 @@ AIRCRAFT_SEED = [
 
 
 async def seed_database(db: AsyncSession):
-    """Seed the database with initial data."""
+    """Seed the database with initial data.
 
-    # Seed admin user.
-    # v2.38.9: Uses direct bcrypt (passlib removed). RESET_ADMIN_PASSWORD defaults
-    # to False so container restarts NEVER overwrite a user-changed password.
-    # Only set RESET_ADMIN_PASSWORD=true for one-time recovery, then remove it.
-    import logging
-    _seed_log = logging.getLogger("doc.seed")
+    Admin user policy (v2.43.0):
+    - First boot: create admin user with ADMIN_PASSWORD from env
+    - Every subsequent boot: DO NOTHING to the admin user
+    - To reset: use reset_admin.py script manually
+    """
 
-    from app.auth.jwt import verify_password as _verify
-
-    _seed_log.info(
-        "Seed startup: admin_username=%s, reset_admin_password=%s",
-        settings.admin_username,
-        settings.reset_admin_password,
-    )
-
+    # ── Admin user ─────────────────────────────────────────────────
     result = await db.execute(select(User).where(User.username == settings.admin_username))
     existing_admin = result.scalar_one_or_none()
+
     if existing_admin:
-        if settings.reset_admin_password:
-            # Use the ADMIN_PASSWORD from environment (not a hardcoded temp password)
-            reset_pw = settings.admin_password
-            new_hash = hash_password(reset_pw)
-            roundtrip_ok = _verify(reset_pw, new_hash)
-            _seed_log.warning(
-                "RESET_ADMIN_PASSWORD=true — resetting admin password to ADMIN_PASSWORD env var "
-                "(hash_prefix=%s, roundtrip=%s). "
-                "Remove RESET_ADMIN_PASSWORD from env after recovery!",
-                new_hash[:7],
-                roundtrip_ok,
-            )
-            if not roundtrip_ok:
-                _seed_log.critical(
-                    "BCRYPT ROUNDTRIP FAILED — password hash cannot be verified! "
-                    "Login will always fail. Check bcrypt package version."
-                )
-            existing_admin.hashed_password = new_hash
-            existing_admin.password_compliant = is_password_compliant(reset_pw)
-        else:
-            # Verify the existing hash is a valid bcrypt hash that can be checked
-            _hash = existing_admin.hashed_password or ""
-            _hash_valid = _hash.startswith("$2b$") and len(_hash) == 60
-            _seed_log.info(
-                "Admin user '%s' exists — password PRESERVED (not overwritten). "
-                "hash_valid=%s, hash_prefix=%s, hash_len=%d. "
-                "Set RESET_ADMIN_PASSWORD=true to force-reset.",
-                existing_admin.username,
-                _hash_valid,
-                _hash[:7] if _hash else "EMPTY",
-                len(_hash),
-            )
-            if not _hash_valid:
-                _seed_log.critical(
-                    "ADMIN PASSWORD HASH IS INVALID OR CORRUPT (prefix=%s, len=%d). "
-                    "Login will fail! Set RESET_ADMIN_PASSWORD=true to fix.",
-                    _hash[:10] if _hash else "EMPTY",
-                    len(_hash),
-                )
-    else:
-        compliant = is_password_compliant(settings.admin_password)
-        new_hash = hash_password(settings.admin_password)
-        roundtrip_ok = _verify(settings.admin_password, new_hash)
+        # Admin exists — never touch their password
+        _hash = existing_admin.hashed_password or ""
+        _hash_ok = _hash.startswith("$2b$") and len(_hash) == 60
         _seed_log.info(
-            "Creating admin user '%s' (compliant=%s, roundtrip=%s)",
-            settings.admin_username,
-            compliant,
-            roundtrip_ok,
+            "Admin '%s' exists — password untouched (hash_valid=%s, prefix=%s, len=%d)",
+            existing_admin.username, _hash_ok, _hash[:7] if _hash else "EMPTY", len(_hash),
         )
+        if not _hash_ok:
+            _seed_log.critical(
+                "Admin password hash is invalid (prefix=%s, len=%d). "
+                "Run: docker compose exec backend python reset_admin.py",
+                _hash[:10] if _hash else "EMPTY", len(_hash),
+            )
+    else:
+        # First boot — create admin user
+        new_hash = hash_password(settings.admin_password)
+        roundtrip_ok = verify_password(settings.admin_password, new_hash)
+        _seed_log.info(
+            "Creating admin user '%s' (roundtrip=%s)",
+            settings.admin_username, roundtrip_ok,
+        )
+        if not roundtrip_ok:
+            _seed_log.critical("BCRYPT ROUNDTRIP FAILED on new admin — login will fail!")
         admin = User(
             username=settings.admin_username,
             hashed_password=new_hash,
-            password_compliant=compliant,
         )
         db.add(admin)
+        await db.flush()
 
-    # Flush and verify admin password can be read back from DB
-    await db.flush()
-    verify_result = await db.execute(select(User).where(User.username == settings.admin_username))
-    verify_admin = verify_result.scalar_one_or_none()
-    if verify_admin:
-        db_hash = verify_admin.hashed_password or ""
-        db_roundtrip = _verify(settings.admin_password, db_hash) if settings.reset_admin_password or not existing_admin else None
-        _seed_log.info(
-            "POST-SEED VERIFY: admin='%s', hash_prefix=%s, hash_len=%d, "
-            "db_roundtrip=%s",
-            verify_admin.username,
-            db_hash[:7] if db_hash else "EMPTY",
-            len(db_hash),
-            db_roundtrip,
-        )
-    else:
-        _seed_log.critical("POST-SEED VERIFY FAILED: admin user not found after seed!")
-
-    # Seed rate templates
+    # ── Rate templates ─────────────────────────────────────────────
     rate_templates = [
         {
             "name": "Standard Hourly Rate",
@@ -289,10 +247,10 @@ async def seed_database(db: AsyncSession):
             select(RateTemplate).where(RateTemplate.name == tmpl_data["name"])
         )
         existing = result.scalar_one_or_none()
-        # Skip if it exists (active or soft-deleted — don't resurrect deleted templates)
         if not existing:
             db.add(RateTemplate(**tmpl_data))
 
+    # ── Aircraft ───────────────────────────────────────────────────
     # Migrate: rename Mini 4 Pro -> Mini 5 Pro with updated specs
     result = await db.execute(
         select(Aircraft).where(Aircraft.model_name == "DJI Mini 4 Pro")
@@ -304,7 +262,6 @@ async def seed_database(db: AsyncSession):
         old_mini.image_filename = mini5_data["image_filename"]
         old_mini.specs = mini5_data["specs"]
 
-    # Seed aircraft (upsert specs to keep them current)
     for aircraft_data in AIRCRAFT_SEED:
         result = await db.execute(
             select(Aircraft).where(Aircraft.model_name == aircraft_data["model_name"])
@@ -312,8 +269,6 @@ async def seed_database(db: AsyncSession):
         existing = result.scalar_one_or_none()
         if existing:
             existing.specs = aircraft_data["specs"]
-            # Only set default image if user hasn't uploaded a custom one
-            # Custom uploads go to "aircraft/{id}/..." while defaults are "dji_*.svg"
             if "image_filename" in aircraft_data:
                 has_custom_upload = (
                     existing.image_filename

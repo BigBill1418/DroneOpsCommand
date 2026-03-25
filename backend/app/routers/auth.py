@@ -1,7 +1,8 @@
 """Authentication router — login, account management, token refresh.
 
-v2.38.6: Rebuilt with direct bcrypt (passlib removed), full logging,
-and emergency recovery endpoint.
+v2.43.0: Rebuilt auth system. Password is set ONCE at first boot via seed.
+Seed NEVER modifies existing passwords. To reset, use reset_admin.py.
+RESET_ADMIN_PASSWORD env var removed entirely.
 """
 
 import logging
@@ -38,11 +39,6 @@ class AccountUpdateRequest(BaseModel):
     current_password: str
     new_username: str | None = None
     new_password: str | None = None
-
-
-class ForceResetRequest(BaseModel):
-    current_password: str
-    new_password: str
 
 
 # ── Login lockout: 5 failed attempts in 120s → locked for 2 minutes ──
@@ -136,7 +132,6 @@ async def login(request: Request, body: LoginRequest, db: AsyncSession = Depends
         "access_token": create_access_token({"sub": user.username}),
         "refresh_token": create_refresh_token({"sub": user.username}),
         "token_type": "bearer",
-        "password_compliant": True,
     }
 
 
@@ -148,7 +143,6 @@ async def get_account(user: User = Depends(get_current_user)):
     """Get current account info."""
     return {
         "username": user.username,
-        "password_compliant": user.password_compliant,
     }
 
 
@@ -180,7 +174,6 @@ async def update_account(
                 detail=f"Password does not meet complexity requirements: {'; '.join(failures)}",
             )
         user.hashed_password = hash_password(body.new_password)
-        user.password_compliant = True
         logger.info("Password changed for user '%s'", user.username)
 
     await db.flush()
@@ -188,38 +181,6 @@ async def update_account(
     return {
         "status": "ok",
         "username": user.username,
-        "password_compliant": user.password_compliant,
-        "access_token": create_access_token({"sub": user.username}),
-        "refresh_token": create_refresh_token({"sub": user.username}),
-    }
-
-
-@router.post("/force-reset")
-async def force_password_reset(
-    body: ForceResetRequest,
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """Force password reset for users with non-compliant passwords."""
-    if not verify_password(body.current_password, user.hashed_password):
-        raise HTTPException(status_code=403, detail="Current password is incorrect")
-
-    failures = check_password_complexity(body.new_password)
-    if failures:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Password does not meet complexity requirements: {'; '.join(failures)}",
-        )
-
-    user.hashed_password = hash_password(body.new_password)
-    user.password_compliant = True
-    await db.flush()
-    logger.info("Force password reset completed for user '%s'", user.username)
-
-    return {
-        "status": "ok",
-        "username": user.username,
-        "password_compliant": True,
         "access_token": create_access_token({"sub": user.username}),
         "refresh_token": create_refresh_token({"sub": user.username}),
     }
@@ -295,13 +256,11 @@ async def auth_diagnostics(db: AsyncSession = Depends(get_db)):
             diag["admin_hash_prefix"] = admin.hashed_password[:7] if admin.hashed_password else "EMPTY"
             diag["admin_hash_length"] = len(admin.hashed_password) if admin.hashed_password else 0
             diag["admin_is_active"] = admin.is_active
-            diag["admin_password_compliant"] = admin.password_compliant
             # Check if the env ADMIN_PASSWORD matches the DB hash
             # (tells you if the password was changed via UI vs what env expects)
             diag["env_password_matches_db"] = verify_password(
                 settings.admin_password, admin.hashed_password
             ) if admin.hashed_password else False
-            diag["reset_admin_password_flag"] = settings.reset_admin_password
     except Exception as exc:
         diag["db_error"] = str(exc)
 
