@@ -110,9 +110,7 @@ def _add_missing_columns(conn):
             "maintenance_records": [
                 ("images", "ALTER TABLE maintenance_records ADD COLUMN images JSONB DEFAULT '[]'"),
             ],
-            "users": [
-                ("password_compliant", "ALTER TABLE users ADD COLUMN password_compliant BOOLEAN DEFAULT FALSE"),
-            ],
+            # password_compliant column removed from model in v2.43.0 — column left in DB (harmless)
         }
 
         # Make opendronelog_flight_id nullable for existing tables (new flights use flight_id)
@@ -196,7 +194,7 @@ logger.info("MultiPartParser max_file_size set to 200 MB")
 app = FastAPI(
     title="D.O.C — Drone Operations Command",
     description="Self-hosted mission management, flight log analysis, AI report generation, invoicing, telemetry visualization, and real-time airspace monitoring for commercial drone operators.",
-    version="2.42.5",
+    version="2.43.0",
     lifespan=lifespan,
 )
 

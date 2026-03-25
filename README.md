@@ -2,7 +2,7 @@
 
 **Self-hosted mission management, flight log analysis, AI report generation, invoicing, and real-time airspace monitoring for commercial drone operators.**
 
-**Version 2.42.5** | [Quick Start](#quick-start) | [Features](#features) | [Configuration](#configuration) | [Contributing](CONTRIBUTING.md) | [License](LICENSE)
+**Version 2.43.0** | [Quick Start](#quick-start) | [Features](#features) | [Configuration](#configuration) | [Contributing](CONTRIBUTING.md) | [License](LICENSE)
 
 ---
 
@@ -13,7 +13,7 @@ Designed for FAA Part 107 certified operators running missions such as search & 
 ### Why DroneOpsCommand?
 
 - **100% self-hosted** — runs on your own hardware via Docker Compose. No cloud dependencies, no per-seat licensing, no subscription fees.
-- **AI stays local** — report generation uses Ollama (Mistral 7B) so client data never leaves your network.
+- **AI stays local** — report generation uses Ollama (Llama 3.1 8B) so client data never leaves your network.
 - **White-label ready** — company name, tagline, and branding are fully configurable from the Settings UI. No code changes needed to make it yours.
 - **Full lifecycle** — flight log upload, GPS path visualization, telemetry analysis, mission management, AI reports, PDF export, invoicing, and email delivery in one platform.
 - **Real-time airspace** — live aircraft tracking via OpenSky Network with anonymous or authenticated access.
