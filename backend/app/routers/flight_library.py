@@ -3,7 +3,9 @@
 import hashlib
 import json
 import logging
+import math
 import os
+import time
 import traceback
 from collections import Counter, defaultdict
 from datetime import datetime as _dt
@@ -24,6 +26,7 @@ from app.models.aircraft import Aircraft
 from app.models.battery import Battery, BatteryLog
 from app.models.device_api_key import DeviceApiKey
 from app.models.flight import Flight
+from app.models.system_settings import SystemSetting
 from app.models.user import User
 from app.schemas.flight import (
     FlightCreate, FlightDetailResponse, FlightResponse, FlightUpdate, FlightUploadResponse,
@@ -902,6 +905,144 @@ async def reprocess_flights(
     logger.info("Reprocess complete: %d updated, %d imported, %d skipped, %d errors",
                 updated_count, imported_count, skipped, len(errors))
     return {"updated": updated_count, "imported": imported_count, "skipped": skipped, "errors": errors}
+
+
+# ── Airspace — OpenSky proxy ─────────────────────────────────────────
+_opensky_token_cache: dict = {"token": None, "expires_at": 0.0}
+
+
+async def _get_opensky_token(client_id: str, client_secret: str) -> str | None:
+    """Obtain (or reuse cached) OAuth2 token from OpenSky Network."""
+    now = time.time()
+    if _opensky_token_cache["token"] and now < _opensky_token_cache["expires_at"] - 30:
+        return _opensky_token_cache["token"]
+
+    token_url = (
+        "https://auth.opensky-network.org/auth/realms/opensky-network"
+        "/protocol/openid-connect/token"
+    )
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            logger.info("OpenSky: requesting OAuth2 token for client_id=%s", client_id)
+            resp = await client.post(
+                token_url,
+                data={
+                    "grant_type": "client_credentials",
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            _opensky_token_cache["token"] = data["access_token"]
+            _opensky_token_cache["expires_at"] = now + data.get("expires_in", 300)
+            logger.info("OpenSky: OAuth2 token acquired, expires_in=%s", data.get("expires_in"))
+            return _opensky_token_cache["token"]
+    except Exception as exc:
+        logger.warning("OpenSky: OAuth2 token request failed: %s", exc)
+        _opensky_token_cache["token"] = None
+        _opensky_token_cache["expires_at"] = 0.0
+        return None
+
+
+@router.get("/airspace/aircraft")
+async def get_airspace_aircraft(
+    lat: float = Query(..., description="Center latitude"),
+    lon: float = Query(..., description="Center longitude"),
+    radius_nm: float = Query(25, description="Radius in nautical miles"),
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """Proxy to OpenSky Network API — returns nearby aircraft positions."""
+    authenticated = False
+
+    # 1. Read OpenSky credentials from SystemSetting
+    client_id = None
+    client_secret = None
+    try:
+        row_id = await db.execute(
+            select(SystemSetting.value).where(SystemSetting.key == "opensky_client_id")
+        )
+        row_secret = await db.execute(
+            select(SystemSetting.value).where(SystemSetting.key == "opensky_client_secret")
+        )
+        client_id = row_id.scalar_one_or_none()
+        client_secret = row_secret.scalar_one_or_none()
+    except Exception as exc:
+        logger.warning("OpenSky: failed to read credentials from DB: %s", exc)
+
+    # 2. Get OAuth2 token if credentials exist
+    token = None
+    if client_id and client_secret:
+        token = await _get_opensky_token(client_id, client_secret)
+        if token:
+            authenticated = True
+
+    # 3. Convert radius to bounding box
+    lat_delta = radius_nm / 60.0
+    lon_delta = radius_nm / (60.0 * math.cos(math.radians(lat)))
+    lamin = lat - lat_delta
+    lamax = lat + lat_delta
+    lomin = lon - lon_delta
+    lomax = lon + lon_delta
+
+    # 4. Call OpenSky REST API
+    api_url = "https://opensky-network.org/api/states/all"
+    params = {
+        "lamin": round(lamin, 4),
+        "lomin": round(lomin, 4),
+        "lamax": round(lamax, 4),
+        "lomax": round(lomax, 4),
+    }
+    headers = {}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            logger.info(
+                "OpenSky: querying states/all lat=%.4f lon=%.4f radius=%.1fnm authenticated=%s",
+                lat, lon, radius_nm, authenticated,
+            )
+            resp = await client.get(api_url, params=params, headers=headers)
+            resp.raise_for_status()
+            data = resp.json()
+    except httpx.HTTPStatusError as exc:
+        logger.error("OpenSky: API returned HTTP %s: %s", exc.response.status_code, exc.response.text[:200])
+        return {"aircraft": [], "timestamp": int(time.time()), "count": 0, "authenticated": authenticated,
+                "error": f"OpenSky API error: HTTP {exc.response.status_code}"}
+    except Exception as exc:
+        logger.error("OpenSky: API request failed: %s", exc)
+        return {"aircraft": [], "timestamp": int(time.time()), "count": 0, "authenticated": authenticated,
+                "error": f"OpenSky API request failed: {exc}"}
+
+    # 5. Transform response
+    states = data.get("states") or []
+    aircraft_list = []
+    for s in states:
+        if len(s) < 17:
+            continue
+        aircraft_list.append({
+            "icao24": s[0],
+            "callsign": (s[1] or "").strip(),
+            "origin_country": s[2],
+            "lat": s[6],
+            "lon": s[5],
+            "alt_ft": round(s[7] * 3.28084) if s[7] is not None else None,
+            "heading": s[10],
+            "speed_kts": round(s[9] * 1.94384) if s[9] is not None else None,
+            "vertical_rate_fpm": round(s[11] * 196.85) if s[11] is not None else None,
+            "on_ground": s[8],
+            "squawk": s[14],
+        })
+
+    logger.info("OpenSky: returned %d aircraft", len(aircraft_list))
+    return {
+        "aircraft": aircraft_list,
+        "timestamp": data.get("time", int(time.time())),
+        "count": len(aircraft_list),
+        "authenticated": authenticated,
+    }
 
 
 # ── Get flight detail ─────────────────────────────────────────────────

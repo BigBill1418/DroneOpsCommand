@@ -18,6 +18,7 @@ import Settings from './pages/Settings';
 import CustomerIntake from './pages/CustomerIntake';
 import UploadLogs from './pages/UploadLogs';
 import Telemetry from './pages/Telemetry';
+import Airspace from './pages/Airspace';
 
 export default function App() {
   const { isAuthenticated, loading, login, logout, passwordCompliant, markPasswordCompliant } = useAuth();
@@ -53,6 +54,7 @@ export default function App() {
                 <Route path="/maintenance" element={<Maintenance />} />
                 <Route path="/financials" element={<Financials />} />
                 <Route path="/telemetry" element={<Telemetry />} />
+                <Route path="/airspace" element={<Airspace />} />
                 <Route path="/upload-logs" element={<UploadLogs />} />
                 <Route path="/settings" element={<Settings />} />
                 <Route path="*" element={<Navigate to="/" />} />
