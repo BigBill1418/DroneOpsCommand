@@ -22,7 +22,7 @@ import {
 } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
-import { IconCheck, IconX, IconPlus, IconEdit, IconTrash, IconCurrencyDollar, IconMail, IconSend, IconBrandPaypal, IconCash, IconDrone, IconPlugConnected, IconMapPin, IconSearch, IconSignature, IconUpload, IconSettings, IconReceipt, IconPlane, IconPalette, IconWorldWww, IconKey, IconUser, IconLock, IconDatabaseExport, IconDatabaseImport, IconShieldCheck, IconDownload, IconAlertTriangle, IconPhoto } from '@tabler/icons-react';
+import { IconCheck, IconX, IconPlus, IconEdit, IconTrash, IconCurrencyDollar, IconMail, IconSend, IconBrandPaypal, IconCash, IconDrone, IconPlugConnected, IconMapPin, IconSearch, IconSignature, IconUpload, IconSettings, IconReceipt, IconPlane, IconPalette, IconWorldWww, IconKey, IconUser, IconLock, IconDatabaseExport, IconDatabaseImport, IconShieldCheck, IconDownload, IconAlertTriangle, IconPhoto, IconRadar2 } from '@tabler/icons-react';
 import api from '../api/client';
 import { Aircraft, RateTemplate } from '../api/types';
 import { inputStyles, cardStyle } from '../components/shared/styles';
@@ -73,6 +73,9 @@ export default function Settings() {
     status: string; message?: string; parser_online?: boolean;
     dji_api_reachable?: boolean; key_source?: string;
   } | null>(null);
+  const [openskySaving, setOpenskySaving] = useState(false);
+  const [openskyTesting, setOpenskyTesting] = useState(false);
+  const [openskyStatus, setOpenskyStatus] = useState<{ status: string; message?: string } | null>(null);
   const [purgeConfirmOpen, setPurgeConfirmOpen] = useState(false);
   const [purgeChecked, setPurgeChecked] = useState(false);
   const [purging, setPurging] = useState(false);
@@ -127,6 +130,10 @@ export default function Settings() {
     initialValues: { dji_api_key: '' },
   });
 
+  const openskyForm = useForm({
+    initialValues: { opensky_client_id: '', opensky_client_secret: '' },
+  });
+
   const accountForm = useForm({
     initialValues: { current_password: '', new_username: '', new_password: '', confirm_password: '' },
     validate: {
@@ -158,6 +165,7 @@ export default function Settings() {
     api.get('/settings/payment').then((r) => paymentForm.setValues(r.data)).catch(() => {});
     api.get('/settings/opendronelog').then((r) => odlForm.setValues(r.data)).catch(() => {});
     api.get('/settings/dji').then((r) => djiForm.setValues(r.data)).catch(() => {});
+    api.get('/settings/opensky').then((r) => openskyForm.setValues(r.data)).catch(() => {});
     api.get('/flight-library/reprocess/status').then((r) => setReprocessStatus(r.data)).catch(() => {});
     api.get('/auth/account').then((r) => { setCurrentUsername(r.data.username); accountForm.setFieldValue('new_username', r.data.username); }).catch(() => {});
     api.get('/settings/weather').then((r) => weatherForm.setValues(r.data)).catch(() => {});
@@ -446,6 +454,33 @@ export default function Settings() {
       notifications.show({ title: 'Error', message: 'Failed to save DJI API key', color: 'red' });
     } finally {
       setDjiSaving(false);
+    }
+  };
+
+  const handleSaveOpenSky = async (values: typeof openskyForm.values) => {
+    setOpenskySaving(true);
+    try {
+      await api.put('/settings/opensky', values);
+      notifications.show({ title: 'Saved', message: 'OpenSky credentials updated', color: 'cyan' });
+      const r = await api.get('/settings/opensky');
+      openskyForm.setValues(r.data);
+    } catch {
+      notifications.show({ title: 'Error', message: 'Failed to save OpenSky credentials', color: 'red' });
+    } finally {
+      setOpenskySaving(false);
+    }
+  };
+
+  const handleTestOpenSky = async () => {
+    setOpenskyTesting(true);
+    try {
+      const r = await api.post('/settings/opensky/test');
+      setOpenskyStatus(r.data);
+    } catch (err: unknown) {
+      const axiosErr = err as { response?: { data?: { detail?: string } } };
+      setOpenskyStatus({ status: 'error', message: axiosErr.response?.data?.detail || 'Test failed' });
+    } finally {
+      setOpenskyTesting(false);
     }
   };
 
@@ -1297,6 +1332,58 @@ export default function Settings() {
                         )}
                       </Group>
                     </Stack>
+                  )}
+                </Stack>
+              </form>
+            </Card>
+
+            {/* OpenSky Network */}
+            <Card padding="lg" radius="md" style={cardStyle}>
+              <Group gap="sm" mb="md">
+                <IconRadar2 size={20} color="#00d4ff" />
+                <Title order={3} c="#e8edf2" style={{ letterSpacing: '1px' }}>OPENSKY NETWORK</Title>
+              </Group>
+              <Text c="#5a6478" size="xs" mb="sm" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+                Real-time air traffic data for Airspace Awareness. Free account at opensky-network.org.
+                Works without credentials (anonymous) but authenticated gets better rate limits.
+              </Text>
+              <form onSubmit={openskyForm.onSubmit(handleSaveOpenSky)}>
+                <Stack gap="sm">
+                  <TextInput
+                    label="CLIENT ID"
+                    placeholder="your-client-id"
+                    {...openskyForm.getInputProps('opensky_client_id')}
+                    styles={inputStyles}
+                  />
+                  <TextInput
+                    label="CLIENT SECRET"
+                    placeholder="your-client-secret"
+                    {...openskyForm.getInputProps('opensky_client_secret')}
+                    styles={inputStyles}
+                  />
+                  <Group gap="sm">
+                    <Button type="submit" color="cyan" loading={openskySaving} styles={{ root: { fontFamily: "'Bebas Neue', sans-serif" } }}>
+                      SAVE
+                    </Button>
+                    <Button
+                      variant="light"
+                      color="cyan"
+                      loading={openskyTesting}
+                      onClick={handleTestOpenSky}
+                      styles={{ root: { fontFamily: "'Bebas Neue', sans-serif" } }}
+                    >
+                      TEST CONNECTION
+                    </Button>
+                  </Group>
+                  {openskyStatus && (
+                    <Badge
+                      color={openskyStatus.status === 'ok' ? 'green' : 'red'}
+                      variant="light"
+                      size="lg"
+                      style={{ fontFamily: "'Share Tech Mono', monospace" }}
+                    >
+                      {openskyStatus.message || openskyStatus.status}
+                    </Badge>
                   )}
                 </Stack>
               </form>
