@@ -44,7 +44,6 @@ import {
   IconCheck,
   IconCopy,
   IconMail,
-  IconCloudUpload,
   IconRefresh,
   IconGauge,
   IconDroplet,
@@ -348,16 +347,6 @@ export default function Dashboard() {
             styles={{ root: { ...bebasFont, letterSpacing: '1px' } }}
           >
             NEW MISSION
-          </Button>
-          <Button
-            leftSection={<IconCloudUpload size={16} />}
-            color="cyan"
-            variant="outline"
-            size="sm"
-            onClick={() => navigate('/upload-logs')}
-            styles={{ root: { ...bebasFont, letterSpacing: '1px' } }}
-          >
-            UPLOAD LOGS
           </Button>
         </Group>
       </Group>
