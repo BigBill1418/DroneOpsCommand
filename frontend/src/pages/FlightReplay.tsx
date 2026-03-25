@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
+  Button,
   Card,
   Group,
   Stack,
@@ -28,11 +29,13 @@ import {
   IconMapPin,
   IconRuler,
   IconChevronRight,
+  IconVideo,
 } from '@tabler/icons-react';
 import { MapContainer, TileLayer, Polyline, CircleMarker, Circle, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import api from '../api/client';
+import FlightVideoExporter from '../components/FlightVideoExporter';
 import { cardStyle, monoFont } from '../components/shared/styles';
 
 const heading = { fontFamily: "'Bebas Neue', sans-serif" };
@@ -137,6 +140,7 @@ export default function FlightReplay() {
   const [currentIdx, setCurrentIdx] = useState(0);
   const [speed, setSpeed] = useState(1);
   const [followDrone, setFollowDrone] = useState(true);
+  const [exportOpen, setExportOpen] = useState(false);
   const animRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Fetch flight data
@@ -298,6 +302,16 @@ export default function FlightReplay() {
           </Title>
         </Group>
         <Group gap="xs">
+          <Button
+            leftSection={<IconVideo size={16} />}
+            color="cyan"
+            variant="light"
+            size="xs"
+            onClick={() => { setPlaying(false); setExportOpen(true); }}
+            styles={{ root: { ...heading, letterSpacing: '1px' } }}
+          >
+            EXPORT VIDEO
+          </Button>
           <Badge color="cyan" variant="light" size="sm" style={monoFont}>
             {flight.drone_name || flight.drone_model || 'Unknown'}
           </Badge>
@@ -306,6 +320,15 @@ export default function FlightReplay() {
           </Badge>
         </Group>
       </Group>
+
+      {/* Video export modal */}
+      <FlightVideoExporter
+        opened={exportOpen}
+        onClose={() => setExportOpen(false)}
+        flight={flight}
+        track={track}
+        timeOffsets={timeOffsets}
+      />
 
       {/* Flight name */}
       <Text c="#5a6478" size="xs" style={monoFont} lineClamp={1}>
