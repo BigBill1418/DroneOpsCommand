@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useRef, useState, useCallback } from 'react';
 import {
   Badge,
   Button,
@@ -52,16 +52,49 @@ const statusMeta: Record<FileStatus, { color: string; label: string }> = {
   error:     { color: 'red',    label: 'Error' },
 };
 
+// Recursively extract files from DataTransferItem directory entries
+async function extractFilesFromEntries(items: DataTransferItemList): Promise<File[]> {
+  const files: File[] = [];
+
+  async function readEntry(entry: FileSystemEntry): Promise<void> {
+    if (entry.isFile) {
+      const file = await new Promise<File>((resolve, reject) => {
+        (entry as FileSystemFileEntry).file(resolve, reject);
+      });
+      files.push(file);
+    } else if (entry.isDirectory) {
+      const reader = (entry as FileSystemDirectoryEntry).createReader();
+      const entries = await new Promise<FileSystemEntry[]>((resolve, reject) => {
+        reader.readEntries(resolve, reject);
+      });
+      for (const e of entries) {
+        await readEntry(e);
+      }
+    }
+  }
+
+  const entries: FileSystemEntry[] = [];
+  for (let i = 0; i < items.length; i++) {
+    const entry = items[i].webkitGetAsEntry?.();
+    if (entry) entries.push(entry);
+  }
+  for (const entry of entries) {
+    await readEntry(entry);
+  }
+  return files;
+}
+
 export default function UploadLogs() {
   const [queue, setQueue]       = useState<QueueEntry[]>([]);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [dragOver, setDragOver] = useState(false);
 
   const fileRef   = useRef<HTMLInputElement>(null);
   const folderRef = useRef<HTMLInputElement>(null);
 
   // ── File intake ─────────────────────────────────────────────────────────
-  function addFiles(raw: FileList | null) {
+  const addFiles = useCallback((raw: File[] | FileList | null) => {
     if (!raw) return;
     const incoming = Array.from(raw).filter(f => VALID_EXTS.has(ext(f.name)));
     const toAdd: QueueEntry[] = [];
@@ -74,7 +107,43 @@ export default function UploadLogs() {
       return;
     }
     setQueue(prev => [...prev, ...toAdd]);
-  }
+  }, [queue]);
+
+  // ── Drag and drop handlers ────────────────────────────────────────────
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(true);
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(false);
+  }, []);
+
+  const handleDrop = useCallback(async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(false);
+
+    if (uploading) return;
+
+    // Try to extract entries (supports folders)
+    if (e.dataTransfer.items?.length) {
+      const hasDirectories = Array.from(e.dataTransfer.items).some(
+        item => item.webkitGetAsEntry?.()?.isDirectory
+      );
+      if (hasDirectories) {
+        const files = await extractFilesFromEntries(e.dataTransfer.items);
+        addFiles(files);
+        return;
+      }
+    }
+
+    // Fallback: plain file list
+    addFiles(e.dataTransfer.files);
+  }, [uploading, addFiles]);
 
   function remove(id: number) {
     setQueue(prev => prev.filter(q => q.id !== id));
@@ -161,28 +230,65 @@ export default function UploadLogs() {
         </div>
       </Group>
 
-      {/* ── Picker card ── */}
-      <Card style={cardStyle} p="lg">
-        <Text size="xs" c="#5a6478" style={{ ...monoFont, letterSpacing: 1, marginBottom: 12 }}>
-          SELECT FILES
-        </Text>
-        <Group gap="sm" wrap="wrap">
-          {/* Individual files */}
+      {/* ── Drop zone + picker card ── */}
+      <Card
+        style={{
+          ...cardStyle,
+          border: dragOver ? '2px dashed #00d4ff' : '1px solid #1a1f2e',
+          background: dragOver ? 'rgba(0, 212, 255, 0.04)' : '#0e1117',
+          transition: 'border 0.15s, background 0.15s',
+        }}
+        p={0}
+        onDragOver={handleDragOver}
+        onDragEnter={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+      >
+        {/* Drop target area */}
+        <div
+          style={{
+            padding: '32px 24px',
+            textAlign: 'center',
+            cursor: uploading ? 'not-allowed' : 'pointer',
+          }}
+          onClick={() => !uploading && fileRef.current?.click()}
+        >
+          <IconCloudUpload
+            size={48}
+            color={dragOver ? '#00d4ff' : '#2a3040'}
+            style={{ marginBottom: 12, transition: 'color 0.15s' }}
+          />
+          <Text c={dragOver ? '#00d4ff' : '#e8edf2'} fw={700} size="lg" style={{ fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '2px' }}>
+            {dragOver ? 'DROP FILES HERE' : 'DRAG & DROP FLIGHT LOGS'}
+          </Text>
+          <Text c="#5a6478" size="xs" style={monoFont} mt={4}>
+            Drop files or folders here, or click to browse — accepts .txt, .csv, .dat, .log
+          </Text>
+        </div>
+
+        {/* Button row */}
+        <Group
+          gap="sm"
+          wrap="wrap"
+          px="lg"
+          pb="lg"
+          justify="center"
+          style={{ borderTop: '1px solid #1a1f2e', paddingTop: 16 }}
+        >
           <Button
             leftSection={<IconUpload size={16} />}
             variant="default"
             disabled={uploading}
-            onClick={() => fileRef.current?.click()}
+            onClick={(e) => { e.stopPropagation(); fileRef.current?.click(); }}
           >
             Add Files
           </Button>
 
-          {/* Entire folder — picks all matching files recursively */}
           <Button
             leftSection={<IconFolder size={16} />}
             variant="default"
             disabled={uploading}
-            onClick={() => folderRef.current?.click()}
+            onClick={(e) => { e.stopPropagation(); folderRef.current?.click(); }}
           >
             Add Folder
           </Button>
