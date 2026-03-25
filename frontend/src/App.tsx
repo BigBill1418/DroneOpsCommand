@@ -18,6 +18,7 @@ import CustomerIntake from './pages/CustomerIntake';
 import UploadLogs from './pages/UploadLogs';
 import Telemetry from './pages/Telemetry';
 import Airspace from './pages/Airspace';
+import FlightReplay from './pages/FlightReplay';
 
 export default function App() {
   const { isAuthenticated, loading, login, logout } = useAuth();
@@ -43,6 +44,7 @@ export default function App() {
               <Route element={<AppLayout onLogout={logout} />}>
                 <Route path="/" element={<Dashboard />} />
                 <Route path="/flights" element={<Flights />} />
+                <Route path="/flights/:id/replay" element={<FlightReplay />} />
                 <Route path="/missions" element={<Missions />} />
                 <Route path="/missions/new" element={<MissionNew />} />
                 <Route path="/missions/:id/edit" element={<MissionNew />} />
