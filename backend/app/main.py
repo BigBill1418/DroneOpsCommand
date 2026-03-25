@@ -190,13 +190,13 @@ limiter = Limiter(key_func=get_remote_address)
 
 # Raise Starlette's default multipart file-size limit (1 MB) so DJI flight logs,
 # mission images, and backup restores can upload without being silently rejected.
-MultiPartParser.max_file_size = 50 * 1024 * 1024  # 50 MB
-logger.info("MultiPartParser max_file_size set to 50 MB")
+MultiPartParser.max_file_size = 200 * 1024 * 1024  # 200 MB
+logger.info("MultiPartParser max_file_size set to 200 MB")
 
 app = FastAPI(
     title="D.O.C — Drone Operations Command",
     description="Mission management, flight data, and after-action reporting for drone operations",
-    version="2.41.1",
+    version="2.41.2",
     lifespan=lifespan,
 )
 

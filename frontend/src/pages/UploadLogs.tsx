@@ -159,59 +159,105 @@ export default function UploadLogs() {
     ));
   }
 
-  // ── Upload ───────────────────────────────────────────────────────────────
+  // ── Upload (batched to avoid 413 / timeout on large sets) ────────────────
+  const BATCH_MAX_BYTES = 40 * 1024 * 1024; // 40 MB per request
+
+  function buildBatches(files: QueueEntry[]): QueueEntry[][] {
+    const batches: QueueEntry[][] = [];
+    let current: QueueEntry[] = [];
+    let currentSize = 0;
+
+    for (const q of files) {
+      // Start a new batch if adding this file would exceed the limit
+      // (but always allow at least one file per batch)
+      if (current.length > 0 && currentSize + q.file.size > BATCH_MAX_BYTES) {
+        batches.push(current);
+        current = [];
+        currentSize = 0;
+      }
+      current.push(q);
+      currentSize += q.file.size;
+    }
+    if (current.length > 0) batches.push(current);
+    return batches;
+  }
+
   async function uploadAll() {
     const pending = queue.filter(q => q.status === 'pending');
     if (pending.length === 0) return;
 
     setUploading(true);
-    setProgress(10);
+    setProgress(5);
     setQueue(prev => prev.map(q =>
       q.status === 'pending' ? { ...q, status: 'uploading' } : q
     ));
 
-    try {
-      const form = new FormData();
-      pending.forEach(q => form.append('files', q.file, q.file.name));
+    const batches = buildBatches(pending);
+    let totalImported = 0;
+    let totalSkipped = 0;
+    let totalErrors: string[] = [];
+    const batchIdSets = batches.map(b => new Set(b.map(q => q.id)));
 
-      const resp = await api.post('/flight-library/upload', form);
-      const { imported = 0, skipped = 0, errors = [] }: {
-        imported: number; skipped: number; errors: string[];
-      } = resp.data;
+    for (let i = 0; i < batches.length; i++) {
+      const batch = batches[i];
+      const batchIds = batchIdSets[i];
 
-      setProgress(100);
+      try {
+        const form = new FormData();
+        batch.forEach(q => form.append('files', q.file, q.file.name));
 
-      setQueue(prev => prev.map(q => {
-        if (q.status !== 'uploading') return q;
-        if (errors.length > 0 && imported === 0) return { ...q, status: 'error',  note: errors[0] ?? 'Parse error' };
-        if (skipped > 0 && imported === 0)       return { ...q, status: 'skip',   note: '' };
-        return { ...q, status: 'done', note: '' };
-      }));
+        const resp = await api.post('/flight-library/upload', form, {
+          timeout: 120000, // 2 min per batch — flight logs can be large
+        });
+        const { imported = 0, skipped = 0, errors = [] }: {
+          imported: number; skipped: number; errors: string[];
+        } = resp.data;
 
-      const parts: string[] = [];
-      if (imported > 0)     parts.push(`${imported} imported`);
-      if (skipped  > 0)     parts.push(`${skipped} already on server`);
-      if (errors.length > 0) parts.push(`${errors.length} parse error(s)`);
+        totalImported += imported;
+        totalSkipped += skipped;
+        totalErrors = totalErrors.concat(errors);
 
-      notifications.show({
-        color:   errors.length > 0 && imported === 0 ? 'red' : 'cyan',
-        title:   'Upload complete',
-        message: parts.join(' · ') || 'No files processed',
-      });
-    } catch (err: any) {
-      const msg =
-        err?.response?.status === 401 ? 'Not authorised — please log in again' :
-        err?.response?.status === 404 ? 'Upload endpoint not found' :
-        err?.message ?? 'Upload failed';
+        // Mark this batch's files
+        setQueue(prev => prev.map(q => {
+          if (!batchIds.has(q.id) || q.status !== 'uploading') return q;
+          if (errors.length > 0 && imported === 0) return { ...q, status: 'error', note: errors[0] ?? 'Parse error' };
+          if (skipped > 0 && imported === 0)       return { ...q, status: 'skip', note: '' };
+          return { ...q, status: 'done', note: '' };
+        }));
+      } catch (err: any) {
+        const msg =
+          err?.response?.status === 401 ? 'Not authorised — please log in again' :
+          err?.response?.status === 404 ? 'Upload endpoint not found' :
+          err?.response?.status === 413 ? 'Files too large — try uploading fewer at once' :
+          err?.code === 'ECONNABORTED' ? 'Upload timed out — check connection' :
+          err?.message ?? 'Upload failed';
 
-      setQueue(prev => prev.map(q =>
-        q.status === 'uploading' ? { ...q, status: 'error', note: msg } : q
-      ));
-      notifications.show({ color: 'red', title: 'Upload failed', message: msg });
-    } finally {
-      setUploading(false);
-      setProgress(0);
+        setQueue(prev => prev.map(q =>
+          batchIds.has(q.id) && q.status === 'uploading'
+            ? { ...q, status: 'error', note: msg }
+            : q
+        ));
+        totalErrors.push(msg);
+      }
+
+      // Update progress across batches
+      setProgress(Math.round(((i + 1) / batches.length) * 100));
     }
+
+    // Summary notification
+    const parts: string[] = [];
+    if (totalImported > 0)     parts.push(`${totalImported} imported`);
+    if (totalSkipped > 0)      parts.push(`${totalSkipped} already on server`);
+    if (totalErrors.length > 0) parts.push(`${totalErrors.length} error(s)`);
+
+    notifications.show({
+      color:   totalErrors.length > 0 && totalImported === 0 ? 'red' : 'cyan',
+      title:   batches.length > 1 ? `Upload complete (${batches.length} batches)` : 'Upload complete',
+      message: parts.join(' · ') || 'No files processed',
+    });
+
+    setUploading(false);
+    setProgress(0);
   }
 
   // ── Derived state ────────────────────────────────────────────────────────
