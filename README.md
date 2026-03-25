@@ -2,7 +2,7 @@
 
 **Self-hosted mission management, flight log analysis, AI report generation, invoicing, and real-time airspace monitoring for commercial drone operators.**
 
-**Version 2.42.1** | [Quick Start](#quick-start) | [Features](#features) | [Configuration](#configuration) | [Contributing](CONTRIBUTING.md) | [License](LICENSE)
+**Version 2.42.2** | [Quick Start](#quick-start) | [Features](#features) | [Configuration](#configuration) | [Contributing](CONTRIBUTING.md) | [License](LICENSE)
 
 ---
 
@@ -543,9 +543,17 @@ Full interactive API documentation is available at `http://localhost:3080/docs` 
 
 ## Roadmap
 
+- **Public Demo Instance** — Fully functional hosted demo at `demo.droneops.app` for prospective users to explore without installing anything
+  - Read-only demo account with pre-loaded sample data (flights, missions, customers, batteries, invoices, reports)
+  - Realistic DJI flight logs with GPS tracks across multiple aircraft and mission types
+  - Auto-reset every 24 hours to clean state (prevents abuse, keeps data fresh)
+  - Demo-mode banner with "Deploy Your Own" CTA linking to Quick Start guide
+  - Disabled features: file uploads, email sending, Cloudflare tunnel, password changes
+  - Sandboxed LLM report generation so visitors can test AI reports on sample missions
+  - Rate-limited API to prevent scraping
 - **Voice-to-Text** — On-device speech recognition in the DroneOpsSync Android companion app for dictating operator field notes hands-free during or after missions
 - **Report Templates** — Multiple PDF templates for different mission types
-- **Claude API Integration** — Replace local Ollama/Mistral 7B with Claude API for faster, higher-quality report generation
+- **Claude API Integration** — Replace local Ollama with Claude API for faster, higher-quality report generation
 - **Flight Replay** — Animated playback of GPS flight paths with altitude-colored trails
 - **Live Flight Tracking** — WebSocket integration for real-time drone position
 - **Multi-User Roles** — Operator, admin, and client role-based access control
