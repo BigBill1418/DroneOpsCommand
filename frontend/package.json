@@ -1,7 +1,7 @@
 {
   "name": "doc-frontend",
   "private": true,
-  "version": "2.45.0",
+  "version": "2.46.0",
   "description": "Self-hosted drone operations command center — mission management, flight log analysis, AI reports, invoicing, and airspace monitoring",
   "keywords": [
     "drone",

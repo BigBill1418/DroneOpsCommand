@@ -1,13 +1,13 @@
 """Seed database with default aircraft profiles and admin user.
 
-v2.43.0: Simplified admin user seed. The seed will ONLY create the admin
-user on first boot. It will NEVER modify an existing user's password.
-To reset a password, use: docker compose exec backend python reset_admin.py
+v2.46.0: Bulletproof admin seed with advisory lock and explicit verification.
+The seed will ONLY create the admin user on first boot. It will NEVER modify
+an existing user's password. To reset: docker compose exec backend python reset_admin.py
 """
 
 import logging
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.jwt import hash_password, verify_password
@@ -17,6 +17,9 @@ from app.models.invoice import RateTemplate, LineItemCategory
 from app.models.user import User
 
 _seed_log = logging.getLogger("doc.seed")
+
+# PostgreSQL advisory lock ID — prevents concurrent seed execution across workers
+_SEED_LOCK_ID = 8675309
 
 AIRCRAFT_SEED = [
     {
@@ -125,46 +128,59 @@ AIRCRAFT_SEED = [
 async def seed_database(db: AsyncSession):
     """Seed the database with initial data.
 
-    Admin user policy (v2.43.0):
+    Admin user policy (v2.46.0):
     - First boot: create admin user with ADMIN_PASSWORD from env
     - Every subsequent boot: DO NOTHING to the admin user
     - To reset: use reset_admin.py script manually
+    - Advisory lock prevents concurrent seed execution across workers
     """
 
-    # ── Admin user ─────────────────────────────────────────────────
-    result = await db.execute(select(User).where(User.username == settings.admin_username))
-    existing_admin = result.scalar_one_or_none()
+    # ── Acquire advisory lock (blocks other workers) ───────────────
+    await db.execute(text(f"SELECT pg_advisory_lock({_SEED_LOCK_ID})"))
+    _seed_log.info("Seed lock acquired — beginning seed")
 
-    if existing_admin:
-        # Admin exists — never touch their password
-        _hash = existing_admin.hashed_password or ""
-        _hash_ok = _hash.startswith("$2b$") and len(_hash) == 60
-        _seed_log.info(
-            "Admin '%s' exists — password untouched (hash_valid=%s, prefix=%s, len=%d)",
-            existing_admin.username, _hash_ok, _hash[:7] if _hash else "EMPTY", len(_hash),
-        )
-        if not _hash_ok:
-            _seed_log.critical(
-                "Admin password hash is invalid (prefix=%s, len=%d). "
-                "Run: docker compose exec backend python reset_admin.py",
-                _hash[:10] if _hash else "EMPTY", len(_hash),
+    try:
+        # ── Admin user ─────────────────────────────────────────────
+        result = await db.execute(select(User).where(User.username == settings.admin_username))
+        existing_admin = result.scalar_one_or_none()
+
+        if existing_admin:
+            # Admin exists — NEVER touch their password
+            _hash = existing_admin.hashed_password or ""
+            _hash_ok = _hash.startswith("$2b$") and len(_hash) == 60
+            env_matches = verify_password(settings.admin_password, _hash) if _hash_ok else False
+            _seed_log.info(
+                "SEED: Admin '%s' exists — password UNTOUCHED "
+                "(hash_valid=%s, hash_prefix=%s, len=%d, env_matches=%s)",
+                existing_admin.username, _hash_ok,
+                _hash[:7] if _hash else "EMPTY", len(_hash), env_matches,
             )
-    else:
-        # First boot — create admin user
-        new_hash = hash_password(settings.admin_password)
-        roundtrip_ok = verify_password(settings.admin_password, new_hash)
-        _seed_log.info(
-            "Creating admin user '%s' (roundtrip=%s)",
-            settings.admin_username, roundtrip_ok,
-        )
-        if not roundtrip_ok:
-            _seed_log.critical("BCRYPT ROUNDTRIP FAILED on new admin — login will fail!")
-        admin = User(
-            username=settings.admin_username,
-            hashed_password=new_hash,
-        )
-        db.add(admin)
-        await db.flush()
+            if not _hash_ok:
+                _seed_log.critical(
+                    "Admin password hash is INVALID (prefix=%s, len=%d). "
+                    "Run: docker compose exec backend python reset_admin.py",
+                    _hash[:10] if _hash else "EMPTY", len(_hash),
+                )
+        else:
+            # First boot — create admin user
+            new_hash = hash_password(settings.admin_password)
+            roundtrip_ok = verify_password(settings.admin_password, new_hash)
+            _seed_log.info(
+                "SEED: Creating admin user '%s' (roundtrip=%s, hash_prefix=%s)",
+                settings.admin_username, roundtrip_ok, new_hash[:7],
+            )
+            if not roundtrip_ok:
+                _seed_log.critical("BCRYPT ROUNDTRIP FAILED on new admin — login will fail!")
+            admin = User(
+                username=settings.admin_username,
+                hashed_password=new_hash,
+            )
+            db.add(admin)
+            await db.flush()
+    finally:
+        # ── Release advisory lock ──────────────────────────────────
+        await db.execute(text(f"SELECT pg_advisory_unlock({_SEED_LOCK_ID})"))
+        _seed_log.info("Seed lock released")
 
     # ── Rate templates ─────────────────────────────────────────────
     rate_templates = [

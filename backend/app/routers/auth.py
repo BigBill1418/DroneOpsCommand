@@ -173,10 +173,40 @@ async def update_account(
                 status_code=400,
                 detail=f"Password does not meet complexity requirements: {'; '.join(failures)}",
             )
-        user.hashed_password = hash_password(body.new_password)
-        logger.info("Password changed for user '%s'", user.username)
+        old_hash_prefix = user.hashed_password[:10] if user.hashed_password else "EMPTY"
+        new_hash = hash_password(body.new_password)
+        user.hashed_password = new_hash
+        logger.info(
+            "PASSWORD CHANGE: user='%s' old_hash=%s... new_hash=%s...",
+            user.username, old_hash_prefix, new_hash[:10],
+        )
 
-    await db.flush()
+    # Explicit commit — do NOT rely on get_db cleanup
+    await db.commit()
+
+    # Read-back verification: re-query the database to confirm the write stuck
+    if body.new_password:
+        verify_result = await db.execute(select(User).where(User.username == user.username))
+        saved_user = verify_result.scalar_one_or_none()
+        if saved_user:
+            readback_ok = verify_password(body.new_password, saved_user.hashed_password)
+            logger.info(
+                "PASSWORD VERIFY: user='%s' readback_ok=%s saved_hash=%s...",
+                user.username, readback_ok, saved_user.hashed_password[:10],
+            )
+            if not readback_ok:
+                logger.critical(
+                    "PASSWORD WRITE FAILED: hash in DB does not match new password! "
+                    "user='%s' expected_hash=%s... got_hash=%s...",
+                    user.username, new_hash[:10],
+                    saved_user.hashed_password[:10] if saved_user.hashed_password else "EMPTY",
+                )
+                raise HTTPException(
+                    status_code=500,
+                    detail="Password save failed — please try again",
+                )
+        else:
+            logger.critical("PASSWORD VERIFY: user '%s' not found after commit!", user.username)
 
     return {
         "status": "ok",

@@ -160,6 +160,25 @@ async def lifespan(app: FastAPI):
     async with async_session() as session:
         await seed_database(session)
 
+    # Post-seed verification: log the admin hash state
+    from app.models.user import User
+    from app.auth.jwt import verify_password
+    async with async_session() as verify_session:
+        result = await verify_session.execute(
+            select(User).where(User.username == settings.admin_username)
+        )
+        admin = result.scalar_one_or_none()
+        if admin:
+            env_matches = verify_password(settings.admin_password, admin.hashed_password)
+            logger.info(
+                "STARTUP: Admin '%s' hash=%s... env_password_matches=%s",
+                admin.username,
+                admin.hashed_password[:10] if admin.hashed_password else "EMPTY",
+                env_matches,
+            )
+        else:
+            logger.critical("STARTUP: Admin user '%s' NOT FOUND after seed!", settings.admin_username)
+
     # Ensure upload/report directories exist
     os.makedirs(settings.upload_dir, exist_ok=True)
     os.makedirs(settings.reports_dir, exist_ok=True)
@@ -194,7 +213,7 @@ logger.info("MultiPartParser max_file_size set to 200 MB")
 app = FastAPI(
     title="D.O.C — Drone Operations Command",
     description="Self-hosted mission management, flight log analysis, AI report generation, invoicing, telemetry visualization, and real-time airspace monitoring for commercial drone operators.",
-    version="2.45.0",
+    version="2.46.0",
     lifespan=lifespan,
 )
 
