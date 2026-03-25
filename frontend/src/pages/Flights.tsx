@@ -57,6 +57,7 @@ import {
 import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
 import { Aircraft, FlightRecord } from '../api/types';
+import FlightMap from '../components/FlightMap/FlightMap';
 import StatCard from '../components/shared/StatCard';
 import { cardStyle, inputStyles, monoFont } from '../components/shared/styles';
 
@@ -257,6 +258,8 @@ export default function Flights() {
   const [uploading, setUploading] = useState(false);
   const [manualOpen, setManualOpen] = useState(false);
   const [detailFlight, setDetailFlight] = useState<FlightRecord | null>(null);
+  const [detailTrack, setDetailTrack] = useState<FlightRecord | null>(null);
+  const [trackLoading, setTrackLoading] = useState(false);
   const [aircraft, setAircraft] = useState<Aircraft[]>([]);
   const navigate = useNavigate();
 
@@ -303,6 +306,18 @@ export default function Flights() {
   useEffect(() => {
     api.get('/aircraft').then((r) => setAircraft(Array.isArray(r.data) ? r.data : [])).catch(() => {});
   }, []);
+
+  // Fetch full flight detail (with gps_track) when drawer opens
+  useEffect(() => {
+    if (!detailFlight?.id) { setDetailTrack(null); return; }
+    let cancelled = false;
+    setTrackLoading(true);
+    api.get(`/flight-library/${detailFlight.id}`)
+      .then((r) => { if (!cancelled) setDetailTrack(r.data); })
+      .catch(() => { if (!cancelled) setDetailTrack(null); })
+      .finally(() => { if (!cancelled) setTrackLoading(false); });
+    return () => { cancelled = true; };
+  }, [detailFlight?.id]);
 
   // ── Upload handler ─────────────────────────────────────────────────
   const handleUpload = async (files: File[]) => {
@@ -802,6 +817,39 @@ export default function Flights() {
       >
         {detailFlight && (
           <Stack gap="md" pt="md">
+            {/* ── Flight Path Map ── */}
+            {(() => {
+              const track = detailTrack?.gps_track;
+              if (trackLoading) return (
+                <Card padding="md" radius="sm" style={{ background: '#0e1117', border: '1px solid #1a1f2e', height: 260, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Loader size="sm" color="cyan" />
+                </Card>
+              );
+              if (!track || !Array.isArray(track) || track.length < 2) return null;
+              const coords = track.map((p: any) => [p.lng, p.lat]);
+              const geojson = {
+                type: 'FeatureCollection' as const,
+                features: [
+                  {
+                    type: 'Feature',
+                    geometry: { type: 'LineString', coordinates: coords },
+                    properties: { flight_index: 0, color: '#00d4ff' },
+                  },
+                  {
+                    type: 'Feature',
+                    geometry: { type: 'Point', coordinates: coords[0] },
+                    properties: { type: 'start', flight_index: 0, color: '#2ecc40' },
+                  },
+                  {
+                    type: 'Feature',
+                    geometry: { type: 'Point', coordinates: coords[coords.length - 1] },
+                    properties: { type: 'end', flight_index: 0, color: '#ff6b1a' },
+                  },
+                ],
+              };
+              return <FlightMap geojson={geojson} height="260px" />;
+            })()}
+
             {/* Drone info — name, model, serial */}
             <Card padding="sm" radius="sm" style={{ background: '#0e1117', border: '1px solid #1a1f2e' }}>
               <Group gap="xs" mb={4}>

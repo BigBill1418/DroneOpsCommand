@@ -3,7 +3,7 @@
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.jwt import hash_password
+from app.auth.jwt import hash_password, is_password_compliant
 from app.config import settings
 from app.models.aircraft import Aircraft
 from app.models.invoice import RateTemplate, LineItemCategory
@@ -116,17 +116,97 @@ AIRCRAFT_SEED = [
 async def seed_database(db: AsyncSession):
     """Seed the database with initial data."""
 
-    # Seed admin user — always re-hash password to match current config
+    # Seed admin user.
+    # v2.38.9: Uses direct bcrypt (passlib removed). RESET_ADMIN_PASSWORD defaults
+    # to False so container restarts NEVER overwrite a user-changed password.
+    # Only set RESET_ADMIN_PASSWORD=true for one-time recovery, then remove it.
+    import logging
+    _seed_log = logging.getLogger("doc.seed")
+
+    from app.auth.jwt import verify_password as _verify
+
+    _seed_log.info(
+        "Seed startup: admin_username=%s, reset_admin_password=%s",
+        settings.admin_username,
+        settings.reset_admin_password,
+    )
+
     result = await db.execute(select(User).where(User.username == settings.admin_username))
     existing_admin = result.scalar_one_or_none()
     if existing_admin:
-        existing_admin.hashed_password = hash_password(settings.admin_password)
+        if settings.reset_admin_password:
+            # Use the ADMIN_PASSWORD from environment (not a hardcoded temp password)
+            reset_pw = settings.admin_password
+            new_hash = hash_password(reset_pw)
+            roundtrip_ok = _verify(reset_pw, new_hash)
+            _seed_log.warning(
+                "RESET_ADMIN_PASSWORD=true — resetting admin password to ADMIN_PASSWORD env var "
+                "(hash_prefix=%s, roundtrip=%s). "
+                "Remove RESET_ADMIN_PASSWORD from env after recovery!",
+                new_hash[:7],
+                roundtrip_ok,
+            )
+            if not roundtrip_ok:
+                _seed_log.critical(
+                    "BCRYPT ROUNDTRIP FAILED — password hash cannot be verified! "
+                    "Login will always fail. Check bcrypt package version."
+                )
+            existing_admin.hashed_password = new_hash
+            existing_admin.password_compliant = is_password_compliant(reset_pw)
+        else:
+            # Verify the existing hash is a valid bcrypt hash that can be checked
+            _hash = existing_admin.hashed_password or ""
+            _hash_valid = _hash.startswith("$2b$") and len(_hash) == 60
+            _seed_log.info(
+                "Admin user '%s' exists — password PRESERVED (not overwritten). "
+                "hash_valid=%s, hash_prefix=%s, hash_len=%d. "
+                "Set RESET_ADMIN_PASSWORD=true to force-reset.",
+                existing_admin.username,
+                _hash_valid,
+                _hash[:7] if _hash else "EMPTY",
+                len(_hash),
+            )
+            if not _hash_valid:
+                _seed_log.critical(
+                    "ADMIN PASSWORD HASH IS INVALID OR CORRUPT (prefix=%s, len=%d). "
+                    "Login will fail! Set RESET_ADMIN_PASSWORD=true to fix.",
+                    _hash[:10] if _hash else "EMPTY",
+                    len(_hash),
+                )
     else:
+        compliant = is_password_compliant(settings.admin_password)
+        new_hash = hash_password(settings.admin_password)
+        roundtrip_ok = _verify(settings.admin_password, new_hash)
+        _seed_log.info(
+            "Creating admin user '%s' (compliant=%s, roundtrip=%s)",
+            settings.admin_username,
+            compliant,
+            roundtrip_ok,
+        )
         admin = User(
             username=settings.admin_username,
-            hashed_password=hash_password(settings.admin_password),
+            hashed_password=new_hash,
+            password_compliant=compliant,
         )
         db.add(admin)
+
+    # Flush and verify admin password can be read back from DB
+    await db.flush()
+    verify_result = await db.execute(select(User).where(User.username == settings.admin_username))
+    verify_admin = verify_result.scalar_one_or_none()
+    if verify_admin:
+        db_hash = verify_admin.hashed_password or ""
+        db_roundtrip = _verify(settings.admin_password, db_hash) if settings.reset_admin_password or not existing_admin else None
+        _seed_log.info(
+            "POST-SEED VERIFY: admin='%s', hash_prefix=%s, hash_len=%d, "
+            "db_roundtrip=%s",
+            verify_admin.username,
+            db_hash[:7] if db_hash else "EMPTY",
+            len(db_hash),
+            db_roundtrip,
+        )
+    else:
+        _seed_log.critical("POST-SEED VERIFY FAILED: admin user not found after seed!")
 
     # Seed rate templates
     rate_templates = [

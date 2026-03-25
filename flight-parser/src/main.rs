@@ -1,6 +1,6 @@
 use axum::{
-    extract::Multipart,
-    http::StatusCode,
+    extract::{DefaultBodyLimit, Multipart},
+    http::{HeaderMap, StatusCode},
     response::Json,
     routing::{get, post},
     Router,
@@ -92,9 +92,39 @@ struct HealthResponse {
     status: String,
     version: String,
     formats: Vec<String>,
+    dji_key_configured: bool,
+}
+
+#[derive(Serialize)]
+struct DjiKeyValidation {
+    status: String,
+    key_source: String,
+    key_present: bool,
+    key_length: usize,
+    dji_api_reachable: bool,
+    dji_api_status: Option<u16>,
+    message: String,
+}
+
+/// Resolve DJI API key: prefer X-DJI-Api-Key header, fall back to env var.
+fn resolve_dji_key(headers: &HeaderMap) -> Option<String> {
+    // 1. Check header from backend (source of truth from Settings UI / DB)
+    if let Some(hdr) = headers.get("x-dji-api-key") {
+        if let Ok(val) = hdr.to_str() {
+            let trimmed = val.trim().to_string();
+            if !trimmed.is_empty() {
+                return Some(trimmed);
+            }
+        }
+    }
+    // 2. Fall back to environment variable (from docker-compose / .env)
+    env::var("DJI_API_KEY").ok().filter(|k| !k.trim().is_empty())
 }
 
 async fn health() -> Json<HealthResponse> {
+    let key_configured = env::var("DJI_API_KEY")
+        .ok()
+        .map_or(false, |k| !k.trim().is_empty());
     Json(HealthResponse {
         status: "healthy".to_string(),
         version: env!("CARGO_PKG_VERSION").to_string(),
@@ -103,6 +133,7 @@ async fn health() -> Json<HealthResponse> {
             "litchi_csv".to_string(),
             "airdata_csv".to_string(),
         ],
+        dji_key_configured: key_configured,
     })
 }
 
@@ -110,10 +141,105 @@ async fn formats() -> Json<Vec<&'static str>> {
     Json(vec!["dji_txt", "litchi_csv", "airdata_csv"])
 }
 
-async fn parse(mut multipart: Multipart) -> Result<Json<ParseResponse>, StatusCode> {
+async fn validate_dji_key(headers: HeaderMap) -> Json<DjiKeyValidation> {
+    let api_key = resolve_dji_key(&headers);
+
+    let (key_present, key_length, key_source) = match &api_key {
+        Some(k) => {
+            let source = if headers.get("x-dji-api-key").is_some() {
+                "settings_db".to_string()
+            } else {
+                "environment".to_string()
+            };
+            (true, k.len(), source)
+        }
+        None => (false, 0, "none".to_string()),
+    };
+
+    if !key_present {
+        return Json(DjiKeyValidation {
+            status: "error".to_string(),
+            key_source,
+            key_present: false,
+            key_length: 0,
+            dji_api_reachable: false,
+            dji_api_status: None,
+            message: "No DJI API key configured. Set it in Settings > Flight Data or in .env".to_string(),
+        });
+    }
+
+    let key = api_key.unwrap();
+
+    // Test the key against DJI's actual keychain endpoint (same one the parser uses)
+    // Send a minimal empty keychains request — a valid key returns a structured response,
+    // an invalid key returns 403.
+    let test_body = serde_json::json!({
+        "version": 1,
+        "department": 0,
+        "keychainsArray": []
+    });
+
+    let result = ureq::post("https://dev.dji.com/openapi/v1/flight-records/keychains")
+        .set("Content-Type", "application/json")
+        .set("Api-Key", &key)
+        .timeout(std::time::Duration::from_secs(10))
+        .send_string(&test_body.to_string());
+
+    match result {
+        Ok(resp) => {
+            let status = resp.status();
+            Json(DjiKeyValidation {
+                status: "online".to_string(),
+                key_source,
+                key_present: true,
+                key_length,
+                dji_api_reachable: true,
+                dji_api_status: Some(status),
+                message: "DJI API key verified — flight log decryption enabled".to_string(),
+            })
+        }
+        Err(ureq::Error::Status(status, _resp)) => {
+            let (s, msg) = match status {
+                401 | 403 => ("error", "DJI API key is invalid or expired (rejected by DJI)".to_string()),
+                429 => ("online", "DJI API key accepted (rate limited — try again later)".to_string()),
+                _ => ("online", format!("DJI API reachable (HTTP {}) — key configured", status)),
+            };
+            Json(DjiKeyValidation {
+                status: s.to_string(),
+                key_source,
+                key_present: true,
+                key_length,
+                dji_api_reachable: true,
+                dji_api_status: Some(status),
+                message: msg,
+            })
+        }
+        Err(e) => {
+            // Network error — can't reach DJI (might be Docker networking)
+            tracing::warn!("DJI API unreachable during key validation: {}", e);
+            Json(DjiKeyValidation {
+                status: "warning".to_string(),
+                key_source,
+                key_present: true,
+                key_length,
+                dji_api_reachable: false,
+                dji_api_status: None,
+                message: "Key saved but cannot reach DJI servers (dev.dji.com) to verify. Check container DNS/internet access.".to_string(),
+            })
+        }
+    }
+}
+
+async fn parse(headers: HeaderMap, mut multipart: Multipart) -> Result<Json<ParseResponse>, StatusCode> {
     let mut flights = Vec::new();
     let mut errors = Vec::new();
-    let dji_api_key = env::var("DJI_API_KEY").ok();
+    let dji_api_key = resolve_dji_key(&headers);
+
+    if dji_api_key.is_some() {
+        tracing::info!("parse: DJI API key available (len={})", dji_api_key.as_ref().unwrap().len());
+    } else {
+        tracing::info!("parse: no DJI API key — encrypted logs will use header data only");
+    }
 
     while let Ok(Some(field)) = multipart.next_field().await {
         let filename = field.file_name().unwrap_or("unknown").to_string();
@@ -161,15 +287,21 @@ async fn main() {
     tracing_subscriber::fmt::init();
 
     let port = env::var("PARSER_PORT").unwrap_or_else(|_| "8100".to_string());
+    let has_key = env::var("DJI_API_KEY").ok().map_or(false, |k| !k.trim().is_empty());
 
     let app = Router::new()
         .route("/health", get(health))
         .route("/formats", get(formats))
         .route("/parse", post(parse))
+        .route("/validate-dji-key", post(validate_dji_key))
+        .layer(DefaultBodyLimit::max(50 * 1024 * 1024)) // 50 MB — DJI logs can be 5-20 MB
         .layer(CorsLayer::permissive());
 
     let addr = format!("0.0.0.0:{}", port);
-    tracing::info!("flight-parser listening on {}", addr);
+    tracing::info!(
+        "flight-parser listening on {} (max body: 50 MB, dji_key_env: {})",
+        addr, has_key
+    );
 
     let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();

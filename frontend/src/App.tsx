@@ -4,6 +4,7 @@ import { useAuth } from './hooks/useAuth';
 import ErrorBoundary from './components/ErrorBoundary';
 import AppLayout from './components/Layout/AppShell';
 import Login from './pages/Login';
+import ForcePasswordReset from './pages/ForcePasswordReset';
 import Dashboard from './pages/Dashboard';
 import Missions from './pages/Missions';
 import MissionNew from './pages/MissionNew';
@@ -16,9 +17,11 @@ import Financials from './pages/Financials';
 import Settings from './pages/Settings';
 import CustomerIntake from './pages/CustomerIntake';
 import UploadLogs from './pages/UploadLogs';
+import Telemetry from './pages/Telemetry';
+import Airspace from './pages/Airspace';
 
 export default function App() {
-  const { isAuthenticated, loading, login, logout } = useAuth();
+  const { isAuthenticated, loading, login, logout, passwordCompliant, markPasswordCompliant } = useAuth();
 
   if (loading) {
     return (
@@ -36,7 +39,8 @@ export default function App() {
 
         {/* All other routes require authentication */}
         <Route path="*" element={
-          !isAuthenticated ? <Login onLogin={login} /> : (
+          !isAuthenticated ? <Login onLogin={login} /> :
+          !passwordCompliant ? <ForcePasswordReset onComplete={markPasswordCompliant} onLogout={logout} /> : (
             <Routes>
               <Route element={<AppLayout onLogout={logout} />}>
                 <Route path="/" element={<Dashboard />} />
@@ -49,6 +53,8 @@ export default function App() {
                 <Route path="/batteries" element={<Batteries />} />
                 <Route path="/maintenance" element={<Maintenance />} />
                 <Route path="/financials" element={<Financials />} />
+                <Route path="/telemetry" element={<Telemetry />} />
+                <Route path="/airspace" element={<Airspace />} />
                 <Route path="/upload-logs" element={<UploadLogs />} />
                 <Route path="/settings" element={<Settings />} />
                 <Route path="*" element={<Navigate to="/" />} />

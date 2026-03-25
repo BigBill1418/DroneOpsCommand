@@ -3,8 +3,13 @@
 import hashlib
 import json
 import logging
+import math
+import os
+import time
 import traceback
+from collections import Counter, defaultdict
 from datetime import datetime as _dt
+from pathlib import Path
 from uuid import UUID
 
 import httpx
@@ -17,9 +22,11 @@ from app.auth.device import validate_device_api_key
 from app.auth.jwt import get_current_user
 from app.config import settings
 from app.database import get_db, async_session
+from app.models.aircraft import Aircraft
 from app.models.battery import Battery, BatteryLog
 from app.models.device_api_key import DeviceApiKey
 from app.models.flight import Flight
+from app.models.system_settings import SystemSetting
 from app.models.user import User
 from app.schemas.flight import (
     FlightCreate, FlightDetailResponse, FlightResponse, FlightUpdate, FlightUploadResponse,
@@ -101,7 +108,49 @@ def _parse_datetime(value: object) -> _dt | None:
         logger.warning("Could not parse date: %r", value)
     return None
 
+from app.models.system_settings import SystemSetting
+
 PARSER_URL = "http://flight-parser:8100"
+
+# ── Original file storage ─────────────────────────────────────────────
+_FLIGHT_LOGS_DIR = Path(settings.upload_dir) / "flight_logs"
+
+
+def _save_original_file(file_hash: str, content: bytes, filename: str) -> None:
+    """Persist the original uploaded flight log to disk for future re-processing."""
+    try:
+        _FLIGHT_LOGS_DIR.mkdir(parents=True, exist_ok=True)
+        ext = Path(filename).suffix.lower() if filename else ".bin"
+        dest = _FLIGHT_LOGS_DIR / f"{file_hash}{ext}"
+        if not dest.exists():
+            dest.write_bytes(content)
+            logger.debug("Saved original flight log: %s (%d bytes)", dest.name, len(content))
+    except Exception as e:
+        logger.warning("Failed to save original flight log %s: %s", file_hash, e)
+
+
+def _get_stored_file_path(file_hash: str) -> Path | None:
+    """Find a stored original file by its hash (any extension)."""
+    if not _FLIGHT_LOGS_DIR.exists():
+        return None
+    for f in _FLIGHT_LOGS_DIR.iterdir():
+        if f.stem == file_hash:
+            return f
+    return None
+
+
+async def _get_dji_api_key(db: AsyncSession) -> str | None:
+    """Read the DJI API key from system settings (set in Settings > Flight Data)."""
+    try:
+        result = await db.execute(
+            select(SystemSetting).where(SystemSetting.key == "dji_api_key")
+        )
+        row = result.scalar_one_or_none()
+        if row and row.value and row.value.strip():
+            return row.value.strip()
+    except Exception as e:
+        logger.warning("Could not read DJI API key from settings: %s", e)
+    return None
 
 
 # ── List flights ──────────────────────────────────────────────────────
@@ -211,6 +260,255 @@ async def flight_stats(
     }
 
 
+# ── Geo helpers for telemetry-stats ──────────────────────────────────
+
+# Approximate bounding boxes: (state, min_lat, max_lat, min_lon, max_lon)
+_US_STATE_BOXES: list[tuple[str, float, float, float, float]] = [
+    ("Alabama", 30.22, 35.01, -88.47, -84.89),
+    ("Alaska", 51.21, 71.39, -179.15, -129.98),
+    ("Arizona", 31.33, 37.00, -114.81, -109.04),
+    ("Arkansas", 33.00, 36.50, -94.62, -89.64),
+    ("California", 32.53, 42.01, -124.41, -114.13),
+    ("Colorado", 36.99, 41.00, -109.06, -102.04),
+    ("Connecticut", 40.95, 42.05, -73.73, -71.79),
+    ("Delaware", 38.45, 39.84, -75.79, -75.05),
+    ("Florida", 24.40, 31.00, -87.63, -80.03),
+    ("Georgia", 30.36, 35.00, -85.61, -80.84),
+    ("Hawaii", 18.91, 22.24, -160.25, -154.81),
+    ("Idaho", 41.99, 49.00, -117.24, -111.04),
+    ("Illinois", 36.97, 42.51, -91.51, -87.02),
+    ("Indiana", 37.77, 41.76, -88.10, -84.78),
+    ("Iowa", 40.37, 43.50, -96.64, -90.14),
+    ("Kansas", 36.99, 40.00, -102.05, -94.59),
+    ("Kentucky", 36.50, 39.15, -89.57, -81.96),
+    ("Louisiana", 28.93, 33.02, -94.04, -88.82),
+    ("Maine", 43.06, 47.46, -71.08, -66.95),
+    ("Maryland", 37.91, 39.72, -79.49, -75.05),
+    ("Massachusetts", 41.24, 42.89, -73.51, -69.93),
+    ("Michigan", 41.70, 48.26, -90.42, -82.12),
+    ("Minnesota", 43.50, 49.38, -97.24, -89.49),
+    ("Mississippi", 30.17, 35.00, -91.66, -88.10),
+    ("Missouri", 35.99, 40.61, -95.77, -89.10),
+    ("Montana", 44.36, 49.00, -116.05, -104.04),
+    ("Nebraska", 40.00, 43.00, -104.05, -95.31),
+    ("Nevada", 35.00, 42.00, -120.01, -114.04),
+    ("New Hampshire", 42.70, 45.31, -72.56, -70.70),
+    ("New Jersey", 38.93, 41.36, -75.56, -73.89),
+    ("New Mexico", 31.33, 37.00, -109.05, -103.00),
+    ("New York", 40.50, 45.01, -79.76, -71.86),
+    ("North Carolina", 33.84, 36.59, -84.32, -75.46),
+    ("North Dakota", 45.94, 49.00, -104.05, -96.55),
+    ("Ohio", 38.40, 41.98, -84.82, -80.52),
+    ("Oklahoma", 33.62, 37.00, -103.00, -94.43),
+    ("Oregon", 41.99, 46.29, -124.57, -116.46),
+    ("Pennsylvania", 39.72, 42.27, -80.52, -74.69),
+    ("Rhode Island", 41.15, 42.02, -71.86, -71.12),
+    ("South Carolina", 32.03, 35.22, -83.35, -78.54),
+    ("South Dakota", 42.48, 45.95, -104.06, -96.44),
+    ("Tennessee", 34.98, 36.68, -90.31, -81.65),
+    ("Texas", 25.84, 36.50, -106.65, -93.51),
+    ("Utah", 36.99, 42.00, -114.05, -109.04),
+    ("Vermont", 42.73, 45.02, -73.44, -71.46),
+    ("Virginia", 36.54, 39.47, -83.68, -75.24),
+    ("Washington", 45.54, 49.00, -124.85, -116.92),
+    ("West Virginia", 37.20, 40.64, -82.64, -77.72),
+    ("Wisconsin", 42.49, 47.08, -92.89, -86.25),
+    ("Wyoming", 40.99, 45.01, -111.06, -104.05),
+]
+
+
+def _lat_lon_to_state(lat: float, lon: float) -> str | None:
+    """Return a US state name for the given lat/lon using bounding boxes."""
+    for name, min_lat, max_lat, min_lon, max_lon in _US_STATE_BOXES:
+        if min_lat <= lat <= max_lat and min_lon <= lon <= max_lon:
+            return name
+    return None
+
+
+def _lon_to_timezone(lat: float, lon: float) -> str | None:
+    """Return a US timezone name from lat/lon using simple longitude ranges."""
+    if lat < 25 and lon < -150:
+        return "Hawaii"
+    if lat > 50 and lon < -130:
+        return "Alaska"
+    if lon <= -115:
+        return "Pacific"
+    if lon <= -105:
+        return "Mountain"
+    if lon <= -85:
+        return "Central"
+    return "Eastern"
+
+
+# ── Telemetry stats (aggregate) ──────────────────────────────────────
+# NOTE: must be registered before /{flight_id} to avoid route shadowing
+@router.get("/telemetry-stats")
+async def telemetry_stats(
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """Return aggregate statistics computed from all flights in the database."""
+    logger.info("Computing telemetry-stats for user %s", _user.username)
+
+    # Single query — load only the columns we need
+    result = await db.execute(
+        select(
+            Flight.duration_secs,
+            Flight.total_distance,
+            Flight.max_altitude,
+            Flight.max_speed,
+            Flight.drone_serial,
+            Flight.drone_model,
+            Flight.drone_name,
+            Flight.home_lat,
+            Flight.home_lon,
+            Flight.start_time,
+            Flight.battery_serial,
+            Flight.source,
+            Flight.point_count,
+            Flight.name,
+            Aircraft.model_name.label("aircraft_model_name"),
+        ).outerjoin(Aircraft, Flight.aircraft_id == Aircraft.id)
+    )
+    rows = result.all()
+
+    total_flights = len(rows)
+    total_duration_secs = 0.0
+    total_distance_m = 0.0
+    overall_max_alt_m = 0.0
+    overall_max_speed_ms = 0.0
+    longest_flight_secs = 0.0
+    farthest_flight_m = 0.0
+    drone_serials: set[str] = set()
+    flight_locations: list[dict] = []
+    states: set[str] = set()
+    time_zones: set[str] = set()
+    earliest: _dt | None = None
+    latest: _dt | None = None
+    month_counter: Counter[str] = Counter()
+    battery_cycles = 0
+    drone_stats: dict[str, dict] = defaultdict(lambda: {"flights": 0, "duration": 0.0})
+    source_counter: Counter[str] = Counter()
+    flights_needing_reprocess = 0
+
+    for row in rows:
+        dur = row.duration_secs or 0
+        dist = row.total_distance or 0
+        alt = row.max_altitude or 0
+        spd = row.max_speed or 0
+
+        total_duration_secs += dur
+        total_distance_m += dist
+        if alt > overall_max_alt_m:
+            overall_max_alt_m = alt
+        if spd > overall_max_speed_ms:
+            overall_max_speed_ms = spd
+        if dur > longest_flight_secs:
+            longest_flight_secs = dur
+        if dist > farthest_flight_m:
+            farthest_flight_m = dist
+
+        if row.drone_serial:
+            drone_serials.add(row.drone_serial)
+
+        # Best display name: drone_name (nickname) > aircraft model > flight drone_model > serial > Unknown
+        drone_display = (
+            row.drone_name
+            or row.aircraft_model_name
+            or row.drone_model
+            or row.drone_serial
+            or "Unknown"
+        )
+        drone_stats[drone_display]["flights"] += 1
+        drone_stats[drone_display]["duration"] += dur
+
+        if row.home_lat is not None and row.home_lon is not None:
+            flight_locations.append({
+                "lat": row.home_lat,
+                "lon": row.home_lon,
+                "name": row.name or "",
+                "date": row.start_time.isoformat() if row.start_time else "",
+                "drone": drone_display,
+            })
+            st = _lat_lon_to_state(row.home_lat, row.home_lon)
+            if st:
+                states.add(st)
+            tz = _lon_to_timezone(row.home_lat, row.home_lon)
+            if tz:
+                time_zones.add(tz)
+
+        if row.start_time:
+            if earliest is None or row.start_time < earliest:
+                earliest = row.start_time
+            if latest is None or row.start_time > latest:
+                latest = row.start_time
+            month_key = row.start_time.strftime("%Y-%m")
+            month_counter[month_key] += 1
+
+        if row.battery_serial:
+            battery_cycles += 1
+
+        src = row.source or "unknown"
+        source_counter[src] += 1
+
+        if src == "dji_txt" and (row.point_count or 0) == 0:
+            flights_needing_reprocess += 1
+
+    # Derived values
+    busiest_month = month_counter.most_common(1)[0][0] if month_counter else None
+    avg_flight_mins = (total_duration_secs / total_flights / 60) if total_flights > 0 else 0.0
+
+    # Build sorted flights_by_month
+    flights_by_month = [
+        {"month": m, "count": c}
+        for m, c in sorted(month_counter.items())
+    ]
+
+    # Build drone_breakdown
+    drone_breakdown = sorted(
+        [
+            {
+                "drone": drone,
+                "flights": info["flights"],
+                "hours": round(info["duration"] / 3600, 2),
+            }
+            for drone, info in drone_stats.items()
+        ],
+        key=lambda x: x["flights"],
+        reverse=True,
+    )
+
+    METERS_TO_MILES = 0.000621371
+    METERS_TO_FEET = 3.28084
+    MS_TO_MPH = 2.23694
+
+    response = {
+        "total_flights": total_flights,
+        "total_flight_hours": round(total_duration_secs / 3600, 2),
+        "total_distance_miles": round(total_distance_m * METERS_TO_MILES, 2),
+        "max_altitude_ft": round(overall_max_alt_m * METERS_TO_FEET, 2),
+        "max_speed_mph": round(overall_max_speed_ms * MS_TO_MPH, 2),
+        "unique_drones": len(drone_serials),
+        "flight_locations": flight_locations,
+        "states_flown": sorted(states),
+        "time_zones_flown": sorted(time_zones),
+        "earliest_flight": earliest.isoformat() if earliest else None,
+        "latest_flight": latest.isoformat() if latest else None,
+        "busiest_month": busiest_month,
+        "avg_flight_duration_mins": round(avg_flight_mins, 2),
+        "total_battery_cycles": battery_cycles,
+        "longest_flight_secs": longest_flight_secs,
+        "farthest_flight_miles": round(farthest_flight_m * METERS_TO_MILES, 2),
+        "drone_breakdown": drone_breakdown,
+        "source_breakdown": dict(source_counter),
+        "flights_by_month": flights_by_month,
+        "flights_needing_reprocess": flights_needing_reprocess,
+    }
+
+    logger.info("telemetry-stats computed: %d flights, %.1f hours", total_flights, total_duration_secs / 3600)
+    return response
+
+
 # ── Parser health check ──────────────────────────────────────────────
 @router.get("/parser/status")
 async def parser_status(
@@ -269,10 +567,19 @@ async def device_upload_flights(
     skipped = 0
     errors = []
 
+    # Fetch DJI API key from settings to pass to the parser
+    dji_key = await _get_dji_api_key(db)
+    parser_headers = {}
+    if dji_key:
+        parser_headers["X-DJI-Api-Key"] = dji_key
+
     for upload in files:
         try:
             content = await upload.read()
             file_hash = hashlib.sha256(content).hexdigest()
+
+            # Save original file for future re-processing
+            _save_original_file(file_hash, content, upload.filename or "upload.bin")
 
             existing = await db.execute(
                 select(Flight).where(Flight.source_file_hash == file_hash)
@@ -285,6 +592,7 @@ async def device_upload_flights(
                 resp = await client.post(
                     f"{PARSER_URL}/parse",
                     files={"file": (upload.filename or "upload.txt", content)},
+                    headers=parser_headers,
                 )
                 if resp.status_code != 200:
                     errors.append(f"{upload.filename}: parser returned {resp.status_code}")
@@ -345,6 +653,396 @@ async def device_upload_flights(
         errors=errors,
         flights=imported,
     )
+
+
+# ── Reprocess status ──────────────────────────────────────────────
+@router.get("/reprocess/status")
+async def reprocess_status(
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """Return counts of flights that could benefit from re-processing,
+    including how many have original files stored on disk."""
+    from sqlalchemy import or_
+
+    total_result = await db.execute(
+        select(func.count(Flight.id)).where(Flight.source == "dji_txt")
+    )
+    total_dji = total_result.scalar() or 0
+
+    # DJI flights needing reprocess
+    reprocess_q = await db.execute(
+        select(Flight.source_file_hash).where(
+            Flight.source == "dji_txt",
+            or_(
+                Flight.point_count == 0,
+                Flight.point_count.is_(None),
+                Flight.gps_track.is_(None),
+            ),
+        )
+    )
+    reprocess_hashes = [row[0] for row in reprocess_q.all() if row[0]]
+    reprocessable = len(reprocess_hashes)
+
+    # How many have original files on disk?
+    stored_count = sum(1 for h in reprocess_hashes if _get_stored_file_path(h) is not None)
+
+    logger.info("Reprocess status: %d/%d DJI flights need re-processing (%d have stored files)",
+                reprocessable, total_dji, stored_count)
+    return {
+        "reprocessable": reprocessable,
+        "total_dji": total_dji,
+        "stored_on_disk": stored_count,
+        "need_manual_upload": reprocessable - stored_count,
+    }
+
+
+# ── Reprocess ALL from stored files ──────────────────────────────
+@router.post("/reprocess/all")
+async def reprocess_all_from_stored(
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """Re-process all flights that have original files stored on disk.
+
+    Finds flights needing reprocess (missing GPS/telemetry data), reads
+    their original file from /data/uploads/flight_logs/, re-parses through
+    the flight-parser service with the current DJI API key, and updates
+    the flight records in place.
+    """
+    from sqlalchemy import or_
+
+    dji_key = await _get_dji_api_key(db)
+    parser_headers = {}
+    if dji_key:
+        parser_headers["X-DJI-Api-Key"] = dji_key
+
+    # Find all flights that need re-processing
+    result = await db.execute(
+        select(Flight).where(
+            Flight.source == "dji_txt",
+            or_(
+                Flight.point_count == 0,
+                Flight.point_count.is_(None),
+                Flight.gps_track.is_(None),
+            ),
+        )
+    )
+    flights_to_reprocess = list(result.scalars().all())
+
+    updated = 0
+    skipped_no_file = 0
+    errors = []
+
+    logger.info("Reprocess all: found %d flights needing re-processing", len(flights_to_reprocess))
+
+    for flight in flights_to_reprocess:
+        file_path = _get_stored_file_path(flight.source_file_hash) if flight.source_file_hash else None
+        if not file_path:
+            skipped_no_file += 1
+            continue
+
+        try:
+            content = file_path.read_bytes()
+            async with httpx.AsyncClient(timeout=120) as client:
+                resp = await client.post(
+                    f"{PARSER_URL}/parse",
+                    files={"file": (file_path.name, content)},
+                    headers=parser_headers,
+                )
+                if resp.status_code != 200:
+                    errors.append(f"{flight.name}: parser returned {resp.status_code}")
+                    continue
+
+                data = resp.json()
+                if data.get("errors"):
+                    errors.extend(data["errors"])
+
+                parsed_flights = data.get("flights", [])
+                if not parsed_flights:
+                    errors.append(f"{flight.name}: parser returned no flights")
+                    continue
+
+                parsed = parsed_flights[0]
+                flight.duration_secs = parsed.get("duration_secs", 0)
+                flight.total_distance = parsed.get("total_distance", 0)
+                flight.max_altitude = parsed.get("max_altitude", 0)
+                flight.max_speed = parsed.get("max_speed", 0)
+                flight.home_lat = parsed.get("home_lat")
+                flight.home_lon = parsed.get("home_lon")
+                flight.point_count = parsed.get("point_count", 0)
+                flight.gps_track = parsed.get("gps_track")
+                flight.telemetry = parsed.get("telemetry")
+                flight.raw_metadata = parsed.get("raw_metadata")
+                await db.flush()
+                updated += 1
+                logger.info("Reprocess all: updated flight %s (%s) — %d points",
+                            flight.id, flight.name, parsed.get("point_count", 0))
+
+        except httpx.ConnectError:
+            errors.append(f"{flight.name}: flight-parser service unavailable")
+            break  # No point continuing if parser is down
+        except Exception as e:
+            errors.append(f"{flight.name}: {str(e)}")
+
+    logger.info("Reprocess all complete: %d updated, %d skipped (no file), %d errors",
+                updated, skipped_no_file, len(errors))
+    return {
+        "updated": updated,
+        "skipped_no_file": skipped_no_file,
+        "errors": errors,
+        "total_attempted": len(flights_to_reprocess),
+    }
+
+
+# ── Reprocess uploaded flight logs (manual re-upload) ─────────────
+@router.post("/reprocess")
+async def reprocess_flights(
+    files: list[UploadFile] = File(...),
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """Re-upload flight logs to update existing flights matched by file hash.
+
+    Unlike /upload which skips duplicates, this endpoint updates existing flight
+    records with freshly parsed data (useful after adding/changing the DJI API key).
+    """
+    updated_count = 0
+    imported_count = 0
+    skipped = 0
+    errors = []
+
+    dji_key = await _get_dji_api_key(db)
+    parser_headers = {}
+    if dji_key:
+        parser_headers["X-DJI-Api-Key"] = dji_key
+
+    for upload in files:
+        try:
+            content = await upload.read()
+            file_hash = hashlib.sha256(content).hexdigest()
+
+            # Save/overwrite original file
+            _save_original_file(file_hash, content, upload.filename or "upload.bin")
+
+            async with httpx.AsyncClient(timeout=120) as client:
+                resp = await client.post(
+                    f"{PARSER_URL}/parse",
+                    files={"file": (upload.filename or "upload.txt", content)},
+                    headers=parser_headers,
+                )
+                if resp.status_code != 200:
+                    errors.append(f"{upload.filename}: parser returned {resp.status_code}")
+                    continue
+
+                data = resp.json()
+                if data.get("errors"):
+                    errors.extend(data["errors"])
+
+                for parsed in data.get("flights", []):
+                    ph = parsed.get("file_hash", file_hash)
+                    existing_result = await db.execute(
+                        select(Flight).where(Flight.source_file_hash == ph)
+                    )
+                    existing_flight = existing_result.scalar_one_or_none()
+
+                    if existing_flight:
+                        existing_flight.duration_secs = parsed.get("duration_secs", 0)
+                        existing_flight.total_distance = parsed.get("total_distance", 0)
+                        existing_flight.max_altitude = parsed.get("max_altitude", 0)
+                        existing_flight.max_speed = parsed.get("max_speed", 0)
+                        existing_flight.home_lat = parsed.get("home_lat")
+                        existing_flight.home_lon = parsed.get("home_lon")
+                        existing_flight.point_count = parsed.get("point_count", 0)
+                        existing_flight.gps_track = parsed.get("gps_track")
+                        existing_flight.telemetry = parsed.get("telemetry")
+                        existing_flight.raw_metadata = parsed.get("raw_metadata")
+                        await db.flush()
+                        updated_count += 1
+                        logger.info("Reprocess: updated flight %s (%s) — %d points",
+                                    existing_flight.id, existing_flight.name,
+                                    parsed.get("point_count", 0))
+                    else:
+                        flight = Flight(
+                            name=parsed.get("name", upload.filename or "Unknown"),
+                            drone_model=parsed.get("drone_model"),
+                            drone_serial=parsed.get("drone_serial"),
+                            battery_serial=parsed.get("battery_serial"),
+                            start_time=_parse_datetime(parsed.get("start_time")),
+                            duration_secs=parsed.get("duration_secs", 0),
+                            total_distance=parsed.get("total_distance", 0),
+                            max_altitude=parsed.get("max_altitude", 0),
+                            max_speed=parsed.get("max_speed", 0),
+                            home_lat=parsed.get("home_lat"),
+                            home_lon=parsed.get("home_lon"),
+                            point_count=parsed.get("point_count", 0),
+                            gps_track=parsed.get("gps_track"),
+                            telemetry=parsed.get("telemetry"),
+                            raw_metadata=parsed.get("raw_metadata"),
+                            source=parsed.get("source", "dji_txt"),
+                            source_file_hash=ph,
+                            original_filename=parsed.get("original_filename", upload.filename),
+                        )
+                        db.add(flight)
+                        await db.flush()
+                        await db.refresh(flight)
+                        imported_count += 1
+                        logger.info("Reprocess: imported new flight %s (%s)", flight.id, flight.name)
+
+                        battery_data = parsed.get("battery_data")
+                        if battery_data and battery_data.get("serial"):
+                            try:
+                                async with db.begin_nested():
+                                    await _track_battery(db, flight, battery_data)
+                            except Exception as bat_exc:
+                                logger.warning("Battery tracking failed for flight %s: %s", flight.id, bat_exc)
+
+        except httpx.ConnectError:
+            errors.append(f"{upload.filename}: flight-parser service unavailable")
+        except Exception as e:
+            errors.append(f"{upload.filename}: {str(e)}")
+
+    logger.info("Reprocess complete: %d updated, %d imported, %d skipped, %d errors",
+                updated_count, imported_count, skipped, len(errors))
+    return {"updated": updated_count, "imported": imported_count, "skipped": skipped, "errors": errors}
+
+
+# ── Airspace — OpenSky proxy ─────────────────────────────────────────
+_opensky_token_cache: dict = {"token": None, "expires_at": 0.0}
+
+
+async def _get_opensky_token(client_id: str, client_secret: str) -> str | None:
+    """Obtain (or reuse cached) OAuth2 token from OpenSky Network."""
+    now = time.time()
+    if _opensky_token_cache["token"] and now < _opensky_token_cache["expires_at"] - 30:
+        return _opensky_token_cache["token"]
+
+    token_url = (
+        "https://auth.opensky-network.org/auth/realms/opensky-network"
+        "/protocol/openid-connect/token"
+    )
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            logger.info("OpenSky: requesting OAuth2 token for client_id=%s", client_id)
+            resp = await client.post(
+                token_url,
+                data={
+                    "grant_type": "client_credentials",
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            _opensky_token_cache["token"] = data["access_token"]
+            _opensky_token_cache["expires_at"] = now + data.get("expires_in", 300)
+            logger.info("OpenSky: OAuth2 token acquired, expires_in=%s", data.get("expires_in"))
+            return _opensky_token_cache["token"]
+    except Exception as exc:
+        logger.warning("OpenSky: OAuth2 token request failed: %s", exc)
+        _opensky_token_cache["token"] = None
+        _opensky_token_cache["expires_at"] = 0.0
+        return None
+
+
+@router.get("/airspace/aircraft")
+async def get_airspace_aircraft(
+    lat: float = Query(..., description="Center latitude"),
+    lon: float = Query(..., description="Center longitude"),
+    radius_nm: float = Query(25, description="Radius in nautical miles"),
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """Proxy to OpenSky Network API — returns nearby aircraft positions."""
+    authenticated = False
+
+    # 1. Read OpenSky credentials from SystemSetting
+    client_id = None
+    client_secret = None
+    try:
+        row_id = await db.execute(
+            select(SystemSetting.value).where(SystemSetting.key == "opensky_client_id")
+        )
+        row_secret = await db.execute(
+            select(SystemSetting.value).where(SystemSetting.key == "opensky_client_secret")
+        )
+        client_id = row_id.scalar_one_or_none()
+        client_secret = row_secret.scalar_one_or_none()
+    except Exception as exc:
+        logger.warning("OpenSky: failed to read credentials from DB: %s", exc)
+
+    # 2. Get OAuth2 token if credentials exist
+    token = None
+    if client_id and client_secret:
+        token = await _get_opensky_token(client_id, client_secret)
+        if token:
+            authenticated = True
+
+    # 3. Convert radius to bounding box
+    lat_delta = radius_nm / 60.0
+    lon_delta = radius_nm / (60.0 * math.cos(math.radians(lat)))
+    lamin = lat - lat_delta
+    lamax = lat + lat_delta
+    lomin = lon - lon_delta
+    lomax = lon + lon_delta
+
+    # 4. Call OpenSky REST API
+    api_url = "https://opensky-network.org/api/states/all"
+    params = {
+        "lamin": round(lamin, 4),
+        "lomin": round(lomin, 4),
+        "lamax": round(lamax, 4),
+        "lomax": round(lomax, 4),
+    }
+    headers = {}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            logger.info(
+                "OpenSky: querying states/all lat=%.4f lon=%.4f radius=%.1fnm authenticated=%s",
+                lat, lon, radius_nm, authenticated,
+            )
+            resp = await client.get(api_url, params=params, headers=headers)
+            resp.raise_for_status()
+            data = resp.json()
+    except httpx.HTTPStatusError as exc:
+        logger.error("OpenSky: API returned HTTP %s: %s", exc.response.status_code, exc.response.text[:200])
+        return {"aircraft": [], "timestamp": int(time.time()), "count": 0, "authenticated": authenticated,
+                "error": f"OpenSky API error: HTTP {exc.response.status_code}"}
+    except Exception as exc:
+        logger.error("OpenSky: API request failed: %s", exc)
+        return {"aircraft": [], "timestamp": int(time.time()), "count": 0, "authenticated": authenticated,
+                "error": f"OpenSky API request failed: {exc}"}
+
+    # 5. Transform response
+    states = data.get("states") or []
+    aircraft_list = []
+    for s in states:
+        if len(s) < 17:
+            continue
+        aircraft_list.append({
+            "icao24": s[0],
+            "callsign": (s[1] or "").strip(),
+            "origin_country": s[2],
+            "lat": s[6],
+            "lon": s[5],
+            "alt_ft": round(s[7] * 3.28084) if s[7] is not None else None,
+            "heading": s[10],
+            "speed_kts": round(s[9] * 1.94384) if s[9] is not None else None,
+            "vertical_rate_fpm": round(s[11] * 196.85) if s[11] is not None else None,
+            "on_ground": s[8],
+            "squawk": s[14],
+        })
+
+    logger.info("OpenSky: returned %d aircraft", len(aircraft_list))
+    return {
+        "aircraft": aircraft_list,
+        "timestamp": data.get("time", int(time.time())),
+        "count": len(aircraft_list),
+        "authenticated": authenticated,
+    }
 
 
 # ── Get flight detail ─────────────────────────────────────────────────
@@ -423,11 +1121,20 @@ async def upload_flights(
     skipped = 0
     errors = []
 
+    # Fetch DJI API key from settings to pass to the parser
+    dji_key = await _get_dji_api_key(db)
+    parser_headers = {}
+    if dji_key:
+        parser_headers["X-DJI-Api-Key"] = dji_key
+
     # Send files to the parser service
     for upload in files:
         try:
             content = await upload.read()
             file_hash = hashlib.sha256(content).hexdigest()
+
+            # Save original file for future re-processing
+            _save_original_file(file_hash, content, upload.filename or "upload.bin")
 
             # Check for duplicate
             existing = await db.execute(
@@ -442,6 +1149,7 @@ async def upload_flights(
                 resp = await client.post(
                     f"{PARSER_URL}/parse",
                     files={"file": (upload.filename or "upload.txt", content)},
+                    headers=parser_headers,
                 )
                 if resp.status_code != 200:
                     errors.append(f"{upload.filename}: parser returned {resp.status_code}")
@@ -915,6 +1623,8 @@ async def import_from_opendronelog_stream(
                 yield sse({"type": "error", "message": f"Import failed: {type(e).__name__}: {e}"})
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
 
 
 

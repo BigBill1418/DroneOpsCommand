@@ -4,38 +4,120 @@ use crate::{BatteryData, ParsedFlight, TelemetryData, TrackPoint};
 ///
 /// DJI logs v13+ are AES-encrypted and require a keychain from DJI's API.
 /// This uses the `dji-log-parser` crate which handles all known DJI log versions.
+///
+/// When a DJI_API_KEY is provided, encrypted frame data (full telemetry, GPS track)
+/// is decoded. Without it, we still extract summary data from the log header
+/// (details struct), which always contains duration, distance, max height/speed,
+/// aircraft info, and timestamps.
 pub fn parse_dji_log(
     data: &[u8],
     filename: &str,
     hash: &str,
-    _api_key: Option<&str>,
+    api_key: Option<&str>,
 ) -> Result<ParsedFlight, String> {
-    // Attempt to parse the DJI log using the dji-log-parser crate
     use dji_log_parser::DJILog;
 
     let log = DJILog::from_bytes(data.to_vec())
         .map_err(|e| format!("{}: failed to parse DJI log: {}", filename, e))?;
 
-    // Get basic metadata from the log header
+    // ── Header metadata (always available, even for encrypted logs) ──────
     let details = &log.details;
 
-    let drone_model = Some(format!("{:?}", details.product_type));
+    let drone_model = {
+        let raw = format!("{:?}", details.product_type);
+        // Clean up Debug representation — e.g. "Mavic3" stays, "Unknown(42)" stays
+        if raw.is_empty() { None } else { Some(raw) }
+    };
+    let drone_serial = if details.aircraft_sn.is_empty() {
+        None
+    } else {
+        Some(details.aircraft_sn.clone())
+    };
+    let battery_serial = if details.battery_sn.is_empty() {
+        None
+    } else {
+        Some(details.battery_sn.clone())
+    };
+    let aircraft_name = if details.aircraft_name.is_empty() {
+        None
+    } else {
+        Some(details.aircraft_name.clone())
+    };
 
-    // Try to get frames — pass None for keychains (works for unencrypted logs)
-    let frames = match log.frames(None) {
-        Ok(f) => f,
+    // Header-level summary data (fallback when frames are unavailable)
+    let header_duration = details.total_time;           // seconds (f64)
+    let header_distance = details.total_distance as f64; // meters (f32→f64)
+    let header_max_height = details.max_height as f64;   // meters AGL (f32→f64)
+    let header_max_hspeed = details.max_horizontal_speed as f64; // m/s (f32→f64)
+
+    let start_time = {
+        let ts = details.start_time.to_rfc3339();
+        Some(ts)
+    };
+
+    let header_home_lat = if details.latitude.abs() > 0.001 {
+        Some(details.latitude)
+    } else {
+        None
+    };
+    let header_home_lon = if details.longitude.abs() > 0.001 {
+        Some(details.longitude)
+    } else {
+        None
+    };
+
+    tracing::info!(
+        "{}: DJI log v{} — product={:?} sn={} duration={:.0}s distance={:.0}m maxAlt={:.0}m maxSpd={:.1}m/s",
+        filename, log.version, details.product_type,
+        drone_serial.as_deref().unwrap_or("n/a"),
+        header_duration, header_distance, header_max_height, header_max_hspeed,
+    );
+
+    // ── Attempt to decode frames (requires keychain for v13+) ───────────
+    let keychains = if let Some(key) = api_key {
+        if key.is_empty() {
+            tracing::info!("{}: DJI_API_KEY is empty, skipping keychain fetch", filename);
+            None
+        } else {
+            match log.fetch_keychains(key) {
+                Ok(kc) => {
+                    tracing::info!("{}: fetched DJI keychains successfully", filename);
+                    Some(kc)
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "{}: failed to fetch DJI keychains: {}. Using header data only.",
+                        filename, e
+                    );
+                    None
+                }
+            }
+        }
+    } else {
+        tracing::info!(
+            "{}: no DJI_API_KEY configured — encrypted frame data unavailable, using header data",
+            filename
+        );
+        None
+    };
+
+    let frames = match log.frames(keychains) {
+        Ok(f) => {
+            tracing::info!("{}: decoded {} frames", filename, f.len());
+            f
+        }
         Err(e) => {
             tracing::warn!(
-                "{}: Could not decode frames: {}. Returning metadata only.",
+                "{}: could not decode frames: {}. Using header summary data.",
                 filename, e
             );
             Vec::new()
         }
     };
 
-    // Extract GPS track and telemetry from frames
+    // ── Extract GPS track and telemetry from frames ─────────────────────
     let mut track = Vec::new();
-    let mut timestamps = Vec::new();
+    let timestamps = Vec::new();
     let mut altitudes = Vec::new();
     let mut speeds = Vec::new();
     let mut battery_pcts = Vec::new();
@@ -49,15 +131,12 @@ pub fn parse_dji_log(
     let mut prev_lon: Option<f64> = None;
     let mut home_lat: Option<f64> = None;
     let mut home_lon: Option<f64> = None;
-    let mut battery_serial: Option<String> = None;
     let mut start_voltage: Option<f64> = None;
     let mut end_voltage: Option<f64> = None;
     let mut min_voltage: Option<f64> = None;
     let mut max_temp: Option<f64> = None;
 
     for frame in &frames {
-        // Extract OSD (On-Screen Display) data — primary flight telemetry
-        // In dji-log-parser 0.5.7, osd and battery are direct structs, not Options
         let osd = &frame.osd;
         let lat = osd.latitude;
         let lon = osd.longitude;
@@ -79,7 +158,6 @@ pub fn parse_dji_log(
                 home_lon = Some(lon);
             }
 
-            // Calculate distance from previous point
             if let (Some(plat), Some(plon)) = (prev_lat, prev_lon) {
                 total_distance += haversine(plat, plon, lat, lon);
             }
@@ -93,9 +171,9 @@ pub fn parse_dji_log(
         if spd > max_speed { max_speed = spd; }
         satellites_vec.push(osd.gps_num as u32);
 
-        // Extract battery data
+        // Battery data
         let battery = &frame.battery;
-        let voltage = battery.voltage as f64 / 1000.0; // mV to V
+        let voltage = battery.voltage as f64 / 1000.0;
         let pct = battery.charge_level as f64;
         let temp = battery.temperature as f64;
 
@@ -109,12 +187,32 @@ pub fn parse_dji_log(
         max_temp = Some(max_temp.map_or(temp, |t: f64| t.max(temp)));
     }
 
-    // Estimate duration from frame count (~10 frames/sec typical for DJI logs)
-    let duration_secs = if !frames.is_empty() {
-        frames.len() as f64 / 10.0
+    // ── Use frame data when available, fall back to header summary ───────
+    let has_frames = !frames.is_empty();
+
+    let final_duration = if has_frames {
+        frames.len() as f64 / 10.0 // ~10 frames/sec typical
     } else {
-        0.0
+        header_duration
     };
+    let final_distance = if has_frames && total_distance > 0.0 {
+        total_distance
+    } else {
+        header_distance
+    };
+    let final_max_alt = if has_frames && max_alt > 0.0 {
+        max_alt
+    } else {
+        header_max_height
+    };
+    let final_max_speed = if has_frames && max_speed > 0.0 {
+        max_speed
+    } else {
+        header_max_hspeed
+    };
+    let final_home_lat = home_lat.or(header_home_lat);
+    let final_home_lon = home_lon.or(header_home_lon);
+
     let point_count = track.len();
 
     let telemetry = if !altitudes.is_empty() {
@@ -146,18 +244,24 @@ pub fn parse_dji_log(
         None
     };
 
+    tracing::info!(
+        "{}: final → duration={:.0}s distance={:.0}m maxAlt={:.0}m maxSpd={:.1}m/s points={} frames={} (from_frames={})",
+        filename, final_duration, final_distance, final_max_alt, final_max_speed,
+        point_count, frames.len(), has_frames,
+    );
+
     Ok(ParsedFlight {
         name: filename.to_string(),
         drone_model,
-        drone_serial: None,
-        battery_serial,
-        start_time: None,
-        duration_secs,
-        total_distance,
-        max_altitude: max_alt,
-        max_speed,
-        home_lat,
-        home_lon,
+        drone_serial: drone_serial.clone(),
+        battery_serial: battery_serial.clone(),
+        start_time,
+        duration_secs: final_duration,
+        total_distance: final_distance,
+        max_altitude: final_max_alt,
+        max_speed: final_max_speed,
+        home_lat: final_home_lat,
+        home_lon: final_home_lon,
         point_count,
         gps_track: track,
         telemetry,
@@ -167,14 +271,26 @@ pub fn parse_dji_log(
         original_filename: filename.to_string(),
         raw_metadata: Some(serde_json::json!({
             "product_type": format!("{:?}", details.product_type),
-            "app_version": details.app_version,
+            "aircraft_name": aircraft_name,
+            "aircraft_sn": drone_serial,
+            "battery_sn": &battery_serial,
+            "rc_sn": &details.rc_sn,
+            "camera_sn": &details.camera_sn,
+            "app_version": &details.app_version,
+            "log_version": log.version,
+            "header_duration": header_duration,
+            "header_distance": header_distance,
+            "header_max_height": header_max_height,
+            "header_max_hspeed": header_max_hspeed,
+            "frames_decoded": has_frames,
+            "frame_count": frames.len(),
         })),
     })
 }
 
 /// Haversine distance in meters between two lat/lon points
 fn haversine(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
-    let r = 6371000.0; // Earth radius in meters
+    let r = 6371000.0;
     let dlat = (lat2 - lat1).to_radians();
     let dlon = (lon2 - lon1).to_radians();
     let a = (dlat / 2.0).sin().powi(2)

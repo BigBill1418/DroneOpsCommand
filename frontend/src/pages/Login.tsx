@@ -29,12 +29,25 @@ export default function Login({ onLogin }: LoginProps) {
     setLoading(true);
     try {
       await onLogin(username, password);
-    } catch {
-      notifications.show({
-        title: 'Login Failed',
-        message: 'Invalid credentials',
-        color: 'red',
-      });
+    } catch (err: unknown) {
+      const axiosErr = err as { response?: { status?: number; data?: { detail?: string } } };
+      const status = axiosErr.response?.status;
+      const detail = axiosErr.response?.data?.detail;
+
+      if (status === 429) {
+        notifications.show({
+          title: 'Account Locked',
+          message: detail || 'Too many failed attempts. Please wait a few minutes.',
+          color: 'orange',
+          autoClose: 10000,
+        });
+      } else {
+        notifications.show({
+          title: 'Login Failed',
+          message: detail || 'Invalid credentials',
+          color: 'red',
+        });
+      }
     } finally {
       setLoading(false);
     }

@@ -1,6 +1,7 @@
 """API endpoints for managing system settings (SMTP, etc.) from the admin portal."""
 
 import asyncio
+import logging
 
 import httpx
 from fastapi import APIRouter, Depends
@@ -12,6 +13,8 @@ from app.auth.jwt import get_current_user
 from app.database import get_db
 from app.models.system_settings import SystemSetting
 from app.models.user import User
+
+logger = logging.getLogger("doc.settings")
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -54,6 +57,17 @@ BRANDING_DEFAULTS = {
     "company_social_url": "",
     "company_contact_email": "",
 }
+
+
+OPENSKY_KEYS = [
+    "opensky_client_id",
+    "opensky_client_secret",
+]
+
+
+class OpenSkySettings(BaseModel):
+    opensky_client_id: str = ""
+    opensky_client_secret: str = ""
 
 
 class OpenDroneLogSettings(BaseModel):
@@ -302,7 +316,12 @@ async def test_dji_api_key(
     _user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Test if the stored DJI API key is configured and the flight-parser service can use it."""
+    """Test DJI API key end-to-end through the flight-parser service.
+
+    Sends the DB-stored key to flight-parser's /validate-dji-key endpoint,
+    which tests it directly against DJI's servers. This validates the full
+    chain: Settings UI → DB → backend → flight-parser → DJI API.
+    """
     result = await db.execute(
         select(SystemSetting).where(SystemSetting.key == "dji_api_key")
     )
@@ -310,51 +329,145 @@ async def test_dji_api_key(
     api_key = row.value if row else ""
 
     if not api_key:
-        return {"status": "error", "message": "No DJI API key configured"}
+        return {"status": "error", "message": "No DJI API key configured — enter your key above and save it first"}
 
-    # Validate key format (DJI keys are typically 32+ hex/alphanumeric characters)
     key_len = len(api_key.strip())
     if key_len < 8:
         return {"status": "error", "message": f"API key too short ({key_len} chars) — check your key"}
 
-    # Check that the flight-parser service (which uses the key) is reachable
-    parser_ok = False
+    # Validate through flight-parser (end-to-end test)
     try:
-        async with httpx.AsyncClient(timeout=5) as client:
-            resp = await client.get("http://flight-parser:8100/health")
-            if resp.status_code == 200:
-                parser_ok = True
-    except Exception:
-        pass
-
-    # Try the DJI API directly (best-effort — may not be reachable from Docker)
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.get(
-                "https://developer-api.dji.com/openapi/v1/manage/user/info",
-                headers={"Api-Key": api_key},
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(
+                "http://flight-parser:8100/validate-dji-key",
+                headers={"X-DJI-Api-Key": api_key.strip()},
             )
             if resp.status_code == 200:
-                return {"status": "online", "message": "API key verified with DJI"}
-            elif resp.status_code == 401:
-                return {"status": "error", "message": "Invalid API key (401 Unauthorized)"}
-            elif resp.status_code == 403:
-                # 403 often means the key is recognized but lacks permissions for this endpoint
-                # — the key itself is valid for flight data
-                msg = "API key configured" + (" — flight parser online" if parser_ok else "")
-                return {"status": "online", "message": msg}
+                data = resp.json()
+                return {
+                    "status": data.get("status", "unknown"),
+                    "message": data.get("message", "Validation complete"),
+                    "key_source": data.get("key_source"),
+                    "dji_api_reachable": data.get("dji_api_reachable"),
+                    "parser_online": True,
+                }
             else:
-                # Any other response means we reached DJI — key is configured
-                msg = "API key configured" + (" — flight parser online" if parser_ok else "")
-                return {"status": "online", "message": msg}
-    except (httpx.ConnectError, httpx.TimeoutException):
-        # Can't reach DJI from Docker — this is normal for self-hosted setups
-        # The flight-parser service has its own network access and uses the key directly
-        msg = "API key configured" + (" — flight parser online" if parser_ok else "")
-        return {"status": "online", "message": msg}
+                return {"status": "error", "message": f"Flight parser returned {resp.status_code}", "parser_online": True}
+    except httpx.ConnectError:
+        return {"status": "error", "message": "Flight parser service is not running — rebuild with ./update.sh dev", "parser_online": False}
+    except httpx.TimeoutException:
+        return {"status": "warning", "message": "Flight parser timed out validating key — DJI servers may be slow", "parser_online": True}
     except Exception as e:
-        msg = "API key configured" + (" — flight parser online" if parser_ok else "")
-        return {"status": "online", "message": msg}
+        logger.warning("DJI key test failed: %s", e)
+        return {"status": "error", "message": f"Validation error: {str(e)}", "parser_online": False}
+
+
+@router.get("/opensky")
+async def get_opensky_settings(
+    _user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get OpenSky Network credentials. Client secret is masked."""
+    result = await db.execute(
+        select(SystemSetting).where(SystemSetting.key.in_(OPENSKY_KEYS))
+    )
+    rows = {r.key: r.value for r in result.scalars().all()}
+
+    data = {}
+    for key in OPENSKY_KEYS:
+        data[key] = rows.get(key, "")
+    # Mask the client secret for frontend display
+    if data.get("opensky_client_secret"):
+        val = data["opensky_client_secret"]
+        data["opensky_client_secret"] = val[:4] + "••••••••" + val[-4:] if len(val) > 8 else "••••••••"
+    return data
+
+
+@router.put("/opensky")
+async def update_opensky_settings(
+    payload: OpenSkySettings,
+    _user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update OpenSky Network credentials."""
+    updates = payload.model_dump()
+
+    for key, value in updates.items():
+        # Skip masked client secret — don't overwrite with mask
+        if key == "opensky_client_secret" and "••••" in value:
+            continue
+
+        result = await db.execute(
+            select(SystemSetting).where(SystemSetting.key == key)
+        )
+        existing = result.scalar_one_or_none()
+        if existing:
+            existing.value = value
+        else:
+            db.add(SystemSetting(key=key, value=value))
+
+    await db.commit()
+    logger.info("OpenSky Network settings updated by user %s", _user.username)
+    return {"status": "ok"}
+
+
+@router.post("/opensky/test")
+async def test_opensky_credentials(
+    _user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Test OpenSky Network credentials by requesting an OAuth2 token."""
+    result = await db.execute(
+        select(SystemSetting).where(SystemSetting.key.in_(OPENSKY_KEYS))
+    )
+    rows = {r.key: r.value for r in result.scalars().all()}
+    client_id = rows.get("opensky_client_id", "").strip()
+    client_secret = rows.get("opensky_client_secret", "").strip()
+
+    if not client_id or not client_secret:
+        return {"status": "error", "message": "OpenSky client ID and secret must both be configured"}
+
+    token_url = (
+        "https://auth.opensky-network.org/auth/realms/opensky-network"
+        "/protocol/openid-connect/token"
+    )
+
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(
+                token_url,
+                data={
+                    "grant_type": "client_credentials",
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                },
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("access_token"):
+                    logger.info("OpenSky credential test succeeded for user %s", _user.username)
+                    return {"status": "ok", "message": "Credentials are valid — OAuth2 token obtained successfully"}
+                else:
+                    logger.warning("OpenSky returned 200 but no access_token")
+                    return {"status": "error", "message": "Unexpected response — no access token returned"}
+            else:
+                detail = ""
+                try:
+                    err = resp.json()
+                    detail = err.get("error_description", err.get("error", ""))
+                except Exception:
+                    detail = resp.text[:200]
+                logger.warning("OpenSky credential test failed: %s %s", resp.status_code, detail)
+                return {"status": "error", "message": f"Authentication failed ({resp.status_code}): {detail}"}
+    except httpx.ConnectError:
+        logger.warning("OpenSky credential test — connection refused")
+        return {"status": "error", "message": "Could not connect to OpenSky auth server"}
+    except httpx.TimeoutException:
+        logger.warning("OpenSky credential test — timeout")
+        return {"status": "error", "message": "OpenSky auth server timed out"}
+    except Exception as e:
+        logger.warning("OpenSky credential test error: %s", e)
+        return {"status": "error", "message": f"Test failed: {str(e)}"}
 
 
 @router.get("/payment")

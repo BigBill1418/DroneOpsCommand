@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import {
   Card,
   Group,
@@ -44,7 +44,9 @@ import {
   IconCheck,
   IconCopy,
   IconMail,
-  IconCloudUpload,
+  IconRefresh,
+  IconGauge,
+  IconDroplet,
 } from '@tabler/icons-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
@@ -90,10 +92,13 @@ interface MetarData {
   flight_category?: string;
   flight_category_color?: string;
   flight_category_desc?: string;
+  temp_c?: number;
+  dewpoint_c?: number;
   wind_dir_deg?: number;
   wind_speed_kt?: number;
   wind_gust_kt?: number;
   visibility?: string;
+  altimeter_hpa?: number;
   clouds?: Array<{ cover: string; base: number }>;
   error?: string;
 }
@@ -142,9 +147,20 @@ interface MaintenanceAlert {
   schedule_id?: string;
   record_id?: string;
   aircraft_id: string;
+  aircraft_name?: string;
   maintenance_type: string;
   description: string;
   next_due_date: string | null;
+  days_until: number;
+  overdue: boolean;
+}
+
+interface NextServiceDue {
+  aircraft_id: string;
+  aircraft_name: string;
+  maintenance_type: string;
+  description: string | null;
+  next_due_date: string;
   days_until: number;
   overdue: boolean;
 }
@@ -201,7 +217,10 @@ export default function Dashboard() {
   const [flightStats, setFlightStats] = useState<FlightStats | null>(null);
   const [wxData, setWxData] = useState<WeatherResponse | null>(null);
   const [wxLoading, setWxLoading] = useState(true);
+  const [wxRefreshing, setWxRefreshing] = useState(false);
+  const [wxLastRefresh, setWxLastRefresh] = useState<Date | null>(null);
   const [maintenanceAlerts, setMaintenanceAlerts] = useState<MaintenanceAlert[]>([]);
+  const [nextServiceDue, setNextServiceDue] = useState<NextServiceDue | null>(null);
   const [batteries, setBatteries] = useState<BatteryInfo[]>([]);
   const [initiateModalOpen, setInitiateModalOpen] = useState(false);
   const [initiateEmail, setInitiateEmail] = useState('');
@@ -210,14 +229,29 @@ export default function Dashboard() {
   const [linkCopied, setLinkCopied] = useState(false);
   const navigate = useNavigate();
 
+  const fetchWeather = useCallback((isRefresh = false) => {
+    if (isRefresh) setWxRefreshing(true);
+    api.get('/weather/current')
+      .then((r) => { setWxData(r.data); setWxLastRefresh(new Date()); })
+      .catch(() => setWxData(null))
+      .finally(() => { setWxLoading(false); setWxRefreshing(false); });
+  }, []);
+
   useEffect(() => {
     api.get('/missions').then((r) => setMissions(r.data)).catch(() => setMissions([]));
     api.get('/customers').then((r) => setCustomers(r.data)).catch(() => setCustomers([]));
     api.get('/flight-library/stats/summary').then((r) => setFlightStats(r.data)).catch(() => setFlightStats(null));
-    api.get('/weather/current').then((r) => setWxData(r.data)).catch(() => setWxData(null)).finally(() => setWxLoading(false));
+    fetchWeather();
     api.get('/maintenance/due').then((r) => setMaintenanceAlerts(r.data)).catch(() => setMaintenanceAlerts([]));
+    api.get('/maintenance/next-due').then((r) => setNextServiceDue(r.data)).catch(() => setNextServiceDue(null));
     api.get('/batteries').then((r) => setBatteries(r.data)).catch(() => setBatteries([]));
-  }, []);
+  }, [fetchWeather]);
+
+  // Auto-refresh weather every 5 minutes
+  useEffect(() => {
+    const interval = setInterval(() => fetchWeather(true), 5 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, [fetchWeather]);
 
   const recentMissions = missions.slice(0, 5);
   const draftCount = missions.filter((m) => m.status === 'draft').length;
@@ -314,16 +348,6 @@ export default function Dashboard() {
           >
             NEW MISSION
           </Button>
-          <Button
-            leftSection={<IconCloudUpload size={16} />}
-            color="cyan"
-            variant="outline"
-            size="sm"
-            onClick={() => navigate('/upload-logs')}
-            styles={{ root: { ...bebasFont, letterSpacing: '1px' } }}
-          >
-            UPLOAD LOGS
-          </Button>
         </Group>
       </Group>
 
@@ -335,16 +359,22 @@ export default function Dashboard() {
         <StatCard icon={IconUsers} label="CUSTOMERS" value={String(customers.length)} color="#00d4ff" />
       </SimpleGrid>
 
-      {/* Main grid: 2 columns on desktop, single column on mobile */}
-      <div className="dashboard-grid" style={{ flex: 1, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', minHeight: 0, gridTemplateRows: 'minmax(0, 1fr) minmax(0, 1fr)', maxHeight: 'calc(100vh - 220px)' }}>
+      {/* Main layout: two independent flex columns so cards stack tight */}
+      <div style={{
+        flex: 1, display: 'flex', gap: '10px', minHeight: 0,
+        maxHeight: 'calc(100vh - 220px)',
+      }}>
 
-        {/* ═══ RECENT MISSIONS ═══ */}
-        <Card padding="sm" radius="md" style={panelStyle}>
-          <Title order={4} c="#e8edf2" mb="xs" style={{ letterSpacing: '1px' }}>
+        {/* ═══ LEFT COLUMN — cards stack naturally, no dead space ═══ */}
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '10px', minHeight: 0 }}>
+
+        {/* ═══ RECENT MISSIONS — compact ═══ */}
+        <Card padding="sm" radius="md" style={{ ...panelStyle, maxHeight: '200px', flexShrink: 0 }}>
+          <Title order={4} c="#e8edf2" mb={4} style={{ letterSpacing: '1px', fontSize: '14px' }}>
             RECENT MISSIONS
           </Title>
           {recentMissions.length === 0 ? (
-            <Text c="#5a6478" ta="center" py="xl">
+            <Text c="#5a6478" ta="center" py="sm" size="sm">
               No missions yet. Create your first mission to get started.
             </Text>
           ) : (
@@ -353,9 +383,8 @@ export default function Dashboard() {
                 highlightOnHover
                 styles={{
                   table: { color: '#e8edf2', minWidth: 400 },
-                  th: { color: '#00d4ff', ...monoSm, borderBottom: '1px solid #1a1f2e', padding: '6px 8px' },
-                  td: { borderBottom: '1px solid #1a1f2e', padding: '6px 8px', fontSize: '13px' },
-                  tr: { '&:hover': { backgroundColor: 'rgba(0, 212, 255, 0.05)' } },
+                  th: { color: '#00d4ff', ...monoXs, borderBottom: '1px solid #1a1f2e', padding: '4px 8px' },
+                  td: { borderBottom: '1px solid #1a1f2e', padding: '4px 8px', fontSize: '12px' },
                 }}
               >
                 <Table.Thead>
@@ -367,7 +396,7 @@ export default function Dashboard() {
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
-                  {recentMissions.map((mission) => (
+                  {recentMissions.slice(0, 4).map((mission) => (
                     <Table.Tr
                       key={mission.id}
                       style={{ cursor: 'pointer' }}
@@ -398,223 +427,76 @@ export default function Dashboard() {
           )}
         </Card>
 
-        {/* ═══ FLIGHT CONDITIONS ═══ */}
-        <Card padding="sm" radius="md" style={panelStyle}>
-          <Group justify="space-between" mb="xs">
-            <Title order={4} c="#e8edf2" style={{ letterSpacing: '1px' }}>
-              FLIGHT CONDITIONS
-            </Title>
-            {wxData && (
-              <Text size="xs" c="#5a6478" style={{ ...monoXs }}>
-                {wxData.location}
-              </Text>
-            )}
-          </Group>
-
-          {wxLoading ? (
-            <Group justify="center" py="xl">
-              <Loader color="cyan" size="sm" />
-              <Text c="#5a6478" size="sm">Loading weather data...</Text>
-            </Group>
-          ) : wx && !wx.error ? (
-            <ScrollArea style={{ flex: 1 }} type="auto">
-              <Stack gap="xs">
-                {/* Status banners */}
-                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                  {wxData?.metar && !wxData.metar.error && wxData.metar.flight_category && (
-                    <Tooltip label={wxData.metar.flight_category_desc || ''} withArrow>
-                      <div style={{
-                        padding: '5px 12px', borderRadius: '6px',
-                        background: `${wxData.metar.flight_category_color}15`,
-                        border: `1px solid ${wxData.metar.flight_category_color}40`,
-                        display: 'flex', alignItems: 'center', gap: '6px', cursor: 'help',
-                      }}>
-                        <IconPlane size={14} color={wxData.metar.flight_category_color} />
-                        <Text size="xs" c={wxData.metar.flight_category_color} fw={700}
-                          style={{ ...monoXs, fontSize: '11px', letterSpacing: '2px' }}>
-                          {wxData.metar.flight_category} — {wxData.airport}
-                        </Text>
-                      </div>
-                    </Tooltip>
-                  )}
-                  {windSeverity && (
-                    <div style={{
-                      padding: '5px 12px', borderRadius: '6px',
-                      background: `${windSeverity.color}15`,
-                      border: `1px solid ${windSeverity.color}40`,
-                      display: 'flex', alignItems: 'center', gap: '6px', flex: 1,
-                    }}>
-                      <IconWind size={14} color={windSeverity.color} />
-                      <Text size="xs" c={windSeverity.color} fw={700}
-                        style={{ ...monoXs, fontSize: '11px', letterSpacing: '2px' }}>
-                        WIND: {windSeverity.label}
+        {/* ═══ NEXT SERVICE DUE — below recent missions ═══ */}
+        <div style={{ flexShrink: 0 }}>
+          {nextServiceDue ? (
+            <Card
+              padding="sm"
+              radius="md"
+              style={{
+                ...panelStyle,
+                cursor: 'pointer',
+                borderColor: nextServiceDue.overdue
+                  ? 'rgba(255, 68, 68, 0.3)'
+                  : nextServiceDue.days_until <= 7
+                    ? 'rgba(255, 107, 26, 0.3)'
+                    : 'rgba(0, 212, 255, 0.2)',
+              }}
+              onClick={() => navigate('/maintenance')}
+            >
+              <Group justify="space-between" wrap="nowrap" align="center">
+                <Group gap={8} wrap="nowrap" style={{ minWidth: 0 }}>
+                  <IconCalendarDue size={14} color={
+                    nextServiceDue.overdue ? '#ff4444'
+                      : nextServiceDue.days_until <= 7 ? '#ff6b1a' : '#00d4ff'
+                  } style={{ flexShrink: 0 }} />
+                  <Text size="xs" c="#00d4ff" fw={600} lineClamp={1} style={{ ...monoXs, fontSize: '12px' }}>
+                    {nextServiceDue.aircraft_name}
+                  </Text>
+                  {nextServiceDue.next_due_date && (
+                    <>
+                      <Text size="xs" c="#5a6478">—</Text>
+                      <Text size="xs" c="#5a6478" style={{ ...monoXs, fontSize: '11px', flexShrink: 0 }}>
+                        {new Date(nextServiceDue.next_due_date).toLocaleDateString('en-US', {
+                          month: 'short', day: 'numeric', year: 'numeric',
+                        })}
                       </Text>
-                    </div>
+                    </>
                   )}
-                </div>
-
-                {/* NWS alerts */}
-                {wxData?.alerts && wxData.alerts.length > 0 && (
-                  <Stack gap={4}>
-                    {wxData.alerts.slice(0, 2).map((alert, i) => (
-                      <Tooltip key={i} label={alert.description || ''} multiline w={400} withArrow position="bottom">
-                        <div style={{
-                          padding: '5px 12px', borderRadius: '6px',
-                          background: 'rgba(255,68,68,0.08)', border: '1px solid rgba(255,68,68,0.3)',
-                          display: 'flex', alignItems: 'center', gap: '6px', cursor: 'help',
-                        }}>
-                          <IconAlertTriangle size={14} color="#ff4444" />
-                          <Text size="xs" c="#ff4444" fw={700} style={{ ...monoXs, fontSize: '11px' }}>
-                            NWS: {alert.event}
-                          </Text>
-                          <Text size="xs" c="#5a6478" style={{ flex: 1 }} lineClamp={1}>
-                            {alert.headline}
-                          </Text>
-                        </div>
-                      </Tooltip>
-                    ))}
-                  </Stack>
-                )}
-
-                {/* Weather stats 2x2 grid */}
-                <SimpleGrid cols={2} spacing="xs">
-                  <div style={{ padding: '8px', background: '#050608', borderRadius: '6px', border: '1px solid #1a1f2e' }}>
-                    <Group gap={4} mb={2}>
-                      <IconTemperature size={12} color="#5a6478" />
-                      <Text size="xs" c="#5a6478" style={monoXs}>TEMP</Text>
-                    </Group>
-                    <Text c="#e8edf2" fw={700} style={{ ...bebasFont, fontSize: '20px', lineHeight: 1.1 }}>
-                      {wx.temperature_f != null ? `${Math.round(wx.temperature_f)}°F` : '—'}
-                    </Text>
-                    <Text size="xs" c="#5a6478" style={{ fontSize: '10px' }}>{wx.condition}</Text>
-                  </div>
-
-                  <div style={{ padding: '8px', background: '#050608', borderRadius: '6px', border: '1px solid #1a1f2e' }}>
-                    <Group gap={4} mb={2}>
-                      <IconWind size={12} color="#5a6478" />
-                      <Text size="xs" c="#5a6478" style={monoXs}>WIND</Text>
-                    </Group>
-                    <Group gap={4} align="baseline">
-                      <Text c="#e8edf2" fw={700} style={{ ...bebasFont, fontSize: '20px', lineHeight: 1.1 }}>
-                        {wx.wind_speed_mph != null ? `${Math.round(wx.wind_speed_mph)}` : '—'}
-                      </Text>
-                      <Text size="xs" c="#5a6478" style={{ fontSize: '10px' }}>MPH</Text>
-                      {wx.wind_direction_deg != null && <WindIndicator deg={wx.wind_direction_deg} />}
-                    </Group>
-                    <Text size="xs" c="#5a6478" style={{ fontSize: '10px' }}>
-                      {wx.wind_direction || '—'}{wx.wind_gusts_mph ? ` / G ${Math.round(wx.wind_gusts_mph)}` : ''}
-                    </Text>
-                  </div>
-
-                  <div style={{ padding: '8px', background: '#050608', borderRadius: '6px', border: '1px solid #1a1f2e' }}>
-                    <Group gap={4} mb={2}>
-                      <IconCloud size={12} color="#5a6478" />
-                      <Text size="xs" c="#5a6478" style={monoXs}>CLOUDS</Text>
-                    </Group>
-                    <Text c="#e8edf2" fw={700} style={{ ...bebasFont, fontSize: '20px', lineHeight: 1.1 }}>
-                      {wx.cloud_cover_pct != null ? `${wx.cloud_cover_pct}%` : '—'}
-                    </Text>
-                    <Text size="xs" c="#5a6478" style={{ fontSize: '10px' }}>
-                      {wx.humidity_pct != null ? `Humidity ${wx.humidity_pct}%` : ''}
-                    </Text>
-                  </div>
-
-                  <div style={{ padding: '8px', background: '#050608', borderRadius: '6px', border: '1px solid #1a1f2e' }}>
-                    <Group gap={4} mb={2}>
-                      <IconEye size={12} color="#5a6478" />
-                      <Text size="xs" c="#5a6478" style={monoXs}>VISIBILITY</Text>
-                    </Group>
-                    <Text c="#e8edf2" fw={700} style={{ ...bebasFont, fontSize: '20px', lineHeight: 1.1 }}>
-                      {wx.visibility_m != null ? `${(wx.visibility_m / 1609.344).toFixed(1)}` : '—'}
-                    </Text>
-                    <Text size="xs" c="#5a6478" style={{ fontSize: '10px' }}>mi</Text>
-                  </div>
-                </SimpleGrid>
-
-                {/* Raw METAR */}
-                {wxData?.metar?.raw_metar && (
-                  <div style={{ padding: '6px 10px', background: '#050608', borderRadius: '4px', border: '1px solid #1a1f2e' }}>
-                    <Text size="xs" c="#5a6478" mb={2} style={{ ...monoXs, fontSize: '9px' }}>
-                      METAR {wxData.metar.station}
-                    </Text>
-                    <Text size="xs" c="#e8edf2"
-                      style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: '10px', wordBreak: 'break-all' }}>
-                      {wxData.metar.raw_metar}
-                    </Text>
-                  </div>
-                )}
-
-                {/* FAA Airspace */}
-                <div>
-                  <Group gap="xs" mb={6}>
-                    <IconAlertTriangle size={14} color="#ff6b1a" />
-                    <Text size="xs" c="#e8edf2" fw={600} style={{ letterSpacing: '1px', fontSize: '12px' }}>
-                      FAA AIRSPACE — {wxData?.airport || 'N/A'}
-                    </Text>
-                  </Group>
-                  <SimpleGrid cols={2} spacing="xs">
-                    <div style={{ padding: '8px', background: '#050608', borderRadius: '6px', border: '1px solid #1a1f2e' }}>
-                      <Text size="xs" c="#ff6b1a" fw={700} mb={4} style={{ ...monoXs }}>TFRs</Text>
-                      {wxData?.tfrs && wxData.tfrs.length > 0 ? (
-                        <Stack gap={2}>
-                          {wxData.tfrs.slice(0, 3).map((tfr, i) => (
-                            <Group key={i} gap="xs">
-                              {tfr.status ? (
-                                <Text size="xs" c="#5a6478" style={{ fontSize: '10px' }}>{tfr.status}</Text>
-                              ) : (
-                                <>
-                                  <Badge size="xs" color="orange" variant="light">TFR</Badge>
-                                  <Text size="xs" c="#e8edf2" style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: '10px' }}>
-                                    {tfr.notam_id}
-                                  </Text>
-                                </>
-                              )}
-                            </Group>
-                          ))}
-                        </Stack>
-                      ) : (
-                        <Text size="xs" c="#00ff88" style={{ fontSize: '10px' }}>No active TFRs</Text>
-                      )}
-                    </div>
-                    <div style={{ padding: '8px', background: '#050608', borderRadius: '6px', border: '1px solid #1a1f2e', maxHeight: '120px', overflowY: 'auto' }}>
-                      <Text size="xs" c="#00d4ff" fw={700} mb={4} style={{ ...monoXs }}>NOTAMS</Text>
-                      {wxData?.notams && wxData.notams.length > 0 ? (
-                        <Stack gap={2}>
-                          {wxData.notams.map((notam, i) => (
-                            <div key={i}>
-                              {notam.status ? (
-                                <Text size="xs" c="#5a6478" style={{ fontSize: '10px' }}>{notam.status}</Text>
-                              ) : (
-                                <Tooltip label={notam.text || ''} multiline w={400} position="left" withArrow>
-                                  <Group gap={4} style={{ cursor: 'help' }}>
-                                    <IconInfoCircle size={10} color="#5a6478" />
-                                    <Text size="xs" c="#e8edf2" lineClamp={1}
-                                      style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: '10px' }}>
-                                      {notam.id || 'NOTAM'}: {(notam.text || '').slice(0, 60)}
-                                    </Text>
-                                  </Group>
-                                </Tooltip>
-                              )}
-                            </div>
-                          ))}
-                        </Stack>
-                      ) : (
-                        <Text size="xs" c="#00ff88" style={{ fontSize: '10px' }}>No active NOTAMs</Text>
-                      )}
-                    </div>
-                  </SimpleGrid>
-                </div>
-              </Stack>
-            </ScrollArea>
+                </Group>
+                <Badge
+                  size="sm"
+                  variant="light"
+                  color={
+                    nextServiceDue.overdue ? 'red'
+                      : nextServiceDue.days_until <= 7 ? 'orange'
+                        : 'cyan'
+                  }
+                  styles={{ root: { flexShrink: 0 } }}
+                >
+                  {nextServiceDue.overdue
+                    ? `${Math.abs(nextServiceDue.days_until)}d OVERDUE`
+                    : nextServiceDue.days_until === 0
+                      ? 'DUE TODAY'
+                      : `${nextServiceDue.days_until}d`
+                  }
+                </Badge>
+              </Group>
+            </Card>
           ) : (
-            <Text c="#5a6478" ta="center" py="md">
-              Weather data unavailable — check network connection.
-            </Text>
+            <Card padding="sm" radius="md" style={panelStyle}>
+              <Group gap="xs">
+                <IconTool size={14} color="#00ff88" />
+                <Text size="xs" c="#00ff88" fw={600} style={monoXs}>
+                  ALL MAINTENANCE CURRENT
+                </Text>
+              </Group>
+            </Card>
           )}
-        </Card>
+        </div>
 
         {/* ═══ FLIGHT STATS ═══ */}
-        <Card padding="sm" radius="md" style={panelStyle}>
+        <Card padding="sm" radius="md" style={{ ...panelStyle, flex: 1, minHeight: 0 }}>
           <Title order={4} c="#e8edf2" mb="xs" style={{ letterSpacing: '1px' }}>
             FLIGHT STATISTICS
           </Title>
@@ -762,11 +644,272 @@ export default function Dashboard() {
           )}
         </Card>
 
-        {/* ═══ MAINTENANCE & BATTERY ALERTS ═══ */}
-        <Card padding="sm" radius="md" style={panelStyle}>
+        </div>{/* end left column */}
+
+        {/* ═══ RIGHT COLUMN — weather + equipment ═══ */}
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '10px', minHeight: 0 }}>
+
+        {/* ═══ FLIGHT CONDITIONS — live weather ═══ */}
+        <Card padding="sm" radius="md" style={{ ...panelStyle, flex: 1, minHeight: 0 }}>
           <Group justify="space-between" mb="xs">
             <Group gap="xs">
               <Title order={4} c="#e8edf2" style={{ letterSpacing: '1px' }}>
+                FLIGHT CONDITIONS
+              </Title>
+              {wxData && (
+                <Text size="xs" c="#5a6478" style={{ ...monoXs }}>
+                  {wxData.location}
+                </Text>
+              )}
+            </Group>
+            <Group gap={6}>
+              {wxLastRefresh && (
+                <Tooltip label="Auto-refreshes every 5 min" withArrow>
+                  <Text size="xs" c="#5a6478" style={{ ...monoXs, fontSize: '9px', cursor: 'help' }}>
+                    {wxLastRefresh.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </Text>
+                </Tooltip>
+              )}
+              <Tooltip label="Refresh weather" withArrow>
+                <ActionIcon
+                  variant="subtle"
+                  color="cyan"
+                  size="sm"
+                  onClick={() => fetchWeather(true)}
+                  loading={wxRefreshing}
+                >
+                  <IconRefresh size={14} />
+                </ActionIcon>
+              </Tooltip>
+            </Group>
+          </Group>
+
+          {wxLoading ? (
+            <Group justify="center" py="xl">
+              <Loader color="cyan" size="sm" />
+              <Text c="#5a6478" size="sm">Loading weather data...</Text>
+            </Group>
+          ) : wx && !wx.error ? (
+            <ScrollArea style={{ flex: 1 }} type="auto">
+              <Stack gap="xs">
+                {/* Status banners */}
+                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                  {wxData?.metar && !wxData.metar.error && wxData.metar.flight_category && (
+                    <Tooltip label={wxData.metar.flight_category_desc || ''} withArrow>
+                      <div style={{
+                        padding: '6px 14px', borderRadius: '6px',
+                        background: `${wxData.metar.flight_category_color}15`,
+                        border: `1px solid ${wxData.metar.flight_category_color}40`,
+                        display: 'flex', alignItems: 'center', gap: '8px', cursor: 'help',
+                      }}>
+                        <IconPlane size={16} color={wxData.metar.flight_category_color} />
+                        <Text size="sm" c={wxData.metar.flight_category_color} fw={700}
+                          style={{ ...monoSm, fontSize: '13px', letterSpacing: '2px' }}>
+                          {wxData.metar.flight_category} — {wxData.airport}
+                        </Text>
+                      </div>
+                    </Tooltip>
+                  )}
+                  {windSeverity && (
+                    <div style={{
+                      padding: '6px 14px', borderRadius: '6px',
+                      background: `${windSeverity.color}15`,
+                      border: `1px solid ${windSeverity.color}40`,
+                      display: 'flex', alignItems: 'center', gap: '8px', flex: 1,
+                    }}>
+                      <IconWind size={16} color={windSeverity.color} />
+                      <Text size="sm" c={windSeverity.color} fw={700}
+                        style={{ ...monoSm, fontSize: '13px', letterSpacing: '2px' }}>
+                        WIND: {windSeverity.label}
+                      </Text>
+                    </div>
+                  )}
+                </div>
+
+                {/* NWS alerts */}
+                {wxData?.alerts && wxData.alerts.length > 0 && (
+                  <Stack gap={4}>
+                    {wxData.alerts.slice(0, 2).map((alert, i) => (
+                      <Tooltip key={i} label={alert.description || ''} multiline w={400} withArrow position="bottom">
+                        <div style={{
+                          padding: '6px 14px', borderRadius: '6px',
+                          background: 'rgba(255,68,68,0.08)', border: '1px solid rgba(255,68,68,0.3)',
+                          display: 'flex', alignItems: 'center', gap: '8px', cursor: 'help',
+                        }}>
+                          <IconAlertTriangle size={16} color="#ff4444" />
+                          <Text size="xs" c="#ff4444" fw={700} style={{ ...monoSm, fontSize: '12px' }}>
+                            NWS: {alert.event}
+                          </Text>
+                          <Text size="xs" c="#5a6478" style={{ flex: 1 }} lineClamp={1}>
+                            {alert.headline}
+                          </Text>
+                        </div>
+                      </Tooltip>
+                    ))}
+                  </Stack>
+                )}
+
+                {/* ── Primary weather: large temp + condition ── */}
+                <div style={{
+                  padding: '14px 16px', background: '#050608', borderRadius: '8px',
+                  border: '1px solid #1a1f2e', display: 'flex', alignItems: 'center', gap: '16px',
+                }}>
+                  <div style={{ flex: 1 }}>
+                    <Text c="#e8edf2" fw={700} style={{ ...bebasFont, fontSize: '36px', lineHeight: 1 }}>
+                      {wx.temperature_f != null ? `${Math.round(wx.temperature_f)}°F` : '—'}
+                    </Text>
+                    <Text c="#5a6478" mt={2} style={{ ...monoSm, fontSize: '13px' }}>{wx.condition}</Text>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <Group gap={6} justify="flex-end" mb={4}>
+                      <IconWind size={16} color="#00d4ff" />
+                      <Text c="#e8edf2" fw={700} style={{ ...bebasFont, fontSize: '24px', lineHeight: 1 }}>
+                        {wx.wind_speed_mph != null ? `${Math.round(wx.wind_speed_mph)}` : '—'}
+                        <span style={{ fontSize: '14px', color: '#5a6478', marginLeft: '3px' }}>mph</span>
+                      </Text>
+                      {wx.wind_direction_deg != null && <WindIndicator deg={wx.wind_direction_deg} />}
+                    </Group>
+                    <Text c="#5a6478" style={{ ...monoXs, fontSize: '11px' }}>
+                      {wx.wind_direction || '—'}{wx.wind_gusts_mph ? ` / Gusts ${Math.round(wx.wind_gusts_mph)} mph` : ''}
+                    </Text>
+                  </div>
+                </div>
+
+                {/* ── Secondary weather stats: 2x2 grid ── */}
+                <SimpleGrid cols={2} spacing={8}>
+                  <div style={{ padding: '10px 12px', background: '#050608', borderRadius: '6px', border: '1px solid #1a1f2e' }}>
+                    <Group gap={6} mb={4}>
+                      <IconCloud size={14} color="#5a6478" />
+                      <Text size="xs" c="#5a6478" style={monoXs}>CLOUDS</Text>
+                    </Group>
+                    <Text c="#e8edf2" fw={700} style={{ ...bebasFont, fontSize: '24px', lineHeight: 1.1 }}>
+                      {wx.cloud_cover_pct != null ? `${wx.cloud_cover_pct}%` : '—'}
+                    </Text>
+                    <Text c="#5a6478" mt={2} style={{ fontSize: '11px' }}>
+                      {wx.humidity_pct != null ? `Humidity ${wx.humidity_pct}%` : ''}
+                    </Text>
+                  </div>
+
+                  <div style={{ padding: '10px 12px', background: '#050608', borderRadius: '6px', border: '1px solid #1a1f2e' }}>
+                    <Group gap={6} mb={4}>
+                      <IconEye size={14} color="#5a6478" />
+                      <Text size="xs" c="#5a6478" style={monoXs}>VISIBILITY</Text>
+                    </Group>
+                    <Text c="#e8edf2" fw={700} style={{ ...bebasFont, fontSize: '24px', lineHeight: 1.1 }}>
+                      {wx.visibility_m != null ? `${(wx.visibility_m / 1609.344).toFixed(1)}` : '—'}
+                      <span style={{ fontSize: '14px', color: '#5a6478', marginLeft: '3px' }}>mi</span>
+                    </Text>
+                  </div>
+
+                  <div style={{ padding: '10px 12px', background: '#050608', borderRadius: '6px', border: '1px solid #1a1f2e' }}>
+                    <Group gap={6} mb={4}>
+                      <IconGauge size={14} color="#5a6478" />
+                      <Text size="xs" c="#5a6478" style={monoXs}>PRESSURE</Text>
+                    </Group>
+                    <Text c="#e8edf2" fw={700} style={{ ...bebasFont, fontSize: '24px', lineHeight: 1.1 }}>
+                      {wx.pressure_msl_hpa != null ? `${(wx.pressure_msl_hpa * 0.02953).toFixed(2)}` : '—'}
+                      <span style={{ fontSize: '14px', color: '#5a6478', marginLeft: '3px' }}>inHg</span>
+                    </Text>
+                  </div>
+
+                  <div style={{ padding: '10px 12px', background: '#050608', borderRadius: '6px', border: '1px solid #1a1f2e' }}>
+                    <Group gap={6} mb={4}>
+                      <IconDroplet size={14} color="#5a6478" />
+                      <Text size="xs" c="#5a6478" style={monoXs}>DEW POINT</Text>
+                    </Group>
+                    <Text c="#e8edf2" fw={700} style={{ ...bebasFont, fontSize: '24px', lineHeight: 1.1 }}>
+                      {wxData?.metar?.dewpoint_c != null ? `${Math.round(wxData.metar.dewpoint_c * 9 / 5 + 32)}°F` : '—'}
+                    </Text>
+                  </div>
+                </SimpleGrid>
+
+                {/* Raw METAR */}
+                {wxData?.metar?.raw_metar && (
+                  <div style={{ padding: '8px 12px', background: '#050608', borderRadius: '6px', border: '1px solid #1a1f2e' }}>
+                    <Text size="xs" c="#5a6478" mb={2} style={{ ...monoXs, fontSize: '10px' }}>
+                      METAR {wxData.metar.station}
+                    </Text>
+                    <Text size="xs" c="#e8edf2"
+                      style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: '11px', wordBreak: 'break-all' }}>
+                      {wxData.metar.raw_metar}
+                    </Text>
+                  </div>
+                )}
+
+                {/* FAA Airspace */}
+                <div>
+                  <Group gap="xs" mb={6}>
+                    <IconAlertTriangle size={14} color="#ff6b1a" />
+                    <Text size="xs" c="#e8edf2" fw={600} style={{ letterSpacing: '1px', fontSize: '12px' }}>
+                      FAA AIRSPACE — {wxData?.airport || 'N/A'}
+                    </Text>
+                  </Group>
+                  <SimpleGrid cols={2} spacing="xs">
+                    <div style={{ padding: '8px', background: '#050608', borderRadius: '6px', border: '1px solid #1a1f2e' }}>
+                      <Text size="xs" c="#ff6b1a" fw={700} mb={4} style={{ ...monoXs }}>TFRs</Text>
+                      {wxData?.tfrs && wxData.tfrs.length > 0 ? (
+                        <Stack gap={2}>
+                          {wxData.tfrs.slice(0, 3).map((tfr, i) => (
+                            <Group key={i} gap="xs">
+                              {tfr.status ? (
+                                <Text size="xs" c="#5a6478" style={{ fontSize: '10px' }}>{tfr.status}</Text>
+                              ) : (
+                                <>
+                                  <Badge size="xs" color="orange" variant="light">TFR</Badge>
+                                  <Text size="xs" c="#e8edf2" style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: '10px' }}>
+                                    {tfr.notam_id}
+                                  </Text>
+                                </>
+                              )}
+                            </Group>
+                          ))}
+                        </Stack>
+                      ) : (
+                        <Text size="xs" c="#00ff88" style={{ fontSize: '10px' }}>No active TFRs</Text>
+                      )}
+                    </div>
+                    <div style={{ padding: '8px', background: '#050608', borderRadius: '6px', border: '1px solid #1a1f2e', maxHeight: '120px', overflowY: 'auto' }}>
+                      <Text size="xs" c="#00d4ff" fw={700} mb={4} style={{ ...monoXs }}>NOTAMS</Text>
+                      {wxData?.notams && wxData.notams.length > 0 ? (
+                        <Stack gap={2}>
+                          {wxData.notams.map((notam, i) => (
+                            <div key={i}>
+                              {notam.status ? (
+                                <Text size="xs" c="#5a6478" style={{ fontSize: '10px' }}>{notam.status}</Text>
+                              ) : (
+                                <Tooltip label={notam.text || ''} multiline w={400} position="left" withArrow>
+                                  <Group gap={4} style={{ cursor: 'help' }}>
+                                    <IconInfoCircle size={10} color="#5a6478" />
+                                    <Text size="xs" c="#e8edf2" lineClamp={1}
+                                      style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: '10px' }}>
+                                      {notam.id || 'NOTAM'}: {(notam.text || '').slice(0, 60)}
+                                    </Text>
+                                  </Group>
+                                </Tooltip>
+                              )}
+                            </div>
+                          ))}
+                        </Stack>
+                      ) : (
+                        <Text size="xs" c="#00ff88" style={{ fontSize: '10px' }}>No active NOTAMs</Text>
+                      )}
+                    </div>
+                  </SimpleGrid>
+                </div>
+              </Stack>
+            </ScrollArea>
+          ) : (
+            <Text c="#5a6478" ta="center" py="md">
+              Weather data unavailable — check network connection.
+            </Text>
+          )}
+        </Card>
+
+        {/* ═══ EQUIPMENT STATUS — compact ═══ */}
+        <Card padding="sm" radius="md" style={{ ...panelStyle, flexShrink: 0 }}>
+          <Group justify="space-between" mb={4}>
+            <Group gap="xs">
+              <Title order={4} c="#e8edf2" style={{ letterSpacing: '1px', fontSize: '14px' }}>
                 EQUIPMENT STATUS
               </Title>
               {hasAlerts && (
@@ -780,54 +923,44 @@ export default function Dashboard() {
               variant="subtle"
               color="cyan"
               onClick={() => navigate('/maintenance')}
-              styles={{ root: { ...monoSm, padding: '0 8px' } }}
+              styles={{ root: { ...monoXs, padding: '0 6px' } }}
             >
               VIEW ALL
             </Button>
           </Group>
 
           <ScrollArea style={{ flex: 1 }} type="auto">
-            <Stack gap="xs">
+            <Stack gap={6}>
               {/* Maintenance alerts */}
               {maintenanceAlerts.length > 0 ? (
                 <div>
-                  <Group gap={4} mb={6}>
-                    <IconTool size={14} color="#ff6b1a" />
+                  <Group gap={4} mb={4}>
+                    <IconTool size={12} color="#ff6b1a" />
                     <Text size="xs" c="#ff6b1a" fw={700} style={{ ...monoXs, letterSpacing: '2px' }}>
                       MAINTENANCE ALERTS
                     </Text>
                   </Group>
-                  <Stack gap={4}>
-                    {maintenanceAlerts.slice(0, 5).map((alert, i) => (
+                  <Stack gap={3}>
+                    {maintenanceAlerts.slice(0, 3).map((alert, i) => (
                       <div key={i} style={{
-                        padding: '8px 10px', borderRadius: '6px',
+                        padding: '5px 8px', borderRadius: '4px',
                         background: alert.overdue ? 'rgba(255, 68, 68, 0.08)' : 'rgba(255, 107, 26, 0.08)',
                         border: `1px solid ${alert.overdue ? 'rgba(255, 68, 68, 0.3)' : 'rgba(255, 107, 26, 0.25)'}`,
                       }}>
                         <Group justify="space-between" wrap="nowrap">
-                          <Group gap="xs" wrap="nowrap">
-                            <IconCalendarDue size={14} color={alert.overdue ? '#ff4444' : '#ff6b1a'} />
-                            <div>
-                              <Text size="xs" c="#e8edf2" fw={600} tt="capitalize">
-                                {alert.maintenance_type.replace(/_/g, ' ')}
-                              </Text>
-                              {alert.description && (
-                                <Text size="xs" c="#5a6478" lineClamp={1} style={{ fontSize: '10px' }}>
-                                  {alert.description}
-                                </Text>
-                              )}
-                            </div>
+                          <Group gap={6} wrap="nowrap">
+                            <IconCalendarDue size={12} color={alert.overdue ? '#ff4444' : '#ff6b1a'} />
+                            <Text size="xs" c="#e8edf2" fw={600} tt="capitalize" style={{ fontSize: '11px' }}>
+                              {alert.maintenance_type.replace(/_/g, ' ')}
+                            </Text>
+                            <Text size="xs" c="#00d4ff" style={{ fontSize: '10px' }}>
+                              {alert.aircraft_name || ''}
+                            </Text>
                           </Group>
-                          <Badge
-                            color={alert.overdue ? 'red' : 'orange'}
-                            variant="light"
-                            size="xs"
-                          >
+                          <Badge color={alert.overdue ? 'red' : 'orange'} variant="light" size="xs">
                             {alert.overdue
                               ? `${Math.abs(alert.days_until)}d OVERDUE`
-                              : alert.days_until === 0
-                                ? 'DUE TODAY'
-                                : `${alert.days_until}d`
+                              : alert.days_until === 0 ? 'TODAY' : `${alert.days_until}d`
                             }
                           </Badge>
                         </Group>
@@ -837,22 +970,20 @@ export default function Dashboard() {
                 </div>
               ) : (
                 <div style={{
-                  padding: '10px', borderRadius: '6px',
+                  padding: '6px 8px', borderRadius: '4px',
                   background: 'rgba(0, 255, 136, 0.05)', border: '1px solid rgba(0, 255, 136, 0.15)',
                 }}>
                   <Group gap="xs">
-                    <IconTool size={14} color="#00ff88" />
-                    <Text size="xs" c="#00ff88" fw={600} style={monoXs}>
-                      ALL MAINTENANCE CURRENT
-                    </Text>
+                    <IconTool size={12} color="#00ff88" />
+                    <Text size="xs" c="#00ff88" fw={600} style={monoXs}>ALL MAINTENANCE CURRENT</Text>
                   </Group>
                 </div>
               )}
 
-              {/* Battery status */}
+              {/* Battery status — compact */}
               <div>
-                <Group gap={4} mb={6}>
-                  <IconBattery size={14} color="#00d4ff" />
+                <Group gap={4} mb={4}>
+                  <IconBattery size={12} color="#00d4ff" />
                   <Text size="xs" c="#00d4ff" fw={700} style={{ ...monoXs, letterSpacing: '2px' }}>
                     BATTERY FLEET
                   </Text>
@@ -863,39 +994,36 @@ export default function Dashboard() {
                     No batteries tracked. Add batteries in Fleet settings.
                   </Text>
                 ) : (
-                  <Stack gap={4}>
+                  <Stack gap={3}>
                     {batteries
                       .filter((b) => b.status === 'active')
                       .sort((a, b) => a.health_pct - b.health_pct)
-                      .slice(0, 6)
+                      .slice(0, 4)
                       .map((b) => {
                         const healthColor = b.health_pct >= 70 ? '#00ff88' : b.health_pct >= 40 ? '#ff6b1a' : '#ff4444';
                         const needsAttention = b.health_pct < 40 || b.cycle_count > 200;
                         return (
                           <div key={b.id} style={{
-                            padding: '6px 10px', borderRadius: '4px',
+                            padding: '4px 8px', borderRadius: '4px',
                             background: needsAttention ? 'rgba(255, 68, 68, 0.06)' : '#050608',
                             border: `1px solid ${needsAttention ? 'rgba(255, 68, 68, 0.2)' : '#1a1f2e'}`,
                           }}>
-                            <Group justify="space-between" wrap="nowrap" mb={4}>
-                              <Group gap="xs" wrap="nowrap">
+                            <Group justify="space-between" wrap="nowrap" mb={2}>
+                              <Group gap={6} wrap="nowrap">
                                 {needsAttention ? (
-                                  <IconBatteryOff size={14} color="#ff4444" />
+                                  <IconBatteryOff size={12} color="#ff4444" />
                                 ) : (
-                                  <IconBattery size={14} color={healthColor} />
+                                  <IconBattery size={12} color={healthColor} />
                                 )}
-                                <Text size="xs" c="#e8edf2" fw={600}>
+                                <Text size="xs" c="#e8edf2" fw={600} style={{ fontSize: '11px' }}>
                                   {b.serial}
                                 </Text>
-                                {b.model && (
-                                  <Text size="xs" c="#5a6478" style={{ fontSize: '10px' }}>{b.model}</Text>
-                                )}
                               </Group>
                               <Group gap={6} wrap="nowrap">
-                                <Text size="xs" c="#5a6478" style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: '10px' }}>
-                                  {b.cycle_count} cycles
+                                <Text size="xs" c="#5a6478" style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: '9px' }}>
+                                  {b.cycle_count}cy
                                 </Text>
-                                <Text size="xs" c={healthColor} fw={700} style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: '11px' }}>
+                                <Text size="xs" c={healthColor} fw={700} style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: '10px' }}>
                                   {b.health_pct}%
                                 </Text>
                               </Group>
@@ -903,7 +1031,7 @@ export default function Dashboard() {
                             <Progress
                               value={b.health_pct}
                               color={healthColor}
-                              size="xs"
+                              size={3}
                               radius="xl"
                               styles={{ root: { background: '#1a1f2e' } }}
                             />
@@ -916,6 +1044,8 @@ export default function Dashboard() {
             </Stack>
           </ScrollArea>
         </Card>
+
+        </div>{/* end right column */}
       </div>
 
       {/* ═══ INITIATE SERVICES MODAL ═══ */}

@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
+from starlette.formparsers import MultiPartParser
 
 from app.config import settings
 from app.database import Base, async_session, engine, get_db
@@ -109,6 +110,9 @@ def _add_missing_columns(conn):
             "maintenance_records": [
                 ("images", "ALTER TABLE maintenance_records ADD COLUMN images JSONB DEFAULT '[]'"),
             ],
+            "users": [
+                ("password_compliant", "ALTER TABLE users ADD COLUMN password_compliant BOOLEAN DEFAULT FALSE"),
+            ],
         }
 
         # Make opendronelog_flight_id nullable for existing tables (new flights use flight_id)
@@ -184,10 +188,15 @@ async def lifespan(app: FastAPI):
 
 limiter = Limiter(key_func=get_remote_address)
 
+# Raise Starlette's default multipart file-size limit (1 MB) so DJI flight logs,
+# mission images, and backup restores can upload without being silently rejected.
+MultiPartParser.max_file_size = 200 * 1024 * 1024  # 200 MB
+logger.info("MultiPartParser max_file_size set to 200 MB")
+
 app = FastAPI(
     title="D.O.C — Drone Operations Command",
     description="Mission management, flight data, and after-action reporting for drone operations",
-    version="2.36.0",
+    version="2.41.4",
     lifespan=lifespan,
 )
 

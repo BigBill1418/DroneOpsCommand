@@ -22,11 +22,12 @@ import {
 } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
-import { IconCheck, IconX, IconPlus, IconEdit, IconTrash, IconCurrencyDollar, IconMail, IconSend, IconBrandPaypal, IconCash, IconDrone, IconPlugConnected, IconMapPin, IconSearch, IconSignature, IconUpload, IconSettings, IconReceipt, IconPlane, IconPalette, IconWorldWww, IconKey, IconUser, IconLock, IconDatabaseExport, IconDatabaseImport, IconShieldCheck, IconDownload, IconAlertTriangle, IconPhoto } from '@tabler/icons-react';
+import { IconCheck, IconX, IconPlus, IconEdit, IconTrash, IconCurrencyDollar, IconMail, IconSend, IconBrandPaypal, IconCash, IconDrone, IconPlugConnected, IconMapPin, IconSearch, IconSignature, IconUpload, IconSettings, IconReceipt, IconPlane, IconPalette, IconWorldWww, IconKey, IconUser, IconLock, IconDatabaseExport, IconDatabaseImport, IconShieldCheck, IconDownload, IconAlertTriangle, IconPhoto, IconRadar2 } from '@tabler/icons-react';
 import api from '../api/client';
 import { Aircraft, RateTemplate } from '../api/types';
 import { inputStyles, cardStyle } from '../components/shared/styles';
 import { invalidateBrandingCache } from '../hooks/useBranding';
+import PasswordStrengthMeter, { isPasswordValid } from '../components/PasswordStrengthMeter';
 
 const tabStyles = {
   tab: {
@@ -62,9 +63,19 @@ export default function Settings() {
   const [tosUploaded, setTosUploaded] = useState(false);
   const [tosUploading, setTosUploading] = useState(false);
   const [brandingSaving, setBrandingSaving] = useState(false);
+  const [reprocessStatus, setReprocessStatus] = useState<{ reprocessable: number; total_dji: number; stored_on_disk: number; need_manual_upload: number } | null>(null);
+  const [reprocessing, setReprocessing] = useState(false);
+  const [reprocessingAll, setReprocessingAll] = useState(false);
+  const [reprocessResult, setReprocessResult] = useState<{ updated: number; imported?: number; skipped_no_file?: number; errors: string[] } | null>(null);
   const [djiSaving, setDjiSaving] = useState(false);
   const [djiTesting, setDjiTesting] = useState(false);
-  const [djiStatus, setDjiStatus] = useState<{ status: string; message?: string } | null>(null);
+  const [djiStatus, setDjiStatus] = useState<{
+    status: string; message?: string; parser_online?: boolean;
+    dji_api_reachable?: boolean; key_source?: string;
+  } | null>(null);
+  const [openskySaving, setOpenskySaving] = useState(false);
+  const [openskyTesting, setOpenskyTesting] = useState(false);
+  const [openskyStatus, setOpenskyStatus] = useState<{ status: string; message?: string } | null>(null);
   const [purgeConfirmOpen, setPurgeConfirmOpen] = useState(false);
   const [purgeChecked, setPurgeChecked] = useState(false);
   const [purging, setPurging] = useState(false);
@@ -119,11 +130,15 @@ export default function Settings() {
     initialValues: { dji_api_key: '' },
   });
 
+  const openskyForm = useForm({
+    initialValues: { opensky_client_id: '', opensky_client_secret: '' },
+  });
+
   const accountForm = useForm({
     initialValues: { current_password: '', new_username: '', new_password: '', confirm_password: '' },
     validate: {
       current_password: (v) => (v.length === 0 ? 'Current password is required' : null),
-      new_password: (v) => (v && v.length > 0 && v.length < 6 ? 'Password must be at least 6 characters' : null),
+      new_password: (v) => (v && v.length > 0 && !isPasswordValid(v) ? 'Password does not meet complexity requirements' : null),
       confirm_password: (v, values) => (v !== values.new_password ? 'Passwords do not match' : null),
     },
   });
@@ -150,6 +165,8 @@ export default function Settings() {
     api.get('/settings/payment').then((r) => paymentForm.setValues(r.data)).catch(() => {});
     api.get('/settings/opendronelog').then((r) => odlForm.setValues(r.data)).catch(() => {});
     api.get('/settings/dji').then((r) => djiForm.setValues(r.data)).catch(() => {});
+    api.get('/settings/opensky').then((r) => openskyForm.setValues(r.data)).catch(() => {});
+    api.get('/flight-library/reprocess/status').then((r) => setReprocessStatus(r.data)).catch(() => {});
     api.get('/auth/account').then((r) => { setCurrentUsername(r.data.username); accountForm.setFieldValue('new_username', r.data.username); }).catch(() => {});
     api.get('/settings/weather').then((r) => weatherForm.setValues(r.data)).catch(() => {});
     api.get('/intake/default-tos-status').then((r) => setTosUploaded(r.data.uploaded)).catch(() => {});
@@ -440,6 +457,33 @@ export default function Settings() {
     }
   };
 
+  const handleSaveOpenSky = async (values: typeof openskyForm.values) => {
+    setOpenskySaving(true);
+    try {
+      await api.put('/settings/opensky', values);
+      notifications.show({ title: 'Saved', message: 'OpenSky credentials updated', color: 'cyan' });
+      const r = await api.get('/settings/opensky');
+      openskyForm.setValues(r.data);
+    } catch {
+      notifications.show({ title: 'Error', message: 'Failed to save OpenSky credentials', color: 'red' });
+    } finally {
+      setOpenskySaving(false);
+    }
+  };
+
+  const handleTestOpenSky = async () => {
+    setOpenskyTesting(true);
+    try {
+      const r = await api.post('/settings/opensky/test');
+      setOpenskyStatus(r.data);
+    } catch (err: unknown) {
+      const axiosErr = err as { response?: { data?: { detail?: string } } };
+      setOpenskyStatus({ status: 'error', message: axiosErr.response?.data?.detail || 'Test failed' });
+    } finally {
+      setOpenskyTesting(false);
+    }
+  };
+
   const handleTestDji = async () => {
     setDjiTesting(true);
     try {
@@ -450,6 +494,56 @@ export default function Settings() {
       setDjiStatus({ status: 'error', message: axiosErr.response?.data?.detail || 'Test failed' });
     } finally {
       setDjiTesting(false);
+    }
+  };
+
+  const handleReprocessAll = async () => {
+    setReprocessingAll(true);
+    setReprocessResult(null);
+    try {
+      const r = await api.post('/flight-library/reprocess/all', {}, { timeout: 600000 });
+      setReprocessResult(r.data);
+      const msg = r.data.skipped_no_file > 0
+        ? `${r.data.updated} updated, ${r.data.skipped_no_file} skipped (no stored file), ${r.data.errors.length} errors`
+        : `${r.data.updated} updated, ${r.data.errors.length} errors`;
+      notifications.show({
+        title: 'Re-process Complete',
+        message: msg,
+        color: r.data.errors.length > 0 ? 'yellow' : 'green',
+      });
+      api.get('/flight-library/reprocess/status').then((r2) => setReprocessStatus(r2.data)).catch(() => {});
+    } catch {
+      notifications.show({ title: 'Error', message: 'Re-processing failed', color: 'red' });
+    } finally {
+      setReprocessingAll(false);
+    }
+  };
+
+  const handleReprocessUpload = async (fileList: FileList | null) => {
+    if (!fileList || fileList.length === 0) return;
+    setReprocessing(true);
+    setReprocessResult(null);
+    try {
+      const formData = new FormData();
+      for (let i = 0; i < fileList.length; i++) {
+        formData.append('files', fileList[i]);
+      }
+      const r = await api.post('/flight-library/reprocess', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: 300000,
+      });
+      setReprocessResult(r.data);
+      const msg = `${r.data.updated} updated, ${r.data.imported} new, ${r.data.errors.length} errors`;
+      notifications.show({
+        title: 'Re-process Complete',
+        message: msg,
+        color: r.data.errors.length > 0 ? 'yellow' : 'green',
+      });
+      api.get('/flight-library/reprocess/status').then((r2) => setReprocessStatus(r2.data)).catch(() => {});
+    } catch {
+      notifications.show({ title: 'Error', message: 'Re-processing failed', color: 'red' });
+    } finally {
+      setReprocessing(false);
     }
   };
 
@@ -1177,7 +1271,8 @@ export default function Settings() {
                 <Title order={3} c="#e8edf2" style={{ letterSpacing: '1px' }}>DJI API KEY</Title>
               </Group>
               <Text c="#5a6478" size="xs" mb="sm" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
-                Enter your DJI Developer API key for direct integration with DJI cloud services.
+                Required for decrypting DJI flight logs (v13+ encryption). Register at developer.dji.com to obtain a key.
+                Without a key, basic flight summary data (duration, distance, altitude) is still extracted from log headers.
               </Text>
               <form onSubmit={djiForm.onSubmit(handleSaveDji)}>
                 <Stack gap="sm">
@@ -1194,27 +1289,208 @@ export default function Settings() {
                     </Button>
                     <Button
                       variant="light"
-                      color={djiStatus?.status === 'online' ? 'green' : djiStatus?.status === 'error' ? 'red' : 'gray'}
+                      color={djiStatus?.status === 'online' ? 'green' : djiStatus?.status === 'error' ? 'red' : djiStatus?.status === 'warning' ? 'yellow' : 'gray'}
                       loading={djiTesting}
                       onClick={handleTestDji}
                       leftSection={djiStatus?.status === 'online' ? <IconCheck size={14} /> : djiStatus?.status === 'error' ? <IconX size={14} /> : <IconPlugConnected size={14} />}
                       styles={{ root: { fontFamily: "'Bebas Neue', sans-serif" } }}
                     >
-                      TEST KEY
+                      VALIDATE KEY
                     </Button>
                   </Group>
                   {djiStatus && (
+                    <Stack gap={6}>
+                      <Badge
+                        color={djiStatus.status === 'online' ? 'green' : djiStatus.status === 'warning' ? 'yellow' : 'red'}
+                        variant="light"
+                        size="lg"
+                        leftSection={djiStatus.status === 'online' ? <IconCheck size={12} /> : djiStatus.status === 'warning' ? <IconPlugConnected size={12} /> : <IconX size={12} />}
+                      >
+                        {djiStatus.message || djiStatus.status}
+                      </Badge>
+                      <Group gap="xs">
+                        <Badge
+                          color={djiStatus.parser_online ? 'green' : 'red'}
+                          variant="dot"
+                          size="sm"
+                        >
+                          Parser {djiStatus.parser_online ? 'Online' : 'Offline'}
+                        </Badge>
+                        {djiStatus.dji_api_reachable !== undefined && (
+                          <Badge
+                            color={djiStatus.dji_api_reachable ? 'green' : 'yellow'}
+                            variant="dot"
+                            size="sm"
+                          >
+                            DJI API {djiStatus.dji_api_reachable ? 'Reachable' : 'Unreachable'}
+                          </Badge>
+                        )}
+                        {djiStatus.key_source && (
+                          <Badge variant="dot" color="gray" size="sm">
+                            Key: {djiStatus.key_source === 'settings_db' ? 'Settings' : djiStatus.key_source === 'environment' ? '.env' : djiStatus.key_source}
+                          </Badge>
+                        )}
+                      </Group>
+                    </Stack>
+                  )}
+                </Stack>
+              </form>
+            </Card>
+
+            {/* OpenSky Network */}
+            <Card padding="lg" radius="md" style={cardStyle}>
+              <Group gap="sm" mb="md">
+                <IconRadar2 size={20} color="#00d4ff" />
+                <Title order={3} c="#e8edf2" style={{ letterSpacing: '1px' }}>OPENSKY NETWORK</Title>
+              </Group>
+              <Text c="#5a6478" size="xs" mb="sm" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+                Real-time air traffic data for Airspace Awareness. Free account at opensky-network.org.
+                Works without credentials (anonymous) but authenticated gets better rate limits.
+              </Text>
+              <form onSubmit={openskyForm.onSubmit(handleSaveOpenSky)}>
+                <Stack gap="sm">
+                  <TextInput
+                    label="CLIENT ID"
+                    placeholder="your-client-id"
+                    {...openskyForm.getInputProps('opensky_client_id')}
+                    styles={inputStyles}
+                  />
+                  <TextInput
+                    label="CLIENT SECRET"
+                    placeholder="your-client-secret"
+                    {...openskyForm.getInputProps('opensky_client_secret')}
+                    styles={inputStyles}
+                  />
+                  <Group gap="sm">
+                    <Button type="submit" color="cyan" loading={openskySaving} styles={{ root: { fontFamily: "'Bebas Neue', sans-serif" } }}>
+                      SAVE
+                    </Button>
+                    <Button
+                      variant="light"
+                      color="cyan"
+                      loading={openskyTesting}
+                      onClick={handleTestOpenSky}
+                      styles={{ root: { fontFamily: "'Bebas Neue', sans-serif" } }}
+                    >
+                      TEST CONNECTION
+                    </Button>
+                  </Group>
+                  {openskyStatus && (
                     <Badge
-                      color={djiStatus.status === 'online' ? 'green' : djiStatus.status === 'unknown' ? 'yellow' : 'red'}
+                      color={openskyStatus.status === 'ok' ? 'green' : 'red'}
                       variant="light"
                       size="lg"
-                      leftSection={djiStatus.status === 'online' ? <IconCheck size={12} /> : <IconX size={12} />}
+                      style={{ fontFamily: "'Share Tech Mono', monospace" }}
                     >
-                      {djiStatus.message || djiStatus.status}
+                      {openskyStatus.message || openskyStatus.status}
                     </Badge>
                   )}
                 </Stack>
               </form>
+            </Card>
+
+            {/* Re-process DJI Flights */}
+            <Card padding="lg" radius="md" style={{ ...cardStyle, border: '1px solid rgba(0, 212, 255, 0.15)' }}>
+              <Group gap="sm" mb="md">
+                <IconDatabaseImport size={20} color="#00d4ff" />
+                <Title order={3} c="#e8edf2" style={{ letterSpacing: '1px' }}>RE-PROCESS FLIGHT LOGS</Title>
+              </Group>
+              <Text c="#5a6478" size="xs" mb="sm" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+                Re-parse flight logs with the current DJI API key to get full decrypted data
+                (GPS tracks, telemetry, battery curves). Original files are now saved on upload —
+                flights uploaded going forward can be re-processed automatically.
+              </Text>
+              {reprocessStatus && (
+                <Stack gap="xs" mb="sm">
+                  <Badge
+                    color={reprocessStatus.reprocessable > 0 ? 'yellow' : 'green'}
+                    variant="light"
+                    size="lg"
+                    style={{ fontFamily: "'Share Tech Mono', monospace" }}
+                  >
+                    {reprocessStatus.reprocessable > 0
+                      ? `${reprocessStatus.reprocessable} of ${reprocessStatus.total_dji} DJI flights missing GPS data`
+                      : `All ${reprocessStatus.total_dji} DJI flights have full data`}
+                  </Badge>
+                  {reprocessStatus.reprocessable > 0 && (
+                    <Group gap="xs">
+                      {reprocessStatus.stored_on_disk > 0 && (
+                        <Badge color="cyan" variant="dot" size="sm" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+                          {reprocessStatus.stored_on_disk} have stored files (auto re-process)
+                        </Badge>
+                      )}
+                      {reprocessStatus.need_manual_upload > 0 && (
+                        <Badge color="orange" variant="dot" size="sm" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+                          {reprocessStatus.need_manual_upload} need manual re-upload
+                        </Badge>
+                      )}
+                    </Group>
+                  )}
+                </Stack>
+              )}
+              <Group gap="sm">
+                {/* Primary action: re-process all from stored files */}
+                {reprocessStatus && reprocessStatus.stored_on_disk > 0 && (
+                  <Button
+                    color="cyan"
+                    loading={reprocessingAll}
+                    leftSection={<IconDatabaseImport size={14} />}
+                    onClick={handleReprocessAll}
+                    styles={{ root: { fontFamily: "'Bebas Neue', sans-serif" } }}
+                  >
+                    {reprocessingAll ? 'RE-PROCESSING...' : `RE-PROCESS ${reprocessStatus.stored_on_disk} FLIGHTS`}
+                  </Button>
+                )}
+                {/* Fallback: manual re-upload for flights without stored files */}
+                <Button
+                  component="label"
+                  color="gray"
+                  variant="light"
+                  loading={reprocessing}
+                  leftSection={<IconDatabaseImport size={14} />}
+                  styles={{ root: { fontFamily: "'Bebas Neue', sans-serif" } }}
+                >
+                  {reprocessing ? 'PROCESSING...' : 'MANUAL RE-UPLOAD'}
+                  <input
+                    type="file"
+                    multiple
+                    accept=".txt,.csv"
+                    style={{ display: 'none' }}
+                    onChange={(e) => handleReprocessUpload(e.target.files)}
+                  />
+                </Button>
+              </Group>
+              {reprocessResult && (
+                <Stack gap={4} mt="sm">
+                  <Group gap="xs">
+                    {reprocessResult.updated > 0 && (
+                      <Badge color="green" variant="light" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+                        {reprocessResult.updated} updated
+                      </Badge>
+                    )}
+                    {(reprocessResult.imported ?? 0) > 0 && (
+                      <Badge color="cyan" variant="light" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+                        {reprocessResult.imported} new
+                      </Badge>
+                    )}
+                    {(reprocessResult.skipped_no_file ?? 0) > 0 && (
+                      <Badge color="orange" variant="light" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+                        {reprocessResult.skipped_no_file} skipped (no stored file)
+                      </Badge>
+                    )}
+                    {reprocessResult.errors.length > 0 && (
+                      <Badge color="red" variant="light" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+                        {reprocessResult.errors.length} errors
+                      </Badge>
+                    )}
+                  </Group>
+                  {reprocessResult.errors.length > 0 && (
+                    <Text c="#ff6b6b" size="xs" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+                      {reprocessResult.errors.slice(0, 3).join('; ')}
+                    </Text>
+                  )}
+                </Stack>
+              )}
             </Card>
           </Stack>
         </Tabs.Panel>
@@ -1572,6 +1848,7 @@ export default function Settings() {
                     {...accountForm.getInputProps('new_password')}
                     styles={inputStyles}
                   />
+                  <PasswordStrengthMeter password={accountForm.values.new_password} />
                   <PasswordInput
                     label="Confirm New Password"
                     placeholder="Re-enter new password"

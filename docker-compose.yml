@@ -87,6 +87,7 @@ services:
       - UPLOAD_DIR=/data/uploads
       - REPORTS_DIR=/data/reports
       - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3080}
+      - RESET_ADMIN_PASSWORD=${RESET_ADMIN_PASSWORD:-false}
     volumes:
       - app_data:/data
     ports:
@@ -132,6 +133,9 @@ services:
       context: ./flight-parser
       dockerfile: Dockerfile
     restart: unless-stopped
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     environment:
       - DJI_API_KEY=${DJI_API_KEY:-}
       - PARSER_PORT=8100
