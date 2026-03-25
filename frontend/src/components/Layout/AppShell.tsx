@@ -1,13 +1,15 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useEffect, useCallback } from 'react';
 import {
   AppShell,
   Burger,
+  Drawer,
   Group,
   NavLink,
+  ScrollArea,
+  Stack,
   Text,
   ActionIcon,
   Tooltip,
-  ScrollArea,
 } from '@mantine/core';
 import { useDisclosure, useMediaQuery } from '@mantine/hooks';
 import {
@@ -24,7 +26,6 @@ import {
   IconCloudUpload,
   IconTimeline,
   IconRadar2,
-  IconX,
 } from '@tabler/icons-react';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
 import { useBranding } from '../../hooks/useBranding';
@@ -33,257 +34,257 @@ interface AppLayoutProps {
   onLogout: () => void;
 }
 
+const navItems = [
+  { icon: IconDashboard, label: 'Dashboard', path: '/' },
+  { icon: IconPlane, label: 'Flights', path: '/flights' },
+  { icon: IconDrone, label: 'Missions', path: '/missions' },
+  { icon: IconUsers, label: 'Customers', path: '/customers' },
+  { icon: IconBattery3, label: 'Batteries', path: '/batteries' },
+  { icon: IconTool, label: 'Maintenance', path: '/maintenance' },
+  { icon: IconChartBar, label: 'Financials', path: '/financials' },
+  { icon: IconTimeline, label: 'Telemetry', path: '/telemetry' },
+  { icon: IconRadar2, label: 'Airspace', path: '/airspace' },
+  { icon: IconCloudUpload, label: 'Upload Logs', path: '/upload-logs' },
+  { icon: IconSettings, label: 'Settings', path: '/settings' },
+];
+
+function NavContent({ location, onNavigate, mobile }: { location: ReturnType<typeof useLocation>; onNavigate: (path: string) => void; mobile?: boolean }) {
+  return (
+    <>
+      {navItems.map((item) => (
+        <NavLink
+          key={item.path}
+          label={item.label}
+          leftSection={<item.icon size={mobile ? 20 : 18} />}
+          active={location.pathname === item.path || (item.path !== '/' && location.pathname.startsWith(item.path))}
+          onClick={() => onNavigate(item.path)}
+          styles={{
+            root: {
+              borderRadius: 6,
+              marginBottom: 2,
+              color: '#e8edf2',
+              padding: mobile ? '14px 16px' : undefined,
+              '&[dataActive]': {
+                backgroundColor: 'rgba(0, 212, 255, 0.1)',
+                color: '#00d4ff',
+              },
+            },
+            label: {
+              fontFamily: "'Rajdhani', sans-serif",
+              fontWeight: 600,
+              letterSpacing: '0.5px',
+              fontSize: mobile ? '17px' : undefined,
+            },
+          }}
+        />
+      ))}
+    </>
+  );
+}
+
 export default function AppLayout({ onLogout }: AppLayoutProps) {
-  const [opened, { toggle, close }] = useDisclosure(false);
+  const [drawerOpened, { open: openDrawer, close: closeDrawer }] = useDisclosure(false);
   const navigate = useNavigate();
   const location = useLocation();
   const branding = useBranding();
   const isMobile = useMediaQuery('(max-width: 768px)');
 
-  // Close navbar on every route change (mobile)
+  // Close drawer on route change
   useEffect(() => {
-    close();
-  }, [location.pathname, close]);
+    closeDrawer();
+  }, [location.pathname, closeDrawer]);
 
   const handleNav = useCallback((path: string) => {
     navigate(path);
-    close();
-  }, [navigate, close]);
-
-  const navItems = [
-    { icon: IconDashboard, label: 'Dashboard', path: '/' },
-    { icon: IconPlane, label: 'Flights', path: '/flights' },
-    { icon: IconDrone, label: 'Missions', path: '/missions' },
-    { icon: IconUsers, label: 'Customers', path: '/customers' },
-    { icon: IconBattery3, label: 'Batteries', path: '/batteries' },
-    { icon: IconTool, label: 'Maintenance', path: '/maintenance' },
-    { icon: IconChartBar, label: 'Financials', path: '/financials' },
-    { icon: IconTimeline, label: 'Telemetry', path: '/telemetry' },
-    { icon: IconRadar2, label: 'Airspace', path: '/airspace' },
-    { icon: IconCloudUpload, label: 'Upload Logs', path: '/upload-logs' },
-    { icon: IconSettings, label: 'Settings', path: '/settings' },
-  ];
+    closeDrawer();
+  }, [navigate, closeDrawer]);
 
   return (
-    <AppShell
-      header={{ height: 60 }}
-      navbar={{
-        width: 220,
-        breakpoint: 'sm',
-        collapsed: { mobile: !opened },
-      }}
-      padding="md"
-      styles={{
-        root: {
-          '--app-shell-transition-duration': '200ms',
-        },
-        main: {
-          background: '#050608',
-          // Prevent main content from being interactive when nav is open on mobile
-          ...(isMobile && opened ? { pointerEvents: 'none' as const } : {}),
-        },
-        header: {
-          background: 'linear-gradient(135deg, #050608 0%, #0e1117 100%)',
-          borderBottom: '1px solid #1a1f2e',
-          zIndex: 300,
-        },
-        navbar: {
-          background: '#0e1117',
-          borderRight: '1px solid #1a1f2e',
-          zIndex: 250,
-          // On mobile when open: full-screen overlay nav
-          ...(isMobile ? {
-            position: 'fixed' as const,
-            top: 60,
-            left: 0,
-            bottom: 0,
-            width: '100%',
-            maxWidth: 280,
-          } : {}),
-        },
-      }}
-    >
-      <AppShell.Header>
-        <Group h="100%" px="md" justify="space-between">
-          <Group>
-            <Burger
-              opened={opened}
-              onClick={toggle}
-              hiddenFrom="sm"
-              size="sm"
-              color="#e8edf2"
-              aria-label="Toggle navigation"
-            />
-            <Text
-              size="xl"
-              fw={700}
-              style={{
-                fontFamily: "'Bebas Neue', sans-serif",
-                letterSpacing: '3px',
-                fontSize: '24px',
-                cursor: 'pointer',
-              }}
-              c="#e8edf2"
-              onClick={() => handleNav('/')}
-            >
-              {branding.company_name.toUpperCase()}
-            </Text>
-            <Text
-              size="xs"
-              c="#5a6478"
-              style={{ fontFamily: "'Share Tech Mono', monospace", letterSpacing: '2px' }}
-              visibleFrom="sm"
-            >
-              {branding.company_tagline.toUpperCase()}
-            </Text>
-          </Group>
-          <Group>
-            <Tooltip label="Logout">
-              <ActionIcon variant="subtle" color="gray" size="lg" onClick={onLogout}>
-                <IconLogout size={18} />
-              </ActionIcon>
-            </Tooltip>
-          </Group>
-        </Group>
-      </AppShell.Header>
+    <>
+      {/* Mobile navigation drawer — completely separate from AppShell */}
+      <Drawer
+        opened={drawerOpened}
+        onClose={closeDrawer}
+        size={280}
+        padding="sm"
+        title={
+          <Text fw={700} c="#e8edf2" style={{ fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '2px', fontSize: '18px' }}>
+            NAVIGATION
+          </Text>
+        }
+        styles={{
+          header: { background: '#0e1117', borderBottom: '1px solid #1a1f2e' },
+          body: { background: '#0e1117', padding: '8px' },
+          content: { background: '#0e1117' },
+          overlay: { zIndex: 400 },
+          inner: { zIndex: 401 },
+        }}
+        withCloseButton
+        closeButtonProps={{ 'aria-label': 'Close navigation', size: 'md' }}
+        transitionProps={{ transition: 'slide-right', duration: 200 }}
+        hiddenFrom="sm"
+      >
+        <Stack gap={0}>
+          <ScrollArea style={{ flex: 1 }} type="auto">
+            <NavContent location={location} onNavigate={handleNav} mobile />
+          </ScrollArea>
 
-      <AppShell.Navbar>
-        {/* Close button at top of nav on mobile */}
-        {isMobile && (
-          <AppShell.Section p="xs" style={{ borderBottom: '1px solid #1a1f2e' }}>
-            <Group justify="space-between" px={4}>
-              <Text size="xs" c="#5a6478" style={{ fontFamily: "'Share Tech Mono', monospace", letterSpacing: '2px' }}>
-                NAVIGATION
-              </Text>
-              <ActionIcon variant="subtle" color="gray" size="sm" onClick={close} aria-label="Close navigation">
-                <IconX size={16} />
-              </ActionIcon>
-            </Group>
-          </AppShell.Section>
-        )}
-
-        <AppShell.Section grow component={ScrollArea} type="auto" offsetScrollbars p="xs">
-          {navItems.map((item) => (
+          <div style={{ borderTop: '1px solid #1a1f2e', paddingTop: 12, marginTop: 12 }}>
             <NavLink
-              key={item.path}
-              label={item.label}
-              leftSection={<item.icon size={18} />}
-              active={location.pathname === item.path || (item.path !== '/' && location.pathname.startsWith(item.path))}
-              onClick={() => handleNav(item.path)}
+              label="Logout"
+              leftSection={<IconLogout size={20} />}
+              onClick={() => { closeDrawer(); onLogout(); }}
               styles={{
-                root: {
-                  borderRadius: 6,
-                  marginBottom: 4,
-                  color: '#e8edf2',
-                  // Larger touch targets on mobile
-                  padding: isMobile ? '12px 14px' : undefined,
-                  '&[dataActive]': {
-                    backgroundColor: 'rgba(0, 212, 255, 0.1)',
-                    color: '#00d4ff',
-                  },
-                },
-                label: {
-                  fontFamily: "'Rajdhani', sans-serif",
-                  fontWeight: 600,
-                  letterSpacing: '0.5px',
-                  fontSize: isMobile ? '16px' : undefined,
-                },
+                root: { borderRadius: 6, color: '#ff6b6b', padding: '14px 16px' },
+                label: { fontFamily: "'Rajdhani', sans-serif", fontWeight: 600, fontSize: '17px' },
               }}
             />
-          ))}
-        </AppShell.Section>
-
-        {/* Drone visual — hidden on small screens */}
-        <AppShell.Section visibleFrom="sm" style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          minHeight: 80, opacity: 0.35, padding: '8px 0',
-        }}>
-          <svg width="140" height="70" viewBox="0 0 120 60" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <line x1="30" y1="20" x2="60" y2="30" stroke="#00d4ff" strokeWidth="1.5" />
-            <line x1="90" y1="20" x2="60" y2="30" stroke="#00d4ff" strokeWidth="1.5" />
-            <line x1="30" y1="40" x2="60" y2="30" stroke="#00d4ff" strokeWidth="1.5" />
-            <line x1="90" y1="40" x2="60" y2="30" stroke="#00d4ff" strokeWidth="1.5" />
-            <rect x="50" y="25" width="20" height="10" rx="3" fill="#00d4ff" fillOpacity="0.3" stroke="#00d4ff" strokeWidth="1" />
-            <circle cx="60" cy="38" r="2.5" fill="#00d4ff" fillOpacity="0.5" />
-            <circle cx="30" cy="20" r="4" stroke="#00d4ff" strokeWidth="1" fill="none">
-              <animate attributeName="r" values="4;6;4" dur="1.5s" repeatCount="indefinite" />
-              <animate attributeName="opacity" values="0.6;0.2;0.6" dur="1.5s" repeatCount="indefinite" />
-            </circle>
-            <circle cx="90" cy="20" r="4" stroke="#00d4ff" strokeWidth="1" fill="none">
-              <animate attributeName="r" values="4;6;4" dur="1.5s" begin="0.2s" repeatCount="indefinite" />
-              <animate attributeName="opacity" values="0.6;0.2;0.6" dur="1.5s" begin="0.2s" repeatCount="indefinite" />
-            </circle>
-            <circle cx="30" cy="40" r="4" stroke="#00d4ff" strokeWidth="1" fill="none">
-              <animate attributeName="r" values="4;6;4" dur="1.5s" begin="0.4s" repeatCount="indefinite" />
-              <animate attributeName="opacity" values="0.6;0.2;0.6" dur="1.5s" begin="0.4s" repeatCount="indefinite" />
-            </circle>
-            <circle cx="90" cy="40" r="4" stroke="#00d4ff" strokeWidth="1" fill="none">
-              <animate attributeName="r" values="4;6;4" dur="1.5s" begin="0.6s" repeatCount="indefinite" />
-              <animate attributeName="opacity" values="0.6;0.2;0.6" dur="1.5s" begin="0.6s" repeatCount="indefinite" />
-            </circle>
-            <ellipse cx="30" cy="20" rx="10" ry="2" fill="#00d4ff" fillOpacity="0.15">
-              <animateTransform attributeName="transform" type="rotate" from="0 30 20" to="360 30 20" dur="0.3s" repeatCount="indefinite" />
-            </ellipse>
-            <ellipse cx="90" cy="20" rx="10" ry="2" fill="#00d4ff" fillOpacity="0.15">
-              <animateTransform attributeName="transform" type="rotate" from="0 90 20" to="360 90 20" dur="0.3s" repeatCount="indefinite" />
-            </ellipse>
-            <ellipse cx="30" cy="40" rx="10" ry="2" fill="#00d4ff" fillOpacity="0.15">
-              <animateTransform attributeName="transform" type="rotate" from="0 30 40" to="360 30 40" dur="0.3s" repeatCount="indefinite" />
-            </ellipse>
-            <ellipse cx="90" cy="40" rx="10" ry="2" fill="#00d4ff" fillOpacity="0.15">
-              <animateTransform attributeName="transform" type="rotate" from="0 90 40" to="360 90 40" dur="0.3s" repeatCount="indefinite" />
-            </ellipse>
-          </svg>
-        </AppShell.Section>
-
-        <AppShell.Section p="xs">
-          <Group gap={8}>
-            <Text
-              size="xs"
-              c="#5a6478"
-              style={{
-                fontFamily: "'Share Tech Mono', monospace",
-                fontSize: '15px',
-              }}
-            >
-              v2.42.4
-            </Text>
-            <Tooltip label="Star on GitHub" position="right">
-              <ActionIcon
-                variant="subtle"
-                color="gray"
-                size="xs"
-                component="a"
-                href="https://github.com/BigBill1418/DroneOpsCommand"
-                target="_blank"
-                rel="noopener noreferrer"
-              >
+            <Group gap={8} mt="sm" px={4}>
+              <Text size="xs" c="#5a6478" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+                v2.42.5
+              </Text>
+              <ActionIcon variant="subtle" color="gray" size="xs" component="a" href="https://github.com/BigBill1418/DroneOpsCommand" target="_blank" rel="noopener noreferrer">
                 <IconBrandGithub size={14} />
               </ActionIcon>
-            </Tooltip>
+            </Group>
+          </div>
+        </Stack>
+      </Drawer>
+
+      {/* AppShell — no navbar on mobile, navbar only on desktop */}
+      <AppShell
+        header={{ height: 60 }}
+        navbar={isMobile ? undefined : {
+          width: 220,
+          breakpoint: 'sm',
+        }}
+        padding="md"
+        styles={{
+          main: { background: '#050608' },
+          header: {
+            background: 'linear-gradient(135deg, #050608 0%, #0e1117 100%)',
+            borderBottom: '1px solid #1a1f2e',
+            zIndex: 300,
+          },
+          navbar: {
+            background: '#0e1117',
+            borderRight: '1px solid #1a1f2e',
+          },
+        }}
+      >
+        <AppShell.Header>
+          <Group h="100%" px="md" justify="space-between">
+            <Group>
+              <Burger
+                opened={drawerOpened}
+                onClick={openDrawer}
+                hiddenFrom="sm"
+                size="sm"
+                color="#e8edf2"
+                aria-label="Open navigation"
+              />
+              <Text
+                size="xl"
+                fw={700}
+                style={{
+                  fontFamily: "'Bebas Neue', sans-serif",
+                  letterSpacing: '3px',
+                  fontSize: '24px',
+                  cursor: 'pointer',
+                }}
+                c="#e8edf2"
+                onClick={() => handleNav('/')}
+              >
+                {branding.company_name.toUpperCase()}
+              </Text>
+              <Text
+                size="xs"
+                c="#5a6478"
+                style={{ fontFamily: "'Share Tech Mono', monospace", letterSpacing: '2px' }}
+                visibleFrom="sm"
+              >
+                {branding.company_tagline.toUpperCase()}
+              </Text>
+            </Group>
+            <Group>
+              <Tooltip label="Logout">
+                <ActionIcon variant="subtle" color="gray" size="lg" onClick={onLogout}>
+                  <IconLogout size={18} />
+                </ActionIcon>
+              </Tooltip>
+            </Group>
           </Group>
-        </AppShell.Section>
-      </AppShell.Navbar>
+        </AppShell.Header>
 
-      <AppShell.Main>
-        <Outlet />
-      </AppShell.Main>
+        {/* Desktop sidebar — only rendered on desktop */}
+        {!isMobile && (
+          <AppShell.Navbar>
+            <AppShell.Section grow component={ScrollArea} type="auto" offsetScrollbars p="xs">
+              <NavContent location={location} onNavigate={handleNav} />
+            </AppShell.Section>
 
-      {/* Full-screen backdrop for mobile — closes nav on tap */}
-      {isMobile && opened && (
-        <div
-          onClick={close}
-          onTouchStart={close}
-          style={{
-            position: 'fixed',
-            inset: 0,
-            top: 60,
-            background: 'rgba(0,0,0,0.7)',
-            zIndex: 240,
-            touchAction: 'none',
-          }}
-        />
-      )}
-    </AppShell>
+            {/* Drone visual */}
+            <AppShell.Section style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              minHeight: 80, opacity: 0.35, padding: '8px 0',
+            }}>
+              <svg width="140" height="70" viewBox="0 0 120 60" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <line x1="30" y1="20" x2="60" y2="30" stroke="#00d4ff" strokeWidth="1.5" />
+                <line x1="90" y1="20" x2="60" y2="30" stroke="#00d4ff" strokeWidth="1.5" />
+                <line x1="30" y1="40" x2="60" y2="30" stroke="#00d4ff" strokeWidth="1.5" />
+                <line x1="90" y1="40" x2="60" y2="30" stroke="#00d4ff" strokeWidth="1.5" />
+                <rect x="50" y="25" width="20" height="10" rx="3" fill="#00d4ff" fillOpacity="0.3" stroke="#00d4ff" strokeWidth="1" />
+                <circle cx="60" cy="38" r="2.5" fill="#00d4ff" fillOpacity="0.5" />
+                <circle cx="30" cy="20" r="4" stroke="#00d4ff" strokeWidth="1" fill="none">
+                  <animate attributeName="r" values="4;6;4" dur="1.5s" repeatCount="indefinite" />
+                  <animate attributeName="opacity" values="0.6;0.2;0.6" dur="1.5s" repeatCount="indefinite" />
+                </circle>
+                <circle cx="90" cy="20" r="4" stroke="#00d4ff" strokeWidth="1" fill="none">
+                  <animate attributeName="r" values="4;6;4" dur="1.5s" begin="0.2s" repeatCount="indefinite" />
+                  <animate attributeName="opacity" values="0.6;0.2;0.6" dur="1.5s" begin="0.2s" repeatCount="indefinite" />
+                </circle>
+                <circle cx="30" cy="40" r="4" stroke="#00d4ff" strokeWidth="1" fill="none">
+                  <animate attributeName="r" values="4;6;4" dur="1.5s" begin="0.4s" repeatCount="indefinite" />
+                  <animate attributeName="opacity" values="0.6;0.2;0.6" dur="1.5s" begin="0.4s" repeatCount="indefinite" />
+                </circle>
+                <circle cx="90" cy="40" r="4" stroke="#00d4ff" strokeWidth="1" fill="none">
+                  <animate attributeName="r" values="4;6;4" dur="1.5s" begin="0.6s" repeatCount="indefinite" />
+                  <animate attributeName="opacity" values="0.6;0.2;0.6" dur="1.5s" begin="0.6s" repeatCount="indefinite" />
+                </circle>
+                <ellipse cx="30" cy="20" rx="10" ry="2" fill="#00d4ff" fillOpacity="0.15">
+                  <animateTransform attributeName="transform" type="rotate" from="0 30 20" to="360 30 20" dur="0.3s" repeatCount="indefinite" />
+                </ellipse>
+                <ellipse cx="90" cy="20" rx="10" ry="2" fill="#00d4ff" fillOpacity="0.15">
+                  <animateTransform attributeName="transform" type="rotate" from="0 90 20" to="360 90 20" dur="0.3s" repeatCount="indefinite" />
+                </ellipse>
+                <ellipse cx="30" cy="40" rx="10" ry="2" fill="#00d4ff" fillOpacity="0.15">
+                  <animateTransform attributeName="transform" type="rotate" from="0 30 40" to="360 30 40" dur="0.3s" repeatCount="indefinite" />
+                </ellipse>
+                <ellipse cx="90" cy="40" rx="10" ry="2" fill="#00d4ff" fillOpacity="0.15">
+                  <animateTransform attributeName="transform" type="rotate" from="0 90 40" to="360 90 40" dur="0.3s" repeatCount="indefinite" />
+                </ellipse>
+              </svg>
+            </AppShell.Section>
+
+            <AppShell.Section p="xs">
+              <Group gap={8}>
+                <Text size="xs" c="#5a6478" style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: '15px' }}>
+                  v2.42.5
+                </Text>
+                <Tooltip label="Star on GitHub" position="right">
+                  <ActionIcon variant="subtle" color="gray" size="xs" component="a" href="https://github.com/BigBill1418/DroneOpsCommand" target="_blank" rel="noopener noreferrer">
+                    <IconBrandGithub size={14} />
+                  </ActionIcon>
+                </Tooltip>
+              </Group>
+            </AppShell.Section>
+          </AppShell.Navbar>
+        )}
+
+        <AppShell.Main>
+          <Outlet />
+        </AppShell.Main>
+      </AppShell>
+    </>
   );
 }
