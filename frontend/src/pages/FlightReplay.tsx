@@ -27,15 +27,13 @@ import {
   IconBolt,
   IconClock,
   IconMapPin,
-  IconRuler,
-  IconChevronRight,
   IconVideo,
 } from '@tabler/icons-react';
-import { MapContainer, TileLayer, Polyline, CircleMarker, Circle, Popup, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Polyline, CircleMarker, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import api from '../api/client';
-import FlightVideoExporter from '../components/FlightVideoExporter';
+import { renderFlightVideo } from '../components/FlightVideoExporter';
 import { cardStyle, monoFont } from '../components/shared/styles';
 
 const heading = { fontFamily: "'Bebas Neue', sans-serif" };
@@ -140,7 +138,7 @@ export default function FlightReplay() {
   const [currentIdx, setCurrentIdx] = useState(0);
   const [speed, setSpeed] = useState(1);
   const [followDrone, setFollowDrone] = useState(true);
-  const [exportOpen, setExportOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const animRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Fetch flight data
@@ -307,10 +305,16 @@ export default function FlightReplay() {
             color="cyan"
             variant="light"
             size="xs"
-            onClick={() => { setPlaying(false); setExportOpen(true); }}
+            loading={exporting}
+            onClick={() => {
+              if (exporting) return;
+              setPlaying(false);
+              setExporting(true);
+              renderFlightVideo(flight, track, timeOffsets).finally(() => setExporting(false));
+            }}
             styles={{ root: { ...heading, letterSpacing: '1px' } }}
           >
-            EXPORT VIDEO
+            {exporting ? 'RENDERING...' : 'EXPORT VIDEO'}
           </Button>
           <Badge color="cyan" variant="light" size="sm" style={monoFont}>
             {flight.drone_name || flight.drone_model || 'Unknown'}
@@ -320,15 +324,6 @@ export default function FlightReplay() {
           </Badge>
         </Group>
       </Group>
-
-      {/* Video export modal */}
-      <FlightVideoExporter
-        opened={exportOpen}
-        onClose={() => setExportOpen(false)}
-        flight={flight}
-        track={track}
-        timeOffsets={timeOffsets}
-      />
 
       {/* Flight name */}
       <Text c="#5a6478" size="xs" style={monoFont} lineClamp={1}>
