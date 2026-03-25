@@ -1,6 +1,6 @@
 # DroneOpsCommand
 
-**Self-hosted mission management, flight log analysis, AI report generation, invoicing, and real-time airspace monitoring for commercial drone operators.**
+**Self-hosted mission management, flight log analysis, GPS flight replay with video export, AI report generation, invoicing, and real-time airspace monitoring for commercial drone operators.**
 
 **Version 2.47.0** | [Quick Start](#quick-start) | [Features](#features) | [Configuration](#configuration) | [Contributing](CONTRIBUTING.md) | [License](LICENSE)
 
@@ -15,7 +15,7 @@ Designed for FAA Part 107 certified operators running missions such as search & 
 - **100% self-hosted** — runs on your own hardware via Docker Compose. No cloud dependencies, no per-seat licensing, no subscription fees.
 - **AI stays local** — report generation uses Ollama (Llama 3.1 8B) so client data never leaves your network.
 - **White-label ready** — company name, tagline, and branding are fully configurable from the Settings UI. No code changes needed to make it yours.
-- **Full lifecycle** — flight log upload, GPS path visualization, telemetry analysis, mission management, AI reports, PDF export, invoicing, and email delivery in one platform.
+- **Full lifecycle** — flight log upload, GPS path visualization, animated flight replay with video export, telemetry analysis, mission management, AI reports, PDF export, invoicing, and email delivery in one platform.
 - **Real-time airspace** — live aircraft tracking via OpenSky Network with anonymous or authenticated access.
 - **Mobile-friendly** — responsive dark-themed UI works on phones, tablets, and desktops.
 
@@ -241,7 +241,7 @@ After logging in, go to **Settings > Branding** to set your company name, taglin
 - NOTAMs (Notices to Airmen) with classification and effective dates
 - National Weather Service alerts with severity levels
 - Wind severity indicator: favorable, caution, hazardous
-- Configurable location from Settings page
+- Configurable home location from Settings page (used for weather, airspace, and METAR data)
 
 ### Financial Dashboard
 - Total billed revenue, average per mission, billable mission count
@@ -251,12 +251,39 @@ After logging in, go to **Settings > Branding** to set your company name, taglin
 - Searchable invoice table across all missions
 - Prepaid status badges
 
+### Flight Replay
+- Animated GPS flight path playback with real-time telemetry HUD
+- Altitude-colored trail segments (ground, <100ft, 100-200ft, 200-400ft, 400ft+)
+- Animated drone marker with heading rotation and glow effect
+- Ghost trail showing full flight path with colored trail progressing over it
+- Playback controls: play/pause (spacebar), skip forward/back, scrub bar
+- Variable speed: 0.5x, 1x, 2x, 5x, 10x
+- Live telemetry sidebar: altitude, speed, heading, position, elapsed time
+- Flight stats panel with duration, distance, max altitude, max speed
+- Home point and start/end markers on map
+- Follow-drone mode auto-pans the map to track the aircraft
+- Dark CartoDB basemap matching the app's theme
+
+### Flight Video Export
+- One-click export: click button → render → auto-download
+- Renders full flight replay as a downloadable WebM video (1920x1080, 30fps)
+- Canvas-based rendering with CartoDB dark map tiles, altitude-colored trail, drone marker
+- Telemetry sidebar overlay with live altitude, speed, heading, position, elapsed time
+- Flight stats panel, altitude color legend, and progress bar in the video
+- Progress notifications during rendering with percentage updates
+- No modal or multi-step flow — instant click-to-download behavior
+- Browser-native MediaRecorder with VP9/VP8 codec support
+- Ideal for after-action reports and customer deliverables
+
 ### Authentication & Security
 - JWT access tokens (configurable expiration, default 30 min)
 - Refresh token rotation (configurable, default 30 days)
-- Secure password hashing via passlib/bcrypt
+- Secure password hashing via bcrypt 4.x (direct, no passlib wrapper)
 - All API endpoints require authentication
-- Admin account seeded on first startup
+- Admin account seeded on first startup only — password never overwritten on restart
+- PostgreSQL advisory lock prevents race conditions during seed
+- Single-worker uvicorn for consistent async behavior
+- Explicit commit + read-back verification on password changes
 
 ### Dashboard
 - At-a-glance stats: total flight hours, total flights, total missions, drafts, customers
@@ -314,7 +341,7 @@ After logging in, go to **Settings > Branding** to set your company name, taglin
 - **aiosmtplib** async email delivery
 - **httpx** async HTTP client (Ollama, OpenDroneLog, weather APIs)
 - **Celery** distributed task queue
-- **passlib + bcrypt** password hashing
+- **bcrypt** direct password hashing (4.x)
 
 ### Nginx Reverse Proxy
 - Proxies `/api/` to backend on port 8000
@@ -422,7 +449,10 @@ Multi-step wizard with 5 stages:
 Full mission view with metadata, assigned aircraft cards, interactive flight map, coverage stats, download link status, report content, and action buttons (edit, delete, generate PDF, email report).
 
 ### Flights (`/flights`)
-Flight library with aggregate statistics, per-drone breakdowns, top flights, sortable/searchable table, and a detail drawer with interactive GPS flight path map, telemetry data, and export options (GPX/KML/CSV).
+Flight library with aggregate statistics, per-drone breakdowns, top flights, sortable/searchable table, and a detail drawer with interactive GPS flight path map, telemetry data, and export options (GPX/KML/CSV). Flight Replay button for flights with GPS tracks.
+
+### Flight Replay (`/flights/:id/replay`)
+Animated GPS flight path playback with altitude-colored trail, drone marker with heading, live telemetry sidebar (altitude, speed, heading, position), flight stats, and playback controls (play/pause, speed, scrub). One-click video export renders the full replay as a downloadable WebM video with map, flight path, and telemetry overlay.
 
 ### Upload Logs (`/upload-logs`)
 Drag-and-drop flight log upload with folder support. Batched uploads for large file sets. Progress tracking per file with duplicate detection and error reporting.
@@ -451,6 +481,7 @@ System configuration across multiple tabs:
 - **Flight Data** — OpenSky Network credentials, DJI API key, OpenDroneLog server URL with connection test
 - **SMTP** — Email server configuration with test email
 - **Payment Links** — PayPal and Venmo URLs for invoices
+- **Home Location** — Coordinates for weather, airspace, and METAR data
 - **Aircraft Fleet** — Add/edit/delete aircraft with specifications
 - **Rate Templates** — Add/edit/delete billing rate presets
 - **Device Keys** — API key management for DroneOpsSync companion app
@@ -551,7 +582,6 @@ Full interactive API documentation is available at `http://localhost:3080/docs` 
   - Disabled features: file uploads, email sending, Cloudflare tunnel, password changes
   - Sandboxed LLM report generation so visitors can test AI reports on sample missions
   - Rate-limited API to prevent scraping
-- **Flight Replay** *(in progress)* — Animated playback of GPS flight paths with altitude-colored trails
 - **Report Templates** — Multiple PDF templates for different mission types
 - **Claude API Integration** — Replace local Ollama with Claude API for faster, higher-quality report generation
 - **Live Flight Tracking** — WebSocket integration for real-time drone position

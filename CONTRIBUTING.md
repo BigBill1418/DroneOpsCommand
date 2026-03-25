@@ -68,11 +68,12 @@ Requires PostgreSQL and Redis running (easiest via `docker compose up db redis -
 
 | Service | Tech | Purpose |
 |---------|------|---------|
-| Frontend | React + Vite + Mantine | SPA web interface |
-| Backend | FastAPI + SQLAlchemy | REST API |
+| Frontend | React 18 + Vite + Mantine UI v7 | SPA web interface |
+| Backend | FastAPI + SQLAlchemy 2.0 (async) | REST API |
 | Database | PostgreSQL 16 | Persistent storage |
+| Flight Parser | Python microservice | DJI flight log decryption |
 | LLM | Ollama (Mistral 7B) | Local AI report generation |
-| Queue | Redis + Celery | Async task processing |
+| Queue | Redis 7 + Celery | Async task processing |
 
 ## Reporting Bugs
 
