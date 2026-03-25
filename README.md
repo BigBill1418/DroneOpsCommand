@@ -2,7 +2,7 @@
 
 **Self-hosted mission management, flight log analysis, AI report generation, invoicing, and real-time airspace monitoring for commercial drone operators.**
 
-**Version 2.43.1** | [Quick Start](#quick-start) | [Features](#features) | [Configuration](#configuration) | [Contributing](CONTRIBUTING.md) | [License](LICENSE)
+**Version 2.44.0** | [Quick Start](#quick-start) | [Features](#features) | [Configuration](#configuration) | [Contributing](CONTRIBUTING.md) | [License](LICENSE)
 
 ---
 
@@ -551,10 +551,9 @@ Full interactive API documentation is available at `http://localhost:3080/docs` 
   - Disabled features: file uploads, email sending, Cloudflare tunnel, password changes
   - Sandboxed LLM report generation so visitors can test AI reports on sample missions
   - Rate-limited API to prevent scraping
-- **Voice-to-Text** — On-device speech recognition in the DroneOpsSync Android companion app for dictating operator field notes hands-free during or after missions
+- **Flight Replay** *(in progress)* — Animated playback of GPS flight paths with altitude-colored trails
 - **Report Templates** — Multiple PDF templates for different mission types
 - **Claude API Integration** — Replace local Ollama with Claude API for faster, higher-quality report generation
-- **Flight Replay** — Animated playback of GPS flight paths with altitude-colored trails
 - **Live Flight Tracking** — WebSocket integration for real-time drone position
 - **Multi-User Roles** — Operator, admin, and client role-based access control
 

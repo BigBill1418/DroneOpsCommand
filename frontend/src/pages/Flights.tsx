@@ -53,6 +53,7 @@ import {
   IconTrash,
   IconUpload,
   IconX,
+  IconPlayerPlay,
 } from '@tabler/icons-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
@@ -849,6 +850,20 @@ export default function Flights() {
               };
               return <FlightMap geojson={geojson} height="260px" />;
             })()}
+
+            {/* Replay button — only if flight has GPS track */}
+            {detailTrack?.gps_track && Array.isArray(detailTrack.gps_track) && detailTrack.gps_track.length >= 2 && (
+              <Button
+                leftSection={<IconPlayerPlay size={16} />}
+                color="cyan"
+                variant="light"
+                fullWidth
+                onClick={() => { setDetailFlight(null); navigate(`/flights/${detailFlight.id}/replay`); }}
+                styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '2px' } }}
+              >
+                FLIGHT REPLAY
+              </Button>
+            )}
 
             {/* Drone info — name, model, serial */}
             <Card padding="sm" radius="sm" style={{ background: '#0e1117', border: '1px solid #1a1f2e' }}>
