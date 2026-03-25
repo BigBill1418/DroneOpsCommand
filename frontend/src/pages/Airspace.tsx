@@ -12,7 +12,10 @@ import {
   Switch,
   Tooltip,
   ActionIcon,
+  Collapse,
+  Transition,
 } from '@mantine/core';
+import { useMediaQuery } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
 import {
   IconRadar2,
@@ -20,6 +23,9 @@ import {
   IconHome,
   IconRefresh,
   IconPlane,
+  IconSettings,
+  IconChevronUp,
+  IconChevronDown,
 } from '@tabler/icons-react';
 import { MapContainer, TileLayer, CircleMarker, Circle, Marker, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
@@ -95,7 +101,9 @@ export default function Airspace() {
   const [homeLon, setHomeLon] = useState<number | null>(null);
   const [gpsError, setGpsError] = useState<string | null>(null);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
+  const [controlsOpen, setControlsOpen] = useState(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const isMobile = useMediaQuery('(max-width: 768px)');
 
   // Load home location from weather settings (already configured)
   useEffect(() => {
@@ -244,19 +252,108 @@ export default function Airspace() {
         )}
       </Group>
 
-      {/* Controls + Map */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 260px', gap: 12 }}>
+      {/* Mobile controls toggle */}
+      {isMobile && (
+        <Card
+          padding="xs"
+          radius="md"
+          style={{ ...cardStyle, cursor: 'pointer' }}
+          onClick={() => setControlsOpen(o => !o)}
+        >
+          <Group justify="space-between">
+            <Group gap="xs">
+              <IconSettings size={16} color="#00d4ff" />
+              <Text c="#e8edf2" fw={700} style={heading} size="sm">CONTROLS</Text>
+              <Badge color="cyan" variant="light" size="xs" style={monoFont}>{radiusNm} NM</Badge>
+              {polling && <Badge color="green" variant="dot" size="xs" style={monoFont}>LIVE</Badge>}
+            </Group>
+            {controlsOpen ? <IconChevronUp size={16} color="#5a6478" /> : <IconChevronDown size={16} color="#5a6478" />}
+          </Group>
+        </Card>
+      )}
+
+      {/* Controls panel — collapsible on mobile, always visible on desktop */}
+      {isMobile ? (
+        <Collapse in={controlsOpen}>
+          <Stack gap="sm">
+            {/* Location + Radius + Refresh in a compact row on mobile */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+              <Card padding="sm" radius="md" style={cardStyle}>
+                <Group gap="xs" mb={4}>
+                  <IconCurrentLocation size={14} color="#00d4ff" />
+                  <Text c="#e8edf2" fw={700} style={heading} size="sm">LOCATION</Text>
+                </Group>
+                <Switch
+                  label="Use GPS"
+                  checked={useGps}
+                  onChange={(e) => setUseGps(e.currentTarget.checked)}
+                  color="cyan"
+                  size="xs"
+                  styles={{ label: { color: '#e8edf2', ...monoFont, fontSize: 11 } }}
+                  mb={4}
+                />
+                {useGps && gpsLat != null && (
+                  <Text size="xs" c="#5a6478" style={monoFont}>{gpsLat.toFixed(4)}, {gpsLon!.toFixed(4)}</Text>
+                )}
+                {useGps && gpsError && <Text size="xs" c="#ff6b6b" style={monoFont}>{gpsError}</Text>}
+                {!useGps && homeLat != null && (
+                  <Group gap={4}><IconHome size={11} color="#5a6478" />
+                    <Text size="xs" c="#5a6478" style={monoFont}>{homeLat.toFixed(4)}, {homeLon!.toFixed(4)}</Text>
+                  </Group>
+                )}
+                {!useGps && !homeLat && <Text size="xs" c="#ff6b6b" style={monoFont}>No home set</Text>}
+              </Card>
+
+              <Card padding="sm" radius="md" style={cardStyle}>
+                <Group gap="xs" mb={4}>
+                  <IconRefresh size={14} color="#00d4ff" />
+                  <Text c="#e8edf2" fw={700} style={heading} size="sm">REFRESH</Text>
+                </Group>
+                <Switch
+                  label="Auto 10s"
+                  checked={polling}
+                  onChange={(e) => setPolling(e.currentTarget.checked)}
+                  color="cyan"
+                  size="xs"
+                  styles={{ label: { color: '#e8edf2', ...monoFont, fontSize: 11 } }}
+                  mb={4}
+                />
+                <ActionIcon variant="subtle" color="cyan" size="sm" onClick={fetchAircraft}>
+                  <IconRefresh size={14} />
+                </ActionIcon>
+              </Card>
+            </div>
+
+            <Card padding="sm" radius="md" style={cardStyle}>
+              <Group justify="space-between" mb={4}>
+                <Text c="#e8edf2" fw={700} style={heading} size="sm">RADIUS</Text>
+                <Badge color="cyan" variant="light" size="xs" style={monoFont}>{radiusNm} NM</Badge>
+              </Group>
+              <Slider
+                value={radiusNm}
+                onChange={setRadiusNm}
+                min={5} max={100} step={5} color="cyan"
+                marks={[{ value: 5, label: '5' }, { value: 25, label: '25' }, { value: 50, label: '50' }, { value: 100, label: '100' }]}
+                styles={{ markLabel: { color: '#5a6478', ...monoFont, fontSize: 10 }, track: { background: '#1a1f2e' } }}
+              />
+            </Card>
+          </Stack>
+        </Collapse>
+      ) : null}
+
+      {/* Map + Desktop sidebar */}
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 260px', gap: 12 }}>
         {/* Map */}
         <Card padding={0} radius="md" style={cardStyle}>
           {loading ? (
-            <Center h={540}>
+            <Center h={isMobile ? 'calc(100vh - 240px)' : 540}>
               <Loader color="cyan" />
             </Center>
           ) : (
             <MapContainer
               center={[activeLat!, activeLon!]}
               zoom={9}
-              style={{ height: 540, borderRadius: 8 }}
+              style={{ height: isMobile ? 'calc(100vh - 240px)' : 540, minHeight: 320, borderRadius: 8 }}
               scrollWheelZoom={true}
               zoomControl={false}
             >
@@ -326,115 +423,117 @@ export default function Airspace() {
           )}
         </Card>
 
-        {/* Controls sidebar */}
-        <Stack gap="sm">
-          {/* Location source */}
-          <Card padding="md" radius="md" style={cardStyle}>
-            <Group gap="xs" mb="xs">
-              <IconCurrentLocation size={16} color="#00d4ff" />
-              <Text c="#e8edf2" fw={700} style={heading} size="md">LOCATION</Text>
-            </Group>
-            <Switch
-              label="Use GPS"
-              checked={useGps}
-              onChange={(e) => setUseGps(e.currentTarget.checked)}
-              color="cyan"
-              size="sm"
-              styles={{ label: { color: '#e8edf2', ...monoFont, fontSize: 12 } }}
-              mb="xs"
-            />
-            {useGps && gpsLat != null && (
-              <Text size="xs" c="#5a6478" style={monoFont}>
-                {gpsLat.toFixed(4)}, {gpsLon!.toFixed(4)}
-              </Text>
-            )}
-            {useGps && gpsError && (
-              <Text size="xs" c="#ff6b6b" style={monoFont}>{gpsError}</Text>
-            )}
-            {!useGps && homeLat != null && (
-              <Group gap={4}>
-                <IconHome size={12} color="#5a6478" />
-                <Text size="xs" c="#5a6478" style={monoFont}>
-                  {homeLat.toFixed(4)}, {homeLon!.toFixed(4)}
-                </Text>
+        {/* Desktop controls sidebar */}
+        {!isMobile && (
+          <Stack gap="sm">
+            {/* Location source */}
+            <Card padding="md" radius="md" style={cardStyle}>
+              <Group gap="xs" mb="xs">
+                <IconCurrentLocation size={16} color="#00d4ff" />
+                <Text c="#e8edf2" fw={700} style={heading} size="md">LOCATION</Text>
               </Group>
-            )}
-            {!useGps && !homeLat && (
-              <Text size="xs" c="#ff6b6b" style={monoFont}>No home set — go to Settings</Text>
-            )}
-          </Card>
-
-          {/* Radius */}
-          <Card padding="md" radius="md" style={cardStyle}>
-            <Group justify="space-between" mb="xs">
-              <Text c="#e8edf2" fw={700} style={heading} size="md">RADIUS</Text>
-              <Badge color="cyan" variant="light" size="sm" style={monoFont}>{radiusNm} NM</Badge>
-            </Group>
-            <Slider
-              value={radiusNm}
-              onChange={setRadiusNm}
-              min={5}
-              max={100}
-              step={5}
-              color="cyan"
-              marks={[
-                { value: 5, label: '5' },
-                { value: 25, label: '25' },
-                { value: 50, label: '50' },
-                { value: 100, label: '100' },
-              ]}
-              styles={{
-                markLabel: { color: '#5a6478', ...monoFont, fontSize: 10 },
-                track: { background: '#1a1f2e' },
-              }}
-            />
-          </Card>
-
-          {/* Polling control */}
-          <Card padding="md" radius="md" style={cardStyle}>
-            <Group gap="xs" mb="xs">
-              <IconRefresh size={16} color="#00d4ff" />
-              <Text c="#e8edf2" fw={700} style={heading} size="md">AUTO-REFRESH</Text>
-            </Group>
-            <Switch
-              label="Poll every 10s"
-              checked={polling}
-              onChange={(e) => setPolling(e.currentTarget.checked)}
-              color="cyan"
-              size="sm"
-              styles={{ label: { color: '#e8edf2', ...monoFont, fontSize: 12 } }}
-            />
-            <ActionIcon
-              variant="subtle"
-              color="cyan"
-              size="sm"
-              onClick={fetchAircraft}
-              mt="xs"
-            >
-              <IconRefresh size={14} />
-            </ActionIcon>
-          </Card>
-
-          {/* Altitude legend */}
-          <Card padding="md" radius="md" style={cardStyle}>
-            <Text c="#e8edf2" fw={700} style={heading} size="md" mb="xs">ALTITUDE KEY</Text>
-            <Stack gap={2}>
-              {[
-                { label: 'Ground', color: '#5a6478' },
-                { label: '< 1,000 ft', color: '#ff6b6b' },
-                { label: '1k–5k ft', color: '#ffd43b' },
-                { label: '5k–15k ft', color: '#69db7c' },
-                { label: '15k–30k ft', color: '#74c0fc' },
-                { label: '30k+ ft', color: '#da77f2' },
-              ].map((item) => (
-                <Group gap="xs" key={item.label}>
-                  <div style={{ width: 10, height: 10, borderRadius: '50%', background: item.color }} />
-                  <Text size="xs" c="#5a6478" style={monoFont}>{item.label}</Text>
+              <Switch
+                label="Use GPS"
+                checked={useGps}
+                onChange={(e) => setUseGps(e.currentTarget.checked)}
+                color="cyan"
+                size="sm"
+                styles={{ label: { color: '#e8edf2', ...monoFont, fontSize: 12 } }}
+                mb="xs"
+              />
+              {useGps && gpsLat != null && (
+                <Text size="xs" c="#5a6478" style={monoFont}>
+                  {gpsLat.toFixed(4)}, {gpsLon!.toFixed(4)}
+                </Text>
+              )}
+              {useGps && gpsError && (
+                <Text size="xs" c="#ff6b6b" style={monoFont}>{gpsError}</Text>
+              )}
+              {!useGps && homeLat != null && (
+                <Group gap={4}>
+                  <IconHome size={12} color="#5a6478" />
+                  <Text size="xs" c="#5a6478" style={monoFont}>
+                    {homeLat.toFixed(4)}, {homeLon!.toFixed(4)}
+                  </Text>
                 </Group>
-              ))}
-            </Stack>
-          </Card>
-        </Stack>
+              )}
+              {!useGps && !homeLat && (
+                <Text size="xs" c="#ff6b6b" style={monoFont}>No home set — go to Settings</Text>
+              )}
+            </Card>
+
+            {/* Radius */}
+            <Card padding="md" radius="md" style={cardStyle}>
+              <Group justify="space-between" mb="xs">
+                <Text c="#e8edf2" fw={700} style={heading} size="md">RADIUS</Text>
+                <Badge color="cyan" variant="light" size="sm" style={monoFont}>{radiusNm} NM</Badge>
+              </Group>
+              <Slider
+                value={radiusNm}
+                onChange={setRadiusNm}
+                min={5}
+                max={100}
+                step={5}
+                color="cyan"
+                marks={[
+                  { value: 5, label: '5' },
+                  { value: 25, label: '25' },
+                  { value: 50, label: '50' },
+                  { value: 100, label: '100' },
+                ]}
+                styles={{
+                  markLabel: { color: '#5a6478', ...monoFont, fontSize: 10 },
+                  track: { background: '#1a1f2e' },
+                }}
+              />
+            </Card>
+
+            {/* Polling control */}
+            <Card padding="md" radius="md" style={cardStyle}>
+              <Group gap="xs" mb="xs">
+                <IconRefresh size={16} color="#00d4ff" />
+                <Text c="#e8edf2" fw={700} style={heading} size="md">AUTO-REFRESH</Text>
+              </Group>
+              <Switch
+                label="Poll every 10s"
+                checked={polling}
+                onChange={(e) => setPolling(e.currentTarget.checked)}
+                color="cyan"
+                size="sm"
+                styles={{ label: { color: '#e8edf2', ...monoFont, fontSize: 12 } }}
+              />
+              <ActionIcon
+                variant="subtle"
+                color="cyan"
+                size="sm"
+                onClick={fetchAircraft}
+                mt="xs"
+              >
+                <IconRefresh size={14} />
+              </ActionIcon>
+            </Card>
+
+            {/* Altitude legend */}
+            <Card padding="md" radius="md" style={cardStyle}>
+              <Text c="#e8edf2" fw={700} style={heading} size="md" mb="xs">ALTITUDE KEY</Text>
+              <Stack gap={2}>
+                {[
+                  { label: 'Ground', color: '#5a6478' },
+                  { label: '< 1,000 ft', color: '#ff6b6b' },
+                  { label: '1k–5k ft', color: '#ffd43b' },
+                  { label: '5k–15k ft', color: '#69db7c' },
+                  { label: '15k–30k ft', color: '#74c0fc' },
+                  { label: '30k+ ft', color: '#da77f2' },
+                ].map((item) => (
+                  <Group gap="xs" key={item.label}>
+                    <div style={{ width: 10, height: 10, borderRadius: '50%', background: item.color }} />
+                    <Text size="xs" c="#5a6478" style={monoFont}>{item.label}</Text>
+                  </Group>
+                ))}
+              </Stack>
+            </Card>
+          </Stack>
+        )}
       </div>
     </Stack>
   );
