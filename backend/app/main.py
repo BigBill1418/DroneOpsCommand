@@ -196,7 +196,7 @@ logger.info("MultiPartParser max_file_size set to 200 MB")
 app = FastAPI(
     title="D.O.C — Drone Operations Command",
     description="Mission management, flight data, and after-action reporting for drone operations",
-    version="2.41.2",
+    version="2.41.3",
     lifespan=lifespan,
 )
 
