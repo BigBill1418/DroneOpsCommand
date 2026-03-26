@@ -1696,14 +1696,34 @@ export default function Settings() {
             <Card padding="lg" radius="md" style={cardStyle}>
               <Group justify="space-between" mb="md">
                 <Title order={3} c="#e8edf2" style={{ letterSpacing: '1px' }}>AIRCRAFT FLEET</Title>
-                <Button
-                  leftSection={<IconPlus size={14} />}
-                  size="xs"
-                  color="cyan"
-                  onClick={() => { setEditingAircraftId(null); aircraftForm.reset(); setAircraftModal(true); }}
-                >
-                  Add Aircraft
-                </Button>
+                <Group gap="xs">
+                  <Button
+                    leftSection={<IconDrone size={14} />}
+                    size="xs"
+                    variant="light"
+                    color="cyan"
+                    onClick={async () => {
+                      try {
+                        notifications.show({ id: 'backfill', title: 'Matching...', message: 'Re-matching flights to fleet aircraft', loading: true, autoClose: false });
+                        const resp = await api.post('/flight-library/backfill-aircraft');
+                        const { matched, total_unlinked, still_unlinked } = resp.data;
+                        notifications.update({ id: 'backfill', title: 'Complete', message: `Matched ${matched} of ${total_unlinked} unlinked flights. ${still_unlinked} still unlinked.`, loading: false, autoClose: 5000, color: matched > 0 ? 'green' : 'yellow' });
+                      } catch {
+                        notifications.update({ id: 'backfill', title: 'Error', message: 'Failed to run backfill', loading: false, autoClose: 4000, color: 'red' });
+                      }
+                    }}
+                  >
+                    Re-match Flights
+                  </Button>
+                  <Button
+                    leftSection={<IconPlus size={14} />}
+                    size="xs"
+                    color="cyan"
+                    onClick={() => { setEditingAircraftId(null); aircraftForm.reset(); setAircraftModal(true); }}
+                  >
+                    Add Aircraft
+                  </Button>
+                </Group>
               </Group>
 
               <Table styles={{
