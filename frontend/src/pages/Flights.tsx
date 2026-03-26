@@ -55,7 +55,7 @@ import {
   IconX,
   IconPlayerPlay,
 } from '@tabler/icons-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../api/client';
 import { Aircraft, FlightRecord } from '../api/types';
 import FlightMap from '../components/FlightMap/FlightMap';
@@ -263,6 +263,7 @@ export default function Flights() {
   const [trackLoading, setTrackLoading] = useState(false);
   const [aircraft, setAircraft] = useState<Aircraft[]>([]);
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   // Sort state
   const [sortBy, setSortBy] = useState<string>('date');
@@ -302,6 +303,20 @@ export default function Flights() {
   }, []);
 
   useEffect(() => { loadFlights(); }, [loadFlights]);
+
+  // Open detail drawer if ?detail=<id> is in the URL (e.g. from dashboard recent flights)
+  useEffect(() => {
+    const detailId = searchParams.get('detail');
+    if (detailId && flights.length > 0 && !detailFlight) {
+      const match = flights.find((f) => String(f.id) === detailId);
+      if (match) {
+        setDetailFlight(match);
+        // Clean up the URL param
+        searchParams.delete('detail');
+        setSearchParams(searchParams, { replace: true });
+      }
+    }
+  }, [flights, searchParams, detailFlight, setSearchParams]);
 
   // Load fleet aircraft for reassignment
   useEffect(() => {

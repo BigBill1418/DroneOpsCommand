@@ -167,7 +167,7 @@ export default function AppLayout({ onLogout }: AppLayoutProps) {
           />
           <Group gap={8} mt="xs" px={4}>
             <Text size="xs" c="#5a6478" style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: '15px' }}>
-              v2.47.1
+              v2.48.0
             </Text>
             <Tooltip label="Star on GitHub" position="right">
               <ActionIcon variant="subtle" color="gray" size="xs" component="a" href="https://github.com/BigBill1418/DroneOpsCommand" target="_blank" rel="noopener noreferrer">
