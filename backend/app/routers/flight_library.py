@@ -139,17 +139,65 @@ def _get_stored_file_path(file_hash: str) -> Path | None:
     return None
 
 
-async def _generate_flight_name(db: AsyncSession, drone_model: str | None, drone_name: str | None, start_time: _dt | None) -> str:
+async def _match_fleet_aircraft(db: AsyncSession, drone_serial: str | None, drone_model: str | None) -> Aircraft | None:
+    """Match a parsed flight to a fleet aircraft by serial number or model name.
+
+    Priority: exact serial match → model name contains match.
+    """
+    # 1. Try exact serial number match
+    if drone_serial:
+        result = await db.execute(
+            select(Aircraft).where(
+                Aircraft.serial_number.isnot(None),
+                func.upper(Aircraft.serial_number) == drone_serial.upper(),
+            )
+        )
+        match = result.scalar_one_or_none()
+        if match:
+            return match
+
+    # 2. Fall back to model name matching
+    if drone_model:
+        model_clean = drone_model.strip()
+        # Try exact match first
+        result = await db.execute(
+            select(Aircraft).where(func.upper(Aircraft.model_name) == model_clean.upper())
+        )
+        match = result.scalar_one_or_none()
+        if match:
+            return match
+
+        # Try partial match (e.g. parsed "M30T" matches fleet "DJI Matrice 30T")
+        result = await db.execute(
+            select(Aircraft).where(
+                Aircraft.model_name.ilike(f"%{model_clean}%")
+            )
+        )
+        match = result.scalar_one_or_none()
+        if match:
+            return match
+
+        # Try the reverse (fleet "Matrice 30T" and parsed "DJI Matrice 30T")
+        result = await db.execute(select(Aircraft))
+        all_aircraft = result.scalars().all()
+        for ac in all_aircraft:
+            if ac.model_name.lower() in model_clean.lower():
+                return ac
+
+    return None
+
+
+async def _generate_flight_name(db: AsyncSession, drone_model: str | None, fleet_aircraft: Aircraft | None, start_time: _dt | None) -> str:
     """Generate a standardized flight name: DroneName_YYYYMMDD_XXXX.
 
-    Uses drone_name if available, falls back to drone_model, then 'Flight'.
+    Uses fleet aircraft model_name if matched, falls back to drone_model, then 'Flight'.
     Date comes from start_time if available, otherwise today.
     XXXX is a sequential number based on how many flights already exist for that day.
     """
-    # Pick the best drone identifier
-    aircraft = drone_name or drone_model or "Flight"
+    # Pick the best drone identifier — fleet aircraft name takes priority
+    aircraft_label = (fleet_aircraft.model_name if fleet_aircraft else None) or drone_model or "Flight"
     # Clean it up for a filename-friendly label
-    aircraft = aircraft.replace(" ", "-").strip()
+    aircraft_label = aircraft_label.replace(" ", "-").strip()
 
     # Date portion
     flight_date = start_time if start_time else _dt.utcnow()
@@ -168,7 +216,7 @@ async def _generate_flight_name(db: AsyncSession, drone_model: str | None, drone
     existing_count = count_result.scalar() or 0
     seq = str(existing_count + 1).zfill(4)
 
-    return f"{aircraft}_{date_str}_{seq}"
+    return f"{aircraft_label}_{date_str}_{seq}"
 
 
 async def _get_dji_api_key(db: AsyncSession) -> str | None:
@@ -643,13 +691,16 @@ async def device_upload_flights(
                         continue
 
                     parsed_start = _parse_datetime(parsed.get("start_time"))
+                    fleet_match = await _match_fleet_aircraft(
+                        db, parsed.get("drone_serial"), parsed.get("drone_model")
+                    )
                     flight_name = await _generate_flight_name(
-                        db, parsed.get("drone_model"), parsed.get("drone_name"), parsed_start
+                        db, parsed.get("drone_model"), fleet_match, parsed_start
                     )
 
                     flight = Flight(
                         name=flight_name,
-                        drone_model=parsed.get("drone_model"),
+                        drone_model=fleet_match.model_name if fleet_match else parsed.get("drone_model"),
                         drone_serial=parsed.get("drone_serial"),
                         battery_serial=parsed.get("battery_serial"),
                         start_time=parsed_start,
@@ -666,7 +717,11 @@ async def device_upload_flights(
                         source=parsed.get("source", "dji_txt"),
                         source_file_hash=ph,
                         original_filename=parsed.get("original_filename", upload.filename),
+                        aircraft_id=fleet_match.id if fleet_match else None,
                     )
+                    if fleet_match:
+                        logger.info("Auto-matched flight to fleet aircraft: %s (serial=%s)",
+                                    fleet_match.model_name, fleet_match.serial_number)
                     db.add(flight)
                     await db.flush()
                     await db.refresh(flight)
@@ -691,6 +746,43 @@ async def device_upload_flights(
         errors=errors,
         flights=imported,
     )
+
+
+# ── Backfill fleet attribution for existing flights ──────────────
+@router.post("/backfill-aircraft")
+async def backfill_aircraft_attribution(
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """Match all unlinked flights to fleet aircraft by serial number or model name.
+
+    Also updates drone_model to the canonical fleet name when matched.
+    """
+    # Get all flights without aircraft_id
+    result = await db.execute(
+        select(Flight).where(Flight.aircraft_id.is_(None))
+    )
+    unlinked = result.scalars().all()
+
+    matched = 0
+    for flight in unlinked:
+        fleet_match = await _match_fleet_aircraft(db, flight.drone_serial, flight.drone_model)
+        if fleet_match:
+            flight.aircraft_id = fleet_match.id
+            flight.drone_model = fleet_match.model_name
+            matched += 1
+            logger.info("Backfill: linked flight %s (%s) → %s",
+                        flight.id, flight.name, fleet_match.model_name)
+
+    if matched > 0:
+        await db.flush()
+
+    logger.info("Backfill complete: %d/%d flights matched to fleet aircraft", matched, len(unlinked))
+    return {
+        "total_unlinked": len(unlinked),
+        "matched": matched,
+        "still_unlinked": len(unlinked) - matched,
+    }
 
 
 # ── Reprocess status ──────────────────────────────────────────────
@@ -902,13 +994,16 @@ async def reprocess_flights(
                                     parsed.get("point_count", 0))
                     else:
                         parsed_start = _parse_datetime(parsed.get("start_time"))
+                        fleet_match = await _match_fleet_aircraft(
+                            db, parsed.get("drone_serial"), parsed.get("drone_model")
+                        )
                         flight_name = await _generate_flight_name(
-                            db, parsed.get("drone_model"), parsed.get("drone_name"), parsed_start
+                            db, parsed.get("drone_model"), fleet_match, parsed_start
                         )
 
                         flight = Flight(
                             name=flight_name,
-                            drone_model=parsed.get("drone_model"),
+                            drone_model=fleet_match.model_name if fleet_match else parsed.get("drone_model"),
                             drone_serial=parsed.get("drone_serial"),
                             battery_serial=parsed.get("battery_serial"),
                             start_time=parsed_start,
@@ -925,12 +1020,15 @@ async def reprocess_flights(
                             source=parsed.get("source", "dji_txt"),
                             source_file_hash=ph,
                             original_filename=parsed.get("original_filename", upload.filename),
+                            aircraft_id=fleet_match.id if fleet_match else None,
                         )
                         db.add(flight)
                         await db.flush()
                         await db.refresh(flight)
                         imported_count += 1
-                        logger.info("Reprocess: imported new flight %s (%s)", flight.id, flight.name)
+                        logger.info("Reprocess: imported new flight %s (%s) aircraft=%s",
+                                    flight.id, flight.name,
+                                    fleet_match.model_name if fleet_match else "unmatched")
 
                         battery_data = parsed.get("battery_data")
                         if battery_data and battery_data.get("serial"):
@@ -1211,13 +1309,16 @@ async def upload_flights(
                         continue
 
                     parsed_start = _parse_datetime(parsed.get("start_time"))
+                    fleet_match = await _match_fleet_aircraft(
+                        db, parsed.get("drone_serial"), parsed.get("drone_model")
+                    )
                     flight_name = await _generate_flight_name(
-                        db, parsed.get("drone_model"), parsed.get("drone_name"), parsed_start
+                        db, parsed.get("drone_model"), fleet_match, parsed_start
                     )
 
                     flight = Flight(
                         name=flight_name,
-                        drone_model=parsed.get("drone_model"),
+                        drone_model=fleet_match.model_name if fleet_match else parsed.get("drone_model"),
                         drone_serial=parsed.get("drone_serial"),
                         battery_serial=parsed.get("battery_serial"),
                         start_time=parsed_start,
@@ -1234,7 +1335,11 @@ async def upload_flights(
                         source=parsed.get("source", "dji_txt"),
                         source_file_hash=ph,
                         original_filename=parsed.get("original_filename", upload.filename),
+                        aircraft_id=fleet_match.id if fleet_match else None,
                     )
+                    if fleet_match:
+                        logger.info("Auto-matched flight to fleet aircraft: %s (serial=%s)",
+                                    fleet_match.model_name, fleet_match.serial_number)
                     db.add(flight)
                     await db.flush()
                     await db.refresh(flight)

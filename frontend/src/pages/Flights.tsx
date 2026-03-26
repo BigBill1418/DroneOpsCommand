@@ -131,14 +131,8 @@ function getMaxSpeed(f: FlightRecord): number {
 function getDroneModel(f: FlightRecord): string {
   return f.drone_model || f.droneModel || f.drone || f.model || '';
 }
-function getDroneName(f: FlightRecord): string {
-  return f.drone_name || f.droneName || '';
-}
 function getDroneDisplay(f: FlightRecord): string {
-  const name = getDroneName(f);
-  const model = getDroneModel(f);
-  if (name && model && name !== model) return name;
-  return name || model || '';
+  return getDroneModel(f) || '';
 }
 function getStartTime(f: FlightRecord): string {
   return f.start_time || f.startTime || f.date || f.created_at || '';
@@ -271,7 +265,7 @@ export default function Flights() {
 
   // Edit modal state (full flight edit including drone reassignment)
   const [editId, setEditId] = useState<string | null>(null);
-  const [editForm, setEditForm] = useState({ name: '', drone_model: '', drone_name: '', aircraft_id: '' as string | null, notes: '' });
+  const [editForm, setEditForm] = useState({ name: '', drone_model: '', aircraft_id: '' as string | null, notes: '' });
 
   // Manual flight form state
   const [manualForm, setManualForm] = useState({
@@ -399,7 +393,6 @@ export default function Flights() {
     setEditForm({
       name: getDisplayName(f),
       drone_model: getDroneModel(f),
-      drone_name: getDroneName(f),
       aircraft_id: f.aircraft_id || null,
       notes: f.notes || '',
     });
@@ -411,7 +404,6 @@ export default function Flights() {
       const payload: Record<string, any> = {};
       if (editForm.name.trim()) payload.name = editForm.name.trim();
       payload.drone_model = editForm.drone_model.trim() || null;
-      payload.drone_name = editForm.drone_name.trim() || null;
       payload.aircraft_id = editForm.aircraft_id || null;
       payload.notes = editForm.notes.trim() || null;
 
@@ -488,7 +480,7 @@ export default function Flights() {
     if (search) {
       const q = search.toLowerCase();
       result = result.filter((f) => {
-        return [getDisplayName(f), getDroneModel(f), getDroneName(f), getStartTime(f), f.notes, f.drone_serial, f.source, f.original_filename]
+        return [getDisplayName(f), getDroneModel(f), getStartTime(f), f.notes, f.drone_serial, f.source, f.original_filename]
           .filter(Boolean).join(' ').toLowerCase().includes(q);
       });
     }
@@ -769,9 +761,6 @@ export default function Flights() {
                       </Table.Td>
                       <Table.Td>
                         <Text size="xs" c="#e8edf2">{getDroneDisplay(f) || '—'}</Text>
-                        {getDroneName(f) && getDroneModel(f) && getDroneName(f) !== getDroneModel(f) && (
-                          <Text size="10px" c="#5a6478" style={monoFont}>{getDroneModel(f)}</Text>
-                        )}
                       </Table.Td>
                       <Table.Td>
                         <Text size="xs" c="#5a6478" style={monoFont}>{formatDuration(getDurationSecs(f))}</Text>
@@ -889,9 +878,6 @@ export default function Flights() {
               <Text c="#e8edf2" fw={600} size="lg">
                 {getDroneDisplay(detailFlight) || 'Unknown'}
               </Text>
-              {getDroneName(detailFlight) && getDroneModel(detailFlight) && getDroneName(detailFlight) !== getDroneModel(detailFlight) && (
-                <Text size="xs" c="#5a6478" style={monoFont}>{getDroneModel(detailFlight)}</Text>
-              )}
               {detailFlight.drone_serial && (
                 <Text size="xs" c="#5a6478" style={monoFont}>S/N: {detailFlight.drone_serial}</Text>
               )}
@@ -1057,13 +1043,6 @@ export default function Flights() {
             placeholder="e.g. DJI Matrice 300 RTK"
             value={editForm.drone_model}
             onChange={(e) => setEditForm({ ...editForm, drone_model: e.target.value })}
-            styles={inputStyles}
-          />
-          <TextInput
-            label="Drone Nickname"
-            placeholder="e.g. Big Red"
-            value={editForm.drone_name}
-            onChange={(e) => setEditForm({ ...editForm, drone_name: e.target.value })}
             styles={inputStyles}
           />
           <Textarea
