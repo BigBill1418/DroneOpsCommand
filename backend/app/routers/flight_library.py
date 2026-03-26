@@ -169,6 +169,7 @@ def _normalize_model(name: str) -> str:
     """Normalize a drone model name for fuzzy comparison.
 
     Strips 'DJI', spaces, hyphens, underscores → lowercase.
+    Removes redundant 'M' prefix after 'MATRICE' (e.g. 'Matrice M30T' → 'matrice30t').
     Then resolves known DJI short codes to canonical names.
 
     'DJI Mavic 3 Pro' → 'mavic3pro'
@@ -177,10 +178,13 @@ def _normalize_model(name: str) -> str:
     'Matrice30'       → 'matrice30'
     'M30T'            → 'matrice30t'
     'M4TD'            → 'matrice4td'
+    'Matrice M30T'    → 'matrice30t'
     """
     s = name.upper().replace("DJI", "").strip()
     s = _re.sub(r'[\s\-_]+', '', s)
     s = s.lower()
+    # Fix "Matrice M30T" → "matrice30t" (redundant M after matrice)
+    s = _re.sub(r'^matricem(\d)', r'matrice\1', s)
     # Resolve known DJI short codes
     return _DJI_ALIASES.get(s, s)
 
