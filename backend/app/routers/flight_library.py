@@ -337,6 +337,7 @@ async def flight_stats(
             "total_distance": f.total_distance,
             "max_altitude": f.max_altitude,
             "drone_model": f.drone_model,
+            "drone_serial": f.drone_serial,
         }
         for f in recent_result.scalars().all()
     ]

@@ -761,6 +761,9 @@ export default function Flights() {
                       </Table.Td>
                       <Table.Td>
                         <Text size="xs" c="#e8edf2">{getDroneDisplay(f) || '—'}</Text>
+                        {f.drone_serial && (
+                          <Text size="10px" c="#5a6478" style={monoFont}>S/N: {f.drone_serial}</Text>
+                        )}
                       </Table.Td>
                       <Table.Td>
                         <Text size="xs" c="#5a6478" style={monoFont}>{formatDuration(getDurationSecs(f))}</Text>
