@@ -1,5 +1,5 @@
 import { memo, useEffect, useState, useCallback } from 'react';
-import { MapContainer, TileLayer, Polyline, CircleMarker, Polygon, Popup, useMap, useMapEvents } from 'react-leaflet';
+import { MapContainer, TileLayer, Polyline, CircleMarker, Polygon, Popup, LayersControl, useMap, useMapEvents } from 'react-leaflet';
 import { Box, Text, Group, Badge, Stack } from '@mantine/core';
 import 'leaflet/dist/leaflet.css';
 
@@ -102,7 +102,21 @@ function FlightMap({ geojson, coverage, height = '400px' }: FlightMapProps) {
           attributionControl={false}
           scrollWheelZoom={false}
         >
-          <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" />
+          <LayersControl position="topright">
+            <LayersControl.BaseLayer checked name="Dark">
+              <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" />
+            </LayersControl.BaseLayer>
+            <LayersControl.BaseLayer name="Satellite">
+              <TileLayer
+                url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+                attribution="Esri"
+                maxZoom={19}
+              />
+            </LayersControl.BaseLayer>
+            <LayersControl.BaseLayer name="Street">
+              <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution="OSM" />
+            </LayersControl.BaseLayer>
+          </LayersControl>
           <FitBounds features={geojson.features} />
           <ScrollHint onShow={handleShowHint} />
 

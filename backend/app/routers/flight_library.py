@@ -142,18 +142,51 @@ def _get_stored_file_path(file_hash: str) -> Path | None:
 import re as _re
 
 
+_DJI_ALIASES: dict[str, str] = {
+    # DJI uses short model codes in flight logs that differ from marketing names.
+    # Map normalized short codes → normalized canonical names.
+    "m30": "matrice30",
+    "m30t": "matrice30t",
+    "m300": "matrice300",
+    "m300rtk": "matrice300rtk",
+    "m350": "matrice350",
+    "m350rtk": "matrice350rtk",
+    "m4td": "matrice4td",
+    "m4e": "matrice4e",
+    "m4t": "matrice4t",
+    "m3d": "mavic3d",           # Mavic 3 (D = standard downward cam)
+    "m3e": "mavic3enterprise",
+    "m3m": "mavic3multispectral",
+    "m3t": "mavic3thermal",
+    "m3pro": "mavic3pro",
+    "mini4pro": "mini4pro",
+    "mini3pro": "mini3pro",
+    "mini5pro": "mini5pro",
+}
+
+
 def _normalize_model(name: str) -> str:
     """Normalize a drone model name for fuzzy comparison.
 
     Strips 'DJI', spaces, hyphens, underscores → lowercase.
+    Removes redundant 'M' prefix after 'MATRICE' (e.g. 'Matrice M30T' → 'matrice30t').
+    Then resolves known DJI short codes to canonical names.
+
     'DJI Mavic 3 Pro' → 'mavic3pro'
     'Mavic3Pro'       → 'mavic3pro'
     'DJI Matrice 30T' → 'matrice30t'
     'Matrice30'       → 'matrice30'
+    'M30T'            → 'matrice30t'
+    'M4TD'            → 'matrice4td'
+    'Matrice M30T'    → 'matrice30t'
     """
     s = name.upper().replace("DJI", "").strip()
     s = _re.sub(r'[\s\-_]+', '', s)
-    return s.lower()
+    s = s.lower()
+    # Fix "Matrice M30T" → "matrice30t" (redundant M after matrice)
+    s = _re.sub(r'^matricem(\d)', r'matrice\1', s)
+    # Resolve known DJI short codes
+    return _DJI_ALIASES.get(s, s)
 
 
 async def _match_fleet_aircraft(db: AsyncSession, drone_serial: str | None, drone_model: str | None) -> Aircraft | None:
@@ -254,12 +287,30 @@ async def list_flights(
     search: str = Query(None),
     drone: str = Query(None),
     source: str = Query(None),
+    date_from: str = Query(None, description="ISO date string for start of range"),
+    date_to: str = Query(None, description="ISO date string for end of range"),
+    aircraft_id: str = Query(None, description="Filter by fleet aircraft UUID"),
+    sort_by: str = Query("date", description="Sort column: date, name, drone, duration, distance, altitude, speed, source"),
+    sort_dir: str = Query("desc", description="Sort direction: asc or desc"),
     limit: int = Query(500, le=2000),
     offset: int = Query(0),
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
-    query = select(Flight).order_by(desc(Flight.start_time), desc(Flight.created_at))
+    # Build sort expression
+    sort_col_map = {
+        "date": Flight.start_time,
+        "name": Flight.name,
+        "drone": Flight.drone_model,
+        "duration": Flight.duration_secs,
+        "distance": Flight.total_distance,
+        "altitude": Flight.max_altitude,
+        "speed": Flight.max_speed,
+        "source": Flight.source,
+    }
+    sort_col = sort_col_map.get(sort_by, Flight.start_time)
+    order = desc(sort_col) if sort_dir == "desc" else sort_col.asc()
+    query = select(Flight).order_by(order, desc(Flight.created_at))
 
     if search:
         q = f"%{search}%"
@@ -271,6 +322,28 @@ async def list_flights(
         query = query.where(Flight.drone_model.ilike(f"%{drone}%"))
     if source:
         query = query.where(Flight.source == source)
+    if date_from:
+        try:
+            from datetime import datetime as _dt
+            dt_from = _dt.fromisoformat(date_from.replace("Z", "+00:00"))
+            query = query.where(Flight.start_time >= dt_from)
+        except ValueError:
+            pass
+    if date_to:
+        try:
+            from datetime import datetime as _dt, timedelta as _td
+            dt_to = _dt.fromisoformat(date_to.replace("Z", "+00:00"))
+            # Include the entire day
+            dt_to = dt_to.replace(hour=23, minute=59, second=59)
+            query = query.where(Flight.start_time <= dt_to)
+        except ValueError:
+            pass
+    if aircraft_id:
+        try:
+            from uuid import UUID as _UUID
+            query = query.where(Flight.aircraft_id == _UUID(aircraft_id))
+        except ValueError:
+            pass
 
     query = query.offset(offset).limit(limit)
     result = await db.execute(query)
@@ -770,11 +843,12 @@ async def backfill_aircraft_attribution(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
-    """Match all unlinked flights to fleet aircraft by serial number or model name.
+    """Match all unlinked flights to fleet aircraft and normalize drone_model names.
 
-    Also updates drone_model to the canonical fleet name when matched.
+    Phase 1: Match flights without aircraft_id to fleet by serial/model.
+    Phase 2: Normalize drone_model on ALL flights with aircraft_id to canonical fleet name.
     """
-    # Get all flights without aircraft_id
+    # ── Phase 1: Match unlinked flights ──
     result = await db.execute(
         select(Flight).where(Flight.aircraft_id.is_(None))
     )
@@ -790,14 +864,38 @@ async def backfill_aircraft_attribution(
             logger.info("Backfill: linked flight %s (%s) → %s",
                         flight.id, flight.name, fleet_match.model_name)
 
-    if matched > 0:
+    # ── Phase 2: Normalize drone_model on already-linked flights ──
+    # Fix flights where aircraft_id is set but drone_model doesn't match the fleet name
+    result2 = await db.execute(
+        select(Flight).where(Flight.aircraft_id.isnot(None))
+    )
+    linked_flights = result2.scalars().all()
+
+    # Build aircraft lookup
+    ac_result = await db.execute(select(Aircraft))
+    aircraft_map = {str(ac.id): ac for ac in ac_result.scalars().all()}
+
+    normalized = 0
+    for flight in linked_flights:
+        ac = aircraft_map.get(str(flight.aircraft_id))
+        if ac and flight.drone_model != ac.model_name:
+            old_name = flight.drone_model
+            flight.drone_model = ac.model_name
+            normalized += 1
+            logger.debug("Backfill: normalized drone_model '%s' → '%s' for flight %s",
+                         old_name, ac.model_name, flight.id)
+
+    changes = matched + normalized
+    if changes > 0:
         await db.flush()
 
-    logger.info("Backfill complete: %d/%d flights matched to fleet aircraft", matched, len(unlinked))
+    logger.info("Backfill complete: %d/%d unlinked matched, %d names normalized",
+                matched, len(unlinked), normalized)
     return {
         "total_unlinked": len(unlinked),
         "matched": matched,
         "still_unlinked": len(unlinked) - matched,
+        "names_normalized": normalized,
     }
 
 

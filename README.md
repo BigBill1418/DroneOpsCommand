@@ -2,7 +2,7 @@
 
 **Self-hosted mission management, flight log analysis, GPS flight replay with video export, AI report generation, invoicing, and real-time airspace monitoring for commercial drone operators.**
 
-**Version 2.49.2** | [Quick Start](#quick-start) | [Features](#features) | [Configuration](#configuration) | [Contributing](CONTRIBUTING.md) | [License](LICENSE)
+**Version 2.51.0** | [Quick Start](#quick-start) | [Features](#features) | [Configuration](#configuration) | [Contributing](CONTRIBUTING.md) | [License](LICENSE)
 
 ---
 
@@ -582,11 +582,17 @@ Full interactive API documentation is available at `http://localhost:3080/docs` 
   - Disabled features: file uploads, email sending, Cloudflare tunnel, password changes
   - Sandboxed LLM report generation so visitors can test AI reports on sample missions
   - Rate-limited API to prevent scraping
-- **Report Templates** — Multiple PDF templates for different mission types
+- **Multi-User Roles & Permissions** — Role-based access control with Pilot, Viewer, and Admin roles so team members can log flights and view data without accessing financials or system settings
+- **Automated Backup & Restore** — Scheduled nightly database and file backups to configurable destinations (local path, NAS, S3) with one-click restore from the Settings UI
+- **Pilot Flight Hour Tracking** — Pilot profiles linked to flights for FAA Part 107 PIC flight time logging, currency tracking, and compliance reporting
+- **Maintenance Scheduling by Flight Hours** — Auto-triggered maintenance alerts based on cumulative flight hours per aircraft (e.g., prop replacement every 50 hours, motor inspection every 100 hours)
+- **Customer Portal** — Read-only shareable links for clients to view their mission reports, flight maps, photos, and invoices without needing a login
+- **Notification System** — Email and in-app alerts for overdue invoices, upcoming maintenance, battery cycle limits, certificate expirations, and completed report generation
 - **Stripe Integration** — Credit card payments for invoices via Stripe Checkout, with payment status sync, webhook handling, and customer-facing payment links in PDF reports and emails
+- **Report Templates** — Multiple PDF templates for different mission types
 - **Claude API Integration** — Replace local Ollama with Claude API for faster, higher-quality report generation
 - **Live Flight Tracking** — WebSocket integration for real-time drone position
-- **Multi-User Roles** — Operator, admin, and client role-based access control
+- **Dashboard Analytics** *(under consideration)* — Revenue trend charts, flights per month, hours per aircraft, and battery cycle visualizations over time
 
 ---
 
