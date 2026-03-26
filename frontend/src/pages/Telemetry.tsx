@@ -29,7 +29,7 @@ import {
   IconTrophy,
   IconChartBar,
 } from '@tabler/icons-react';
-import { MapContainer, TileLayer, CircleMarker, Popup, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, CircleMarker, Popup, LayersControl, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import api from '../api/client';
 import StatCard from '../components/shared/StatCard';
@@ -212,10 +212,17 @@ export default function Telemetry() {
               scrollWheelZoom={false}
               zoomControl={false}
             >
-              <TileLayer
-                attribution=""
-                url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-              />
+              <LayersControl position="topright">
+                <LayersControl.BaseLayer checked name="Dark">
+                  <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" />
+                </LayersControl.BaseLayer>
+                <LayersControl.BaseLayer name="Satellite">
+                  <TileLayer url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}" attribution="Esri" maxZoom={19} />
+                </LayersControl.BaseLayer>
+                <LayersControl.BaseLayer name="Street">
+                  <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution="OSM" />
+                </LayersControl.BaseLayer>
+              </LayersControl>
               <FitToLocations locations={stats.flight_locations} />
               {stats.flight_locations.map((loc, i) => (
                 <CircleMarker

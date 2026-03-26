@@ -198,12 +198,13 @@ async def lifespan(app: FastAPI):
                         "(will serve from /static/aircraft/ instead)", fname, e
                     )
 
-    # Auto-backfill: link unmatched flights to fleet aircraft
+    # Auto-backfill: link unmatched flights to fleet aircraft + normalize names
     try:
         from app.models.flight import Flight
         from app.models.aircraft import Aircraft
         from app.routers.flight_library import _match_fleet_aircraft
         async with async_session() as backfill_session:
+            # Phase 1: Match unlinked flights
             result = await backfill_session.execute(
                 select(Flight).where(Flight.aircraft_id.is_(None))
             )
@@ -215,9 +216,25 @@ async def lifespan(app: FastAPI):
                     flight.aircraft_id = fleet_match.id
                     flight.drone_model = fleet_match.model_name
                     matched += 1
-            if matched > 0:
+
+            # Phase 2: Normalize drone_model on linked flights
+            result2 = await backfill_session.execute(
+                select(Flight).where(Flight.aircraft_id.isnot(None))
+            )
+            linked = result2.scalars().all()
+            ac_result = await backfill_session.execute(select(Aircraft))
+            ac_map = {str(ac.id): ac for ac in ac_result.scalars().all()}
+            normalized = 0
+            for flight in linked:
+                ac = ac_map.get(str(flight.aircraft_id))
+                if ac and flight.drone_model != ac.model_name:
+                    flight.drone_model = ac.model_name
+                    normalized += 1
+
+            if matched > 0 or normalized > 0:
                 await backfill_session.commit()
-            logger.info("STARTUP: Aircraft backfill — %d/%d unlinked flights matched to fleet", matched, len(unlinked))
+            logger.info("STARTUP: Aircraft backfill — %d/%d unlinked matched, %d names normalized",
+                        matched, len(unlinked), normalized)
     except Exception as e:
         logger.warning("STARTUP: Aircraft backfill failed: %s", e)
 
@@ -236,7 +253,7 @@ logger.info("MultiPartParser max_file_size set to 200 MB")
 app = FastAPI(
     title="D.O.C — Drone Operations Command",
     description="Self-hosted mission management, flight log analysis, AI report generation, invoicing, telemetry visualization, and real-time airspace monitoring for commercial drone operators.",
-    version="2.50.0",
+    version="2.51.0",
     lifespan=lifespan,
 )
 
