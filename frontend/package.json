@@ -1,8 +1,8 @@
 {
   "name": "doc-frontend",
   "private": true,
-  "version": "2.41.6",
-  "description": "Self-hosted drone operations command center — mission management, flight log analysis, AI reports, invoicing, and airspace monitoring",
+  "version": "2.49.1",
+  "description": "Self-hosted drone operations command center — mission management, flight log analysis, GPS flight replay with video export, AI reports, invoicing, and airspace monitoring",
   "keywords": [
     "drone",
     "drone-operations",
@@ -13,6 +13,8 @@
     "commercial-drone",
     "self-hosted",
     "flight-telemetry",
+    "flight-replay",
+    "video-export",
     "airspace-monitoring",
     "OpenSky",
     "AI-reports",

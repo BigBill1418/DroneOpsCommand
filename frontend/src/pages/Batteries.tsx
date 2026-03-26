@@ -30,6 +30,7 @@ import {
   IconEdit,
   IconPlus,
   IconRefresh,
+  IconSearch,
   IconSelector,
   IconSwitch,
   IconTrash,
@@ -67,6 +68,7 @@ export default function Batteries() {
   const [sortBy, setSortBy] = useState<string>('model');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [droneModels, setDroneModels] = useState<string[]>([]);
+  const [search, setSearch] = useState('');
 
   const loadBatteries = async () => {
     setLoading(true);
@@ -162,9 +164,20 @@ export default function Batteries() {
   const [batchGroup, setBatchGroup] = useState<string | null>(null);
   const [batchTarget, setBatchTarget] = useState<string | null>(null);
 
+  const filtered = useMemo(() => {
+    if (!search.trim()) return batteries;
+    const q = search.toLowerCase();
+    return batteries.filter((b) =>
+      (b.name || '').toLowerCase().includes(q) ||
+      b.serial.toLowerCase().includes(q) ||
+      (b.model || '').toLowerCase().includes(q) ||
+      b.status.toLowerCase().includes(q)
+    );
+  }, [batteries, search]);
+
   // Group batteries by drone model, sorted by aircraft fleet order
   const grouped = useMemo(() => {
-    const sorted = [...batteries].sort((a, b) => {
+    const sorted = [...filtered].sort((a, b) => {
       let cmp = 0;
       switch (sortBy) {
         case 'serial': cmp = (a.name || a.serial).localeCompare(b.name || b.serial, undefined, { numeric: true, sensitivity: 'base' }); break;
@@ -204,7 +217,7 @@ export default function Batteries() {
       if (bi !== undefined) return 1;
       return a[0].localeCompare(b[0]);
     });
-  }, [batteries, sortBy, sortDir, droneModels]);
+  }, [filtered, sortBy, sortDir, droneModels]);
 
   const toggleSort = (col: string) => {
     if (sortBy === col) {
@@ -275,6 +288,16 @@ export default function Batteries() {
         </Card>
       ) : (
         <>
+          <TextInput
+            placeholder="Search batteries by name, serial, model, or status..."
+            leftSection={<IconSearch size={16} />}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            styles={{
+              input: { background: '#050608', borderColor: '#1a1f2e', color: '#e8edf2', fontFamily: "'Share Tech Mono', monospace", fontSize: '13px' },
+            }}
+          />
+
           <SimpleGrid cols={{ base: 2, sm: 4 }}>
             <StatCard icon={IconBattery} label="Total Batteries" value={String(stats.total)} />
             <StatCard icon={IconBattery4} label="Active" value={String(stats.active)} color="#2ecc40" />
@@ -284,7 +307,7 @@ export default function Batteries() {
 
           <Card padding="lg" radius="md" style={cardStyle}>
             <Text size="sm" c="#5a6478" style={monoFont} mb="md">
-              {batteries.length} BATTER{batteries.length !== 1 ? 'IES' : 'Y'} — {grouped.length} DRONE TYPE{grouped.length !== 1 ? 'S' : ''}
+              {filtered.length} BATTER{filtered.length !== 1 ? 'IES' : 'Y'}{search.trim() ? ` (of ${batteries.length})` : ''} — {grouped.length} DRONE TYPE{grouped.length !== 1 ? 'S' : ''}
             </Text>
 
             <ScrollArea type="auto">

@@ -38,7 +38,6 @@ services:
       - OLLAMA_MAX_LOADED_MODELS=1
       # Enable flash attention for faster inference
       - OLLAMA_FLASH_ATTENTION=1
-    # Pin 6 of 8 hardware threads — leaves 2 for OS, DB, and other services
     cpuset: "0-5"
     mem_reservation: 8g
 
@@ -52,10 +51,25 @@ services:
       sh -c "
         echo 'Waiting for Ollama to be ready...' &&
         until curl -s http://ollama:11434/api/tags > /dev/null 2>&1; do sleep 2; done &&
-        echo 'Pulling Mistral model...' &&
-        curl -s http://ollama:11434/api/pull -d '{\"name\": \"mistral:7b-instruct-v0.3-q4_K_M\"}' &&
+        echo 'Pulling Llama 3.1 8B model...' &&
+        curl -s http://ollama:11434/api/pull -d '{\"name\": \"llama3.1:8b-instruct-q4_K_M\"}' &&
         echo 'Model pulled. Will load into RAM on first use.'
       "
+
+  # ── Watchtower — Auto-update monitoring ────────────────────────
+  # Checks for new images daily and sends notifications.
+  # Set WATCHTOWER_NOTIFICATION_URL in .env for alerts.
+  watchtower:
+    image: containrrr/watchtower:latest
+    restart: unless-stopped
+    environment:
+      - WATCHTOWER_CLEANUP=true
+      - WATCHTOWER_POLL_INTERVAL=86400
+      - WATCHTOWER_MONITOR_ONLY=${WATCHTOWER_MONITOR_ONLY:-false}
+      - WATCHTOWER_NOTIFICATION_URL=${WATCHTOWER_NOTIFICATION_URL:-}
+      - WATCHTOWER_NOTIFICATIONS_HOSTNAME=droneops-server
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
 
   backend:
     build:
@@ -69,7 +83,7 @@ services:
       - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://doc:changeme_in_production@db:5432/doc}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://ollama:11434}
-      - OLLAMA_MODEL=${OLLAMA_MODEL:-mistral:7b-instruct-v0.3-q4_K_M}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.1:8b-instruct-q4_K_M}
       - OPENDRONELOG_URL=${OPENDRONELOG_URL:-}
       - JWT_SECRET_KEY=${JWT_SECRET_KEY:-changeme_generate_a_random_secret}
       - JWT_ALGORITHM=${JWT_ALGORITHM:-HS256}
@@ -87,7 +101,6 @@ services:
       - UPLOAD_DIR=/data/uploads
       - REPORTS_DIR=/data/reports
       - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3080}
-      - RESET_ADMIN_PASSWORD=${RESET_ADMIN_PASSWORD:-false}
     volumes:
       - app_data:/data
     ports:
@@ -110,7 +123,7 @@ services:
       - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://doc:changeme_in_production@db:5432/doc}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://ollama:11434}
-      - OLLAMA_MODEL=${OLLAMA_MODEL:-mistral:7b-instruct-v0.3-q4_K_M}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.1:8b-instruct-q4_K_M}
       - SMTP_HOST=${SMTP_HOST:-}
       - SMTP_PORT=${SMTP_PORT:-587}
       - SMTP_USER=${SMTP_USER:-}

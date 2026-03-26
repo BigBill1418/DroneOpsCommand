@@ -99,7 +99,7 @@ export default function Settings() {
   const [newDeviceKey, setNewDeviceKey] = useState<string | null>(null);
 
   const aircraftForm = useForm({
-    initialValues: { model_name: '', manufacturer: 'DJI', specs_json: '{}' },
+    initialValues: { model_name: '', manufacturer: 'DJI', serial_number: '', specs_json: '{}' },
   });
 
   const rateForm = useForm({
@@ -276,6 +276,7 @@ export default function Settings() {
       const data = {
         model_name: values.model_name,
         manufacturer: values.manufacturer,
+        serial_number: values.serial_number.trim() || null,
         specs: JSON.parse(values.specs_json || '{}'),
       };
       if (editingAircraftId) {
@@ -299,6 +300,7 @@ export default function Settings() {
     aircraftForm.setValues({
       model_name: a.model_name,
       manufacturer: a.manufacturer,
+      serial_number: a.serial_number || '',
       specs_json: JSON.stringify(a.specs, null, 2),
     });
     setAircraftModal(true);
@@ -667,9 +669,9 @@ export default function Settings() {
     setWeatherSaving(true);
     try {
       await api.put('/settings/weather', values);
-      notifications.show({ title: 'Saved', message: `Weather location set to ${values.weather_label || 'configured coordinates'}`, color: 'cyan' });
+      notifications.show({ title: 'Saved', message: `Home location set to ${values.weather_label || 'configured coordinates'}`, color: 'cyan' });
     } catch {
-      notifications.show({ title: 'Error', message: 'Failed to save weather location', color: 'red' });
+      notifications.show({ title: 'Error', message: 'Failed to save home location', color: 'red' });
     } finally {
       setWeatherSaving(false);
     }
@@ -840,10 +842,10 @@ export default function Settings() {
             <Card padding="lg" radius="md" style={cardStyle}>
               <Group gap="sm" mb="md">
                 <IconMapPin size={20} color="#00d4ff" />
-                <Title order={3} c="#e8edf2" style={{ letterSpacing: '1px' }}>WEATHER & AIRSPACE LOCATION</Title>
+                <Title order={3} c="#e8edf2" style={{ letterSpacing: '1px' }}>HOME LOCATION</Title>
               </Group>
               <Text c="#5a6478" size="xs" mb="sm" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
-                Set the location for dashboard weather, METAR, TFR, and NOTAM monitoring. Enter a zip code or city name to auto-fill.
+                Your home base for dashboard weather, METAR, TFR, NOTAM monitoring, and the default center for airspace tracking. The airspace page will also use GPS on mobile when available.
               </Text>
               <Group mb="md" align="end">
                 <TextInput
@@ -878,7 +880,7 @@ export default function Settings() {
                     ICAO airport code is used for METAR, TFR, and NOTAM data. The lookup fills this automatically.
                   </Text>
                   <Button type="submit" color="cyan" loading={weatherSaving} styles={{ root: { fontFamily: "'Bebas Neue', sans-serif" } }}>
-                    SAVE WEATHER LOCATION
+                    SAVE HOME LOCATION
                   </Button>
                 </Stack>
               </form>
@@ -1713,6 +1715,7 @@ export default function Settings() {
                   <Table.Tr>
                     <Table.Th w={50}></Table.Th>
                     <Table.Th>MODEL</Table.Th>
+                    <Table.Th>SERIAL NUMBER</Table.Th>
                     <Table.Th>MANUFACTURER</Table.Th>
                     <Table.Th>KEY SPECS</Table.Th>
                     <Table.Th>ACTIONS</Table.Th>
@@ -1729,6 +1732,7 @@ export default function Settings() {
                         )}
                       </Table.Td>
                       <Table.Td fw={600}>{a.model_name}</Table.Td>
+                      <Table.Td c="#5a6478" style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: '12px' }}>{a.serial_number || '—'}</Table.Td>
                       <Table.Td c="#5a6478">{a.manufacturer}</Table.Td>
                       <Table.Td c="#5a6478" style={{ fontSize: '12px' }}>
                         {a.specs.max_flight_time && `${a.specs.max_flight_time}`}
@@ -1897,6 +1901,7 @@ export default function Settings() {
         <form onSubmit={aircraftForm.onSubmit(handleSaveAircraft)}>
           <Stack gap="sm">
             <TextInput label="Model Name" required {...aircraftForm.getInputProps('model_name')} styles={inputStyles} />
+            <TextInput label="Serial Number" placeholder="Drone hardware serial number" {...aircraftForm.getInputProps('serial_number')} styles={inputStyles} />
             <TextInput label="Manufacturer" {...aircraftForm.getInputProps('manufacturer')} styles={inputStyles} />
 
             {/* Aircraft Image Upload */}

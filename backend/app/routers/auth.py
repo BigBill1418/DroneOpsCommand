@@ -1,7 +1,8 @@
 """Authentication router — login, account management, token refresh.
 
-v2.38.6: Rebuilt with direct bcrypt (passlib removed), full logging,
-and emergency recovery endpoint.
+v2.43.0: Rebuilt auth system. Password is set ONCE at first boot via seed.
+Seed NEVER modifies existing passwords. To reset, use reset_admin.py.
+RESET_ADMIN_PASSWORD env var removed entirely.
 """
 
 import logging
@@ -24,7 +25,6 @@ from app.auth.jwt import (
     hash_password,
     verify_password,
     check_password_complexity,
-    is_password_compliant,
     PASSWORD_RULES,
 )
 from app.config import settings
@@ -39,11 +39,6 @@ class AccountUpdateRequest(BaseModel):
     current_password: str
     new_username: str | None = None
     new_password: str | None = None
-
-
-class ForceResetRequest(BaseModel):
-    current_password: str
-    new_password: str
 
 
 # ── Login lockout: 5 failed attempts in 120s → locked for 2 minutes ──
@@ -131,19 +126,12 @@ async def login(request: Request, body: LoginRequest, db: AsyncSession = Depends
 
     _clear_failures(client_ip)
 
-    # Update password compliance flag
-    compliant = is_password_compliant(body.password)
-    if user.password_compliant != compliant:
-        user.password_compliant = compliant
-        await db.flush()
-
-    logger.info("Login SUCCESS: user='%s' ip=%s compliant=%s", user.username, client_ip, compliant)
+    logger.info("Login SUCCESS: user='%s' ip=%s", user.username, client_ip)
 
     return {
         "access_token": create_access_token({"sub": user.username}),
         "refresh_token": create_refresh_token({"sub": user.username}),
         "token_type": "bearer",
-        "password_compliant": user.password_compliant,
     }
 
 
@@ -155,7 +143,6 @@ async def get_account(user: User = Depends(get_current_user)):
     """Get current account info."""
     return {
         "username": user.username,
-        "password_compliant": user.password_compliant,
     }
 
 
@@ -186,47 +173,44 @@ async def update_account(
                 status_code=400,
                 detail=f"Password does not meet complexity requirements: {'; '.join(failures)}",
             )
-        user.hashed_password = hash_password(body.new_password)
-        user.password_compliant = True
-        logger.info("Password changed for user '%s'", user.username)
-
-    await db.flush()
-
-    return {
-        "status": "ok",
-        "username": user.username,
-        "password_compliant": user.password_compliant,
-        "access_token": create_access_token({"sub": user.username}),
-        "refresh_token": create_refresh_token({"sub": user.username}),
-    }
-
-
-@router.post("/force-reset")
-async def force_password_reset(
-    body: ForceResetRequest,
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """Force password reset for users with non-compliant passwords."""
-    if not verify_password(body.current_password, user.hashed_password):
-        raise HTTPException(status_code=403, detail="Current password is incorrect")
-
-    failures = check_password_complexity(body.new_password)
-    if failures:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Password does not meet complexity requirements: {'; '.join(failures)}",
+        old_hash_prefix = user.hashed_password[:10] if user.hashed_password else "EMPTY"
+        new_hash = hash_password(body.new_password)
+        user.hashed_password = new_hash
+        logger.info(
+            "PASSWORD CHANGE: user='%s' old_hash=%s... new_hash=%s...",
+            user.username, old_hash_prefix, new_hash[:10],
         )
 
-    user.hashed_password = hash_password(body.new_password)
-    user.password_compliant = True
-    await db.flush()
-    logger.info("Force password reset completed for user '%s'", user.username)
+    # Explicit commit — do NOT rely on get_db cleanup
+    await db.commit()
+
+    # Read-back verification: re-query the database to confirm the write stuck
+    if body.new_password:
+        verify_result = await db.execute(select(User).where(User.username == user.username))
+        saved_user = verify_result.scalar_one_or_none()
+        if saved_user:
+            readback_ok = verify_password(body.new_password, saved_user.hashed_password)
+            logger.info(
+                "PASSWORD VERIFY: user='%s' readback_ok=%s saved_hash=%s...",
+                user.username, readback_ok, saved_user.hashed_password[:10],
+            )
+            if not readback_ok:
+                logger.critical(
+                    "PASSWORD WRITE FAILED: hash in DB does not match new password! "
+                    "user='%s' expected_hash=%s... got_hash=%s...",
+                    user.username, new_hash[:10],
+                    saved_user.hashed_password[:10] if saved_user.hashed_password else "EMPTY",
+                )
+                raise HTTPException(
+                    status_code=500,
+                    detail="Password save failed — please try again",
+                )
+        else:
+            logger.critical("PASSWORD VERIFY: user '%s' not found after commit!", user.username)
 
     return {
         "status": "ok",
         "username": user.username,
-        "password_compliant": True,
         "access_token": create_access_token({"sub": user.username}),
         "refresh_token": create_refresh_token({"sub": user.username}),
     }
@@ -302,13 +286,11 @@ async def auth_diagnostics(db: AsyncSession = Depends(get_db)):
             diag["admin_hash_prefix"] = admin.hashed_password[:7] if admin.hashed_password else "EMPTY"
             diag["admin_hash_length"] = len(admin.hashed_password) if admin.hashed_password else 0
             diag["admin_is_active"] = admin.is_active
-            diag["admin_password_compliant"] = admin.password_compliant
             # Check if the env ADMIN_PASSWORD matches the DB hash
             # (tells you if the password was changed via UI vs what env expects)
             diag["env_password_matches_db"] = verify_password(
                 settings.admin_password, admin.hashed_password
             ) if admin.hashed_password else False
-            diag["reset_admin_password_flag"] = settings.reset_admin_password
     except Exception as exc:
         diag["db_error"] = str(exc)
 

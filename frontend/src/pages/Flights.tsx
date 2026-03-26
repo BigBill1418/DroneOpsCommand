@@ -53,8 +53,9 @@ import {
   IconTrash,
   IconUpload,
   IconX,
+  IconPlayerPlay,
 } from '@tabler/icons-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../api/client';
 import { Aircraft, FlightRecord } from '../api/types';
 import FlightMap from '../components/FlightMap/FlightMap';
@@ -130,14 +131,8 @@ function getMaxSpeed(f: FlightRecord): number {
 function getDroneModel(f: FlightRecord): string {
   return f.drone_model || f.droneModel || f.drone || f.model || '';
 }
-function getDroneName(f: FlightRecord): string {
-  return f.drone_name || f.droneName || '';
-}
 function getDroneDisplay(f: FlightRecord): string {
-  const name = getDroneName(f);
-  const model = getDroneModel(f);
-  if (name && model && name !== model) return name;
-  return name || model || '';
+  return getDroneModel(f) || '';
 }
 function getStartTime(f: FlightRecord): string {
   return f.start_time || f.startTime || f.date || f.created_at || '';
@@ -262,6 +257,7 @@ export default function Flights() {
   const [trackLoading, setTrackLoading] = useState(false);
   const [aircraft, setAircraft] = useState<Aircraft[]>([]);
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   // Sort state
   const [sortBy, setSortBy] = useState<string>('date');
@@ -269,7 +265,7 @@ export default function Flights() {
 
   // Edit modal state (full flight edit including drone reassignment)
   const [editId, setEditId] = useState<string | null>(null);
-  const [editForm, setEditForm] = useState({ name: '', drone_model: '', drone_name: '', aircraft_id: '' as string | null, notes: '' });
+  const [editForm, setEditForm] = useState({ name: '', drone_model: '', aircraft_id: '' as string | null, notes: '' });
 
   // Manual flight form state
   const [manualForm, setManualForm] = useState({
@@ -301,6 +297,20 @@ export default function Flights() {
   }, []);
 
   useEffect(() => { loadFlights(); }, [loadFlights]);
+
+  // Open detail drawer if ?detail=<id> is in the URL (e.g. from dashboard recent flights)
+  useEffect(() => {
+    const detailId = searchParams.get('detail');
+    if (detailId && flights.length > 0 && !detailFlight) {
+      const match = flights.find((f) => String(f.id) === detailId);
+      if (match) {
+        setDetailFlight(match);
+        // Clean up the URL param
+        searchParams.delete('detail');
+        setSearchParams(searchParams, { replace: true });
+      }
+    }
+  }, [flights, searchParams, detailFlight, setSearchParams]);
 
   // Load fleet aircraft for reassignment
   useEffect(() => {
@@ -383,7 +393,6 @@ export default function Flights() {
     setEditForm({
       name: getDisplayName(f),
       drone_model: getDroneModel(f),
-      drone_name: getDroneName(f),
       aircraft_id: f.aircraft_id || null,
       notes: f.notes || '',
     });
@@ -395,7 +404,6 @@ export default function Flights() {
       const payload: Record<string, any> = {};
       if (editForm.name.trim()) payload.name = editForm.name.trim();
       payload.drone_model = editForm.drone_model.trim() || null;
-      payload.drone_name = editForm.drone_name.trim() || null;
       payload.aircraft_id = editForm.aircraft_id || null;
       payload.notes = editForm.notes.trim() || null;
 
@@ -472,7 +480,7 @@ export default function Flights() {
     if (search) {
       const q = search.toLowerCase();
       result = result.filter((f) => {
-        return [getDisplayName(f), getDroneModel(f), getDroneName(f), getStartTime(f), f.notes, f.drone_serial, f.source, f.original_filename]
+        return [getDisplayName(f), getDroneModel(f), getStartTime(f), f.notes, f.drone_serial, f.source, f.original_filename]
           .filter(Boolean).join(' ').toLowerCase().includes(q);
       });
     }
@@ -753,8 +761,8 @@ export default function Flights() {
                       </Table.Td>
                       <Table.Td>
                         <Text size="xs" c="#e8edf2">{getDroneDisplay(f) || '—'}</Text>
-                        {getDroneName(f) && getDroneModel(f) && getDroneName(f) !== getDroneModel(f) && (
-                          <Text size="10px" c="#5a6478" style={monoFont}>{getDroneModel(f)}</Text>
+                        {f.drone_serial && (
+                          <Text size="10px" c="#5a6478" style={monoFont}>S/N: {f.drone_serial}</Text>
                         )}
                       </Table.Td>
                       <Table.Td>
@@ -850,6 +858,20 @@ export default function Flights() {
               return <FlightMap geojson={geojson} height="260px" />;
             })()}
 
+            {/* Replay button — only if flight has GPS track */}
+            {detailTrack?.gps_track && Array.isArray(detailTrack.gps_track) && detailTrack.gps_track.length >= 2 && (
+              <Button
+                leftSection={<IconPlayerPlay size={16} />}
+                color="cyan"
+                variant="light"
+                fullWidth
+                onClick={() => { setDetailFlight(null); navigate(`/flights/${detailFlight.id}/replay`); }}
+                styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '2px' } }}
+              >
+                FLIGHT REPLAY
+              </Button>
+            )}
+
             {/* Drone info — name, model, serial */}
             <Card padding="sm" radius="sm" style={{ background: '#0e1117', border: '1px solid #1a1f2e' }}>
               <Group gap="xs" mb={4}>
@@ -859,9 +881,6 @@ export default function Flights() {
               <Text c="#e8edf2" fw={600} size="lg">
                 {getDroneDisplay(detailFlight) || 'Unknown'}
               </Text>
-              {getDroneName(detailFlight) && getDroneModel(detailFlight) && getDroneName(detailFlight) !== getDroneModel(detailFlight) && (
-                <Text size="xs" c="#5a6478" style={monoFont}>{getDroneModel(detailFlight)}</Text>
-              )}
               {detailFlight.drone_serial && (
                 <Text size="xs" c="#5a6478" style={monoFont}>S/N: {detailFlight.drone_serial}</Text>
               )}
@@ -1027,13 +1046,6 @@ export default function Flights() {
             placeholder="e.g. DJI Matrice 300 RTK"
             value={editForm.drone_model}
             onChange={(e) => setEditForm({ ...editForm, drone_model: e.target.value })}
-            styles={inputStyles}
-          />
-          <TextInput
-            label="Drone Nickname"
-            placeholder="e.g. Big Red"
-            value={editForm.drone_name}
-            onChange={(e) => setEditForm({ ...editForm, drone_name: e.target.value })}
             styles={inputStyles}
           />
           <Textarea
