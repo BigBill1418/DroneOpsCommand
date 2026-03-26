@@ -198,6 +198,29 @@ async def lifespan(app: FastAPI):
                         "(will serve from /static/aircraft/ instead)", fname, e
                     )
 
+    # Auto-backfill: link unmatched flights to fleet aircraft
+    try:
+        from app.models.flight import Flight
+        from app.models.aircraft import Aircraft
+        from app.routers.flight_library import _match_fleet_aircraft
+        async with async_session() as backfill_session:
+            result = await backfill_session.execute(
+                select(Flight).where(Flight.aircraft_id.is_(None))
+            )
+            unlinked = result.scalars().all()
+            matched = 0
+            for flight in unlinked:
+                fleet_match = await _match_fleet_aircraft(backfill_session, flight.drone_serial, flight.drone_model)
+                if fleet_match:
+                    flight.aircraft_id = fleet_match.id
+                    flight.drone_model = fleet_match.model_name
+                    matched += 1
+            if matched > 0:
+                await backfill_session.commit()
+            logger.info("STARTUP: Aircraft backfill — %d/%d unlinked flights matched to fleet", matched, len(unlinked))
+    except Exception as e:
+        logger.warning("STARTUP: Aircraft backfill failed: %s", e)
+
     yield
 
     await engine.dispose()
@@ -213,7 +236,7 @@ logger.info("MultiPartParser max_file_size set to 200 MB")
 app = FastAPI(
     title="D.O.C — Drone Operations Command",
     description="Self-hosted mission management, flight log analysis, AI report generation, invoicing, telemetry visualization, and real-time airspace monitoring for commercial drone operators.",
-    version="2.48.0",
+    version="2.49.0",
     lifespan=lifespan,
 )
 
