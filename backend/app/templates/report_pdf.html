@@ -18,7 +18,7 @@
   }
 
   .header {
-    background: linear-gradient(135deg, #050608 0%, #0e1117 100%);
+    background: linear-gradient(135deg, {{ brand_primary_color | default('#050608') }} 0%, {{ brand_primary_color | default('#050608') }}dd 100%);
     color: #e8edf2;
     padding: 30px 40px;
     margin: -10px -10px 0 -10px;
@@ -33,7 +33,9 @@
     letter-spacing: 3px;
   }
 
-  .logo .hq { color: #00d4ff; }
+  .logo .hq { color: {{ brand_accent_color | default('{{ brand_accent_color | default('#00d4ff') }}') }}; }
+
+  .logo-image { max-height: 60px; max-width: 200px; margin-bottom: 6px; }
 
   .header-right {
     text-align: right;
@@ -46,7 +48,7 @@
     font-family: 'Liberation Sans', 'Noto Sans', Arial, sans-serif;
     font-size: 14pt;
     font-weight: 600;
-    color: #00d4ff;
+    color: {{ brand_accent_color | default('#00d4ff') }};
     margin-bottom: 4px;
   }
 
@@ -99,7 +101,7 @@
   }
 
   .highlight-box {
-    background: linear-gradient(135deg, #050608 0%, #0e1117 100%);
+    background: linear-gradient(135deg, {{ brand_primary_color | default('#050608') }} 0%, {{ brand_primary_color | default('#050608') }}dd 100%);
     color: #e8edf2;
     border-radius: 6px;
     margin: 15px 0;
@@ -126,7 +128,7 @@
   .stat-cell .stat {
     font-family: 'Liberation Sans', 'Noto Sans', Arial, sans-serif; font-weight: 700; text-transform: uppercase;
     font-size: 26pt;
-    color: #00d4ff;
+    color: {{ brand_accent_color | default('#00d4ff') }};
     line-height: 1.1;
   }
 
@@ -215,7 +217,7 @@
 
   table.flights th {
     background: #0e1117;
-    color: #00d4ff;
+    color: {{ brand_accent_color | default('#00d4ff') }};
     font-family: 'Liberation Mono', 'DejaVu Sans Mono', 'Courier New', monospace;
     font-size: 8pt;
     text-transform: uppercase;
@@ -294,14 +296,14 @@
   .invoice-totals .total-line {
     font-family: 'Liberation Sans', 'Noto Sans', Arial, sans-serif; font-weight: 700; text-transform: uppercase;
     font-size: 18pt;
-    color: #00d4ff;
+    color: {{ brand_accent_color | default('#00d4ff') }};
   }
 
   /* Footer */
   .footer {
     margin-top: 40px;
     padding: 20px 40px;
-    background: linear-gradient(135deg, #050608 0%, #0e1117 100%);
+    background: linear-gradient(135deg, {{ brand_primary_color | default('#050608') }} 0%, {{ brand_primary_color | default('#050608') }}dd 100%);
     color: #5a6478;
     text-align: center;
     font-family: 'Liberation Mono', 'DejaVu Sans Mono', 'Courier New', monospace;
@@ -309,7 +311,7 @@
     margin: 40px -10px -10px -10px;
   }
 
-  .footer a { color: #00d4ff; text-decoration: none; }
+  .footer a { color: {{ brand_accent_color | default('#00d4ff') }}; text-decoration: none; }
 
   .footer .social-links {
     margin: 8px 0;
@@ -323,7 +325,7 @@
     letter-spacing: 2px;
   }
 
-  .footer .logo-small .hq { color: #00d4ff; }
+  .footer .logo-small .hq { color: {{ brand_accent_color | default('#00d4ff') }}; }
 
   @page {
     size: letter;
@@ -336,6 +338,9 @@
 <!-- Header -->
 <div class="header">
   <div>
+    {% if company_logo_path %}
+    <img src="file://{{ company_logo_path }}" class="logo-image" alt="{{ company_name }}" />
+    {% endif %}
     <div class="logo">{{ company_name | upper }}</div>
     <div style="font-family: 'Liberation Mono', 'DejaVu Sans Mono', 'Courier New', monospace; font-size: 8pt; color: #5a6478; letter-spacing: 2px;">
       {{ company_tagline | upper }}
@@ -485,14 +490,14 @@
 {% if download_link %}
 <div class="section">
   <h1>MISSION FOOTAGE DOWNLOAD</h1>
-  <div style="padding: 20px; background: linear-gradient(135deg, #050608 0%, #0e1117 100%); border-radius: 6px; text-align: center;">
-    <div style="font-family: 'Liberation Sans', 'Noto Sans', Arial, sans-serif; font-weight: 700; text-transform: uppercase; font-size: 14pt; color: #00d4ff; letter-spacing: 1px; margin-bottom: 8px;">
+  <div style="padding: 20px; background: linear-gradient(135deg, {{ brand_primary_color | default('#050608') }} 0%, {{ brand_primary_color | default('#050608') }}dd 100%); border-radius: 6px; text-align: center;">
+    <div style="font-family: 'Liberation Sans', 'Noto Sans', Arial, sans-serif; font-weight: 700; text-transform: uppercase; font-size: 14pt; color: {{ brand_accent_color | default('#00d4ff') }}; letter-spacing: 1px; margin-bottom: 8px;">
       HIGH RESOLUTION FILES
     </div>
     <p style="font-size: 10pt; color: #e8edf2; margin-bottom: 12px;">
       Download all high-resolution images and video from this mission:
     </p>
-    <a href="{{ download_link.url }}" style="display: inline-block; padding: 10px 30px; background: #00d4ff; color: #050608; font-family: 'Liberation Sans', 'Noto Sans', Arial, sans-serif; font-weight: 700; text-transform: uppercase; font-size: 14pt; letter-spacing: 2px; text-decoration: none; border-radius: 4px;">
+    <a href="{{ download_link.url }}" style="display: inline-block; padding: 10px 30px; background: {{ brand_accent_color | default('#00d4ff') }}; color: #050608; font-family: 'Liberation Sans', 'Noto Sans', Arial, sans-serif; font-weight: 700; text-transform: uppercase; font-size: 14pt; letter-spacing: 2px; text-decoration: none; border-radius: 4px;">
       DOWNLOAD FILES
     </a>
     <div style="font-family: 'Liberation Mono', 'DejaVu Sans Mono', 'Courier New', monospace; font-size: 8pt; color: #ff6b1a; margin-top: 10px;">

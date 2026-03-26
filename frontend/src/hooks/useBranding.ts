@@ -7,6 +7,9 @@ export interface Branding {
   company_website: string;
   company_social_url: string;
   company_contact_email: string;
+  company_logo: string;
+  brand_primary_color: string;
+  brand_accent_color: string;
 }
 
 const DEFAULTS: Branding = {
@@ -15,6 +18,9 @@ const DEFAULTS: Branding = {
   company_website: '',
   company_social_url: '',
   company_contact_email: '',
+  company_logo: '',
+  brand_primary_color: '#050608',
+  brand_accent_color: '#00d4ff',
 };
 
 let cachedBranding: Branding | null = null;

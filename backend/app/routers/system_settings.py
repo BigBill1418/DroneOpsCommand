@@ -1,15 +1,20 @@
 """API endpoints for managing system settings (SMTP, etc.) from the admin portal."""
 
 import asyncio
+import io
 import logging
+import os
+import uuid as uuid_mod
 
 import httpx
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from PIL import Image as PILImage
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.jwt import get_current_user
+from app.config import settings as app_settings
 from app.database import get_db
 from app.models.system_settings import SystemSetting
 from app.models.user import User
@@ -47,6 +52,9 @@ BRANDING_KEYS = [
     "company_website",
     "company_social_url",
     "company_contact_email",
+    "company_logo",
+    "brand_primary_color",
+    "brand_accent_color",
 ]
 
 # Defaults used when no branding is configured
@@ -56,6 +64,9 @@ BRANDING_DEFAULTS = {
     "company_website": "",
     "company_social_url": "",
     "company_contact_email": "",
+    "company_logo": "",
+    "brand_primary_color": "#050608",
+    "brand_accent_color": "#00d4ff",
 }
 
 
@@ -105,6 +116,8 @@ class BrandingSettings(BaseModel):
     company_website: str = ""
     company_social_url: str = ""
     company_contact_email: str = ""
+    brand_primary_color: str = "#050608"
+    brand_accent_color: str = "#00d4ff"
 
 
 class SmtpSettings(BaseModel):
@@ -148,6 +161,94 @@ async def update_branding_settings(
             db.add(SystemSetting(key=key, value=value))
 
     await db.commit()
+    return {"status": "ok"}
+
+
+MAX_LOGO_SIZE = 5_000_000  # 5 MB
+ALLOWED_LOGO_TYPES = {"image/jpeg", "image/png", "image/webp", "image/svg+xml"}
+
+
+@router.post("/branding/logo")
+async def upload_company_logo(
+    file: UploadFile = File(...),
+    _user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Upload a company logo image for PDF reports and emails."""
+    content = await file.read()
+    if len(content) > MAX_LOGO_SIZE:
+        raise HTTPException(status_code=413, detail="Logo too large (5MB max)")
+    if file.content_type and file.content_type not in ALLOWED_LOGO_TYPES:
+        raise HTTPException(status_code=400, detail="Only JPEG, PNG, WebP, and SVG images are allowed")
+
+    # Delete old logo if one exists
+    result = await db.execute(
+        select(SystemSetting).where(SystemSetting.key == "company_logo")
+    )
+    existing = result.scalar_one_or_none()
+    if existing and existing.value:
+        old_path = os.path.join(app_settings.upload_dir, existing.value)
+        try:
+            os.remove(old_path)
+        except OSError:
+            pass
+
+    # Resize non-SVG logos to max 400px width for PDFs
+    ext = os.path.splitext(file.filename)[1].lower() if file.filename else ".png"
+    if file.content_type != "image/svg+xml":
+        try:
+            img = PILImage.open(io.BytesIO(content))
+            if img.width > 400:
+                ratio = 400 / img.width
+                img = img.resize((400, int(img.height * ratio)), PILImage.LANCZOS)
+            buf = io.BytesIO()
+            if img.mode in ("RGBA", "P") and ext not in (".png", ".webp"):
+                img = img.convert("RGB")
+            fmt = "PNG" if ext == ".png" else "WEBP" if ext == ".webp" else "JPEG"
+            img.save(buf, format=fmt, quality=90, optimize=True)
+            content = buf.getvalue()
+        except Exception as exc:
+            logger.warning("Logo resize failed, using original: %s", exc)
+
+    # Save to uploads/branding/
+    logo_dir = os.path.join(app_settings.upload_dir, "branding")
+    os.makedirs(logo_dir, exist_ok=True)
+    filename = f"logo_{uuid_mod.uuid4()}{ext}"
+    file_path = os.path.join(logo_dir, filename)
+    with open(file_path, "wb") as f:
+        f.write(content)
+
+    # Store relative path in DB
+    relative_path = os.path.join("branding", filename)
+    if existing:
+        existing.value = relative_path
+    else:
+        db.add(SystemSetting(key="company_logo", value=relative_path))
+    await db.commit()
+
+    logger.info("Company logo uploaded: %s", relative_path)
+    return {"company_logo": relative_path}
+
+
+@router.delete("/branding/logo")
+async def delete_company_logo(
+    _user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete the company logo."""
+    result = await db.execute(
+        select(SystemSetting).where(SystemSetting.key == "company_logo")
+    )
+    existing = result.scalar_one_or_none()
+    if existing and existing.value:
+        old_path = os.path.join(app_settings.upload_dir, existing.value)
+        try:
+            os.remove(old_path)
+        except OSError:
+            pass
+        existing.value = ""
+        await db.commit()
+        logger.info("Company logo deleted")
     return {"status": "ok"}
 
 

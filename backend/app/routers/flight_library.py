@@ -254,12 +254,30 @@ async def list_flights(
     search: str = Query(None),
     drone: str = Query(None),
     source: str = Query(None),
+    date_from: str = Query(None, description="ISO date string for start of range"),
+    date_to: str = Query(None, description="ISO date string for end of range"),
+    aircraft_id: str = Query(None, description="Filter by fleet aircraft UUID"),
+    sort_by: str = Query("date", description="Sort column: date, name, drone, duration, distance, altitude, speed, source"),
+    sort_dir: str = Query("desc", description="Sort direction: asc or desc"),
     limit: int = Query(500, le=2000),
     offset: int = Query(0),
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
-    query = select(Flight).order_by(desc(Flight.start_time), desc(Flight.created_at))
+    # Build sort expression
+    sort_col_map = {
+        "date": Flight.start_time,
+        "name": Flight.name,
+        "drone": Flight.drone_model,
+        "duration": Flight.duration_secs,
+        "distance": Flight.total_distance,
+        "altitude": Flight.max_altitude,
+        "speed": Flight.max_speed,
+        "source": Flight.source,
+    }
+    sort_col = sort_col_map.get(sort_by, Flight.start_time)
+    order = desc(sort_col) if sort_dir == "desc" else sort_col.asc()
+    query = select(Flight).order_by(order, desc(Flight.created_at))
 
     if search:
         q = f"%{search}%"
@@ -271,6 +289,28 @@ async def list_flights(
         query = query.where(Flight.drone_model.ilike(f"%{drone}%"))
     if source:
         query = query.where(Flight.source == source)
+    if date_from:
+        try:
+            from datetime import datetime as _dt
+            dt_from = _dt.fromisoformat(date_from.replace("Z", "+00:00"))
+            query = query.where(Flight.start_time >= dt_from)
+        except ValueError:
+            pass
+    if date_to:
+        try:
+            from datetime import datetime as _dt, timedelta as _td
+            dt_to = _dt.fromisoformat(date_to.replace("Z", "+00:00"))
+            # Include the entire day
+            dt_to = dt_to.replace(hour=23, minute=59, second=59)
+            query = query.where(Flight.start_time <= dt_to)
+        except ValueError:
+            pass
+    if aircraft_id:
+        try:
+            from uuid import UUID as _UUID
+            query = query.where(Flight.aircraft_id == _UUID(aircraft_id))
+        except ValueError:
+            pass
 
     query = query.offset(offset).limit(limit)
     result = await db.execute(query)

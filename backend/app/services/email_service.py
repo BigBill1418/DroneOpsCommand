@@ -29,13 +29,20 @@ SMTP_KEYS = [
 
 
 async def _get_branding(db: AsyncSession | None) -> dict:
-    """Load branding settings from DB, with defaults."""
+    """Load branding settings from DB, with defaults. Adds company_logo_url for emails."""
     from app.routers.system_settings import BRANDING_DEFAULTS
     if not db:
         return dict(BRANDING_DEFAULTS)
     try:
         from app.routers.system_settings import get_branding
-        return await get_branding(db)
+        brand = await get_branding(db)
+        # Build absolute logo URL for email templates
+        logo = brand.get("company_logo", "")
+        if logo:
+            brand["company_logo_url"] = f"{settings.frontend_url}/uploads/{logo}"
+        else:
+            brand["company_logo_url"] = ""
+        return brand
     except Exception:
         return dict(BRANDING_DEFAULTS)
 

@@ -57,6 +57,17 @@ def generate_pdf(
 
     brand = branding or dict(BRANDING_DEFAULTS)
 
+    # Resolve company logo to absolute file path for WeasyPrint
+    company_logo_path = ""
+    logo_rel = brand.get("company_logo", "")
+    if logo_rel:
+        abs_logo = os.path.join(settings.upload_dir, logo_rel)
+        if os.path.isfile(abs_logo):
+            company_logo_path = abs_logo
+            logger.debug("PDF using company logo: %s", abs_logo)
+        else:
+            logger.warning("Company logo not found at %s", abs_logo)
+
     try:
         template = jinja_env.get_template("report_pdf.html")
     except Exception as exc:
@@ -74,6 +85,7 @@ def generate_pdf(
             download_link=download_link,
             generated_at=datetime.utcnow().strftime("%B %d, %Y"),
             year=datetime.utcnow().year,
+            company_logo_path=company_logo_path,
             **brand,
         )
     except Exception as exc:

@@ -249,6 +249,7 @@ export default function Flights() {
   const [dateFrom, setDateFrom] = useState<Date | null>(null);
   const [dateTo, setDateTo] = useState<Date | null>(null);
   const [droneFilter, setDroneFilter] = useState<string | null>(null);
+  const [sourceFilter, setSourceFilter] = useState<string | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [manualOpen, setManualOpen] = useState(false);
@@ -466,13 +467,14 @@ export default function Flights() {
     return [...models].sort().map((m) => ({ value: m, label: m }));
   }, [flights]);
 
-  const hasActiveFilters = !!search || !!dateFrom || !!dateTo || !!droneFilter;
+  const hasActiveFilters = !!search || !!dateFrom || !!dateTo || !!droneFilter || !!sourceFilter;
 
   const clearAllFilters = () => {
     setSearch('');
     setDateFrom(null);
     setDateTo(null);
     setDroneFilter(null);
+    setSourceFilter(null);
   };
 
   const filtered = useMemo(() => {
@@ -504,6 +506,9 @@ export default function Flights() {
     if (droneFilter) {
       result = result.filter((f) => getDroneModel(f) === droneFilter);
     }
+    if (sourceFilter) {
+      result = result.filter((f) => f.source === sourceFilter);
+    }
     // Sort
     const sorted = [...result].sort((a, b) => {
       let cmp = 0;
@@ -524,7 +529,7 @@ export default function Flights() {
       return sortDir === 'asc' ? cmp : -cmp;
     });
     return sorted;
-  }, [flights, search, dateFrom, dateTo, droneFilter, sortBy, sortDir]);
+  }, [flights, search, dateFrom, dateTo, droneFilter, sourceFilter, sortBy, sortDir]);
 
   const toggleSort = (col: string) => {
     if (sortBy === col) {
@@ -712,6 +717,22 @@ export default function Flights() {
                     leftSection={<IconDrone size={14} />}
                     styles={{ input: { background: '#050608', borderColor: '#1a1f2e', color: '#e8edf2', width: 180 }, dropdown: { background: '#0e1117', borderColor: '#1a1f2e' } }}
                     nothingFoundMessage="No aircraft found"
+                  />
+                  <Select
+                    placeholder="All sources"
+                    value={sourceFilter}
+                    onChange={setSourceFilter}
+                    data={[
+                      { value: 'dji_txt', label: 'DJI' },
+                      { value: 'litchi_csv', label: 'Litchi' },
+                      { value: 'airdata_csv', label: 'Airdata' },
+                      { value: 'manual', label: 'Manual' },
+                      { value: 'opendronelog_import', label: 'ODL Import' },
+                    ]}
+                    clearable
+                    size="xs"
+                    leftSection={<IconDatabase size={14} />}
+                    styles={{ input: { background: '#050608', borderColor: '#1a1f2e', color: '#e8edf2', width: 140 }, dropdown: { background: '#0e1117', borderColor: '#1a1f2e' } }}
                   />
                 </Group>
               )}
