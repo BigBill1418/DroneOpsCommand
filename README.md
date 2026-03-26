@@ -583,6 +583,7 @@ Full interactive API documentation is available at `http://localhost:3080/docs` 
   - Sandboxed LLM report generation so visitors can test AI reports on sample missions
   - Rate-limited API to prevent scraping
 - **Report Templates** — Multiple PDF templates for different mission types
+- **Stripe Integration** — Credit card payments for invoices via Stripe Checkout, with payment status sync, webhook handling, and customer-facing payment links in PDF reports and emails
 - **Claude API Integration** — Replace local Ollama with Claude API for faster, higher-quality report generation
 - **Live Flight Tracking** — WebSocket integration for real-time drone position
 - **Multi-User Roles** — Operator, admin, and client role-based access control
