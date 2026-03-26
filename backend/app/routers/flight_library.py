@@ -228,15 +228,16 @@ async def flight_stats(
             "drone_model": farthest_flight.drone_model,
         }
 
-    # Recent flights (last 5)
+    # Recent flights (last 10 by creation date — most recently added to the system)
     recent_result = await db.execute(
-        select(Flight).order_by(desc(Flight.start_time)).limit(5)
+        select(Flight).order_by(desc(Flight.created_at)).limit(10)
     )
     recent_flights = [
         {
             "id": str(f.id),
             "name": f.name,
             "start_time": f.start_time.isoformat() if f.start_time else None,
+            "created_at": f.created_at.isoformat() if f.created_at else None,
             "duration_secs": f.duration_secs,
             "total_distance": f.total_distance,
             "max_altitude": f.max_altitude,
