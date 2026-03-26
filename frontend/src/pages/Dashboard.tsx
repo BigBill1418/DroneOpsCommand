@@ -611,7 +611,7 @@ export default function Dashboard() {
                           padding: '6px 8px', background: '#050608', borderRadius: '4px',
                           border: '1px solid #1a1f2e', cursor: 'pointer',
                         }}
-                          onClick={() => navigate(`/flights/${f.id}`)}
+                          onClick={() => navigate(`/flights?detail=${f.id}`)}
                         >
                           <Group justify="space-between" wrap="nowrap">
                             <Text size="xs" c="#e8edf2" fw={600} lineClamp={1} style={{ flex: 1 }}>

@@ -139,6 +139,38 @@ def _get_stored_file_path(file_hash: str) -> Path | None:
     return None
 
 
+async def _generate_flight_name(db: AsyncSession, drone_model: str | None, drone_name: str | None, start_time: _dt | None) -> str:
+    """Generate a standardized flight name: DroneName_YYYYMMDD_XXXX.
+
+    Uses drone_name if available, falls back to drone_model, then 'Flight'.
+    Date comes from start_time if available, otherwise today.
+    XXXX is a sequential number based on how many flights already exist for that day.
+    """
+    # Pick the best drone identifier
+    aircraft = drone_name or drone_model or "Flight"
+    # Clean it up for a filename-friendly label
+    aircraft = aircraft.replace(" ", "-").strip()
+
+    # Date portion
+    flight_date = start_time if start_time else _dt.utcnow()
+    date_str = flight_date.strftime("%Y%m%d")
+
+    # Count existing flights for this date to generate a sequential number
+    day_start = flight_date.replace(hour=0, minute=0, second=0, microsecond=0)
+    from datetime import timedelta
+    day_end = day_start + timedelta(days=1)
+    count_result = await db.execute(
+        select(func.count(Flight.id)).where(
+            Flight.created_at >= day_start,
+            Flight.created_at < day_end,
+        )
+    )
+    existing_count = count_result.scalar() or 0
+    seq = str(existing_count + 1).zfill(4)
+
+    return f"{aircraft}_{date_str}_{seq}"
+
+
 async def _get_dji_api_key(db: AsyncSession) -> str | None:
     """Read the DJI API key from system settings (set in Settings > Flight Data)."""
     try:
@@ -610,12 +642,17 @@ async def device_upload_flights(
                         skipped += 1
                         continue
 
+                    parsed_start = _parse_datetime(parsed.get("start_time"))
+                    flight_name = await _generate_flight_name(
+                        db, parsed.get("drone_model"), parsed.get("drone_name"), parsed_start
+                    )
+
                     flight = Flight(
-                        name=parsed.get("name", upload.filename or "Unknown"),
+                        name=flight_name,
                         drone_model=parsed.get("drone_model"),
                         drone_serial=parsed.get("drone_serial"),
                         battery_serial=parsed.get("battery_serial"),
-                        start_time=_parse_datetime(parsed.get("start_time")),
+                        start_time=parsed_start,
                         duration_secs=parsed.get("duration_secs", 0),
                         total_distance=parsed.get("total_distance", 0),
                         max_altitude=parsed.get("max_altitude", 0),
@@ -864,12 +901,17 @@ async def reprocess_flights(
                                     existing_flight.id, existing_flight.name,
                                     parsed.get("point_count", 0))
                     else:
+                        parsed_start = _parse_datetime(parsed.get("start_time"))
+                        flight_name = await _generate_flight_name(
+                            db, parsed.get("drone_model"), parsed.get("drone_name"), parsed_start
+                        )
+
                         flight = Flight(
-                            name=parsed.get("name", upload.filename or "Unknown"),
+                            name=flight_name,
                             drone_model=parsed.get("drone_model"),
                             drone_serial=parsed.get("drone_serial"),
                             battery_serial=parsed.get("battery_serial"),
-                            start_time=_parse_datetime(parsed.get("start_time")),
+                            start_time=parsed_start,
                             duration_secs=parsed.get("duration_secs", 0),
                             total_distance=parsed.get("total_distance", 0),
                             max_altitude=parsed.get("max_altitude", 0),
@@ -1168,12 +1210,17 @@ async def upload_flights(
                         skipped += 1
                         continue
 
+                    parsed_start = _parse_datetime(parsed.get("start_time"))
+                    flight_name = await _generate_flight_name(
+                        db, parsed.get("drone_model"), parsed.get("drone_name"), parsed_start
+                    )
+
                     flight = Flight(
-                        name=parsed.get("name", upload.filename or "Unknown"),
+                        name=flight_name,
                         drone_model=parsed.get("drone_model"),
                         drone_serial=parsed.get("drone_serial"),
                         battery_serial=parsed.get("battery_serial"),
-                        start_time=_parse_datetime(parsed.get("start_time")),
+                        start_time=parsed_start,
                         duration_secs=parsed.get("duration_secs", 0),
                         total_distance=parsed.get("total_distance", 0),
                         max_altitude=parsed.get("max_altitude", 0),
