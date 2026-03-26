@@ -9,7 +9,11 @@
 <table width="100%" cellpadding="0" cellspacing="0" style="max-width: 600px; margin: 0 auto; background: #ffffff;">
   <!-- Header -->
   <tr>
-    <td style="background: linear-gradient(135deg, #050608 0%, #0e1117 100%); padding: 30px; text-align: center;">
+    <td style="background: linear-gradient(135deg, {{ brand_primary_color | default('#050608') }} 0%, {{ brand_primary_color | default('#050608') }}dd 100%); padding: 30px; text-align: center;">
+      {% if company_logo_url %}
+      <img src="{{ company_logo_url }}" alt="{{ company_name }}" style="max-height: 50px; max-width: 180px; margin-bottom: 8px;" />
+      <br>
+      {% endif %}
       <div style="font-family: 'Arial Black', Arial, sans-serif; font-size: 28px; letter-spacing: 3px; color: #e8edf2;">
         {{ company_name | upper }}
       </div>
@@ -31,7 +35,7 @@
         Please find attached the detailed operations report for:
       </p>
 
-      <div style="background: #0e1117; color: #00d4ff; padding: 15px 20px; border-radius: 6px; margin: 20px 0; font-size: 18px; font-weight: bold; text-align: center;">
+      <div style="background: #0e1117; color: {{ brand_accent_color | default('#00d4ff') }}; padding: 15px 20px; border-radius: 6px; margin: 20px 0; font-size: 18px; font-weight: bold; text-align: center;">
         {{ mission_title }}
       </div>
 
@@ -42,13 +46,13 @@
 
       {% if download_link %}
       <div style="background: linear-gradient(135deg, #050608 0%, #0e1117 100%); border-radius: 6px; padding: 20px; margin: 20px 0; text-align: center;">
-        <div style="font-family: 'Arial Black', Arial, sans-serif; font-size: 14px; color: #00d4ff; letter-spacing: 1px; margin-bottom: 8px;">
+        <div style="font-family: 'Arial Black', Arial, sans-serif; font-size: 14px; color: {{ brand_accent_color | default('#00d4ff') }}; letter-spacing: 1px; margin-bottom: 8px;">
           HIGH RESOLUTION FILES
         </div>
         <p style="font-size: 13px; color: #e8edf2; margin: 0 0 15px 0;">
           Download all high-resolution images and video from your mission:
         </p>
-        <a href="{{ download_link.url }}" style="display: inline-block; padding: 12px 30px; background: #00d4ff; color: #050608; font-family: 'Arial Black', Arial, sans-serif; font-size: 14px; letter-spacing: 2px; text-decoration: none; border-radius: 4px;">
+        <a href="{{ download_link.url }}" style="display: inline-block; padding: 12px 30px; background: {{ brand_accent_color | default('#00d4ff') }}; color: #050608; font-family: 'Arial Black', Arial, sans-serif; font-size: 14px; letter-spacing: 2px; text-decoration: none; border-radius: 4px;">
           DOWNLOAD FILES
         </a>
         <div style="font-size: 11px; color: #ff6b1a; margin-top: 10px;">
@@ -89,13 +93,13 @@
       {% if company_website or company_social_url %}
       <div style="margin: 8px 0;">
         {% if company_website %}
-        <a href="{{ company_website }}" style="color: #00d4ff; text-decoration: none; font-size: 12px;">{{ company_website | replace('https://', '') | replace('http://', '') }}</a>
+        <a href="{{ company_website }}" style="color: {{ brand_accent_color | default('#00d4ff') }}; text-decoration: none; font-size: 12px;">{{ company_website | replace('https://', '') | replace('http://', '') }}</a>
         {% endif %}
         {% if company_website and company_social_url %}
         &nbsp;&nbsp;|&nbsp;&nbsp;
         {% endif %}
         {% if company_social_url %}
-        <a href="{{ company_social_url }}" style="color: #00d4ff; text-decoration: none; font-size: 12px;">{{ company_social_url | replace('https://', '') | replace('http://', '') }}</a>
+        <a href="{{ company_social_url }}" style="color: {{ brand_accent_color | default('#00d4ff') }}; text-decoration: none; font-size: 12px;">{{ company_social_url | replace('https://', '') | replace('http://', '') }}</a>
         {% endif %}
       </div>
       {% endif %}

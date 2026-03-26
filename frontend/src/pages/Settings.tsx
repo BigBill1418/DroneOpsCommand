@@ -154,8 +154,12 @@ export default function Settings() {
       company_website: '',
       company_social_url: '',
       company_contact_email: '',
+      brand_primary_color: '#050608',
+      brand_accent_color: '#00d4ff',
     },
   });
+  const [companyLogo, setCompanyLogo] = useState<string>('');
+  const [logoUploading, setLogoUploading] = useState(false);
 
   useEffect(() => {
     api.get('/llm/status').then((r) => setLlmStatus(r.data)).catch(() => setLlmStatus({ status: 'offline' })).finally(() => setLlmLoading(false));
@@ -170,7 +174,7 @@ export default function Settings() {
     api.get('/auth/account').then((r) => { setCurrentUsername(r.data.username); accountForm.setFieldValue('new_username', r.data.username); }).catch(() => {});
     api.get('/settings/weather').then((r) => weatherForm.setValues(r.data)).catch(() => {});
     api.get('/intake/default-tos-status').then((r) => setTosUploaded(r.data.uploaded)).catch(() => {});
-    api.get('/settings/branding').then((r) => brandingForm.setValues(r.data)).catch(() => {});
+    api.get('/settings/branding').then((r) => { brandingForm.setValues(r.data); setCompanyLogo(r.data.company_logo || ''); }).catch(() => {});
     api.get('/settings/device-keys').then((r) => setDeviceKeys(r.data)).catch(() => {});
   }, []);
 
@@ -762,6 +766,69 @@ export default function Settings() {
               <Text c="#5a6478" size="xs" mb="md" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
                 These settings control how your company appears throughout the app, in emails, PDF reports, and customer-facing pages.
               </Text>
+              {/* Logo Upload */}
+              <Text size="sm" fw={600} c="#e8edf2" mb={4}>Company Logo</Text>
+              <Text size="xs" c="#5a6478" mb="xs" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+                Used in PDF reports and email headers. Recommended: PNG with transparent background, max 400px wide.
+              </Text>
+              <Group gap="md" mb="md">
+                {companyLogo ? (
+                  <Group gap="sm" align="center">
+                    <Image src={`/uploads/${companyLogo}`} h={60} fit="contain" radius="sm" style={{ background: '#1a1f2e', padding: 8, borderRadius: 6 }} />
+                    <ActionIcon
+                      variant="light"
+                      color="red"
+                      size="sm"
+                      onClick={async () => {
+                        try {
+                          await api.delete('/settings/branding/logo');
+                          setCompanyLogo('');
+                          notifications.show({ title: 'Deleted', message: 'Logo removed', color: 'cyan' });
+                        } catch {
+                          notifications.show({ title: 'Error', message: 'Failed to delete logo', color: 'red' });
+                        }
+                      }}
+                    >
+                      <IconTrash size={14} />
+                    </ActionIcon>
+                  </Group>
+                ) : (
+                  <Text size="xs" c="#5a6478" fs="italic">No logo uploaded</Text>
+                )}
+                <Button
+                  size="xs"
+                  variant="light"
+                  color="cyan"
+                  leftSection={<IconPhoto size={14} />}
+                  loading={logoUploading}
+                  onClick={() => {
+                    const input = document.createElement('input');
+                    input.type = 'file';
+                    input.accept = 'image/png,image/jpeg,image/webp,image/svg+xml';
+                    input.onchange = async (e) => {
+                      const file = (e.target as HTMLInputElement).files?.[0];
+                      if (!file) return;
+                      setLogoUploading(true);
+                      try {
+                        const formData = new FormData();
+                        formData.append('file', file);
+                        const resp = await api.post('/settings/branding/logo', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+                        setCompanyLogo(resp.data.company_logo);
+                        invalidateBrandingCache();
+                        notifications.show({ title: 'Uploaded', message: 'Company logo saved', color: 'cyan' });
+                      } catch {
+                        notifications.show({ title: 'Error', message: 'Failed to upload logo', color: 'red' });
+                      } finally {
+                        setLogoUploading(false);
+                      }
+                    };
+                    input.click();
+                  }}
+                >
+                  {companyLogo ? 'Replace Logo' : 'Upload Logo'}
+                </Button>
+              </Group>
+
               <form onSubmit={brandingForm.onSubmit(handleSaveBranding)}>
                 <Stack gap="sm">
                   <TextInput
@@ -795,6 +862,46 @@ export default function Settings() {
                     {...brandingForm.getInputProps('company_contact_email')}
                     styles={inputStyles}
                   />
+
+                  {/* Brand Colors */}
+                  <Text size="sm" fw={600} c="#e8edf2" mt="xs">PDF Report Colors</Text>
+                  <Group gap="md">
+                    <div>
+                      <Text size="xs" c="#5a6478" mb={4}>Header Background</Text>
+                      <Group gap="xs">
+                        <input
+                          type="color"
+                          value={brandingForm.values.brand_primary_color || '#050608'}
+                          onChange={(e) => brandingForm.setFieldValue('brand_primary_color', e.target.value)}
+                          style={{ width: 36, height: 36, border: '1px solid #1a1f2e', borderRadius: 4, cursor: 'pointer', background: 'transparent', padding: 2 }}
+                        />
+                        <TextInput
+                          size="xs"
+                          w={90}
+                          {...brandingForm.getInputProps('brand_primary_color')}
+                          styles={inputStyles}
+                        />
+                      </Group>
+                    </div>
+                    <div>
+                      <Text size="xs" c="#5a6478" mb={4}>Accent Color</Text>
+                      <Group gap="xs">
+                        <input
+                          type="color"
+                          value={brandingForm.values.brand_accent_color || '#00d4ff'}
+                          onChange={(e) => brandingForm.setFieldValue('brand_accent_color', e.target.value)}
+                          style={{ width: 36, height: 36, border: '1px solid #1a1f2e', borderRadius: 4, cursor: 'pointer', background: 'transparent', padding: 2 }}
+                        />
+                        <TextInput
+                          size="xs"
+                          w={90}
+                          {...brandingForm.getInputProps('brand_accent_color')}
+                          styles={inputStyles}
+                        />
+                      </Group>
+                    </div>
+                  </Group>
+
                   <Button type="submit" color="cyan" loading={brandingSaving} styles={{ root: { fontFamily: "'Bebas Neue', sans-serif" } }}>
                     SAVE BRANDING
                   </Button>
