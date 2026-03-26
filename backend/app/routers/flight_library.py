@@ -139,10 +139,27 @@ def _get_stored_file_path(file_hash: str) -> Path | None:
     return None
 
 
+import re as _re
+
+
+def _normalize_model(name: str) -> str:
+    """Normalize a drone model name for fuzzy comparison.
+
+    Strips 'DJI', spaces, hyphens, underscores → lowercase.
+    'DJI Mavic 3 Pro' → 'mavic3pro'
+    'Mavic3Pro'       → 'mavic3pro'
+    'DJI Matrice 30T' → 'matrice30t'
+    'Matrice30'       → 'matrice30'
+    """
+    s = name.upper().replace("DJI", "").strip()
+    s = _re.sub(r'[\s\-_]+', '', s)
+    return s.lower()
+
+
 async def _match_fleet_aircraft(db: AsyncSession, drone_serial: str | None, drone_model: str | None) -> Aircraft | None:
     """Match a parsed flight to a fleet aircraft by serial number or model name.
 
-    Priority: exact serial match → model name contains match.
+    Priority: exact serial match → normalized fuzzy model name match.
     """
     # 1. Try exact serial number match
     if drone_serial:
@@ -156,32 +173,30 @@ async def _match_fleet_aircraft(db: AsyncSession, drone_serial: str | None, dron
         if match:
             return match
 
-    # 2. Fall back to model name matching
+    # 2. Normalized fuzzy model name matching
     if drone_model:
-        model_clean = drone_model.strip()
-        # Try exact match first
-        result = await db.execute(
-            select(Aircraft).where(func.upper(Aircraft.model_name) == model_clean.upper())
-        )
-        match = result.scalar_one_or_none()
-        if match:
-            return match
+        parsed_norm = _normalize_model(drone_model)
+        if not parsed_norm:
+            return None
 
-        # Try partial match (e.g. parsed "M30T" matches fleet "DJI Matrice 30T")
-        result = await db.execute(
-            select(Aircraft).where(
-                Aircraft.model_name.ilike(f"%{model_clean}%")
-            )
-        )
-        match = result.scalar_one_or_none()
-        if match:
-            return match
-
-        # Try the reverse (fleet "Matrice 30T" and parsed "DJI Matrice 30T")
         result = await db.execute(select(Aircraft))
         all_aircraft = result.scalars().all()
+
+        # Pass 1: exact normalized match (e.g. "Mavic3Pro" == "mavic3pro" from "DJI Mavic 3 Pro")
         for ac in all_aircraft:
-            if ac.model_name.lower() in model_clean.lower():
+            if _normalize_model(ac.model_name) == parsed_norm:
+                return ac
+
+        # Pass 2: one is a prefix of the other (e.g. "matrice30" startswith match on "matrice30t")
+        for ac in all_aircraft:
+            fleet_norm = _normalize_model(ac.model_name)
+            if fleet_norm.startswith(parsed_norm) or parsed_norm.startswith(fleet_norm):
+                return ac
+
+        # Pass 3: one contains the other
+        for ac in all_aircraft:
+            fleet_norm = _normalize_model(ac.model_name)
+            if parsed_norm in fleet_norm or fleet_norm in parsed_norm:
                 return ac
 
     return None
