@@ -282,7 +282,7 @@ async def seed_database(db: AsyncSession):
         result = await db.execute(
             select(Aircraft).where(Aircraft.model_name == aircraft_data["model_name"])
         )
-        existing = result.scalar_one_or_none()
+        existing = result.scalars().first()
         if existing:
             existing.specs = aircraft_data["specs"]
             if "image_filename" in aircraft_data:
