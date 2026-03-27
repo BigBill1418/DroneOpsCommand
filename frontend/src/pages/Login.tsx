@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Anchor,
   Box,
@@ -13,16 +13,26 @@ import {
 } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useBranding } from '../hooks/useBranding';
+import { useDemoMode } from '../hooks/useDemoMode';
 
 interface LoginProps {
   onLogin: (username: string, password: string) => Promise<void>;
 }
 
 export default function Login({ onLogin }: LoginProps) {
+  const isDemo = useDemoMode();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const branding = useBranding();
+
+  // Auto-fill demo credentials
+  useEffect(() => {
+    if (isDemo) {
+      setUsername('demo');
+      setPassword('demo123');
+    }
+  }, [isDemo]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -71,6 +81,44 @@ export default function Login({ onLogin }: LoginProps) {
       }}
       className="login-page"
     >
+      {isDemo && (
+        <Card
+          w="100%"
+          maw={440}
+          padding="md"
+          radius="md"
+          style={{
+            background: 'linear-gradient(135deg, #1a0a00, #1a0500)',
+            border: '1px solid #ff6b1a',
+            position: 'relative',
+            zIndex: 1,
+          }}
+        >
+          <Stack gap={8} align="center">
+            <Text size="sm" fw={700} c="#ff6b1a" style={{ fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '3px', fontSize: '18px' }}>
+              DEMO INSTANCE
+            </Text>
+            <Text size="xs" c="#e8edf2" ta="center" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+              Explore DroneOpsCommand with pre-loaded sample data.
+              Some actions are restricted.
+            </Text>
+            <Card padding="xs" radius="sm" style={{ background: '#050608', border: '1px solid #1a1f2e', width: '100%' }}>
+              <Stack gap={2} align="center">
+                <Text size="xs" c="#5a6478" style={{ fontFamily: "'Share Tech Mono', monospace", letterSpacing: '1px' }}>
+                  CREDENTIALS
+                </Text>
+                <Text size="sm" c="#00d4ff" fw={600} style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+                  Username: demo &nbsp;|&nbsp; Password: demo123
+                </Text>
+              </Stack>
+            </Card>
+            <Anchor href="https://github.com/BigBill1418/DroneOpsCommand" target="_blank" c="#00d4ff" size="xs" style={{ fontFamily: "'Share Tech Mono', monospace", letterSpacing: '1px' }}>
+              Deploy Your Own Instance
+            </Anchor>
+          </Stack>
+        </Card>
+      )}
+
       <Card
         shadow="xl"
         padding="xl"
