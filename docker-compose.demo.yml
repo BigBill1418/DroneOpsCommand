@@ -17,6 +17,9 @@ services:
       - SMTP_HOST=
       - SMTP_USER=
       - SMTP_PASSWORD=
+    # Override base port mapping — use 8001 to avoid conflict with prod on 8000
+    ports: !override
+      - "8001:8000"
     # Remove ollama dependency (it's disabled)
     depends_on:
       db:
