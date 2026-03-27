@@ -406,7 +406,7 @@ export default function Dashboard() {
                       <Table.Td>{mission.title}</Table.Td>
                       <Table.Td>
                         <Text size="xs" c="#5a6478" tt="capitalize">
-                          {mission.mission_type.replace(/_/g, ' ')}
+                          {(mission.mission_type || '').replace(/_/g, ' ')}
                         </Text>
                       </Table.Td>
                       <Table.Td>
@@ -951,7 +951,7 @@ export default function Dashboard() {
                           <Group gap={6} wrap="nowrap">
                             <IconCalendarDue size={12} color={alert.overdue ? '#ff4444' : '#ff6b1a'} />
                             <Text size="xs" c="#e8edf2" fw={600} tt="capitalize" style={{ fontSize: '11px' }}>
-                              {alert.maintenance_type.replace(/_/g, ' ')}
+                              {(alert.maintenance_type || '').replace(/_/g, ' ')}
                             </Text>
                             <Text size="xs" c="#00d4ff" style={{ fontSize: '10px' }}>
                               {alert.aircraft_name || ''}

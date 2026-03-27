@@ -2162,16 +2162,16 @@ export default function Settings() {
                       <Group justify="space-between" mb="sm">
                         <Group gap="sm">
                           <IconPlane size={16} color="#00d4ff" />
-                          <Text fw={600} c="#e8edf2" size="sm">{ac.aircraft_name}</Text>
+                          <Text fw={600} c="#e8edf2" size="sm">{ac.aircraft_name || 'Unknown Aircraft'}</Text>
                           <Badge size="xs" variant="light" color={ac.overall_status === 'overdue' ? 'red' : ac.overall_status === 'due_soon' ? 'yellow' : 'green'}>
-                            {ac.overall_status.toUpperCase().replace('_', ' ')}
+                            {(ac.overall_status || 'ok').toUpperCase().replace('_', ' ')}
                           </Badge>
                         </Group>
                         <Group gap="xs">
                           <Text c="#5a6478" size="xs" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
-                            {ac.total_flight_hours.toFixed(1)}h total
+                            {(ac.total_flight_hours ?? 0).toFixed(1)}h total
                           </Text>
-                          {ac.schedules.length === 0 && (
+                          {(ac.schedules?.length ?? 0) === 0 && (
                             <Button
                               size="xs"
                               variant="light"
@@ -2186,7 +2186,7 @@ export default function Settings() {
                         </Group>
                       </Group>
 
-                      {ac.schedules.length > 0 && (
+                      {(ac.schedules?.length ?? 0) > 0 && (
                         <Table styles={{
                           table: { color: '#e8edf2' },
                           th: { color: '#5a6478', fontFamily: "'Share Tech Mono', monospace", fontSize: '11px', borderBottom: '1px solid #1a1f2e', padding: '4px 8px' },
@@ -2202,7 +2202,7 @@ export default function Settings() {
                             </Table.Tr>
                           </Table.Thead>
                           <Table.Tbody>
-                            {ac.schedules.map((s: any) => (
+                            {(ac.schedules || []).map((s: any) => (
                               <Table.Tr key={s.schedule_id}>
                                 <Table.Td>{s.maintenance_type}</Table.Td>
                                 <Table.Td>
@@ -2224,7 +2224,7 @@ export default function Settings() {
                                 </Table.Td>
                                 <Table.Td>
                                   <Badge size="xs" variant="light" color={s.status === 'overdue' ? 'red' : s.status === 'due_soon' ? 'yellow' : 'green'}>
-                                    {s.status.toUpperCase().replace('_', ' ')}
+                                    {(s.status || 'ok').toUpperCase().replace('_', ' ')}
                                   </Badge>
                                 </Table.Td>
                               </Table.Tr>
@@ -2376,9 +2376,9 @@ export default function Settings() {
                   )}
                   {backupHistory.map((b: any) => (
                     <Table.Tr key={b.filename}>
-                      <Table.Td>{b.filename}</Table.Td>
-                      <Table.Td>{(b.size_bytes / 1024 / 1024).toFixed(1)} MB</Table.Td>
-                      <Table.Td>{new Date(b.modified_at).toLocaleString()}</Table.Td>
+                      <Table.Td>{b.filename || '—'}</Table.Td>
+                      <Table.Td>{((b.size_bytes ?? 0) / 1024 / 1024).toFixed(1)} MB</Table.Td>
+                      <Table.Td>{b.modified_at ? new Date(b.modified_at).toLocaleString() : '—'}</Table.Td>
                       <Table.Td>
                         <ActionIcon variant="subtle" color="red" size="sm" onClick={() => handleDeleteBackup(b.filename)}>
                           <IconTrash size={14} />
