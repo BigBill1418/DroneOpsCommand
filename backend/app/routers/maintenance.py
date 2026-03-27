@@ -4,23 +4,57 @@ import asyncio
 import logging
 import os
 import uuid as uuid_mod
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
-from sqlalchemy import select, desc
+from fastapi import APIRouter, Body, Depends, File, HTTPException, UploadFile
+from pydantic import BaseModel
+from sqlalchemy import func, select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.jwt import get_current_user
 from app.config import settings
 from app.database import get_db
 from app.models.aircraft import Aircraft
+from app.models.flight import Flight
 from app.models.maintenance import MaintenanceRecord, MaintenanceSchedule
 from app.models.user import User
 from app.schemas.flight import (
     MaintenanceRecordCreate, MaintenanceRecordUpdate, MaintenanceRecordResponse,
     MaintenanceScheduleCreate, MaintenanceScheduleResponse,
 )
+
+
+# ── DJI industry-standard maintenance defaults ───────────────────────
+DJI_MAINTENANCE_DEFAULTS = [
+    {"maintenance_type": "Propeller Replacement", "interval_hours": 200, "interval_days": 365,
+     "description": "Replace all propellers per DJI recommendation — inspect for chips, cracks, warping after every flight"},
+    {"maintenance_type": "Motor Inspection", "interval_hours": 200, "interval_days": 365,
+     "description": "Inspect all motors for bearing wear, unusual noise, debris — clean and lubricate per manufacturer spec"},
+    {"maintenance_type": "Gimbal Calibration", "interval_hours": 100, "interval_days": 180,
+     "description": "Recalibrate gimbal IMU and mechanical alignment — check for drift, vibration, or lens obstruction"},
+    {"maintenance_type": "IMU Calibration", "interval_hours": 50, "interval_days": 90,
+     "description": "Calibrate Inertial Measurement Unit on level surface — required after firmware updates or compass anomalies"},
+    {"maintenance_type": "Compass Calibration", "interval_hours": 50, "interval_days": None,
+     "description": "Calibrate compass when operating in new geographic area or after magnetic interference detection"},
+    {"maintenance_type": "Airframe Inspection", "interval_hours": 100, "interval_days": 365,
+     "description": "Full visual and structural inspection — check arms, landing gear, body for cracks, loose fasteners, water damage"},
+    {"maintenance_type": "Battery Health Check", "interval_hours": None, "interval_days": 30,
+     "description": "Check all batteries: cycle count, cell voltage balance, swelling, storage voltage — retire batteries exceeding 200 cycles or showing >0.1V cell imbalance"},
+    {"maintenance_type": "Firmware Review", "interval_hours": None, "interval_days": 30,
+     "description": "Check for and apply DJI firmware updates — review release notes for safety-critical patches before field deployment"},
+    {"maintenance_type": "Remote Controller Inspection", "interval_hours": None, "interval_days": 90,
+     "description": "Inspect RC: stick tension, button response, antenna integrity, screen condition, firmware version match"},
+    {"maintenance_type": "Sensor Cleaning", "interval_hours": 25, "interval_days": 30,
+     "description": "Clean all vision sensors, obstacle avoidance sensors, and camera lens — use microfiber and sensor-safe cleaning solution"},
+]
+
+
+class ScheduleIntervalUpdate(BaseModel):
+    """Schema for updating a maintenance schedule's interval."""
+    interval_hours: float | None = None
+    interval_days: int | None = None
+    description: str | None = None
 
 logger = logging.getLogger("doc.maintenance")
 
@@ -266,6 +300,58 @@ async def create_schedule(
     return schedule
 
 
+@router.get("/schedules/{aircraft_id}", response_model=list[MaintenanceScheduleResponse])
+async def get_schedules_for_aircraft(
+    aircraft_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """Get all maintenance schedules for a specific aircraft."""
+    # Verify aircraft exists
+    ac_result = await db.execute(select(Aircraft).where(Aircraft.id == aircraft_id))
+    if not ac_result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Aircraft not found")
+
+    result = await db.execute(
+        select(MaintenanceSchedule)
+        .where(MaintenanceSchedule.aircraft_id == aircraft_id)
+        .order_by(MaintenanceSchedule.maintenance_type)
+    )
+    return result.scalars().all()
+
+
+@router.put("/schedules/{schedule_id}", response_model=MaintenanceScheduleResponse)
+async def update_schedule(
+    schedule_id: UUID,
+    data: ScheduleIntervalUpdate,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """Update a maintenance schedule's interval or description."""
+    result = await db.execute(
+        select(MaintenanceSchedule).where(MaintenanceSchedule.id == schedule_id)
+    )
+    schedule = result.scalar_one_or_none()
+    if not schedule:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+
+    if data.interval_hours is not None:
+        schedule.interval_hours = data.interval_hours
+    if data.interval_days is not None:
+        schedule.interval_days = data.interval_days
+    if data.description is not None:
+        schedule.description = data.description
+
+    await db.flush()
+    await db.refresh(schedule)
+    logger.info(
+        "Updated schedule %s (%s) — hours=%s, days=%s",
+        schedule_id, schedule.maintenance_type,
+        schedule.interval_hours, schedule.interval_days,
+    )
+    return schedule
+
+
 @router.delete("/schedules/{schedule_id}", status_code=204)
 async def delete_schedule(
     schedule_id: UUID,
@@ -277,6 +363,203 @@ async def delete_schedule(
     if not schedule:
         raise HTTPException(status_code=404, detail="Schedule not found")
     await db.delete(schedule)
+
+
+# ── Seed Defaults ─────────────────────────────────────────────────────
+
+@router.post("/seed-defaults")
+async def seed_defaults(
+    aircraft_id: UUID = Body(..., embed=True),
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """Create industry-standard DJI maintenance schedules for an aircraft if none exist."""
+    # Verify aircraft exists
+    ac_result = await db.execute(select(Aircraft).where(Aircraft.id == aircraft_id))
+    aircraft = ac_result.scalar_one_or_none()
+    if not aircraft:
+        raise HTTPException(status_code=404, detail="Aircraft not found")
+
+    # Check if schedules already exist
+    existing = await db.execute(
+        select(func.count())
+        .select_from(MaintenanceSchedule)
+        .where(MaintenanceSchedule.aircraft_id == aircraft_id)
+    )
+    count = existing.scalar()
+    if count and count > 0:
+        logger.info(
+            "Aircraft %s (%s) already has %d schedules — skipping seed",
+            aircraft_id, aircraft.model_name, count,
+        )
+        return {
+            "message": f"Aircraft already has {count} maintenance schedules — no defaults added",
+            "created": 0,
+            "existing": count,
+        }
+
+    created = []
+    for default in DJI_MAINTENANCE_DEFAULTS:
+        schedule = MaintenanceSchedule(
+            aircraft_id=aircraft_id,
+            maintenance_type=default["maintenance_type"],
+            interval_hours=default["interval_hours"],
+            interval_days=default["interval_days"],
+            description=default["description"],
+        )
+        db.add(schedule)
+        created.append(default["maintenance_type"])
+
+    await db.flush()
+    logger.info(
+        "Seeded %d default maintenance schedules for aircraft %s (%s)",
+        len(created), aircraft_id, aircraft.model_name,
+    )
+    return {
+        "message": f"Created {len(created)} default maintenance schedules",
+        "created": len(created),
+        "schedules": created,
+    }
+
+
+# ── Maintenance Status (flight-hours-based) ──────────────────────────
+
+@router.get("/status")
+async def maintenance_status(
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """Return maintenance status for ALL aircraft based on flight hours and schedule intervals.
+
+    For each aircraft, calculates total flight hours from Flight.duration_secs,
+    then compares against each MaintenanceSchedule to determine:
+      - overdue: flight hours since last maintenance exceed the interval
+      - due_soon: within 10% of the interval threshold
+      - ok: not yet approaching the interval
+    Also checks date-based intervals where applicable.
+    """
+    today = date.today()
+
+    # ── Load all aircraft ────────────────────────────────────────────
+    ac_result = await db.execute(select(Aircraft))
+    all_aircraft = ac_result.scalars().all()
+
+    # ── Compute total flight hours per aircraft_id ───────────────────
+    hours_query = (
+        select(
+            Flight.aircraft_id,
+            func.coalesce(func.sum(Flight.duration_secs), 0).label("total_secs"),
+        )
+        .where(Flight.aircraft_id.isnot(None))
+        .group_by(Flight.aircraft_id)
+    )
+    hours_result = await db.execute(hours_query)
+    flight_hours_map: dict[str, float] = {}
+    for row in hours_result.all():
+        flight_hours_map[str(row.aircraft_id)] = row.total_secs / 3600.0
+
+    # ── Load all schedules ───────────────────────────────────────────
+    sched_result = await db.execute(select(MaintenanceSchedule))
+    all_schedules = sched_result.scalars().all()
+
+    # Group schedules by aircraft_id
+    schedules_by_aircraft: dict[str, list] = {}
+    for sched in all_schedules:
+        aid = str(sched.aircraft_id)
+        schedules_by_aircraft.setdefault(aid, []).append(sched)
+
+    # ── Load last maintenance record per (aircraft_id, maintenance_type) ─
+    # Used to know flight_hours_at time of last maintenance
+    last_records_query = (
+        select(MaintenanceRecord)
+        .order_by(MaintenanceRecord.performed_at.desc())
+    )
+    last_records_result = await db.execute(last_records_query)
+    # Build lookup: (aircraft_id, type) -> most recent record
+    last_record_map: dict[tuple[str, str], MaintenanceRecord] = {}
+    for rec in last_records_result.scalars().all():
+        key = (str(rec.aircraft_id), rec.maintenance_type)
+        if key not in last_record_map:  # first = most recent due to desc order
+            last_record_map[key] = rec
+
+    # ── Build status for each aircraft ───────────────────────────────
+    output = []
+    for ac in all_aircraft:
+        aid = str(ac.id)
+        total_hours = flight_hours_map.get(aid, 0.0)
+        schedules = schedules_by_aircraft.get(aid, [])
+
+        schedule_statuses = []
+        worst_status = "ok"
+
+        for sched in schedules:
+            item_status = "ok"
+            hours_remaining = None
+            days_remaining = None
+            hours_since_maintenance = None
+            next_due_at_hours = None
+
+            # ── Hours-based check ────────────────────────────────
+            if sched.interval_hours is not None:
+                rec = last_record_map.get((aid, sched.maintenance_type))
+                last_hours = rec.flight_hours_at if rec and rec.flight_hours_at is not None else 0.0
+                hours_since_maintenance = total_hours - last_hours
+                next_due_at_hours = last_hours + sched.interval_hours
+                hours_remaining = sched.interval_hours - hours_since_maintenance
+
+                threshold_10pct = sched.interval_hours * 0.10
+
+                if hours_since_maintenance >= sched.interval_hours:
+                    item_status = "overdue"
+                elif hours_remaining <= threshold_10pct:
+                    item_status = "due_soon"
+
+            # ── Date-based check ─────────────────────────────────
+            if sched.interval_days is not None:
+                if sched.last_performed:
+                    next_due_date = sched.last_performed + timedelta(days=sched.interval_days)
+                    days_remaining = (next_due_date - today).days
+                    threshold_days = max(1, int(sched.interval_days * 0.10))
+
+                    if days_remaining < 0:
+                        item_status = "overdue"
+                    elif days_remaining <= threshold_days and item_status != "overdue":
+                        item_status = "due_soon"
+                else:
+                    # Never performed — overdue
+                    days_remaining = -1
+                    item_status = "overdue"
+
+            # Track worst status for the aircraft
+            if item_status == "overdue":
+                worst_status = "overdue"
+            elif item_status == "due_soon" and worst_status != "overdue":
+                worst_status = "due_soon"
+
+            schedule_statuses.append({
+                "schedule_id": str(sched.id),
+                "maintenance_type": sched.maintenance_type,
+                "description": sched.description,
+                "interval_hours": sched.interval_hours,
+                "interval_days": sched.interval_days,
+                "status": item_status,
+                "hours_since_maintenance": round(hours_since_maintenance, 2) if hours_since_maintenance is not None else None,
+                "hours_remaining": round(hours_remaining, 2) if hours_remaining is not None else None,
+                "next_due_at_hours": round(next_due_at_hours, 2) if next_due_at_hours is not None else None,
+                "days_remaining": days_remaining,
+                "last_performed": sched.last_performed.isoformat() if sched.last_performed else None,
+            })
+
+        output.append({
+            "aircraft_id": aid,
+            "aircraft_name": ac.model_name,
+            "total_flight_hours": round(total_hours, 2),
+            "overall_status": worst_status,
+            "schedules": schedule_statuses,
+        })
+
+    logger.debug("Maintenance status computed for %d aircraft", len(output))
+    return output
 
 
 # ── Due / Overdue alerts ──────────────────────────────────────────────
@@ -302,7 +585,6 @@ async def maintenance_due(
 
         aid = str(sched.aircraft_id)
         if sched.last_performed:
-            from datetime import timedelta
             next_due = sched.last_performed + timedelta(days=sched.interval_days)
             days_until = (next_due - today).days
             if days_until <= 7:  # Due within a week or overdue
@@ -377,7 +659,6 @@ async def maintenance_next_due(
             continue
         aid = str(sched.aircraft_id)
         if sched.last_performed:
-            from datetime import timedelta
             next_due = sched.last_performed + timedelta(days=sched.interval_days)
         else:
             next_due = today  # Never performed — due now

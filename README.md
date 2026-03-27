@@ -2,7 +2,7 @@
 
 **Self-hosted mission management, flight log analysis, GPS flight replay with video export, AI report generation, invoicing, and real-time airspace monitoring for commercial drone operators.**
 
-**Version 2.51.0** | [Quick Start](#quick-start) | [Features](#features) | [Configuration](#configuration) | [Contributing](CONTRIBUTING.md) | [License](LICENSE)
+**Version 2.52.0** | [Quick Start](#quick-start) | [Features](#features) | [Configuration](#configuration) | [Contributing](CONTRIBUTING.md) | [License](LICENSE)
 
 ---
 
@@ -659,21 +659,16 @@ Transform DroneOpsCommand from a self-hosted tool into a revenue-generating SaaS
 
 - **Thermal Inspection Report Engine** — Ingest DJI radiometric RJPEG thermal imagery, auto-detect hotspot anomalies via configurable temperature delta thresholds and OpenCV contour detection, annotate visual images with bounding boxes, GPS coordinates, and measured temperatures, and generate branded PDF inspection reports. Plugs into the existing Celery/WeasyPrint report pipeline as a thermal-specific report template. Industry-configurable severity presets (solar/NETA electrical/roofing).
 - **Multi-User / Role-Based Access** — Admin and Operator roles at minimum. Foundation for teams and the multi-tenant SaaS tier. Implement before schema changes get harder.
-- **Automated Backup & Restore** — Scheduled nightly database and file backups to configurable destinations (local path, NAS, S3) with one-click restore from the Settings UI.
-- **Pilot Flight Hour Tracking** — Pilot profiles linked to flights for FAA Part 107 PIC flight time logging, currency tracking, and compliance reporting.
-- **Maintenance Scheduling by Flight Hours** — Auto-triggered maintenance alerts based on cumulative flight hours per aircraft (e.g., prop replacement every 50 hours, motor inspection every 100 hours).
 - **Notification System** — Email and in-app alerts for overdue invoices, upcoming maintenance, battery cycle limits, certificate expirations, and completed report generation.
 - **Report Template Library** — Multiple PDF templates for different mission types. Inspection reports, SAR after-action reports, videography delivery summaries. Operator-buildable custom templates. LLM prompt adapts per template type.
 - **Airspace Pre-Check Workflow** — Drop a pin before mission creation and get a pre-flight airspace assessment: LAANC status, nearby TFRs, Class B/C/D proximity. Uses existing weather/FAA API infrastructure.
-- **Direct DJI Log Import** — Parse `.txt` and `.csv` DJI flight logs natively without requiring an OpenDroneLog instance. Reduces onboarding friction. Share parser logic with DroneOpsSync.
 - **Claude API Integration** — Replace local Ollama with Claude API for faster, higher-quality report generation.
 - **React Native Android App** — Mission creation, photo capture on-site, report review, and customer lookup from the field. Communicates with the stack via JWT-authenticated HTTPS API.
 - **Voice-to-Text** — On-device speech recognition in the Android app for dictating operator field notes hands-free during or after missions.
 - **DroneOpsSync Deep Integration** — Field-captured photos auto-upload to the correct mission. Field notes from the controller pre-populate report narrative. JWT API is already in place.
-- **Live Flight Tracking** — WebSocket integration for real-time drone position.
+- **Live Flight Tracking** — WebSocket integration for real-time drone position. DroneOpsSync streams GPS via WebSocket during active flights; backend hub relays to frontend Leaflet map with animated markers. DJI Cloud API for enterprise drones (M30T, M300, M350) supports native telemetry streaming.
 - **Public API & Webhooks** — Let third-party tools (dispatch software, QuickBooks, project management) integrate with Command. Webhooks on mission status changes, invoice payment, and report delivery.
-- **Dashboard Analytics** *(under consideration)* — Revenue trend charts, flights per month, hours per aircraft, and battery cycle visualizations over time.
-- **Public Demo Instance** — Fully functional hosted demo at `demo.droneops.app` for prospective users to explore without installing anything. Read-only demo account with pre-loaded sample data, auto-reset every 24 hours, sandboxed LLM report generation, rate-limited API.
+- **Public Demo Instance** — Hosted demo at `command-demo.barnardhq.com` with pre-loaded sample data, auto-reset every 24 hours, sandboxed LLM report generation, rate-limited API, demo-mode banner with "Deploy Your Own" CTA.
 
 ---
 

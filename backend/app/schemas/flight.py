@@ -23,6 +23,7 @@ class FlightCreate(BaseModel):
     notes: str | None = None
     tags: list[str] | None = None
     aircraft_id: UUID | None = None
+    pilot_id: str | None = None
     gps_track: list[dict] | None = None
 
 
@@ -42,6 +43,7 @@ class FlightUpdate(BaseModel):
     notes: str | None = None
     tags: list[str] | None = None
     aircraft_id: UUID | None = None
+    pilot_id: str | None = None
 
 
 class FlightResponse(BaseModel):
@@ -64,6 +66,7 @@ class FlightResponse(BaseModel):
     source: str
     original_filename: str | None
     aircraft_id: UUID | None
+    pilot_id: str | None = None
     aircraft: AircraftResponse | None = None
     created_at: datetime
     updated_at: datetime

@@ -22,7 +22,7 @@ import {
 } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
-import { IconCheck, IconX, IconPlus, IconEdit, IconTrash, IconCurrencyDollar, IconMail, IconSend, IconBrandPaypal, IconCash, IconDrone, IconPlugConnected, IconMapPin, IconSearch, IconSignature, IconUpload, IconSettings, IconReceipt, IconPlane, IconPalette, IconWorldWww, IconKey, IconUser, IconLock, IconDatabaseExport, IconDatabaseImport, IconShieldCheck, IconDownload, IconAlertTriangle, IconPhoto, IconRadar2 } from '@tabler/icons-react';
+import { IconCheck, IconX, IconPlus, IconEdit, IconTrash, IconCurrencyDollar, IconMail, IconSend, IconBrandPaypal, IconCash, IconDrone, IconPlugConnected, IconMapPin, IconSearch, IconSignature, IconUpload, IconSettings, IconReceipt, IconPlane, IconPalette, IconWorldWww, IconKey, IconUser, IconLock, IconDatabaseExport, IconDatabaseImport, IconShieldCheck, IconDownload, IconAlertTriangle, IconPhoto, IconRadar2, IconUsers, IconTool, IconClock, IconCalendar, IconRefresh, IconPlayerPlay } from '@tabler/icons-react';
 import api from '../api/client';
 import { Aircraft, RateTemplate } from '../api/types';
 import { inputStyles, cardStyle } from '../components/shared/styles';
@@ -98,6 +98,23 @@ export default function Settings() {
   const [deviceKeyLabel, setDeviceKeyLabel] = useState('');
   const [newDeviceKey, setNewDeviceKey] = useState<string | null>(null);
 
+  // Pilots
+  const [pilots, setPilots] = useState<any[]>([]);
+  const [pilotModal, setPilotModal] = useState(false);
+  const [editingPilotId, setEditingPilotId] = useState<string | null>(null);
+  const [pilotSaving, setPilotSaving] = useState(false);
+
+  // Maintenance
+  const [maintenanceStatus, setMaintenanceStatus] = useState<any[]>([]);
+  const [maintenanceLoading, setMaintenanceLoading] = useState(false);
+  const [seedingDefaults, setSeedingDefaults] = useState<string | null>(null);
+
+  // Scheduled Backup
+  const [backupSchedule, setBackupSchedule] = useState<{ enabled: boolean; retention_days: number; backup_time: string }>({ enabled: false, retention_days: 30, backup_time: '02:00' });
+  const [backupHistory, setBackupHistory] = useState<any[]>([]);
+  const [backupScheduleSaving, setBackupScheduleSaving] = useState(false);
+  const [backupRunning, setBackupRunning] = useState(false);
+
   const aircraftForm = useForm({
     initialValues: { model_name: '', manufacturer: 'DJI', serial_number: '', specs_json: '{}' },
   });
@@ -147,6 +164,10 @@ export default function Settings() {
     initialValues: { weather_lat: '', weather_lon: '', weather_label: '', weather_airport_icao: '' },
   });
 
+  const pilotForm = useForm({
+    initialValues: { name: '', email: '', phone: '', faa_certificate_number: '', faa_certificate_expiry: '', notes: '' },
+  });
+
   const brandingForm = useForm({
     initialValues: {
       company_name: '',
@@ -176,6 +197,11 @@ export default function Settings() {
     api.get('/intake/default-tos-status').then((r) => setTosUploaded(r.data.uploaded)).catch(() => {});
     api.get('/settings/branding').then((r) => { brandingForm.setValues(r.data); setCompanyLogo(r.data.company_logo || ''); }).catch(() => {});
     api.get('/settings/device-keys').then((r) => setDeviceKeys(r.data)).catch(() => {});
+    api.get('/pilots').then((r) => setPilots(r.data)).catch(() => {});
+    api.get('/backup/schedule').then((r) => setBackupSchedule(r.data)).catch(() => {});
+    api.get('/backup/history').then((r) => setBackupHistory(r.data)).catch(() => {});
+    setMaintenanceLoading(true);
+    api.get('/maintenance/status').then((r) => setMaintenanceStatus(r.data)).catch(() => {}).finally(() => setMaintenanceLoading(false));
   }, []);
 
   const handleBackupAndDownload = async () => {
@@ -726,6 +752,104 @@ export default function Settings() {
     other: 'Other',
   };
 
+  // ── Pilot handlers ──────────────────────────────────
+  const handleSavePilot = async (values: typeof pilotForm.values) => {
+    setPilotSaving(true);
+    try {
+      const payload = {
+        ...values,
+        faa_certificate_expiry: values.faa_certificate_expiry || null,
+      };
+      if (editingPilotId) {
+        await api.put(`/pilots/${editingPilotId}`, payload);
+      } else {
+        await api.post('/pilots', payload);
+      }
+      setPilotModal(false);
+      setEditingPilotId(null);
+      pilotForm.reset();
+      api.get('/pilots').then((r) => setPilots(r.data));
+      notifications.show({ title: 'Saved', message: 'Pilot saved', color: 'cyan' });
+    } catch (err: any) {
+      notifications.show({ title: 'Error', message: err.response?.data?.detail || 'Failed to save pilot', color: 'red' });
+    } finally {
+      setPilotSaving(false);
+    }
+  };
+
+  const handleEditPilot = (p: any) => {
+    setEditingPilotId(p.id);
+    pilotForm.setValues({
+      name: p.name || '',
+      email: p.email || '',
+      phone: p.phone || '',
+      faa_certificate_number: p.faa_certificate_number || '',
+      faa_certificate_expiry: p.faa_certificate_expiry ? p.faa_certificate_expiry.slice(0, 16) : '',
+      notes: p.notes || '',
+    });
+    setPilotModal(true);
+  };
+
+  const handleDeletePilot = async (pilotId: string) => {
+    try {
+      await api.delete(`/pilots/${pilotId}`);
+      api.get('/pilots').then((r) => setPilots(r.data));
+      notifications.show({ title: 'Deactivated', message: 'Pilot deactivated', color: 'yellow' });
+    } catch {
+      notifications.show({ title: 'Error', message: 'Failed to deactivate pilot', color: 'red' });
+    }
+  };
+
+  // ── Maintenance handlers ────────────────────────────
+  const handleSeedDefaults = async (aircraftId: string) => {
+    setSeedingDefaults(aircraftId);
+    try {
+      const resp = await api.post('/maintenance/seed-defaults', { aircraft_id: aircraftId });
+      notifications.show({ title: 'Seeded', message: resp.data.message, color: 'cyan' });
+      api.get('/maintenance/status').then((r) => setMaintenanceStatus(r.data));
+    } catch (err: any) {
+      notifications.show({ title: 'Error', message: err.response?.data?.detail || 'Failed to seed defaults', color: 'red' });
+    } finally {
+      setSeedingDefaults(null);
+    }
+  };
+
+  // ── Backup schedule handlers ────────────────────────
+  const handleSaveBackupSchedule = async () => {
+    setBackupScheduleSaving(true);
+    try {
+      await api.put('/backup/schedule', backupSchedule);
+      notifications.show({ title: 'Saved', message: 'Backup schedule updated', color: 'cyan' });
+    } catch {
+      notifications.show({ title: 'Error', message: 'Failed to save backup schedule', color: 'red' });
+    } finally {
+      setBackupScheduleSaving(false);
+    }
+  };
+
+  const handleRunBackupNow = async () => {
+    setBackupRunning(true);
+    try {
+      const resp = await api.post('/backup/run-now');
+      notifications.show({ title: 'Backup Complete', message: `${resp.data.filename} created (${resp.data.toc_entries} objects)`, color: 'green' });
+      api.get('/backup/history').then((r) => setBackupHistory(r.data));
+    } catch (err: any) {
+      notifications.show({ title: 'Backup Failed', message: err.response?.data?.detail || 'Failed to run backup', color: 'red' });
+    } finally {
+      setBackupRunning(false);
+    }
+  };
+
+  const handleDeleteBackup = async (filename: string) => {
+    try {
+      await api.delete(`/backup/history/${filename}`);
+      setBackupHistory((prev) => prev.filter((b: any) => b.filename !== filename));
+      notifications.show({ title: 'Deleted', message: `${filename} removed`, color: 'yellow' });
+    } catch {
+      notifications.show({ title: 'Error', message: 'Failed to delete backup', color: 'red' });
+    }
+  };
+
   return (
     <Stack gap="md">
       <Title order={2} c="#e8edf2" style={{ letterSpacing: '2px' }}>SETTINGS</Title>
@@ -749,6 +873,15 @@ export default function Settings() {
           </Tabs.Tab>
           <Tabs.Tab value="devices" leftSection={<IconKey size={14} />}>
             DEVICE ACCESS
+          </Tabs.Tab>
+          <Tabs.Tab value="pilots" leftSection={<IconUsers size={14} />}>
+            PILOTS
+          </Tabs.Tab>
+          <Tabs.Tab value="maintenance" leftSection={<IconTool size={14} />}>
+            MAINTENANCE
+          </Tabs.Tab>
+          <Tabs.Tab value="backups" leftSection={<IconDatabaseExport size={14} />}>
+            BACKUPS
           </Tabs.Tab>
           <Tabs.Tab value="account" leftSection={<IconUser size={14} />}>
             ACCOUNT
@@ -1935,6 +2068,330 @@ export default function Settings() {
         </Tabs.Panel>
 
         {/* ═══ ACCOUNT TAB ═══ */}
+        {/* ═══ PILOTS TAB ═══ */}
+        <Tabs.Panel value="pilots" pt="md">
+          <Stack gap="md">
+            <Card padding="lg" radius="md" style={cardStyle}>
+              <Group justify="space-between" mb="md">
+                <Group gap="sm">
+                  <IconUsers size={20} color="#00d4ff" />
+                  <Title order={3} c="#e8edf2" style={{ letterSpacing: '1px' }}>PILOTS</Title>
+                </Group>
+                <Button leftSection={<IconPlus size={14} />} size="xs" color="cyan" onClick={() => { setEditingPilotId(null); pilotForm.reset(); setPilotModal(true); }}>
+                  Add Pilot
+                </Button>
+              </Group>
+              <Text c="#5a6478" size="xs" mb="md" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+                Manage drone pilots, track flight hours, and monitor FAA Part 107 currency status.
+              </Text>
+
+              <Table styles={{
+                table: { color: '#e8edf2' },
+                th: { color: '#00d4ff', fontFamily: "'Share Tech Mono', monospace", fontSize: '13px', borderBottom: '1px solid #1a1f2e' },
+                td: { borderBottom: '1px solid #1a1f2e', fontFamily: "'Share Tech Mono', monospace", fontSize: '13px' },
+              }}>
+                <Table.Thead>
+                  <Table.Tr>
+                    <Table.Th>NAME</Table.Th>
+                    <Table.Th>FLIGHTS</Table.Th>
+                    <Table.Th>HOURS</Table.Th>
+                    <Table.Th>FAA CERT EXPIRY</Table.Th>
+                    <Table.Th>STATUS</Table.Th>
+                    <Table.Th>ACTIONS</Table.Th>
+                  </Table.Tr>
+                </Table.Thead>
+                <Table.Tbody>
+                  {pilots.length === 0 && (
+                    <Table.Tr><Table.Td colSpan={6}><Text c="#5a6478" size="sm" ta="center" py="md">No pilots added yet</Text></Table.Td></Table.Tr>
+                  )}
+                  {pilots.map((p: any) => (
+                    <Table.Tr key={p.id}>
+                      <Table.Td>{p.name}</Table.Td>
+                      <Table.Td>{p.total_flights ?? 0}</Table.Td>
+                      <Table.Td>{p.total_flight_hours?.toFixed(1) ?? '0.0'}h</Table.Td>
+                      <Table.Td>
+                        {p.faa_certificate_expiry
+                          ? new Date(p.faa_certificate_expiry).toLocaleDateString()
+                          : <Text c="#5a6478" size="xs">Not set</Text>}
+                      </Table.Td>
+                      <Table.Td>
+                        <Badge color={p.is_active ? 'green' : 'gray'} size="sm" variant="light">
+                          {p.is_active ? 'ACTIVE' : 'INACTIVE'}
+                        </Badge>
+                      </Table.Td>
+                      <Table.Td>
+                        <Group gap={4}>
+                          <ActionIcon variant="subtle" color="cyan" size="sm" onClick={() => handleEditPilot(p)}>
+                            <IconEdit size={14} />
+                          </ActionIcon>
+                          {p.is_active && (
+                            <ActionIcon variant="subtle" color="red" size="sm" onClick={() => handleDeletePilot(p.id)}>
+                              <IconTrash size={14} />
+                            </ActionIcon>
+                          )}
+                        </Group>
+                      </Table.Td>
+                    </Table.Tr>
+                  ))}
+                </Table.Tbody>
+              </Table>
+            </Card>
+          </Stack>
+        </Tabs.Panel>
+
+        {/* ═══ MAINTENANCE TAB ═══ */}
+        <Tabs.Panel value="maintenance" pt="md">
+          <Stack gap="md">
+            <Card padding="lg" radius="md" style={cardStyle}>
+              <Group gap="sm" mb="md">
+                <IconTool size={20} color="#00d4ff" />
+                <Title order={3} c="#e8edf2" style={{ letterSpacing: '1px' }}>MAINTENANCE STATUS</Title>
+              </Group>
+              <Text c="#5a6478" size="xs" mb="md" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+                Industry-standard DJI maintenance intervals. Seed defaults per aircraft, then track service records.
+              </Text>
+
+              {maintenanceLoading ? (
+                <Group justify="center" py="xl"><Loader color="cyan" size="sm" /></Group>
+              ) : maintenanceStatus.length === 0 ? (
+                <Text c="#5a6478" size="sm" ta="center" py="md">No aircraft in fleet — add aircraft in Fleet & Rates tab first</Text>
+              ) : (
+                <Stack gap="lg">
+                  {maintenanceStatus.map((ac: any) => (
+                    <Card key={ac.aircraft_id} padding="md" radius="sm" style={{ background: '#0a0d12', border: '1px solid #1a1f2e' }}>
+                      <Group justify="space-between" mb="sm">
+                        <Group gap="sm">
+                          <IconPlane size={16} color="#00d4ff" />
+                          <Text fw={600} c="#e8edf2" size="sm">{ac.aircraft_name}</Text>
+                          <Badge size="xs" variant="light" color={ac.overall_status === 'overdue' ? 'red' : ac.overall_status === 'due_soon' ? 'yellow' : 'green'}>
+                            {ac.overall_status.toUpperCase().replace('_', ' ')}
+                          </Badge>
+                        </Group>
+                        <Group gap="xs">
+                          <Text c="#5a6478" size="xs" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+                            {ac.total_flight_hours.toFixed(1)}h total
+                          </Text>
+                          {ac.schedules.length === 0 && (
+                            <Button
+                              size="xs"
+                              variant="light"
+                              color="cyan"
+                              leftSection={<IconPlus size={12} />}
+                              loading={seedingDefaults === ac.aircraft_id}
+                              onClick={() => handleSeedDefaults(ac.aircraft_id)}
+                            >
+                              Seed Defaults
+                            </Button>
+                          )}
+                        </Group>
+                      </Group>
+
+                      {ac.schedules.length > 0 && (
+                        <Table styles={{
+                          table: { color: '#e8edf2' },
+                          th: { color: '#5a6478', fontFamily: "'Share Tech Mono', monospace", fontSize: '11px', borderBottom: '1px solid #1a1f2e', padding: '4px 8px' },
+                          td: { borderBottom: '1px solid #0e1117', fontFamily: "'Share Tech Mono', monospace", fontSize: '12px', padding: '4px 8px' },
+                        }}>
+                          <Table.Thead>
+                            <Table.Tr>
+                              <Table.Th>ITEM</Table.Th>
+                              <Table.Th>INTERVAL</Table.Th>
+                              <Table.Th>HOURS SINCE</Table.Th>
+                              <Table.Th>REMAINING</Table.Th>
+                              <Table.Th>STATUS</Table.Th>
+                            </Table.Tr>
+                          </Table.Thead>
+                          <Table.Tbody>
+                            {ac.schedules.map((s: any) => (
+                              <Table.Tr key={s.schedule_id}>
+                                <Table.Td>{s.maintenance_type}</Table.Td>
+                                <Table.Td>
+                                  {s.interval_hours ? `${s.interval_hours}h` : ''}
+                                  {s.interval_hours && s.interval_days ? ' / ' : ''}
+                                  {s.interval_days ? `${s.interval_days}d` : ''}
+                                </Table.Td>
+                                <Table.Td>{s.hours_since_maintenance != null ? `${s.hours_since_maintenance.toFixed(1)}h` : '—'}</Table.Td>
+                                <Table.Td>
+                                  {s.hours_remaining != null ? (
+                                    <Text c={s.hours_remaining < 0 ? '#ff4444' : s.hours_remaining < 20 ? '#ff6b1a' : '#4ade80'} size="xs" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+                                      {s.hours_remaining.toFixed(1)}h
+                                    </Text>
+                                  ) : s.days_remaining != null ? (
+                                    <Text c={s.days_remaining < 0 ? '#ff4444' : s.days_remaining < 7 ? '#ff6b1a' : '#4ade80'} size="xs" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+                                      {s.days_remaining}d
+                                    </Text>
+                                  ) : '—'}
+                                </Table.Td>
+                                <Table.Td>
+                                  <Badge size="xs" variant="light" color={s.status === 'overdue' ? 'red' : s.status === 'due_soon' ? 'yellow' : 'green'}>
+                                    {s.status.toUpperCase().replace('_', ' ')}
+                                  </Badge>
+                                </Table.Td>
+                              </Table.Tr>
+                            ))}
+                          </Table.Tbody>
+                        </Table>
+                      )}
+                    </Card>
+                  ))}
+                </Stack>
+              )}
+            </Card>
+          </Stack>
+        </Tabs.Panel>
+
+        {/* ═══ BACKUPS TAB ═══ */}
+        <Tabs.Panel value="backups" pt="md">
+          <Stack gap="md">
+            {/* Scheduled Backup Config */}
+            <Card padding="lg" radius="md" style={cardStyle}>
+              <Group gap="sm" mb="md">
+                <IconClock size={20} color="#00d4ff" />
+                <Title order={3} c="#e8edf2" style={{ letterSpacing: '1px' }}>SCHEDULED BACKUPS</Title>
+              </Group>
+              <Text c="#5a6478" size="xs" mb="md" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+                Automatic nightly database backups saved to /data/backups/ with configurable retention.
+              </Text>
+              <Stack gap="sm">
+                <Switch
+                  label="Enable Scheduled Backups"
+                  checked={backupSchedule.enabled}
+                  onChange={(e) => setBackupSchedule((prev) => ({ ...prev, enabled: e.currentTarget.checked }))}
+                  styles={{
+                    label: { color: '#e8edf2', fontFamily: "'Share Tech Mono', monospace" },
+                    track: { borderColor: '#1a1f2e' },
+                  }}
+                />
+                <Group gap="md">
+                  <TextInput
+                    label="Backup Time (HH:MM)"
+                    value={backupSchedule.backup_time}
+                    onChange={(e) => setBackupSchedule((prev) => ({ ...prev, backup_time: e.currentTarget.value }))}
+                    styles={inputStyles}
+                    w={160}
+                    placeholder="02:00"
+                  />
+                  <NumberInput
+                    label="Retention (days)"
+                    value={backupSchedule.retention_days}
+                    onChange={(v) => setBackupSchedule((prev) => ({ ...prev, retention_days: Number(v) || 30 }))}
+                    styles={inputStyles}
+                    w={160}
+                    min={1}
+                    max={365}
+                  />
+                </Group>
+                <Group gap="sm">
+                  <Button color="cyan" loading={backupScheduleSaving} onClick={handleSaveBackupSchedule} styles={{ root: { fontFamily: "'Bebas Neue', sans-serif" } }}>
+                    SAVE SCHEDULE
+                  </Button>
+                  <Button variant="light" color="green" loading={backupRunning} onClick={handleRunBackupNow} leftSection={<IconPlayerPlay size={14} />} styles={{ root: { fontFamily: "'Bebas Neue', sans-serif" } }}>
+                    RUN BACKUP NOW
+                  </Button>
+                </Group>
+              </Stack>
+            </Card>
+
+            {/* Manual Backup & Restore */}
+            <Card padding="lg" radius="md" style={cardStyle}>
+              <Group gap="sm" mb="md">
+                <IconDatabaseExport size={20} color="#00d4ff" />
+                <Title order={3} c="#e8edf2" style={{ letterSpacing: '1px' }}>MANUAL BACKUP & RESTORE</Title>
+              </Group>
+              <Stack gap="sm">
+                <Group gap="sm">
+                  <Button color="cyan" loading={backupCreating} onClick={handleBackupAndDownload} leftSection={<IconDownload size={14} />} styles={{ root: { fontFamily: "'Bebas Neue', sans-serif" } }}>
+                    CREATE & DOWNLOAD BACKUP
+                  </Button>
+                  <Button variant="light" color="yellow" onClick={handleRestoreFileSelect} leftSection={<IconDatabaseImport size={14} />} styles={{ root: { fontFamily: "'Bebas Neue', sans-serif" } }}>
+                    UPLOAD & RESTORE
+                  </Button>
+                </Group>
+
+                {backupResult && (
+                  <Card padding="sm" radius="sm" style={{ background: '#0a1a0a', border: '1px solid #1a3a1a' }}>
+                    <Text c="#4ade80" size="xs" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+                      Backup: {backupResult.filename} — {backupResult.objects} objects — SHA-256: {backupResult.sha256.slice(0, 16)}...
+                    </Text>
+                  </Card>
+                )}
+
+                {restoreValidation && (
+                  <Card padding="sm" radius="sm" style={{ background: '#1a1a0a', border: '1px solid #3a3a1a' }}>
+                    <Stack gap="xs">
+                      <Text c="#ffd700" size="xs" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+                        Validated: {restoreValidation.filename} — {restoreValidation.toc_entries} objects — {(restoreValidation.size_bytes / 1024 / 1024).toFixed(1)}MB
+                      </Text>
+                      <Checkbox
+                        label="I understand this will replace ALL database contents"
+                        checked={restoreChecked}
+                        onChange={(e) => setRestoreChecked(e.currentTarget.checked)}
+                        styles={{ input: { borderColor: '#ff4444' }, label: { color: '#e8edf2', fontFamily: "'Share Tech Mono', monospace", fontSize: '12px' } }}
+                      />
+                      <Button color="red" disabled={!restoreChecked} loading={restoreRunning} onClick={handleConfirmRestore} leftSection={<IconAlertTriangle size={14} />} styles={{ root: { fontFamily: "'Bebas Neue', sans-serif" } }}>
+                        CONFIRM RESTORE
+                      </Button>
+                    </Stack>
+                  </Card>
+                )}
+
+                {restoreResult && (
+                  <Card padding="sm" radius="sm" style={{ background: '#0a1a0a', border: '1px solid #1a3a1a' }}>
+                    <Text c="#4ade80" size="xs" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+                      Restored: {restoreResult.table_count} tables — SHA-256: {restoreResult.sha256.slice(0, 16)}...
+                    </Text>
+                  </Card>
+                )}
+              </Stack>
+            </Card>
+
+            {/* Backup History */}
+            <Card padding="lg" radius="md" style={cardStyle}>
+              <Group justify="space-between" mb="md">
+                <Group gap="sm">
+                  <IconCalendar size={20} color="#00d4ff" />
+                  <Title order={3} c="#e8edf2" style={{ letterSpacing: '1px' }}>BACKUP HISTORY</Title>
+                </Group>
+                <Button variant="subtle" color="cyan" size="xs" onClick={() => api.get('/backup/history').then((r) => setBackupHistory(r.data))} leftSection={<IconRefresh size={12} />}>
+                  Refresh
+                </Button>
+              </Group>
+
+              <Table styles={{
+                table: { color: '#e8edf2' },
+                th: { color: '#00d4ff', fontFamily: "'Share Tech Mono', monospace", fontSize: '13px', borderBottom: '1px solid #1a1f2e' },
+                td: { borderBottom: '1px solid #1a1f2e', fontFamily: "'Share Tech Mono', monospace", fontSize: '12px' },
+              }}>
+                <Table.Thead>
+                  <Table.Tr>
+                    <Table.Th>FILENAME</Table.Th>
+                    <Table.Th>SIZE</Table.Th>
+                    <Table.Th>DATE</Table.Th>
+                    <Table.Th>ACTIONS</Table.Th>
+                  </Table.Tr>
+                </Table.Thead>
+                <Table.Tbody>
+                  {backupHistory.length === 0 && (
+                    <Table.Tr><Table.Td colSpan={4}><Text c="#5a6478" size="sm" ta="center" py="md">No backups found</Text></Table.Td></Table.Tr>
+                  )}
+                  {backupHistory.map((b: any) => (
+                    <Table.Tr key={b.filename}>
+                      <Table.Td>{b.filename}</Table.Td>
+                      <Table.Td>{(b.size_bytes / 1024 / 1024).toFixed(1)} MB</Table.Td>
+                      <Table.Td>{new Date(b.modified_at).toLocaleString()}</Table.Td>
+                      <Table.Td>
+                        <ActionIcon variant="subtle" color="red" size="sm" onClick={() => handleDeleteBackup(b.filename)}>
+                          <IconTrash size={14} />
+                        </ActionIcon>
+                      </Table.Td>
+                    </Table.Tr>
+                  ))}
+                </Table.Tbody>
+              </Table>
+            </Card>
+          </Stack>
+        </Tabs.Panel>
+
         <Tabs.Panel value="account" pt="md">
           <Stack gap="md">
             <Card padding="lg" radius="md" style={cardStyle}>
@@ -2115,6 +2572,28 @@ export default function Settings() {
           </Stack>
         </form>
       </Modal>
+      {/* Pilot Modal */}
+      <Modal
+        opened={pilotModal}
+        onClose={() => { setPilotModal(false); setEditingPilotId(null); }}
+        title={editingPilotId ? 'Edit Pilot' : 'New Pilot'}
+        styles={{ header: { background: '#0e1117' }, content: { background: '#0e1117' }, title: { color: '#e8edf2', fontFamily: "'Bebas Neue', sans-serif" } }}
+      >
+        <form onSubmit={pilotForm.onSubmit(handleSavePilot)}>
+          <Stack gap="sm">
+            <TextInput label="Name" required {...pilotForm.getInputProps('name')} styles={inputStyles} />
+            <TextInput label="Email" {...pilotForm.getInputProps('email')} styles={inputStyles} />
+            <TextInput label="Phone" {...pilotForm.getInputProps('phone')} styles={inputStyles} />
+            <TextInput label="FAA Certificate Number" {...pilotForm.getInputProps('faa_certificate_number')} styles={inputStyles} />
+            <TextInput label="FAA Certificate Expiry" type="datetime-local" {...pilotForm.getInputProps('faa_certificate_expiry')} styles={inputStyles} />
+            <Textarea label="Notes" minRows={3} {...pilotForm.getInputProps('notes')} styles={inputStyles} />
+            <Button type="submit" color="cyan" loading={pilotSaving} styles={{ root: { fontFamily: "'Bebas Neue', sans-serif" } }}>
+              SAVE
+            </Button>
+          </Stack>
+        </form>
+      </Modal>
+
       {/* Purge Flights Confirmation Modal */}
       <Modal
         opened={purgeConfirmOpen}
