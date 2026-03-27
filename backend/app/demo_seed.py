@@ -155,12 +155,21 @@ async def seed_demo_data(db: AsyncSession) -> None:
             ),
         ]
 
+        # Resolve aircraft — reuse existing (from regular seed) or create new
+        ac_id_map = {}  # maps our static UUID -> actual DB UUID
         for ac in aircraft_list:
             existing = await db.execute(
-                select(Aircraft).where(Aircraft.serial_number == ac.serial_number)
+                select(Aircraft).where(Aircraft.model_name == ac.model_name)
             )
-            if existing.scalar_one_or_none() is None:
+            found = existing.scalars().first()
+            if found is not None:
+                ac_id_map[ac.id] = found.id
+                # Backfill serial if missing
+                if not found.serial_number and ac.serial_number:
+                    found.serial_number = ac.serial_number
+            else:
                 db.add(ac)
+                ac_id_map[ac.id] = ac.id
 
         await db.flush()
         logger.info("demo_seed: %d aircraft flushed.", len(aircraft_list))
@@ -333,7 +342,7 @@ async def seed_demo_data(db: AsyncSession) -> None:
             Flight(
                 id=_F1,
                 name="Solana North Array — Run 1",
-                aircraft_id=_AC1,
+                aircraft_id=ac_id_map.get(_AC1, _AC1),
                 pilot_id=_P1,
                 drone_model="DJI Matrice 30T",
                 drone_name="Matrice-30T Alpha",
@@ -353,7 +362,7 @@ async def seed_demo_data(db: AsyncSession) -> None:
             Flight(
                 id=_F2,
                 name="Solana South Array — Run 2",
-                aircraft_id=_AC1,
+                aircraft_id=ac_id_map.get(_AC1, _AC1),
                 pilot_id=_P1,
                 drone_model="DJI Matrice 30T",
                 drone_name="Matrice-30T Alpha",
@@ -373,7 +382,7 @@ async def seed_demo_data(db: AsyncSession) -> None:
             Flight(
                 id=_F3,
                 name="Solana East Inverter Bank — Run 3",
-                aircraft_id=_AC1,
+                aircraft_id=ac_id_map.get(_AC1, _AC1),
                 pilot_id=_P1,
                 drone_model="DJI Matrice 30T",
                 drone_name="Matrice-30T Alpha",
@@ -394,7 +403,7 @@ async def seed_demo_data(db: AsyncSession) -> None:
             Flight(
                 id=_F4,
                 name="Office Tower Progress — Orbit Pass",
-                aircraft_id=_AC3,
+                aircraft_id=ac_id_map.get(_AC3, _AC3),
                 pilot_id=_P2,
                 drone_model="DJI Mavic 3 Enterprise",
                 drone_name="Mavic-3E Bravo",
@@ -414,7 +423,7 @@ async def seed_demo_data(db: AsyncSession) -> None:
             Flight(
                 id=_F5,
                 name="Office Tower Progress — Nadir Map",
-                aircraft_id=_AC3,
+                aircraft_id=ac_id_map.get(_AC3, _AC3),
                 pilot_id=_P2,
                 drone_model="DJI Mavic 3 Enterprise",
                 drone_name="Mavic-3E Bravo",
@@ -435,7 +444,7 @@ async def seed_demo_data(db: AsyncSession) -> None:
             Flight(
                 id=_F6,
                 name="Route 9 Bridge — Underside Pass East",
-                aircraft_id=_AC2,
+                aircraft_id=ac_id_map.get(_AC2, _AC2),
                 pilot_id=_P1,
                 drone_model="DJI Matrice 4TD",
                 drone_name="Matrice-4TD Charlie",
@@ -455,7 +464,7 @@ async def seed_demo_data(db: AsyncSession) -> None:
             Flight(
                 id=_F7,
                 name="Route 9 Bridge — Underside Pass West",
-                aircraft_id=_AC2,
+                aircraft_id=ac_id_map.get(_AC2, _AC2),
                 pilot_id=_P1,
                 drone_model="DJI Matrice 4TD",
                 drone_name="Matrice-4TD Charlie",
@@ -476,7 +485,7 @@ async def seed_demo_data(db: AsyncSession) -> None:
             Flight(
                 id=_F8,
                 name="Solana North Expansion — Run 1",
-                aircraft_id=_AC1,
+                aircraft_id=ac_id_map.get(_AC1, _AC1),
                 pilot_id=_P1,
                 drone_model="DJI Matrice 30T",
                 drone_name="Matrice-30T Alpha",
@@ -496,7 +505,7 @@ async def seed_demo_data(db: AsyncSession) -> None:
             Flight(
                 id=_F9,
                 name="Solana Original Array — Re-scan",
-                aircraft_id=_AC1,
+                aircraft_id=ac_id_map.get(_AC1, _AC1),
                 pilot_id=_P2,
                 drone_model="DJI Matrice 30T",
                 drone_name="Matrice-30T Alpha",
@@ -517,7 +526,7 @@ async def seed_demo_data(db: AsyncSession) -> None:
             Flight(
                 id=_F10,
                 name="Warehouse A & B Rooftop Grid",
-                aircraft_id=_AC3,
+                aircraft_id=ac_id_map.get(_AC3, _AC3),
                 pilot_id=_P2,
                 drone_model="DJI Mavic 3 Enterprise",
                 drone_name="Mavic-3E Bravo",
@@ -537,7 +546,7 @@ async def seed_demo_data(db: AsyncSession) -> None:
             Flight(
                 id=_F11,
                 name="Warehouse C Rooftop Grid",
-                aircraft_id=_AC3,
+                aircraft_id=ac_id_map.get(_AC3, _AC3),
                 pilot_id=_P2,
                 drone_model="DJI Mavic 3 Enterprise",
                 drone_name="Mavic-3E Bravo",
@@ -558,7 +567,7 @@ async def seed_demo_data(db: AsyncSession) -> None:
             Flight(
                 id=_F12,
                 name="City Hall Aerial Promo Shoot",
-                aircraft_id=_AC3,
+                aircraft_id=ac_id_map.get(_AC3, _AC3),
                 pilot_id=_P2,
                 drone_model="DJI Mavic 3 Enterprise",
                 drone_name="Mavic-3E Bravo",
@@ -619,7 +628,7 @@ async def seed_demo_data(db: AsyncSession) -> None:
         maintenance_schedules = [
             MaintenanceSchedule(
                 id=uuid.UUID("e1000000-de00-0000-0000-000000000001"),
-                aircraft_id=_AC1,
+                aircraft_id=ac_id_map.get(_AC1, _AC1),
                 maintenance_type="Propeller Inspection & Replacement",
                 interval_hours=50.0,
                 interval_days=None,
@@ -628,7 +637,7 @@ async def seed_demo_data(db: AsyncSession) -> None:
             ),
             MaintenanceSchedule(
                 id=uuid.UUID("e1000000-de00-0000-0000-000000000002"),
-                aircraft_id=_AC1,
+                aircraft_id=ac_id_map.get(_AC1, _AC1),
                 maintenance_type="Gimbal & Camera Calibration",
                 interval_hours=100.0,
                 interval_days=90,
@@ -637,7 +646,7 @@ async def seed_demo_data(db: AsyncSession) -> None:
             ),
             MaintenanceSchedule(
                 id=uuid.UUID("e1000000-de00-0000-0000-000000000003"),
-                aircraft_id=_AC2,
+                aircraft_id=ac_id_map.get(_AC2, _AC2),
                 maintenance_type="Propeller Inspection & Replacement",
                 interval_hours=50.0,
                 interval_days=None,
@@ -646,7 +655,7 @@ async def seed_demo_data(db: AsyncSession) -> None:
             ),
             MaintenanceSchedule(
                 id=uuid.UUID("e1000000-de00-0000-0000-000000000004"),
-                aircraft_id=_AC2,
+                aircraft_id=ac_id_map.get(_AC2, _AC2),
                 maintenance_type="Firmware Update",
                 interval_hours=None,
                 interval_days=60,
@@ -655,7 +664,7 @@ async def seed_demo_data(db: AsyncSession) -> None:
             ),
             MaintenanceSchedule(
                 id=uuid.UUID("e1000000-de00-0000-0000-000000000005"),
-                aircraft_id=_AC3,
+                aircraft_id=ac_id_map.get(_AC3, _AC3),
                 maintenance_type="Motor & Frame Inspection",
                 interval_hours=75.0,
                 interval_days=None,
@@ -664,7 +673,7 @@ async def seed_demo_data(db: AsyncSession) -> None:
             ),
             MaintenanceSchedule(
                 id=uuid.UUID("e1000000-de00-0000-0000-000000000006"),
-                aircraft_id=_AC3,
+                aircraft_id=ac_id_map.get(_AC3, _AC3),
                 maintenance_type="Battery Storage & Health Check",
                 interval_hours=None,
                 interval_days=30,
