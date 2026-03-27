@@ -8,21 +8,29 @@ interface Props {
 
 interface State {
   hasError: boolean;
+  errorMessage: string;
+  errorStack: string;
 }
 
 export default class ErrorBoundary extends Component<Props, State> {
-  state: State = { hasError: false };
+  state: State = { hasError: false, errorMessage: '', errorStack: '' };
 
-  static getDerivedStateFromError(): State {
-    return { hasError: true };
+  static getDerivedStateFromError(error: Error): State {
+    return {
+      hasError: true,
+      errorMessage: error?.message || 'Unknown error',
+      errorStack: error?.stack || '',
+    };
   }
 
   componentDidCatch(error: Error, info: React.ErrorInfo) {
-    console.error('[ErrorBoundary]', error, info.componentStack);
+    console.error('[ErrorBoundary] Error:', error?.message);
+    console.error('[ErrorBoundary] Stack:', error?.stack);
+    console.error('[ErrorBoundary] Component:', info.componentStack);
   }
 
   handleReset = () => {
-    this.setState({ hasError: false });
+    this.setState({ hasError: false, errorMessage: '', errorStack: '' });
   };
 
   render() {
@@ -55,6 +63,17 @@ export default class ErrorBoundary extends Component<Props, State> {
               >
                 An unexpected error occurred. Try refreshing the page or navigating back.
               </Text>
+              {this.state.errorMessage && (
+                <Text
+                  c="#ff6b6b"
+                  ta="center"
+                  maw={500}
+                  size="xs"
+                  style={{ fontFamily: "'Share Tech Mono', monospace", wordBreak: 'break-word' }}
+                >
+                  {this.state.errorMessage}
+                </Text>
+              )}
               <Button
                 color="cyan"
                 onClick={() => {
