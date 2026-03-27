@@ -618,7 +618,7 @@ async def seed_demo_data(db: AsyncSession) -> None:
 
         maintenance_schedules = [
             MaintenanceSchedule(
-                id=uuid.UUID("e1000000-demo-0000-0000-000000000001"),
+                id=uuid.UUID("e1000000-de00-0000-0000-000000000001"),
                 aircraft_id=_AC1,
                 maintenance_type="Propeller Inspection & Replacement",
                 interval_hours=50.0,
@@ -627,7 +627,7 @@ async def seed_demo_data(db: AsyncSession) -> None:
                 description="Inspect all 4 propellers for cracks, chips, and balance issues. Replace any defective blade sets.",
             ),
             MaintenanceSchedule(
-                id=uuid.UUID("e1000000-demo-0000-0000-000000000002"),
+                id=uuid.UUID("e1000000-de00-0000-0000-000000000002"),
                 aircraft_id=_AC1,
                 maintenance_type="Gimbal & Camera Calibration",
                 interval_hours=100.0,
@@ -636,7 +636,7 @@ async def seed_demo_data(db: AsyncSession) -> None:
                 description="Full gimbal calibration, lens cleaning, thermal sensor verification, and IMU re-calibration.",
             ),
             MaintenanceSchedule(
-                id=uuid.UUID("e1000000-demo-0000-0000-000000000003"),
+                id=uuid.UUID("e1000000-de00-0000-0000-000000000003"),
                 aircraft_id=_AC2,
                 maintenance_type="Propeller Inspection & Replacement",
                 interval_hours=50.0,
@@ -645,7 +645,7 @@ async def seed_demo_data(db: AsyncSession) -> None:
                 description="Inspect all 4 propellers for cracks, chips, and balance issues. Replace any defective blade sets.",
             ),
             MaintenanceSchedule(
-                id=uuid.UUID("e1000000-demo-0000-0000-000000000004"),
+                id=uuid.UUID("e1000000-de00-0000-0000-000000000004"),
                 aircraft_id=_AC2,
                 maintenance_type="Firmware Update",
                 interval_hours=None,
@@ -654,7 +654,7 @@ async def seed_demo_data(db: AsyncSession) -> None:
                 description="Check DJI Pilot 2 app and aircraft firmware for available updates. Apply and verify post-update stability.",
             ),
             MaintenanceSchedule(
-                id=uuid.UUID("e1000000-demo-0000-0000-000000000005"),
+                id=uuid.UUID("e1000000-de00-0000-0000-000000000005"),
                 aircraft_id=_AC3,
                 maintenance_type="Motor & Frame Inspection",
                 interval_hours=75.0,
@@ -663,7 +663,7 @@ async def seed_demo_data(db: AsyncSession) -> None:
                 description="Inspect motor mounts, arm fold hinges, and frame for stress cracks or loose fasteners. Clean motor cans.",
             ),
             MaintenanceSchedule(
-                id=uuid.UUID("e1000000-demo-0000-0000-000000000006"),
+                id=uuid.UUID("e1000000-de00-0000-0000-000000000006"),
                 aircraft_id=_AC3,
                 maintenance_type="Battery Storage & Health Check",
                 interval_hours=None,
