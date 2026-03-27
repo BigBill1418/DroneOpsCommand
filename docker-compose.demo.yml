@@ -1,0 +1,41 @@
+# Docker Compose override for demo instance (command-demo.barnardhq.com)
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.demo.yml up -d --build
+#
+# Or with a .env.demo file:
+#   env $(cat .env.demo | xargs) docker compose -f docker-compose.yml -f docker-compose.demo.yml up -d --build
+
+services:
+  backend:
+    environment:
+      - DEMO_MODE=true
+      - DEMO_RESET_INTERVAL_HOURS=24
+      - ADMIN_USERNAME=demo
+      - ADMIN_PASSWORD=demo123
+      - JWT_ACCESS_TOKEN_EXPIRE_MINUTES=60
+      - JWT_REFRESH_TOKEN_EXPIRE_DAYS=1
+      # Disable outbound email in demo
+      - SMTP_HOST=
+      - SMTP_USER=
+      - SMTP_PASSWORD=
+
+  # Disable Ollama in demo (no GPU needed, saves resources)
+  # LLM features will show as "offline" which is fine for demo
+  ollama:
+    deploy:
+      replicas: 0
+
+  ollama-setup:
+    deploy:
+      replicas: 0
+
+  # Disable watchtower in demo
+  watchtower:
+    deploy:
+      replicas: 0
+
+  # Disable cloudflared (demo uses its own tunnel or direct access)
+  cloudflared:
+    deploy:
+      replicas: 0

@@ -161,6 +161,13 @@ async def lifespan(app: FastAPI):
     async with async_session() as session:
         await seed_database(session)
 
+    # Demo mode: seed sample data for the demo instance
+    if settings.demo_mode:
+        from app.demo_seed import seed_demo_data
+        async with async_session() as demo_session:
+            await seed_demo_data(demo_session)
+        logger.info("STARTUP: Demo data seeded")
+
     # Post-seed verification: log the admin hash state
     from app.models.user import User
     from app.auth.jwt import verify_password
@@ -254,7 +261,7 @@ logger.info("MultiPartParser max_file_size set to 200 MB")
 app = FastAPI(
     title="D.O.C — Drone Operations Command",
     description="Self-hosted mission management, flight log analysis, AI report generation, invoicing, telemetry visualization, and real-time airspace monitoring for commercial drone operators.",
-    version="2.52.0",
+    version="2.53.0",
     lifespan=lifespan,
 )
 
@@ -271,6 +278,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Demo mode guard — blocks destructive operations in demo instances
+if settings.demo_mode:
+    from app.middleware.demo_guard import DemoGuardMiddleware
+    app.add_middleware(DemoGuardMiddleware)
+    logger.info("DEMO MODE enabled — destructive operations are blocked")
 
 # Fallback route: serve default aircraft SVGs from bundled static if not in uploads
 _bundled_aircraft_dir = os.path.join(os.path.dirname(__file__), "static", "aircraft")
@@ -325,6 +338,17 @@ app.include_router(maintenance.router)
 app.include_router(backup.router)
 app.include_router(device_keys.router)
 app.include_router(pilots.router)
+
+
+# ── Demo status endpoint (no auth required) ───────────────────────────
+@app.get("/api/demo/status")
+async def demo_status():
+    """Public endpoint — tells the frontend whether demo mode is active."""
+    return {
+        "demo_mode": settings.demo_mode,
+        "message": "This is a demo instance of DroneOpsCommand. Some actions are restricted."
+        if settings.demo_mode else None,
+    }
 
 
 @app.middleware("http")
