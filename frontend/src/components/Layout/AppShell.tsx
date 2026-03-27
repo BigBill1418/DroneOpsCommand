@@ -28,6 +28,7 @@ import {
 } from '@tabler/icons-react';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
 import { useBranding } from '../../hooks/useBranding';
+import { useDemoMode } from '../../hooks/useDemoMode';
 
 interface AppLayoutProps {
   onLogout: () => void;
@@ -52,6 +53,7 @@ export default function AppLayout({ onLogout }: AppLayoutProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const branding = useBranding();
+  const isDemo = useDemoMode();
 
   const handleNav = useCallback((path: string) => {
     navigate(path);
@@ -123,6 +125,25 @@ export default function AppLayout({ onLogout }: AppLayoutProps) {
         </Group>
       </AppShell.Header>
 
+      {isDemo && (
+        <div style={{
+          background: 'linear-gradient(90deg, #ff6b1a, #ff4444)',
+          padding: '6px 16px',
+          textAlign: 'center',
+          fontFamily: "'Share Tech Mono', monospace",
+          fontSize: '12px',
+          color: '#fff',
+          letterSpacing: '1px',
+          position: 'relative',
+          zIndex: 1000,
+        }}>
+          DEMO INSTANCE — Some actions are restricted.{' '}
+          <a href="https://github.com/BigBill1418/DroneOpsCommand" target="_blank" rel="noopener noreferrer" style={{ color: '#fff', textDecoration: 'underline', fontWeight: 700 }}>
+            Deploy Your Own
+          </a>
+        </div>
+      )}
+
       <AppShell.Navbar>
         <AppShell.Section grow component={ScrollArea} type="auto" offsetScrollbars p="xs">
           <Stack gap={0}>
@@ -167,7 +188,7 @@ export default function AppLayout({ onLogout }: AppLayoutProps) {
           />
           <Group gap={8} mt="xs" px={4}>
             <Text size="xs" c="#5a6478" style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: '15px' }}>
-              v2.52.0
+              v2.53.0
             </Text>
             <Tooltip label="Star on GitHub" position="right">
               <ActionIcon variant="subtle" color="gray" size="xs" component="a" href="https://github.com/BigBill1418/DroneOpsCommand" target="_blank" rel="noopener noreferrer">

@@ -2,7 +2,7 @@
 
 **Self-hosted mission management, flight log analysis, GPS flight replay with video export, AI report generation, invoicing, and real-time airspace monitoring for commercial drone operators.**
 
-**Version 2.52.0** | [Quick Start](#quick-start) | [Features](#features) | [Configuration](#configuration) | [Contributing](CONTRIBUTING.md) | [License](LICENSE)
+**Version 2.53.0** | [Quick Start](#quick-start) | [Features](#features) | [Configuration](#configuration) | [Contributing](CONTRIBUTING.md) | [License](LICENSE)
 
 ---
 
@@ -666,7 +666,6 @@ Transform DroneOpsCommand from a self-hosted tool into a revenue-generating SaaS
 - **React Native Android App** — Mission creation, photo capture on-site, report review, and customer lookup from the field. Communicates with the stack via JWT-authenticated HTTPS API.
 - **Voice-to-Text** — On-device speech recognition in the Android app for dictating operator field notes hands-free during or after missions.
 - **DroneOpsSync Deep Integration** — Field-captured photos auto-upload to the correct mission. Field notes from the controller pre-populate report narrative. JWT API is already in place.
-- **Live Flight Tracking** — WebSocket integration for real-time drone position. DroneOpsSync streams GPS via WebSocket during active flights; backend hub relays to frontend Leaflet map with animated markers. DJI Cloud API for enterprise drones (M30T, M300, M350) supports native telemetry streaming.
 - **Public API & Webhooks** — Let third-party tools (dispatch software, QuickBooks, project management) integrate with Command. Webhooks on mission status changes, invoice payment, and report delivery.
 - **Public Demo Instance** — Hosted demo at `command-demo.barnardhq.com` with pre-loaded sample data, auto-reset every 24 hours, sandboxed LLM report generation, rate-limited API, demo-mode banner with "Deploy Your Own" CTA.
 
