@@ -3,8 +3,12 @@
 v2.38.6: Replaced passlib with direct bcrypt usage.
 passlib 1.7.4 is unmaintained and silently fails password verification
 with bcrypt >= 4.0, causing login to always reject valid passwords.
+
+v2.53.4: Wrapped bcrypt calls in asyncio.to_thread() to prevent blocking
+the async event loop during password hash/verify operations (~250-500ms each).
 """
 
+import asyncio
 import logging
 import re
 from datetime import datetime, timedelta
@@ -45,9 +49,8 @@ def is_password_compliant(password: str) -> bool:
     return len(check_password_complexity(password)) == 0
 
 
-def hash_password(password: str) -> str:
-    """Hash a password using bcrypt directly (no passlib)."""
-    # bcrypt only uses first 72 bytes — truncate to avoid silent mismatch
+def _hash_password_sync(password: str) -> str:
+    """Synchronous bcrypt hash — call via hash_password() for async safety."""
     pw_bytes = password.encode("utf-8")[:72]
     salt = bcrypt.gensalt(rounds=12)
     hashed = bcrypt.hashpw(pw_bytes, salt)
@@ -56,8 +59,8 @@ def hash_password(password: str) -> str:
     return result
 
 
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Verify a password against a bcrypt hash directly (no passlib)."""
+def _verify_password_sync(plain_password: str, hashed_password: str) -> bool:
+    """Synchronous bcrypt verify — call via verify_password() for async safety."""
     try:
         pw_bytes = plain_password.encode("utf-8")[:72]
         hash_bytes = hashed_password.encode("utf-8")
@@ -70,6 +73,44 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     except Exception as exc:
         logger.error("Password verification crashed: %s (hash_prefix=%s)", exc, hashed_password[:7] if hashed_password else "EMPTY")
         return False
+
+
+def hash_password(password: str) -> str:
+    """Hash a password using bcrypt directly (no passlib).
+
+    This is the synchronous version — used during startup/seed where
+    we're not in an async request context. For async endpoints, use
+    hash_password_async() instead.
+    """
+    return _hash_password_sync(password)
+
+
+async def hash_password_async(password: str) -> str:
+    """Hash a password without blocking the async event loop.
+
+    Runs bcrypt in a thread pool so other requests aren't blocked
+    during the ~250-500ms hashing operation.
+    """
+    return await asyncio.to_thread(_hash_password_sync, password)
+
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    """Verify a password against a bcrypt hash directly (no passlib).
+
+    This is the synchronous version — used during startup/seed where
+    we're not in an async request context. For async endpoints, use
+    verify_password_async() instead.
+    """
+    return _verify_password_sync(plain_password, hashed_password)
+
+
+async def verify_password_async(plain_password: str, hashed_password: str) -> bool:
+    """Verify a password without blocking the async event loop.
+
+    Runs bcrypt in a thread pool so other requests aren't blocked
+    during the ~250-500ms verification operation.
+    """
+    return await asyncio.to_thread(_verify_password_sync, plain_password, hashed_password)
 
 
 def create_access_token(data: dict) -> str:

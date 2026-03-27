@@ -23,7 +23,9 @@ from app.auth.jwt import (
     create_refresh_token,
     get_current_user,
     hash_password,
+    hash_password_async,
     verify_password,
+    verify_password_async,
     check_password_complexity,
     PASSWORD_RULES,
 )
@@ -113,7 +115,7 @@ async def login(request: Request, body: LoginRequest, db: AsyncSession = Depends
         _record_failure(client_ip)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
-    pw_ok = verify_password(body.password, user.hashed_password)
+    pw_ok = await verify_password_async(body.password, user.hashed_password)
     if not pw_ok:
         logger.warning(
             "Login failed: wrong password for user '%s' (ip=%s, hash_prefix=%s)",
@@ -153,7 +155,7 @@ async def update_account(
     db: AsyncSession = Depends(get_db),
 ):
     """Update username and/or password. Requires current password for verification."""
-    if not verify_password(body.current_password, user.hashed_password):
+    if not await verify_password_async(body.current_password, user.hashed_password):
         raise HTTPException(status_code=403, detail="Current password is incorrect")
 
     if not body.new_username and not body.new_password:
@@ -174,7 +176,7 @@ async def update_account(
                 detail=f"Password does not meet complexity requirements: {'; '.join(failures)}",
             )
         old_hash_prefix = user.hashed_password[:10] if user.hashed_password else "EMPTY"
-        new_hash = hash_password(body.new_password)
+        new_hash = await hash_password_async(body.new_password)
         user.hashed_password = new_hash
         logger.info(
             "PASSWORD CHANGE: user='%s' old_hash=%s... new_hash=%s...",
@@ -189,7 +191,7 @@ async def update_account(
         verify_result = await db.execute(select(User).where(User.username == user.username))
         saved_user = verify_result.scalar_one_or_none()
         if saved_user:
-            readback_ok = verify_password(body.new_password, saved_user.hashed_password)
+            readback_ok = await verify_password_async(body.new_password, saved_user.hashed_password)
             logger.info(
                 "PASSWORD VERIFY: user='%s' readback_ok=%s saved_hash=%s...",
                 user.username, readback_ok, saved_user.hashed_password[:10],
@@ -272,8 +274,8 @@ async def auth_diagnostics(db: AsyncSession = Depends(get_db)):
     # Test bcrypt roundtrip
     try:
         test_pw = "DiagTest123!@#"
-        test_hash = hash_password(test_pw)
-        diag["bcrypt_roundtrip"] = verify_password(test_pw, test_hash)
+        test_hash = await hash_password_async(test_pw)
+        diag["bcrypt_roundtrip"] = await verify_password_async(test_pw, test_hash)
     except Exception as exc:
         diag["bcrypt_error"] = str(exc)
 
@@ -288,7 +290,7 @@ async def auth_diagnostics(db: AsyncSession = Depends(get_db)):
             diag["admin_is_active"] = admin.is_active
             # Check if the env ADMIN_PASSWORD matches the DB hash
             # (tells you if the password was changed via UI vs what env expects)
-            diag["env_password_matches_db"] = verify_password(
+            diag["env_password_matches_db"] = await verify_password_async(
                 settings.admin_password, admin.hashed_password
             ) if admin.hashed_password else False
     except Exception as exc:
