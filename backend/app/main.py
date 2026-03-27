@@ -17,7 +17,7 @@ from starlette.formparsers import MultiPartParser
 from app.config import settings
 from app.database import Base, async_session, engine, get_db
 import app.models  # noqa: F401 — ensure all models registered with Base before create_all
-from app.routers import auth, customers, aircraft, missions, flights, maps, reports, invoices, rate_templates, llm, system_settings, financials, weather, intake, flight_library, batteries, maintenance, backup, device_keys
+from app.routers import auth, customers, aircraft, missions, flights, maps, reports, invoices, rate_templates, llm, system_settings, financials, weather, intake, flight_library, batteries, maintenance, backup, device_keys, pilots
 
 # Configure root logger for the app
 logging.basicConfig(
@@ -100,6 +100,7 @@ def _add_missing_columns(conn):
             ],
             "flights": [
                 ("drone_name", "ALTER TABLE flights ADD COLUMN drone_name VARCHAR(255)"),
+                ("pilot_id", "ALTER TABLE flights ADD COLUMN pilot_id VARCHAR(36) REFERENCES pilots(id) ON DELETE SET NULL"),
             ],
             "batteries": [
                 ("name", "ALTER TABLE batteries ADD COLUMN name VARCHAR(255)"),
@@ -253,7 +254,7 @@ logger.info("MultiPartParser max_file_size set to 200 MB")
 app = FastAPI(
     title="D.O.C — Drone Operations Command",
     description="Self-hosted mission management, flight log analysis, AI report generation, invoicing, telemetry visualization, and real-time airspace monitoring for commercial drone operators.",
-    version="2.51.0",
+    version="2.52.0",
     lifespan=lifespan,
 )
 
@@ -323,6 +324,7 @@ app.include_router(batteries.router)
 app.include_router(maintenance.router)
 app.include_router(backup.router)
 app.include_router(device_keys.router)
+app.include_router(pilots.router)
 
 
 @app.middleware("http")

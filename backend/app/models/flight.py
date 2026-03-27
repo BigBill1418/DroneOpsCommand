@@ -47,8 +47,12 @@ class Flight(Base):
     aircraft_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("aircraft.id", ondelete="SET NULL"), nullable=True
     )
+    pilot_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("pilots.id", ondelete="SET NULL"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     aircraft = relationship("Aircraft", lazy="selectin")
+    pilot = relationship("Pilot", lazy="selectin")
     battery_logs = relationship("BatteryLog", back_populates="flight", lazy="noload")
