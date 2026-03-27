@@ -13,6 +13,7 @@ flight-parser/target/
 # Environment
 .env
 *.env.local
+.env.demo.local
 
 # IDE
 .vscode/
