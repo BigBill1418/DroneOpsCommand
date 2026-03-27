@@ -238,13 +238,13 @@ export default function Dashboard() {
   }, []);
 
   useEffect(() => {
-    api.get('/missions').then((r) => setMissions(r.data)).catch(() => setMissions([]));
-    api.get('/customers').then((r) => setCustomers(r.data)).catch(() => setCustomers([]));
+    api.get('/missions').then((r) => setMissions(Array.isArray(r.data) ? r.data : [])).catch(() => setMissions([]));
+    api.get('/customers').then((r) => setCustomers(Array.isArray(r.data) ? r.data : [])).catch(() => setCustomers([]));
     api.get('/flight-library/stats/summary').then((r) => setFlightStats(r.data)).catch(() => setFlightStats(null));
     fetchWeather();
-    api.get('/maintenance/due').then((r) => setMaintenanceAlerts(r.data)).catch(() => setMaintenanceAlerts([]));
+    api.get('/maintenance/due').then((r) => setMaintenanceAlerts(Array.isArray(r.data) ? r.data : [])).catch(() => setMaintenanceAlerts([]));
     api.get('/maintenance/next-due').then((r) => setNextServiceDue(r.data)).catch(() => setNextServiceDue(null));
-    api.get('/batteries').then((r) => setBatteries(r.data)).catch(() => setBatteries([]));
+    api.get('/batteries').then((r) => setBatteries(Array.isArray(r.data) ? r.data : [])).catch(() => setBatteries([]));
   }, [fetchWeather]);
 
   // Auto-refresh weather every 5 minutes

@@ -409,7 +409,7 @@ async def get_backup_history(
 
     if not os.path.isdir(BACKUP_DIR):
         logger.info("Backup directory %s does not exist — returning empty history", BACKUP_DIR)
-        return {"backups": []}
+        return []
 
     entries = []
     try:
@@ -439,7 +439,7 @@ async def get_backup_history(
             continue
 
     logger.info("Backup history: %d file(s) found", len(entries))
-    return {"backups": entries}
+    return entries
 
 
 @router.post("/run-now")
