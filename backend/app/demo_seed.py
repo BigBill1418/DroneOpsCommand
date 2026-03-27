@@ -596,19 +596,19 @@ async def seed_demo_data(db: AsyncSession) -> None:
         logger.info("demo_seed: creating mission-flight links...")
 
         mission_flight_map = [
-            # (mission_id, flight_id, aircraft_id)
-            (_M1, _F1,  _AC1),
-            (_M1, _F2,  _AC1),
-            (_M1, _F3,  _AC1),
-            (_M2, _F4,  _AC3),
-            (_M2, _F5,  _AC3),
-            (_M3, _F6,  _AC2),
-            (_M3, _F7,  _AC2),
-            (_M4, _F8,  _AC1),
-            (_M4, _F9,  _AC1),
-            (_M5, _F10, _AC3),
-            (_M5, _F11, _AC3),
-            (_M6, _F12, _AC3),
+            # (mission_id, flight_id, aircraft_id) — use ac_id_map for resolved IDs
+            (_M1, _F1,  ac_id_map.get(_AC1, _AC1)),
+            (_M1, _F2,  ac_id_map.get(_AC1, _AC1)),
+            (_M1, _F3,  ac_id_map.get(_AC1, _AC1)),
+            (_M2, _F4,  ac_id_map.get(_AC3, _AC3)),
+            (_M2, _F5,  ac_id_map.get(_AC3, _AC3)),
+            (_M3, _F6,  ac_id_map.get(_AC2, _AC2)),
+            (_M3, _F7,  ac_id_map.get(_AC2, _AC2)),
+            (_M4, _F8,  ac_id_map.get(_AC1, _AC1)),
+            (_M4, _F9,  ac_id_map.get(_AC1, _AC1)),
+            (_M5, _F10, ac_id_map.get(_AC3, _AC3)),
+            (_M5, _F11, ac_id_map.get(_AC3, _AC3)),
+            (_M6, _F12, ac_id_map.get(_AC3, _AC3)),
         ]
 
         for mission_id, flight_id, aircraft_id in mission_flight_map:
