@@ -184,8 +184,8 @@ export default function Settings() {
 
   useEffect(() => {
     api.get('/llm/status').then((r) => setLlmStatus(r.data)).catch(() => setLlmStatus({ status: 'offline' })).finally(() => setLlmLoading(false));
-    api.get('/aircraft').then((r) => setAircraft(r.data)).catch(() => setAircraft([]));
-    api.get('/rate-templates').then((r) => setRateTemplates(r.data)).catch(() => setRateTemplates([]));
+    api.get('/aircraft').then((r) => setAircraft(Array.isArray(r.data) ? r.data : [])).catch(() => setAircraft([]));
+    api.get('/rate-templates').then((r) => setRateTemplates(Array.isArray(r.data) ? r.data : [])).catch(() => setRateTemplates([]));
     api.get('/settings/smtp').then((r) => smtpForm.setValues(r.data)).catch(() => {});
     api.get('/settings/payment').then((r) => paymentForm.setValues(r.data)).catch(() => {});
     api.get('/settings/opendronelog').then((r) => odlForm.setValues(r.data)).catch(() => {});
@@ -196,12 +196,12 @@ export default function Settings() {
     api.get('/settings/weather').then((r) => weatherForm.setValues(r.data)).catch(() => {});
     api.get('/intake/default-tos-status').then((r) => setTosUploaded(r.data.uploaded)).catch(() => {});
     api.get('/settings/branding').then((r) => { brandingForm.setValues(r.data); setCompanyLogo(r.data.company_logo || ''); }).catch(() => {});
-    api.get('/settings/device-keys').then((r) => setDeviceKeys(r.data)).catch(() => {});
-    api.get('/pilots').then((r) => setPilots(r.data)).catch(() => {});
+    api.get('/settings/device-keys').then((r) => setDeviceKeys(Array.isArray(r.data) ? r.data : [])).catch(() => {});
+    api.get('/pilots').then((r) => setPilots(Array.isArray(r.data) ? r.data : [])).catch(() => {});
     api.get('/backup/schedule').then((r) => setBackupSchedule(r.data)).catch(() => {});
-    api.get('/backup/history').then((r) => setBackupHistory(r.data)).catch(() => {});
+    api.get('/backup/history').then((r) => setBackupHistory(Array.isArray(r.data) ? r.data : [])).catch(() => {});
     setMaintenanceLoading(true);
-    api.get('/maintenance/status').then((r) => setMaintenanceStatus(r.data)).catch(() => {}).finally(() => setMaintenanceLoading(false));
+    api.get('/maintenance/status').then((r) => setMaintenanceStatus(Array.isArray(r.data) ? r.data : [])).catch(() => {}).finally(() => setMaintenanceLoading(false));
   }, []);
 
   const handleBackupAndDownload = async () => {
@@ -317,7 +317,7 @@ export default function Settings() {
       setAircraftModal(false);
       setEditingAircraftId(null);
       aircraftForm.reset();
-      api.get('/aircraft').then((r) => setAircraft(r.data));
+      api.get('/aircraft').then((r) => setAircraft(Array.isArray(r.data) ? r.data : []));
       notifications.show({ title: 'Saved', message: 'Aircraft profile saved', color: 'cyan' });
     } catch {
       notifications.show({ title: 'Error', message: 'Invalid specs JSON', color: 'red' });
@@ -393,7 +393,7 @@ export default function Settings() {
       setRateModal(false);
       setEditingRateId(null);
       rateForm.reset();
-      api.get('/rate-templates').then((r) => setRateTemplates(r.data));
+      api.get('/rate-templates').then((r) => setRateTemplates(Array.isArray(r.data) ? r.data : []));
       notifications.show({ title: 'Saved', message: 'Rate template saved', color: 'cyan' });
     } catch {
       notifications.show({ title: 'Error', message: 'Failed to save rate template', color: 'red' });
@@ -768,7 +768,7 @@ export default function Settings() {
       setPilotModal(false);
       setEditingPilotId(null);
       pilotForm.reset();
-      api.get('/pilots').then((r) => setPilots(r.data));
+      api.get('/pilots').then((r) => setPilots(Array.isArray(r.data) ? r.data : []));
       notifications.show({ title: 'Saved', message: 'Pilot saved', color: 'cyan' });
     } catch (err: any) {
       notifications.show({ title: 'Error', message: err.response?.data?.detail || 'Failed to save pilot', color: 'red' });
@@ -793,7 +793,7 @@ export default function Settings() {
   const handleDeletePilot = async (pilotId: string) => {
     try {
       await api.delete(`/pilots/${pilotId}`);
-      api.get('/pilots').then((r) => setPilots(r.data));
+      api.get('/pilots').then((r) => setPilots(Array.isArray(r.data) ? r.data : []));
       notifications.show({ title: 'Deactivated', message: 'Pilot deactivated', color: 'yellow' });
     } catch {
       notifications.show({ title: 'Error', message: 'Failed to deactivate pilot', color: 'red' });
@@ -806,7 +806,7 @@ export default function Settings() {
     try {
       const resp = await api.post('/maintenance/seed-defaults', { aircraft_id: aircraftId });
       notifications.show({ title: 'Seeded', message: resp.data.message, color: 'cyan' });
-      api.get('/maintenance/status').then((r) => setMaintenanceStatus(r.data));
+      api.get('/maintenance/status').then((r) => setMaintenanceStatus(Array.isArray(r.data) ? r.data : []));
     } catch (err: any) {
       notifications.show({ title: 'Error', message: err.response?.data?.detail || 'Failed to seed defaults', color: 'red' });
     } finally {
@@ -832,7 +832,7 @@ export default function Settings() {
     try {
       const resp = await api.post('/backup/run-now');
       notifications.show({ title: 'Backup Complete', message: `${resp.data.filename} created (${resp.data.toc_entries} objects)`, color: 'green' });
-      api.get('/backup/history').then((r) => setBackupHistory(r.data));
+      api.get('/backup/history').then((r) => setBackupHistory(Array.isArray(r.data) ? r.data : []));
     } catch (err: any) {
       notifications.show({ title: 'Backup Failed', message: err.response?.data?.detail || 'Failed to run backup', color: 'red' });
     } finally {
@@ -2352,7 +2352,7 @@ export default function Settings() {
                   <IconCalendar size={20} color="#00d4ff" />
                   <Title order={3} c="#e8edf2" style={{ letterSpacing: '1px' }}>BACKUP HISTORY</Title>
                 </Group>
-                <Button variant="subtle" color="cyan" size="xs" onClick={() => api.get('/backup/history').then((r) => setBackupHistory(r.data))} leftSection={<IconRefresh size={12} />}>
+                <Button variant="subtle" color="cyan" size="xs" onClick={() => api.get('/backup/history').then((r) => setBackupHistory(Array.isArray(r.data) ? r.data : []))} leftSection={<IconRefresh size={12} />}>
                   Refresh
                 </Button>
               </Group>
