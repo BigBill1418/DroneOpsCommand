@@ -10,7 +10,7 @@ class Settings(BaseSettings):
 
     # Ollama
     ollama_base_url: str = "http://ollama:11434"
-    ollama_model: str = "mistral:7b-instruct-v0.3-q4_K_M"
+    ollama_model: str = "llama3.1:8b-instruct-q4_K_M"
 
     # OpenDroneLog
     opendronelog_url: str = ""

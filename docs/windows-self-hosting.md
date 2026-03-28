@@ -14,7 +14,7 @@ Complete guide for running DroneOpsCommand on a Windows 10/11 machine using Dock
 | CPU | 4 cores | 8 cores |
 | Virtualization | Enabled in BIOS | — |
 
-> The AI report engine (Ollama/Mistral 7B) reserves ~8 GB of RAM by itself. With 8 GB total you will be tight — 16 GB is strongly recommended.
+> The AI report engine (Ollama/Llama 3.1 8B) reserves ~8 GB of RAM by itself. With 8 GB total you will be tight — 16 GB is strongly recommended.
 
 ---
 
@@ -140,7 +140,7 @@ docker compose up -d
 The first run will:
 1. **Build** the backend, frontend, and flight-parser images (5-10 minutes)
 2. **Download** PostgreSQL, Redis, and Ollama base images (~2 GB)
-3. **Pull the AI model** — Mistral 7B is ~4 GB
+3. **Pull the AI model** — Llama 3.1 8B is ~4 GB
 
 Watch the model download progress:
 
@@ -157,7 +157,7 @@ Press `Ctrl+C` when you see "Model pulled." — the app is ready.
 Open your browser and go to:
 
 - **Web UI:** [http://localhost:3080](http://localhost:3080)
-- **API docs:** [http://localhost:8000/docs](http://localhost:8000/docs)
+- **API docs:** [http://localhost:3080/docs](http://localhost:3080/docs)
 
 Log in with:
 - **Username:** `admin` (or whatever you set for `ADMIN_USERNAME`)
