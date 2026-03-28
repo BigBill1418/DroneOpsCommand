@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useEffect } from 'react';
 import {
   AppShell,
   Burger,
@@ -9,8 +9,9 @@ import {
   Text,
   ActionIcon,
   Tooltip,
+  Overlay,
 } from '@mantine/core';
-import { useDisclosure } from '@mantine/hooks';
+import { useDisclosure, useMediaQuery } from '@mantine/hooks';
 import {
   IconBattery3,
   IconBrandGithub,
@@ -54,6 +55,24 @@ export default function AppLayout({ onLogout }: AppLayoutProps) {
   const location = useLocation();
   const branding = useBranding();
   const isDemo = useDemoMode();
+  const isMobile = useMediaQuery('(max-width: 768px)');
+  const isLandscapePhone = useMediaQuery('(orientation: landscape) and (max-height: 500px)');
+  const showMobileNav = isMobile || isLandscapePhone;
+
+  // Close navbar on route change (covers browser back/forward too)
+  useEffect(() => {
+    close();
+  }, [location.pathname, close]);
+
+  // Lock body scroll when mobile nav is open — prevents background scrolling
+  useEffect(() => {
+    if (showMobileNav && opened) {
+      document.body.classList.add('nav-open');
+    } else {
+      document.body.classList.remove('nav-open');
+    }
+    return () => document.body.classList.remove('nav-open');
+  }, [showMobileNav, opened]);
 
   const handleNav = useCallback((path: string) => {
     navigate(path);
@@ -135,13 +154,25 @@ export default function AppLayout({ onLogout }: AppLayoutProps) {
           color: '#fff',
           letterSpacing: '1px',
           position: 'relative',
-          zIndex: 1000,
+          zIndex: 100,
         }}>
           DEMO INSTANCE — Some actions are restricted.{' '}
           <a href="https://github.com/BigBill1418/DroneOpsCommand" target="_blank" rel="noopener noreferrer" style={{ color: '#fff', textDecoration: 'underline', fontWeight: 700 }}>
             Deploy Your Own
           </a>
         </div>
+      )}
+
+      {/* Mobile backdrop overlay — tap anywhere outside navbar to close */}
+      {showMobileNav && opened && (
+        <Overlay
+          onClick={close}
+          fixed
+          opacity={0.6}
+          color="#000"
+          zIndex={199}
+          style={{ cursor: 'pointer' }}
+        />
       )}
 
       <AppShell.Navbar>
@@ -188,7 +219,7 @@ export default function AppLayout({ onLogout }: AppLayoutProps) {
           />
           <Group gap={8} mt="xs" px={4}>
             <Text size="xs" c="#5a6478" style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: '15px' }}>
-              v2.53.6
+              v2.54.0
             </Text>
             <Tooltip label="Star on GitHub" position="right">
               <ActionIcon variant="subtle" color="gray" size="xs" component="a" href="https://github.com/BigBill1418/DroneOpsCommand" target="_blank" rel="noopener noreferrer">
