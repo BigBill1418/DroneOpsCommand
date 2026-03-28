@@ -2,6 +2,10 @@
    MOBILE & TABLET RESPONSIVE OVERRIDES
    Field-ready UI: large touch targets, readable text, usable forms.
    Only activates at ≤768px (sm breakpoint). Desktop is untouched.
+
+   MOBILE NAVIGATION: Handled by a Mantine <Drawer> in AppShell.tsx.
+   No CSS hacks needed — the Drawer provides overlay, tap-to-close,
+   scroll locking, and proper z-indexing out of the box.
    ═══════════════════════════════════════════════════════════════════════ */
 
 /* ── Global: Touch targets & spacing ──────────────────────────────── */
@@ -43,7 +47,7 @@
     min-height: 28px !important;
   }
 
-  /* Navbar items — bigger touch targets */
+  /* Nav items inside the Drawer — bigger touch targets */
   .mantine-NavLink-root {
     min-height: 48px;
     padding: 10px 12px !important;
@@ -58,44 +62,11 @@
     margin-right: 12px;
   }
 
-  /* ── Mobile navbar: slide-in drawer with proper z-index ──────────── */
-  .mantine-AppShell-navbar {
-    z-index: 200;
-    position: fixed !important;
-    top: 0;
-    left: 0;
-    height: 100dvh !important;
-    height: 100% !important;
-    width: 260px !important;
-    max-width: 80vw !important;
-    transition: transform 250ms ease, opacity 200ms ease !important;
-    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.5);
-  }
-
-  /* When Mantine hides the navbar (data-hidden), slide it off-screen */
-  .mantine-AppShell-navbar[data-hidden] {
-    transform: translateX(-100%) !important;
-    opacity: 0 !important;
-    pointer-events: none !important;
-    box-shadow: none !important;
-  }
-
-  /* When visible, ensure it's fully on-screen */
-  .mantine-AppShell-navbar:not([data-hidden]) {
-    transform: translateX(0) !important;
-    opacity: 1 !important;
-  }
-
-  /* Hide decorative drone SVG on mobile — wastes precious screen space */
-  .nav-drone-visual {
-    display: none !important;
-  }
-
-  /* Reduce page padding on mobile — never shift for navbar */
+  /* Main content — full width, no sidebar indent on mobile */
   .mantine-AppShell-main {
     padding: 8px !important;
     padding-top: 68px !important; /* header height + small gap */
-    padding-left: 8px !important; /* no indent for navbar on mobile */
+    padding-left: 8px !important;
   }
 
   /* Tables: ensure scroll areas show scrollbar */
@@ -142,16 +113,6 @@
   }
 
   .mantine-Modal-header {
-    padding: 12px !important;
-  }
-
-  /* Drawers — full width on mobile */
-  .mantine-Drawer-content {
-    width: 100% !important;
-    max-width: 100% !important;
-  }
-
-  .mantine-Drawer-body {
     padding: 12px !important;
   }
 
@@ -342,53 +303,17 @@
 
 /* ── Mobile landscape ─────────────────────────────────────────────── */
 /* Phones in landscape have width > 768px but height < 500px.
-   Without this, Mantine treats them as "desktop" and shows the navbar
-   as a permanent 220px sidebar, squishing content and getting stuck. */
+   Navigation is handled by the Drawer (JS detects landscape via
+   useMediaQuery), so no navbar CSS hacks needed here.
+   Only layout adjustments for the shorter viewport. */
 @media (orientation: landscape) and (max-height: 500px) {
-  /* Force the navbar to behave as a slide-in drawer, same as portrait.
-     Mantine shows it above sm breakpoint — override that. */
-  .mantine-AppShell-navbar {
-    position: fixed !important;
-    z-index: 200;
-    width: 260px !important;
-    max-width: 80vw !important;
-    height: 100dvh !important;
-    height: 100% !important;
-    transform: translateX(-100%) !important;
-    transition: transform 250ms ease, opacity 200ms ease !important;
-    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.5);
-  }
-
-  .mantine-AppShell-navbar[data-hidden] {
-    transform: translateX(-100%) !important;
-    opacity: 0 !important;
-    pointer-events: none !important;
-    box-shadow: none !important;
-  }
-
-  /* When opened via burger, slide it in */
-  .mantine-AppShell-navbar:not([data-hidden]) {
-    transform: translateX(0) !important;
-    opacity: 1 !important;
-  }
-
-  /* Hide decorative drone SVG in landscape */
-  .nav-drone-visual {
-    display: none !important;
-  }
-
-  /* Show the burger menu in landscape too */
-  .mantine-Burger-root {
-    display: flex !important;
-  }
-
   /* Shrink the header to save vertical space */
   .mantine-AppShell-header {
     height: 48px !important;
     min-height: 48px !important;
   }
 
-  /* Adjust main area top padding for shorter header — never indent for navbar */
+  /* Adjust main area top padding for shorter header */
   .mantine-AppShell-main {
     padding-top: 56px !important;
     padding-left: 8px !important;
@@ -524,12 +449,6 @@
 
 /* ── Prevent horizontal overflow globally ─────────────────────────── */
 @media (max-width: 768px) {
-  /* Lock body scroll when mobile nav is open — prevent background scrolling */
-  body.nav-open {
-    overflow: hidden !important;
-    touch-action: none;
-  }
-
   body {
     overflow-x: hidden;
   }
