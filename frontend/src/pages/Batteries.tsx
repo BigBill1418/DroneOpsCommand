@@ -338,7 +338,7 @@ export default function Batteries() {
                         <Table.Td colSpan={6} style={{ borderBottom: '1px solid #1a1f2e', padding: '6px 12px' }}>
                           <Group justify="space-between">
                             <Text size="xs" fw={700} c="#00d4ff" style={{ fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '2px', fontSize: '14px' }}>
-                              {model.toUpperCase()} — {bats.length} batter{bats.length !== 1 ? 'ies' : 'y'}
+                              {(model || 'Unknown').toUpperCase()} — {bats.length} batter{bats.length !== 1 ? 'ies' : 'y'}
                             </Text>
                             <Button
                               variant="subtle"
@@ -370,7 +370,7 @@ export default function Batteries() {
                             </Table.Td>
                             <Table.Td>
                               <Badge color={STATUS_COLORS[bat.status] || 'gray'} variant="light" size="sm">
-                                {bat.status.toUpperCase()}
+                                {(bat.status || 'unknown').toUpperCase()}
                               </Badge>
                             </Table.Td>
                             <Table.Td>

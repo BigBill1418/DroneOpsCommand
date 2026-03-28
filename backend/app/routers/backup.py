@@ -5,15 +5,18 @@ import logging
 import os
 import subprocess
 import tempfile
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.jwt import get_current_user
 from app.config import settings
 from app.database import get_db
+from app.models.system_settings import SystemSetting
 from app.models.user import User
 
 logger = logging.getLogger("doc.backup")
@@ -311,3 +314,259 @@ async def restore_from_upload(
         "table_count": table_count,
         "warnings": result.stderr[:1000] if result.stderr else None,
     }
+
+
+# ---------------------------------------------------------------------------
+# Scheduled backup settings & history endpoints
+# ---------------------------------------------------------------------------
+
+BACKUP_DIR = "/data/backups"
+
+_SCHEDULE_KEYS = {
+    "backup_enabled": "false",
+    "backup_retention_days": "30",
+    "backup_time": "02:00",
+}
+
+
+class BackupScheduleUpdate(BaseModel):
+    enabled: bool = False
+    retention_days: int = 30
+    backup_time: str = "02:00"  # HH:MM format
+
+
+async def _get_setting(db: AsyncSession, key: str) -> str:
+    """Fetch a single SystemSetting value, returning the default if not set."""
+    result = await db.execute(select(SystemSetting).where(SystemSetting.key == key))
+    row = result.scalar_one_or_none()
+    return row.value if row is not None else _SCHEDULE_KEYS.get(key, "")
+
+
+async def _set_setting(db: AsyncSession, key: str, value: str) -> None:
+    """Upsert a single SystemSetting key-value pair."""
+    result = await db.execute(select(SystemSetting).where(SystemSetting.key == key))
+    row = result.scalar_one_or_none()
+    if row is None:
+        db.add(SystemSetting(key=key, value=value))
+    else:
+        row.value = value
+
+
+@router.get("/schedule")
+async def get_backup_schedule(
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """Get the current scheduled backup settings from the SystemSetting table."""
+    logger.info("Fetching backup schedule settings")
+    enabled_val = await _get_setting(db, "backup_enabled")
+    retention_val = await _get_setting(db, "backup_retention_days")
+    time_val = await _get_setting(db, "backup_time")
+
+    try:
+        retention_days = int(retention_val)
+    except ValueError:
+        retention_days = 30
+
+    return {
+        "enabled": enabled_val.lower() == "true",
+        "retention_days": retention_days,
+        "backup_time": time_val,
+    }
+
+
+@router.put("/schedule")
+async def update_backup_schedule(
+    payload: BackupScheduleUpdate,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """Update the scheduled backup settings in the SystemSetting table."""
+    logger.info(
+        "Updating backup schedule: enabled=%s, retention_days=%d, backup_time=%s",
+        payload.enabled, payload.retention_days, payload.backup_time,
+    )
+
+    await _set_setting(db, "backup_enabled", "true" if payload.enabled else "false")
+    await _set_setting(db, "backup_retention_days", str(payload.retention_days))
+    await _set_setting(db, "backup_time", payload.backup_time)
+    await db.commit()
+
+    logger.info("Backup schedule updated successfully")
+    return {
+        "enabled": payload.enabled,
+        "retention_days": payload.retention_days,
+        "backup_time": payload.backup_time,
+    }
+
+
+@router.get("/history")
+async def get_backup_history(
+    _user: User = Depends(get_current_user),
+):
+    """List backup files saved in the backup directory with size, date, and sha256."""
+    logger.info("Listing backup history from %s", BACKUP_DIR)
+
+    if not os.path.isdir(BACKUP_DIR):
+        logger.info("Backup directory %s does not exist — returning empty history", BACKUP_DIR)
+        return []
+
+    entries = []
+    try:
+        filenames = sorted(
+            [f for f in os.listdir(BACKUP_DIR) if f.endswith(".dump")],
+            reverse=True,
+        )
+    except OSError as exc:
+        logger.error("Failed to list backup directory %s: %s", BACKUP_DIR, exc)
+        raise HTTPException(status_code=500, detail=f"Could not read backup directory: {exc}")
+
+    for filename in filenames:
+        filepath = os.path.join(BACKUP_DIR, filename)
+        try:
+            stat = os.stat(filepath)
+            size_bytes = stat.st_size
+            modified_at = datetime.utcfromtimestamp(stat.st_mtime).isoformat() + "Z"
+            checksum = _compute_sha256(filepath)
+            entries.append({
+                "filename": filename,
+                "size_bytes": size_bytes,
+                "modified_at": modified_at,
+                "sha256": checksum,
+            })
+        except OSError as exc:
+            logger.warning("Could not stat backup file %s: %s", filepath, exc)
+            continue
+
+    logger.info("Backup history: %d file(s) found", len(entries))
+    return entries
+
+
+@router.post("/run-now")
+async def run_backup_now(
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """Trigger an immediate scheduled backup — saves the dump to disk, does not stream."""
+    logger.info("Immediate scheduled backup requested")
+
+    # Ensure backup directory exists
+    try:
+        os.makedirs(BACKUP_DIR, exist_ok=True)
+    except OSError as exc:
+        logger.error("Cannot create backup directory %s: %s", BACKUP_DIR, exc)
+        raise HTTPException(status_code=500, detail=f"Cannot create backup directory: {exc}")
+
+    conn = _pg_conn_args()
+    env = {"PGPASSWORD": conn["password"]}
+    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    filename = f"doc_backup_{timestamp}.dump"
+    filepath = os.path.join(BACKUP_DIR, filename)
+
+    cmd = [
+        "pg_dump",
+        "-h", conn["host"],
+        "-p", conn["port"],
+        "-U", conn["user"],
+        "-Fc",
+        "-f", filepath,
+        conn["dbname"],
+    ]
+
+    logger.info("Running pg_dump to %s", filepath)
+    try:
+        result = _run_pg_command(cmd, env, timeout=600)
+    except subprocess.TimeoutExpired:
+        logger.error("Scheduled backup timed out for %s", filename)
+        raise HTTPException(status_code=504, detail="Backup timed out")
+    except FileNotFoundError:
+        logger.error("pg_dump not found — postgresql-client not installed")
+        raise HTTPException(status_code=500, detail="pg_dump not found — postgresql-client not installed")
+
+    if result.returncode != 0:
+        logger.error("pg_dump failed for scheduled backup %s: %s", filename, result.stderr)
+        raise HTTPException(status_code=500, detail=f"Backup failed: {result.stderr[:500]}")
+
+    # Validate archive integrity
+    archive_valid, toc_entries = _validate_archive(filepath, env)
+    if not archive_valid:
+        try:
+            os.unlink(filepath)
+        except OSError:
+            pass
+        logger.error("Scheduled backup archive failed validation: %s", filename)
+        raise HTTPException(status_code=500, detail="Backup archive failed validation — file is corrupt")
+
+    checksum = _compute_sha256(filepath)
+    size_bytes = os.path.getsize(filepath)
+
+    logger.info(
+        "Scheduled backup saved: %s (%d bytes, sha256=%s, %d objects)",
+        filename, size_bytes, checksum, toc_entries,
+    )
+
+    # Clean up old backups beyond retention_days
+    retention_val = await _get_setting(db, "backup_retention_days")
+    try:
+        retention_days = int(retention_val)
+    except ValueError:
+        retention_days = 30
+
+    cutoff = datetime.utcnow() - timedelta(days=retention_days)
+    removed = []
+    try:
+        for fname in os.listdir(BACKUP_DIR):
+            if not fname.endswith(".dump") or fname == filename:
+                continue
+            fpath = os.path.join(BACKUP_DIR, fname)
+            try:
+                mtime = datetime.utcfromtimestamp(os.path.getmtime(fpath))
+                if mtime < cutoff:
+                    os.unlink(fpath)
+                    removed.append(fname)
+                    logger.info("Removed expired backup: %s (mtime=%s, cutoff=%s)", fname, mtime.isoformat(), cutoff.isoformat())
+            except OSError as exc:
+                logger.warning("Could not remove old backup %s: %s", fpath, exc)
+    except OSError as exc:
+        logger.warning("Could not list backup directory for cleanup: %s", exc)
+
+    if removed:
+        logger.info("Cleaned up %d expired backup(s): %s", len(removed), removed)
+
+    return {
+        "filename": filename,
+        "filepath": filepath,
+        "size_bytes": size_bytes,
+        "sha256": checksum,
+        "toc_entries": toc_entries,
+        "retention_days": retention_days,
+        "removed_old_backups": removed,
+    }
+
+
+@router.delete("/history/{filename}")
+async def delete_backup_file(
+    filename: str,
+    _user: User = Depends(get_current_user),
+):
+    """Delete a specific backup file from the backup directory."""
+    # Sanitize: reject any path traversal attempts
+    safe_name = os.path.basename(filename)
+    if safe_name != filename or not safe_name.endswith(".dump"):
+        logger.warning("Rejected invalid backup filename for deletion: %r", filename)
+        raise HTTPException(status_code=400, detail="Invalid filename — only .dump files in the backup directory may be deleted")
+
+    filepath = os.path.join(BACKUP_DIR, safe_name)
+
+    if not os.path.isfile(filepath):
+        logger.warning("Delete requested for non-existent backup: %s", filepath)
+        raise HTTPException(status_code=404, detail=f"Backup file not found: {safe_name}")
+
+    try:
+        os.unlink(filepath)
+    except OSError as exc:
+        logger.error("Failed to delete backup file %s: %s", filepath, exc)
+        raise HTTPException(status_code=500, detail=f"Could not delete backup file: {exc}")
+
+    logger.info("Backup file deleted: %s", safe_name)
+    return {"deleted": True, "filename": safe_name}

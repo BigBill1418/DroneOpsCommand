@@ -2,7 +2,7 @@
 
 **Self-hosted mission management, flight log analysis, GPS flight replay with video export, AI report generation, invoicing, and real-time airspace monitoring for commercial drone operators.**
 
-**Version 2.51.0** | [Quick Start](#quick-start) | [Features](#features) | [Configuration](#configuration) | [Contributing](CONTRIBUTING.md) | [License](LICENSE)
+**Version 2.54.1** | [Quick Start](#quick-start) | [Features](#features) | [Configuration](#configuration) | [Contributing](CONTRIBUTING.md) | [License](LICENSE)
 
 ---
 
@@ -574,25 +574,100 @@ Full interactive API documentation is available at `http://localhost:3080/docs` 
 
 ## Roadmap
 
-- **Public Demo Instance** — Fully functional hosted demo at `demo.droneops.app` for prospective users to explore without installing anything
-  - Read-only demo account with pre-loaded sample data (flights, missions, customers, batteries, invoices, reports)
-  - Realistic DJI flight logs with GPS tracks across multiple aircraft and mission types
-  - Auto-reset every 24 hours to clean state (prevents abuse, keeps data fresh)
-  - Demo-mode banner with "Deploy Your Own" CTA linking to Quick Start guide
-  - Disabled features: file uploads, email sending, Cloudflare tunnel, password changes
-  - Sandboxed LLM report generation so visitors can test AI reports on sample missions
-  - Rate-limited API to prevent scraping
-- **Multi-User Roles & Permissions** — Role-based access control with Pilot, Viewer, and Admin roles so team members can log flights and view data without accessing financials or system settings
-- **Automated Backup & Restore** — Scheduled nightly database and file backups to configurable destinations (local path, NAS, S3) with one-click restore from the Settings UI
-- **Pilot Flight Hour Tracking** — Pilot profiles linked to flights for FAA Part 107 PIC flight time logging, currency tracking, and compliance reporting
-- **Maintenance Scheduling by Flight Hours** — Auto-triggered maintenance alerts based on cumulative flight hours per aircraft (e.g., prop replacement every 50 hours, motor inspection every 100 hours)
-- **Customer Portal** — Read-only shareable links for clients to view their mission reports, flight maps, photos, and invoices without needing a login
-- **Notification System** — Email and in-app alerts for overdue invoices, upcoming maintenance, battery cycle limits, certificate expirations, and completed report generation
-- **Stripe Integration** — Credit card payments for invoices via Stripe Checkout, with payment status sync, webhook handling, and customer-facing payment links in PDF reports and emails
-- **Report Templates** — Multiple PDF templates for different mission types
-- **Claude API Integration** — Replace local Ollama with Claude API for faster, higher-quality report generation
-- **Live Flight Tracking** — WebSocket integration for real-time drone position
-- **Dashboard Analytics** *(under consideration)* — Revenue trend charts, flights per month, hours per aircraft, and battery cycle visualizations over time
+### Now — Client Portal
+
+A client-facing interface within Command that gives customers visibility into their missions and deliverables without exposing operator internals. Lives under a `/client` route scope with scoped authentication separate from the operator UI.
+
+**Authentication & Access**
+- Signed JWT links emailed to clients — no account creation required. Link scopes the client to their missions only.
+- Optional password-protected persistent login for repeat clients.
+- Token expiry and revocation controls in the operator Settings page.
+
+**Mission Dashboard (Client View)**
+- Client sees their missions with status progression: Scheduled → In Progress → Processing → Review → Delivered.
+- Filtered view — no financials, flight logs, fleet data, or internal notes visible. Only mission name, date, status, and deliverables.
+- `client_visible` boolean flags on existing mission fields control what surfaces.
+
+**Deliverable Review & Approval**
+- Watermarked preview of videos and photos — watermark strips on approval + payment.
+- Inline PDF viewer for AI-generated mission reports.
+- Approve or Request Revision workflow with comment box.
+- Revision requests create a task in the operator dashboard with the client's feedback attached.
+
+**File Delivery via UNAS NAS Integration**
+- Extends the existing UNAS integration: approved deliverables generate time-limited download links pointing to files on the operator's NAS via Cloudflare tunnel.
+- No third-party storage — client downloads directly from operator infrastructure.
+- Large file support: folder share links or "Request Physical Delivery" option for raw footage and orthomosaics.
+
+**Invoice & Payment**
+- Client views their invoice in the portal.
+- Stripe integration: card and ACH payment directly in the portal. Payment webhook marks the invoice paid in Command's financial dashboard automatically.
+- Replaces manual PayPal/Venmo chase with a closed-loop payment flow.
+
+**Signature Capture**
+- E-signature widget for client sign-off on deliverables before final delivery.
+- Signature stored in mission record with timestamp and IP address.
+- Critical for legal, insurance, and security investigation deliverables.
+
+**Data Model Additions**
+- `client_access_tokens` — JWT tracking, expiry, scope
+- `deliverables` — mission_id, file_path, file_type, watermarked_url, status (pending / approved / revision_requested)
+- `client_reviews` — deliverable_id, status, comment, timestamp
+- `signatures` — mission_id, client_id, signature_data, timestamp, ip_address
+- `client_visible` boolean flags on existing mission fields
+
+---
+
+### Next — Multi-Tenant Managed Hosting
+
+Transform DroneOpsCommand from a self-hosted tool into a revenue-generating SaaS product. The self-hosted open-source path remains for operators who want it — managed hosting is the commercial tier.
+
+**Tenant Architecture**
+- Schema-per-tenant isolation in PostgreSQL. Each tenant gets their own schema with identical table structures.
+- Tenant provisioning API: signup → subdomain claim → payment → automatic schema creation and admin user seeding.
+- JWT tenant claims with schema routing middleware. Every authenticated request resolves to the correct tenant schema.
+- CI test coverage verifying tenant A cannot read tenant B's data under any code path.
+
+**Billing & Licensing**
+- Stripe subscription integration: plan tiers with mission limits, user seat limits, and storage quotas.
+- Stripe Checkout hosted page for signup — no custom payment frontend required.
+- Stripe Customer Portal for self-service plan changes, payment method updates, and invoice history.
+- Webhook-driven plan enforcement: upgrade/downgrade/cancel reflected in tenant configuration automatically.
+- Stripe Tax add-on for US sales tax compliance.
+
+**AI Processing (Cloud Offload)**
+- Managed tenants use cloud LLM (Anthropic or OpenAI API) instead of local Ollama.
+- Per-tenant API key configuration with model selection.
+- Celery queue hardening: retry logic, dead letter queue, per-tenant job isolation, queue depth monitoring.
+- SLA-aware job priority to prevent report generation backlog across tenants.
+
+**Infrastructure**
+- Application servers behind a load balancer with subdomain-based tenant routing.
+- Managed PostgreSQL with automated backups.
+- S3-compatible object storage for mission images, reports, and deliverables (per-tenant path prefixes).
+- Signed URLs for secure file delivery.
+- Redis for Celery broker and session caching.
+
+**Pricing Tiers (Planned)**
+- Starter — limited missions/month, 1 user, cloud AI reports, email support.
+- Professional — higher limits, multi-user with RBAC, priority report generation, UNAS integration.
+- Enterprise — unlimited, custom branding, dedicated support, SLA.
+
+---
+
+### Planned — Additional Features
+
+- **Thermal Inspection Report Engine** — Ingest DJI radiometric RJPEG thermal imagery, auto-detect hotspot anomalies via configurable temperature delta thresholds and OpenCV contour detection, annotate visual images with bounding boxes, GPS coordinates, and measured temperatures, and generate branded PDF inspection reports. Plugs into the existing Celery/WeasyPrint report pipeline as a thermal-specific report template. Industry-configurable severity presets (solar/NETA electrical/roofing).
+- **Multi-User / Role-Based Access** — Admin and Operator roles at minimum. Foundation for teams and the multi-tenant SaaS tier. Implement before schema changes get harder.
+- **Notification System** — Email and in-app alerts for overdue invoices, upcoming maintenance, battery cycle limits, certificate expirations, and completed report generation.
+- **Report Template Library** — Multiple PDF templates for different mission types. Inspection reports, SAR after-action reports, videography delivery summaries. Operator-buildable custom templates. LLM prompt adapts per template type.
+- **Airspace Pre-Check Workflow** — Drop a pin before mission creation and get a pre-flight airspace assessment: LAANC status, nearby TFRs, Class B/C/D proximity. Uses existing weather/FAA API infrastructure.
+- **Claude API Integration** — Replace local Ollama with Claude API for faster, higher-quality report generation.
+- **React Native Android App** — Mission creation, photo capture on-site, report review, and customer lookup from the field. Communicates with the stack via JWT-authenticated HTTPS API.
+- **Voice-to-Text** — On-device speech recognition in the Android app for dictating operator field notes hands-free during or after missions.
+- **DroneOpsSync Deep Integration** — Field-captured photos auto-upload to the correct mission. Field notes from the controller pre-populate report narrative. JWT API is already in place.
+- **Public API & Webhooks** — Let third-party tools (dispatch software, QuickBooks, project management) integrate with Command. Webhooks on mission status changes, invoice payment, and report delivery.
+- **Public Demo Instance** — Hosted demo at `command-demo.barnardhq.com` with pre-loaded sample data, auto-reset every 24 hours, sandboxed LLM report generation, rate-limited API, demo-mode banner with "Deploy Your Own" CTA.
 
 ---
 

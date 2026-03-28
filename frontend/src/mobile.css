@@ -2,6 +2,10 @@
    MOBILE & TABLET RESPONSIVE OVERRIDES
    Field-ready UI: large touch targets, readable text, usable forms.
    Only activates at ≤768px (sm breakpoint). Desktop is untouched.
+
+   MOBILE NAVIGATION: Handled by a Mantine <Drawer> in AppShell.tsx.
+   No CSS hacks needed — the Drawer provides overlay, tap-to-close,
+   scroll locking, and proper z-indexing out of the box.
    ═══════════════════════════════════════════════════════════════════════ */
 
 /* ── Global: Touch targets & spacing ──────────────────────────────── */
@@ -43,7 +47,7 @@
     min-height: 28px !important;
   }
 
-  /* Navbar items — bigger touch targets */
+  /* Nav items inside the Drawer — bigger touch targets */
   .mantine-NavLink-root {
     min-height: 48px;
     padding: 10px 12px !important;
@@ -58,25 +62,11 @@
     margin-right: 12px;
   }
 
-  /* Navbar overlay — ensure it covers content and isn't clipped by overflow-x:hidden */
-  .mantine-AppShell-navbar {
-    z-index: 200;
-    position: fixed !important;
-    top: 0;
-    left: 0;
-    height: 100% !important;
-    width: 180px !important; /* Narrower on mobile — save screen real estate */
-  }
-
-  /* Hide decorative drone SVG on mobile — wastes precious screen space */
-  .nav-drone-visual {
-    display: none !important;
-  }
-
-  /* Reduce page padding on mobile */
+  /* Main content — full width, no sidebar indent on mobile */
   .mantine-AppShell-main {
     padding: 8px !important;
     padding-top: 68px !important; /* header height + small gap */
+    padding-left: 8px !important;
   }
 
   /* Tables: ensure scroll areas show scrollbar */
@@ -123,16 +113,6 @@
   }
 
   .mantine-Modal-header {
-    padding: 12px !important;
-  }
-
-  /* Drawers — full width on mobile */
-  .mantine-Drawer-content {
-    width: 100% !important;
-    max-width: 100% !important;
-  }
-
-  .mantine-Drawer-body {
     padding: 12px !important;
   }
 
@@ -323,32 +303,10 @@
 
 /* ── Mobile landscape ─────────────────────────────────────────────── */
 /* Phones in landscape have width > 768px but height < 500px.
-   Without this, Mantine treats them as "desktop" and shows the navbar
-   as a permanent 220px sidebar, squishing content and getting stuck. */
+   Navigation is handled by the Drawer (JS detects landscape via
+   useMediaQuery), so no navbar CSS hacks needed here.
+   Only layout adjustments for the shorter viewport. */
 @media (orientation: landscape) and (max-height: 500px) {
-  /* Force the navbar to hide (same as mobile portrait behavior).
-     Mantine shows it above sm breakpoint — override that. */
-  .mantine-AppShell-navbar {
-    transform: translateX(-100%) !important;
-    transition: transform 200ms ease !important;
-    width: 180px !important; /* Narrower on mobile landscape too */
-  }
-
-  /* Hide decorative drone SVG in landscape */
-  .nav-drone-visual {
-    display: none !important;
-  }
-
-  /* When opened via burger, slide it in */
-  .mantine-AppShell-navbar:not([data-hidden]) {
-    transform: translateX(0) !important;
-  }
-
-  /* Show the burger menu in landscape too */
-  .mantine-Burger-root {
-    display: flex !important;
-  }
-
   /* Shrink the header to save vertical space */
   .mantine-AppShell-header {
     height: 48px !important;

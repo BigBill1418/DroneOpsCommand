@@ -238,13 +238,13 @@ export default function Dashboard() {
   }, []);
 
   useEffect(() => {
-    api.get('/missions').then((r) => setMissions(r.data)).catch(() => setMissions([]));
-    api.get('/customers').then((r) => setCustomers(r.data)).catch(() => setCustomers([]));
+    api.get('/missions').then((r) => setMissions(Array.isArray(r.data) ? r.data : [])).catch(() => setMissions([]));
+    api.get('/customers').then((r) => setCustomers(Array.isArray(r.data) ? r.data : [])).catch(() => setCustomers([]));
     api.get('/flight-library/stats/summary').then((r) => setFlightStats(r.data)).catch(() => setFlightStats(null));
     fetchWeather();
-    api.get('/maintenance/due').then((r) => setMaintenanceAlerts(r.data)).catch(() => setMaintenanceAlerts([]));
+    api.get('/maintenance/due').then((r) => setMaintenanceAlerts(Array.isArray(r.data) ? r.data : [])).catch(() => setMaintenanceAlerts([]));
     api.get('/maintenance/next-due').then((r) => setNextServiceDue(r.data)).catch(() => setNextServiceDue(null));
-    api.get('/batteries').then((r) => setBatteries(r.data)).catch(() => setBatteries([]));
+    api.get('/batteries').then((r) => setBatteries(Array.isArray(r.data) ? r.data : [])).catch(() => setBatteries([]));
   }, [fetchWeather]);
 
   // Auto-refresh weather every 5 minutes
@@ -406,7 +406,7 @@ export default function Dashboard() {
                       <Table.Td>{mission.title}</Table.Td>
                       <Table.Td>
                         <Text size="xs" c="#5a6478" tt="capitalize">
-                          {mission.mission_type.replace(/_/g, ' ')}
+                          {(mission.mission_type || '').replace(/_/g, ' ')}
                         </Text>
                       </Table.Td>
                       <Table.Td>
@@ -951,7 +951,7 @@ export default function Dashboard() {
                           <Group gap={6} wrap="nowrap">
                             <IconCalendarDue size={12} color={alert.overdue ? '#ff4444' : '#ff6b1a'} />
                             <Text size="xs" c="#e8edf2" fw={600} tt="capitalize" style={{ fontSize: '11px' }}>
-                              {alert.maintenance_type.replace(/_/g, ' ')}
+                              {(alert.maintenance_type || '').replace(/_/g, ' ')}
                             </Text>
                             <Text size="xs" c="#00d4ff" style={{ fontSize: '10px' }}>
                               {alert.aircraft_name || ''}

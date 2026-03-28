@@ -1,0 +1,61 @@
+# Docker Compose override for demo instance (command-demo.barnardhq.com)
+#
+# Usage from /opt/droneops-demo/:
+#   docker compose -p droneops-demo -f docker-compose.yml -f docker-compose.demo.yml --env-file .env.demo up -d --build
+
+services:
+  backend:
+    environment:
+      - DEMO_MODE=true
+      - DEMO_RESET_INTERVAL_HOURS=24
+      - ADMIN_USERNAME=demo
+      - ADMIN_PASSWORD=demo123
+      - JWT_ACCESS_TOKEN_EXPIRE_MINUTES=60
+      - JWT_REFRESH_TOKEN_EXPIRE_DAYS=1
+      - FRONTEND_URL=https://command-demo.barnardhq.com
+      # Disable outbound email in demo
+      - SMTP_HOST=
+      - SMTP_USER=
+      - SMTP_PASSWORD=
+    # Override base port mapping — use 8001 to avoid conflict with prod on 8000
+    ports: !override
+      - "8001:8000"
+    # Remove ollama dependency (it's disabled)
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # Disable worker in demo (no Celery tasks needed)
+  worker:
+    deploy:
+      replicas: 0
+
+  # Demo frontend on port 3081 (prod uses 3080)
+  frontend:
+    ports:
+      - "3081:8080"
+
+  # Cloudflare tunnel is run as a standalone container with --network host
+  # because compose containers can't reach host ports (localhost:3081).
+  # Start it with:
+  #   docker run -d --name demo-tunnel --network host \
+  #     cloudflare/cloudflared:latest tunnel --no-autoupdate run --token $TOKEN
+  cloudflared:
+    deploy:
+      replicas: 0
+
+  # Disable Ollama in demo (no GPU needed, LLM shows as "offline")
+  ollama:
+    deploy:
+      replicas: 0
+
+  ollama-setup:
+    deploy:
+      replicas: 0
+
+  # Disable watchtower in demo
+  watchtower:
+    deploy:
+      replicas: 0
