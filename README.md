@@ -2,7 +2,7 @@
 
 **Self-hosted mission management, flight log analysis, GPS flight replay with video export, AI report generation, invoicing, and real-time airspace monitoring for commercial drone operators.**
 
-**Version 2.55.0** | [Quick Start](#quick-start) | [Features](#features) | [Configuration](#configuration) | [Contributing](CONTRIBUTING.md) | [License](LICENSE)
+**Version 2.55.1** | [Quick Start](#quick-start) | [Features](#features) | [Configuration](#configuration) | [Contributing](CONTRIBUTING.md) | [License](LICENSE)
 
 ---
 
@@ -82,19 +82,27 @@ docker compose logs -f ollama-setup
 4. Ollama downloads and loads the Llama 3.1 8B model
 5. All storage directories are created
 
-### Auto-start on boot (systemd)
+### Auto-start & auto-deploy (one command)
 
-To have DroneOpsCommand start automatically after a server reboot:
+Run the setup script to install boot auto-start and git-based auto-deploy:
 
 ```bash
-# Edit WorkingDirectory in droneops.service if not installed at /opt/DroneOpsCommand
-sudo cp droneops.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable droneops
-sudo systemctl start droneops
+sudo ./setup-server.sh                    # tracks claude/dev by default
+sudo ./setup-server.sh --branch main      # track main instead
+sudo ./setup-server.sh --uninstall        # remove everything
+```
 
-# View logs
-journalctl -u droneops -f
+This installs three systemd units:
+- **`droneops.service`** — starts the Docker stack on boot
+- **`droneops-autopull.service`** — checks git for new commits and deploys
+- **`droneops-autopull.timer`** — triggers the check every 60 seconds
+
+```bash
+# Useful commands
+systemctl status droneops                 # stack status
+systemctl list-timers droneops-autopull*  # next auto-deploy check
+journalctl -u droneops-autopull -f        # auto-deploy logs
+tail -f autopull.log                      # detailed deploy log
 ```
 
 All containers have healthchecks and `restart: unless-stopped`, so individual services auto-recover from crashes. The backend retries DB and Redis connections on startup to handle restart race conditions.
