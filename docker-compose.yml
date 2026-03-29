@@ -183,7 +183,7 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO /dev/null http://localhost:8080/ || exit 1"]
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/ || exit 1"]
       interval: 15s
       timeout: 10s
       retries: 3
