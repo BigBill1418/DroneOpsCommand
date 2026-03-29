@@ -2,7 +2,7 @@
 
 **Self-hosted mission management, flight log analysis, GPS flight replay with video export, AI report generation, invoicing, and real-time airspace monitoring for commercial drone operators.**
 
-**Version 2.54.3** | [Quick Start](#quick-start) | [Features](#features) | [Configuration](#configuration) | [Contributing](CONTRIBUTING.md) | [License](LICENSE)
+**Version 2.55.0** | [Quick Start](#quick-start) | [Features](#features) | [Configuration](#configuration) | [Contributing](CONTRIBUTING.md) | [License](LICENSE)
 
 ---
 
@@ -81,6 +81,23 @@ docker compose logs -f ollama-setup
 3. Aircraft fleet (6 DJI models) and rate templates (8 billing presets) are pre-loaded
 4. Ollama downloads and loads the Llama 3.1 8B model
 5. All storage directories are created
+
+### Auto-start on boot (systemd)
+
+To have DroneOpsCommand start automatically after a server reboot:
+
+```bash
+# Edit WorkingDirectory in droneops.service if not installed at /opt/DroneOpsCommand
+sudo cp droneops.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable droneops
+sudo systemctl start droneops
+
+# View logs
+journalctl -u droneops -f
+```
+
+All containers have healthchecks and `restart: unless-stopped`, so individual services auto-recover from crashes. The backend retries DB and Redis connections on startup to handle restart race conditions.
 
 ### Personalize it
 

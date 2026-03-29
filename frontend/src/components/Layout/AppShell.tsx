@@ -92,8 +92,15 @@ function NavContent({
         ))}
       </Stack>
 
-      {/* Footer: logout + version */}
+      {/* Footer: logo + logout + version */}
       <div style={{ borderTop: '1px solid #1a1f2e', padding: '8px' }}>
+        <div style={{ display: 'flex', justifyContent: 'center', padding: '8px 0 4px' }}>
+          <img
+            src="/logo.svg"
+            alt="BarnardHQ"
+            style={{ width: 140, opacity: 0.35 }}
+          />
+        </div>
         <NavLink
           label="Logout"
           leftSection={<IconLogout size={18} />}
@@ -109,7 +116,7 @@ function NavContent({
             c="#5a6478"
             style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: '15px' }}
           >
-            v2.54.3
+            v2.55.0
           </Text>
           <Tooltip label="Star on GitHub" position="right">
             <ActionIcon
@@ -354,6 +361,13 @@ export default function AppLayout({ onLogout }: AppLayoutProps) {
           </AppShell.Section>
 
           <AppShell.Section p="xs" style={{ borderTop: '1px solid #1a1f2e' }}>
+            <div style={{ display: 'flex', justifyContent: 'center', padding: '8px 0 4px' }}>
+              <img
+                src="/logo.svg"
+                alt="BarnardHQ"
+                style={{ width: 140, opacity: 0.35 }}
+              />
+            </div>
             <NavLink
               label="Logout"
               leftSection={<IconLogout size={18} />}
@@ -375,7 +389,7 @@ export default function AppLayout({ onLogout }: AppLayoutProps) {
                   fontSize: '15px',
                 }}
               >
-                v2.54.3
+                v2.55.0
               </Text>
               <Tooltip label="Star on GitHub" position="right">
                 <ActionIcon
@@ -391,61 +405,6 @@ export default function AppLayout({ onLogout }: AppLayoutProps) {
                 </ActionIcon>
               </Tooltip>
             </Group>
-          </AppShell.Section>
-
-          {/* Drone visual — desktop only */}
-          <AppShell.Section
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              minHeight: 80,
-              opacity: 0.35,
-              padding: '8px 0',
-            }}
-          >
-            <svg
-              width="140"
-              height="70"
-              viewBox="0 0 120 60"
-              fill="none"
-              xmlns="http://www.w3.org/2000/svg"
-            >
-              <line x1="30" y1="20" x2="60" y2="30" stroke="#00d4ff" strokeWidth="1.5" />
-              <line x1="90" y1="20" x2="60" y2="30" stroke="#00d4ff" strokeWidth="1.5" />
-              <line x1="30" y1="40" x2="60" y2="30" stroke="#00d4ff" strokeWidth="1.5" />
-              <line x1="90" y1="40" x2="60" y2="30" stroke="#00d4ff" strokeWidth="1.5" />
-              <rect x="50" y="25" width="20" height="10" rx="3" fill="#00d4ff" fillOpacity="0.3" stroke="#00d4ff" strokeWidth="1" />
-              <circle cx="60" cy="38" r="2.5" fill="#00d4ff" fillOpacity="0.5" />
-              <circle cx="30" cy="20" r="4" stroke="#00d4ff" strokeWidth="1" fill="none">
-                <animate attributeName="r" values="4;6;4" dur="1.5s" repeatCount="indefinite" />
-                <animate attributeName="opacity" values="0.6;0.2;0.6" dur="1.5s" repeatCount="indefinite" />
-              </circle>
-              <circle cx="90" cy="20" r="4" stroke="#00d4ff" strokeWidth="1" fill="none">
-                <animate attributeName="r" values="4;6;4" dur="1.5s" begin="0.2s" repeatCount="indefinite" />
-                <animate attributeName="opacity" values="0.6;0.2;0.6" dur="1.5s" begin="0.2s" repeatCount="indefinite" />
-              </circle>
-              <circle cx="30" cy="40" r="4" stroke="#00d4ff" strokeWidth="1" fill="none">
-                <animate attributeName="r" values="4;6;4" dur="1.5s" begin="0.4s" repeatCount="indefinite" />
-                <animate attributeName="opacity" values="0.6;0.2;0.6" dur="1.5s" begin="0.4s" repeatCount="indefinite" />
-              </circle>
-              <circle cx="90" cy="40" r="4" stroke="#00d4ff" strokeWidth="1" fill="none">
-                <animate attributeName="r" values="4;6;4" dur="1.5s" begin="0.6s" repeatCount="indefinite" />
-                <animate attributeName="opacity" values="0.6;0.2;0.6" dur="1.5s" begin="0.6s" repeatCount="indefinite" />
-              </circle>
-              <ellipse cx="30" cy="20" rx="10" ry="2" fill="#00d4ff" fillOpacity="0.15">
-                <animateTransform attributeName="transform" type="rotate" from="0 30 20" to="360 30 20" dur="0.3s" repeatCount="indefinite" />
-              </ellipse>
-              <ellipse cx="90" cy="20" rx="10" ry="2" fill="#00d4ff" fillOpacity="0.15">
-                <animateTransform attributeName="transform" type="rotate" from="0 90 20" to="360 90 20" dur="0.3s" repeatCount="indefinite" />
-              </ellipse>
-              <ellipse cx="30" cy="40" rx="10" ry="2" fill="#00d4ff" fillOpacity="0.15">
-                <animateTransform attributeName="transform" type="rotate" from="0 30 40" to="360 30 40" dur="0.3s" repeatCount="indefinite" />
-              </ellipse>
-              <ellipse cx="90" cy="40" rx="10" ry="2" fill="#00d4ff" fillOpacity="0.15">
-                <animateTransform attributeName="transform" type="rotate" from="0 90 40" to="360 90 40" dur="0.3s" repeatCount="indefinite" />
-              </ellipse>
-            </svg>
           </AppShell.Section>
         </AppShell.Navbar>
       )}
