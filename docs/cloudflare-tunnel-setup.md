@@ -56,19 +56,19 @@ FRONTEND_URL=https://droneops.example.com  # Replace with your actual domain
 
 ## Step 4: Start the Tunnel
 
-The tunnel service uses a Docker Compose **profile** so it doesn't start by default:
+The `cloudflared` service is included in `docker-compose.yml` and starts automatically with `docker compose up -d`. It requires the `CLOUDFLARE_TUNNEL_TOKEN` environment variable — without it, the container exits immediately (no-op).
 
 ```bash
-# Start everything INCLUDING the tunnel
-docker compose --profile tunnel up -d
+# If your stack is already running, restart to pick up the new token
+docker compose up -d
 
-# Or if your stack is already running, just add the tunnel
-docker compose --profile tunnel up -d cloudflared
+# Or restart just the tunnel service
+docker compose restart cloudflared
 ```
 
 To stop the tunnel without affecting other services:
 ```bash
-docker compose --profile tunnel stop cloudflared
+docker compose stop cloudflared
 ```
 
 ## Step 5: Verify
@@ -194,7 +194,7 @@ Customer's Browser
 | Symptom | Fix |
 |---------|-----|
 | `cloudflared` exits immediately | Check `CLOUDFLARE_TUNNEL_TOKEN` is set in `.env` |
-| Tunnel shows "Inactive" in dashboard | Run `docker compose --profile tunnel logs cloudflared` to check errors |
+| Tunnel shows "Inactive" in dashboard | Run `docker compose logs cloudflared` to check errors |
 | Intake form loads but API calls fail | Make sure the tunnel hostname points to `frontend:80`, not `backend:8000` |
 | "Access Denied" on intake form | Check your Cloudflare Access bypass policies include `/intake/*` and `/api/intake/*` |
 | TOS PDF won't load | Add bypass for `/api/intake/*` in Access policies |

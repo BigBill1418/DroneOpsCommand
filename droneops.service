@@ -1,0 +1,33 @@
+# DroneOpsCommand — Docker Compose auto-start on boot
+#
+# Starts the full stack when the server boots.
+# All containers have healthchecks and restart:unless-stopped
+# so individual crashes auto-recover without systemd intervention.
+#
+# Install via: ./setup-server.sh
+# Logs: journalctl -u droneops -f
+# Control: sudo systemctl [start|stop|restart|status] droneops
+#
+[Unit]
+Description=DroneOpsCommand — Drone Operations Management Platform
+Documentation=https://github.com/BigBill1418/DroneOpsCommand
+After=docker.service network-online.target
+Requires=docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# __INSTALL_DIR__ is replaced by setup-server.sh during install
+WorkingDirectory=__INSTALL_DIR__
+ExecStart=/usr/bin/docker compose up -d
+ExecStop=/usr/bin/docker compose down
+ExecReload=/usr/bin/docker compose restart
+# Give containers up to 180s to start (Ollama model load can be slow on first boot)
+TimeoutStartSec=180
+TimeoutStopSec=60
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target

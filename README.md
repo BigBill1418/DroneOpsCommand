@@ -2,7 +2,7 @@
 
 **Self-hosted mission management, flight log analysis, GPS flight replay with video export, AI report generation, invoicing, and real-time airspace monitoring for commercial drone operators.**
 
-**Version 2.54.1** | [Quick Start](#quick-start) | [Features](#features) | [Configuration](#configuration) | [Contributing](CONTRIBUTING.md) | [License](LICENSE)
+**Version 2.55.2** | [Quick Start](#quick-start) | [Features](#features) | [Configuration](#configuration) | [Contributing](CONTRIBUTING.md) | [License](LICENSE)
 
 ---
 
@@ -79,8 +79,33 @@ docker compose logs -f ollama-setup
 1. PostgreSQL schema is created automatically
 2. Admin user is seeded with your configured credentials
 3. Aircraft fleet (6 DJI models) and rate templates (8 billing presets) are pre-loaded
-4. Ollama downloads and loads the Mistral 7B model
+4. Ollama downloads and loads the Llama 3.1 8B model
 5. All storage directories are created
+
+### Auto-start & auto-deploy (one command)
+
+Run the setup script to install boot auto-start and git-based auto-deploy:
+
+```bash
+sudo ./setup-server.sh                    # tracks claude/dev by default
+sudo ./setup-server.sh --branch main      # track main instead
+sudo ./setup-server.sh --uninstall        # remove everything
+```
+
+This installs three systemd units:
+- **`droneops.service`** — starts the Docker stack on boot
+- **`droneops-autopull.service`** — checks git for new commits and deploys
+- **`droneops-autopull.timer`** — triggers the check every 60 seconds
+
+```bash
+# Useful commands
+systemctl status droneops                 # stack status
+systemctl list-timers droneops-autopull*  # next auto-deploy check
+journalctl -u droneops-autopull -f        # auto-deploy logs
+tail -f autopull.log                      # detailed deploy log
+```
+
+All containers have healthchecks and `restart: unless-stopped`, so individual services auto-recover from crashes. The backend retries DB and Redis connections on startup to handle restart race conditions.
 
 ### Personalize it
 
@@ -145,7 +170,7 @@ After logging in, go to **Settings > Branding** to set your company name, taglin
 - Connection testing from Settings page
 
 ### AI Report Generation
-- Local LLM via Ollama (Mistral 7B by default) — your data stays on your hardware
+- Local LLM via Ollama (Llama 3.1 8B by default) — your data stays on your hardware
 - Operator enters field notes/narrative, LLM generates professional after-action report
 - Structured report sections: Mission Overview, Area Coverage, Flight Operations Summary, Key Findings, Recommendations
 - Async generation via Celery worker with status polling
@@ -313,7 +338,7 @@ After logging in, go to **Settings > Branding** to set your company name, taglin
 | Backend | Python 3.12, FastAPI, SQLAlchemy 2.0 | internal | REST API (via nginx) |
 | Database | PostgreSQL 16 Alpine | 5432 | Persistent storage |
 | Flight Parser | Python microservice | 8100 | DJI flight log decryption and parsing |
-| LLM | Ollama (Mistral 7B quantized) | 11434 | Local AI report generation |
+| LLM | Ollama (Llama 3.1 8B quantized) | 11434 | Local AI report generation |
 | Queue | Redis 7 Alpine | 6379 | Celery task broker |
 | Worker | Celery (same backend image) | — | Async report generation |
 
@@ -379,7 +404,7 @@ All settings are configured via environment variables in the `.env` file.
 |----------|---------|-------------|
 | `OPENDRONELOG_URL` | *(empty)* | Your OpenDroneLog server URL (e.g., `http://192.168.1.50:8080`) |
 | `OLLAMA_BASE_URL` | `http://ollama:11434` | Ollama API endpoint |
-| `OLLAMA_MODEL` | `mistral:7b-instruct-v0.3-q4_K_M` | LLM model for report generation |
+| `OLLAMA_MODEL` | `llama3.1:8b-instruct-q4_K_M` | LLM model for report generation |
 
 ### Email (SMTP)
 | Variable | Default | Description |
@@ -667,7 +692,7 @@ Transform DroneOpsCommand from a self-hosted tool into a revenue-generating SaaS
 - **Voice-to-Text** — On-device speech recognition in the Android app for dictating operator field notes hands-free during or after missions.
 - **DroneOpsSync Deep Integration** — Field-captured photos auto-upload to the correct mission. Field notes from the controller pre-populate report narrative. JWT API is already in place.
 - **Public API & Webhooks** — Let third-party tools (dispatch software, QuickBooks, project management) integrate with Command. Webhooks on mission status changes, invoice payment, and report delivery.
-- **Public Demo Instance** — Hosted demo at `command-demo.barnardhq.com` with pre-loaded sample data, auto-reset every 24 hours, sandboxed LLM report generation, rate-limited API, demo-mode banner with "Deploy Your Own" CTA.
+- **Public Demo Instance** — ~~Planned~~ **Live** at `command-demo.barnardhq.com` with pre-loaded sample data, sandboxed operations (demo guard middleware), demo-mode banner with "Deploy Your Own" CTA. See `docker-compose.demo.yml` for deployment config.
 
 ---
 

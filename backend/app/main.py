@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 import time
@@ -143,6 +144,41 @@ def _add_missing_columns(conn):
         raise
 
 
+async def _wait_for_db(max_retries: int = 10, delay: float = 3.0):
+    """Retry DB connection on startup — handles race conditions after restart."""
+    from sqlalchemy import text
+    for attempt in range(1, max_retries + 1):
+        try:
+            async with engine.connect() as conn:
+                await conn.execute(text("SELECT 1"))
+            logger.info("STARTUP: Database connection OK (attempt %d)", attempt)
+            return
+        except Exception as exc:
+            if attempt == max_retries:
+                logger.critical("STARTUP: Database unreachable after %d attempts: %s", max_retries, exc)
+                raise
+            logger.warning("STARTUP: DB not ready (attempt %d/%d): %s — retrying in %.0fs", attempt, max_retries, exc, delay)
+            await asyncio.sleep(delay)
+
+
+async def _wait_for_redis(max_retries: int = 10, delay: float = 3.0):
+    """Retry Redis connection on startup."""
+    import redis.asyncio as aioredis
+    for attempt in range(1, max_retries + 1):
+        try:
+            r = aioredis.from_url(settings.redis_url)
+            await r.ping()
+            await r.aclose()
+            logger.info("STARTUP: Redis connection OK (attempt %d)", attempt)
+            return
+        except Exception as exc:
+            if attempt == max_retries:
+                logger.critical("STARTUP: Redis unreachable after %d attempts: %s", max_retries, exc)
+                raise
+            logger.warning("STARTUP: Redis not ready (attempt %d/%d): %s — retrying in %.0fs", attempt, max_retries, exc, delay)
+            await asyncio.sleep(delay)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Warn about insecure default credentials
@@ -150,6 +186,10 @@ async def lifespan(app: FastAPI):
         logger.warning("SECURITY: JWT_SECRET_KEY is using the default value — change it in production!")
     if settings.admin_password == "changeme_in_production":
         logger.warning("SECURITY: ADMIN_PASSWORD is using the default value — change it in production!")
+
+    # Wait for dependencies to be ready (handles restart race conditions)
+    await _wait_for_db()
+    await _wait_for_redis()
 
     # Create tables
     async with engine.begin() as conn:
@@ -261,7 +301,7 @@ logger.info("MultiPartParser max_file_size set to 200 MB")
 app = FastAPI(
     title="D.O.C — Drone Operations Command",
     description="Self-hosted mission management, flight log analysis, AI report generation, invoicing, telemetry visualization, and real-time airspace monitoring for commercial drone operators.",
-    version="2.54.1",
+    version="2.55.2",
     lifespan=lifespan,
 )
 
@@ -371,8 +411,15 @@ async def log_requests(request: Request, call_next):
 
 
 @app.get("/api/health")
-async def health_check():
-    return {"status": "healthy", "service": "D.O.C — Drone Operations Command"}
+async def health_check(db: AsyncSession = Depends(get_db)):
+    """Health check — verifies DB connectivity for Docker healthcheck auto-recovery."""
+    from sqlalchemy import text
+    try:
+        await db.execute(text("SELECT 1"))
+        return {"status": "healthy", "service": "D.O.C — Drone Operations Command"}
+    except Exception as exc:
+        logger.error("Health check DB probe failed: %s", exc)
+        raise HTTPException(status_code=503, detail="Database unreachable")
 
 
 @app.get("/api/branding")

@@ -1,0 +1,25 @@
+# DroneOpsCommand — Auto-deploy service (triggered by timer)
+#
+# This service is triggered by droneops-autopull.timer.
+# It checks for new git commits and auto-deploys if changes are found.
+#
+# Install via: ./setup-server.sh
+# Logs: journalctl -u droneops-autopull
+#       /path/to/droneops/autopull.log
+#
+[Unit]
+Description=DroneOpsCommand — Auto-deploy check
+After=docker.service network-online.target droneops.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# __INSTALL_DIR__ is replaced by setup-server.sh during install
+WorkingDirectory=__INSTALL_DIR__
+Environment=DOC_DIR=__INSTALL_DIR__
+Environment=DOC_BRANCH=__BRANCH__
+ExecStart=__INSTALL_DIR__/autopull.sh
+# Run as the user who owns the repo
+User=__USER__
+Group=__USER__
+TimeoutStartSec=300

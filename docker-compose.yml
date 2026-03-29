@@ -40,12 +40,18 @@ services:
       - OLLAMA_FLASH_ATTENTION=1
     cpuset: "0-5"
     mem_reservation: 8g
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/11434' || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
 
   ollama-setup:
     image: curlimages/curl:latest
     depends_on:
       ollama:
-        condition: service_started
+        condition: service_healthy
     restart: "no"
     entrypoint: >
       sh -c "
@@ -111,7 +117,13 @@ services:
       redis:
         condition: service_healthy
       ollama:
-        condition: service_started
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import httpx; r = httpx.get('http://localhost:8000/api/health'); r.raise_for_status()\""]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
 
   worker:
     build:
@@ -119,6 +131,12 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     command: celery -A app.tasks.celery_tasks worker --loglevel=info
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.tasks.celery_tasks inspect ping --timeout 10 || exit 1"]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 30s
     environment:
       - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://doc:changeme_in_production@db:5432/doc}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
@@ -146,6 +164,12 @@ services:
       context: ./flight-parser
       dockerfile: Dockerfile
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8100/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
     dns:
       - 1.1.1.1
       - 8.8.8.8
@@ -158,10 +182,17 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/ || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
     ports:
       - "${FRONTEND_PORT:-3080}:8080"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
 
   # ── Cloudflare Tunnel ─────────────────────────────────────────────
   # Exposes the app securely without opening router ports.
@@ -173,8 +204,10 @@ services:
     environment:
       - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN:-}
     depends_on:
-      - frontend
-      - backend
+      frontend:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
 
 volumes:
   postgres_data:
