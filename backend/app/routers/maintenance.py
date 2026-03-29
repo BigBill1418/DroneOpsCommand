@@ -399,6 +399,7 @@ async def seed_defaults(
         }
 
     created = []
+    today = date.today()
     for default in DJI_MAINTENANCE_DEFAULTS:
         schedule = MaintenanceSchedule(
             aircraft_id=aircraft_id,
@@ -406,6 +407,9 @@ async def seed_defaults(
             interval_hours=default["interval_hours"],
             interval_days=default["interval_days"],
             description=default["description"],
+            # Assume the aircraft is currently airworthy — set last_performed
+            # to today so schedules don't immediately show as overdue.
+            last_performed=today,
         )
         db.add(schedule)
         created.append(default["maintenance_type"])
@@ -502,7 +506,21 @@ async def maintenance_status(
             # ── Hours-based check ────────────────────────────────
             if sched.interval_hours is not None:
                 rec = last_record_map.get((aid, sched.maintenance_type))
-                last_hours = rec.flight_hours_at if rec and rec.flight_hours_at is not None else 0.0
+                if rec and rec.flight_hours_at is not None:
+                    # We have a concrete record of the flight hours when
+                    # this maintenance was last done.
+                    last_hours = rec.flight_hours_at
+                elif sched.last_performed is not None:
+                    # No record with flight_hours_at, but the schedule has
+                    # a last_performed date (e.g. from seed-defaults or
+                    # manual entry).  Treat it as if maintenance was done
+                    # at the current total hours — the interval counter
+                    # starts fresh from here.
+                    last_hours = total_hours
+                else:
+                    # Never performed and no record at all — assume 0.
+                    last_hours = 0.0
+
                 hours_since_maintenance = total_hours - last_hours
                 next_due_at_hours = last_hours + sched.interval_hours
                 hours_remaining = sched.interval_hours - hours_since_maintenance
@@ -577,29 +595,41 @@ async def maintenance_due(
     aircraft_result = await db.execute(select(Aircraft))
     aircraft_map = {str(a.id): a.model_name for a in aircraft_result.scalars().all()}
 
-    # Check date-based schedules
+    # Check schedules — date-based intervals AND hours-only with no last_performed
     schedules = await db.execute(select(MaintenanceSchedule))
     for sched in schedules.scalars().all():
-        if not sched.interval_days:
-            continue
-
         aid = str(sched.aircraft_id)
-        if sched.last_performed:
-            next_due = sched.last_performed + timedelta(days=sched.interval_days)
-            days_until = (next_due - today).days
-            if days_until <= 7:  # Due within a week or overdue
+
+        # Date-based interval check
+        if sched.interval_days:
+            if sched.last_performed:
+                next_due = sched.last_performed + timedelta(days=sched.interval_days)
+                days_until = (next_due - today).days
+                if days_until <= 7:  # Due within a week or overdue
+                    alerts.append({
+                        "schedule_id": str(sched.id),
+                        "aircraft_id": aid,
+                        "aircraft_name": aircraft_map.get(aid, "Unknown"),
+                        "maintenance_type": sched.maintenance_type,
+                        "description": sched.description,
+                        "next_due_date": next_due.isoformat(),
+                        "days_until": days_until,
+                        "overdue": days_until < 0,
+                    })
+            elif not sched.last_performed:
+                # Never performed and no last_performed date — overdue
                 alerts.append({
                     "schedule_id": str(sched.id),
                     "aircraft_id": aid,
                     "aircraft_name": aircraft_map.get(aid, "Unknown"),
                     "maintenance_type": sched.maintenance_type,
                     "description": sched.description,
-                    "next_due_date": next_due.isoformat(),
-                    "days_until": days_until,
-                    "overdue": days_until < 0,
+                    "next_due_date": None,
+                    "days_until": -1,
+                    "overdue": True,
                 })
-        else:
-            # Never performed — always due
+        elif not sched.interval_days and sched.last_performed is None:
+            # Hours-only schedule that has never been performed — flag it
             alerts.append({
                 "schedule_id": str(sched.id),
                 "aircraft_id": aid,
@@ -607,7 +637,7 @@ async def maintenance_due(
                 "maintenance_type": sched.maintenance_type,
                 "description": sched.description,
                 "next_due_date": None,
-                "days_until": -999,
+                "days_until": -1,
                 "overdue": True,
             })
 
