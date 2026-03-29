@@ -1,0 +1,19 @@
+# DroneOpsCommand — Auto-deploy timer
+#
+# Triggers droneops-autopull.service every 60 seconds to check
+# for new git commits and auto-deploy.
+#
+# Install via: ./setup-server.sh
+# Status: systemctl status droneops-autopull.timer
+#         systemctl list-timers droneops-autopull*
+#
+[Unit]
+Description=DroneOpsCommand — Auto-deploy timer (polls git every 60s)
+
+[Timer]
+OnBootSec=120
+OnUnitActiveSec=60
+AccuracySec=10
+
+[Install]
+WantedBy=timers.target
