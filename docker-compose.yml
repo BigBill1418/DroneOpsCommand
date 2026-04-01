@@ -9,7 +9,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
-      - "5435:5432"
+      - "5434:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-doc}"]
       interval: 5s
@@ -76,6 +76,7 @@ services:
       - WATCHTOWER_MONITOR_ONLY=${WATCHTOWER_MONITOR_ONLY:-false}
       - WATCHTOWER_NOTIFICATION_URL=${WATCHTOWER_NOTIFICATION_URL:-}
       - WATCHTOWER_NOTIFICATIONS_HOSTNAME=droneops-server
+      - DOCKER_API_VERSION=1.45
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
 

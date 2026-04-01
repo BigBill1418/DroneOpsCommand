@@ -1,7 +1,7 @@
 FROM python:3.12-slim
 
 # Install system dependencies for WeasyPrint, fonts, geospatial libs, gosu, and curl
-# Cache-bust: v2.55.4 (added curl for Docker healthcheck)
+# Cache-bust: v2.55.5 (added curl for Docker healthcheck)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libpango-1.0-0 \
