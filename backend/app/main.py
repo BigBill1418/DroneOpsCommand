@@ -208,22 +208,46 @@ async def lifespan(app: FastAPI):
             await seed_demo_data(demo_session)
         logger.info("STARTUP: Demo data seeded")
 
-    # Post-seed verification: log the admin hash state
+    # Post-seed verification: ensure admin can actually log in
     from app.models.user import User
-    from app.auth.jwt import verify_password
+    from app.auth.jwt import verify_password, hash_password
     async with async_session() as verify_session:
         result = await verify_session.execute(
             select(User).where(User.username == settings.admin_username)
         )
         admin = result.scalar_one_or_none()
         if admin:
-            env_matches = verify_password(settings.admin_password, admin.hashed_password)
+            _hash = admin.hashed_password or ""
+            _hash_ok = _hash.startswith("$2b$") and len(_hash) == 60
+            env_matches = verify_password(settings.admin_password, _hash) if _hash_ok else False
             logger.info(
-                "STARTUP: Admin '%s' hash=%s... env_password_matches=%s",
+                "STARTUP: Admin '%s' hash=%s... hash_valid=%s env_password_matches=%s",
                 admin.username,
-                admin.hashed_password[:10] if admin.hashed_password else "EMPTY",
+                _hash[:10] if _hash else "EMPTY",
+                _hash_ok,
                 env_matches,
             )
+
+            # Auto-repair: if env password doesn't match DB hash, fix it
+            # This handles migration/restore scenarios where the hash is
+            # corrupted, truncated, or from a different password.
+            if not env_matches:
+                new_hash = hash_password(settings.admin_password)
+                roundtrip_ok = verify_password(settings.admin_password, new_hash)
+                if roundtrip_ok:
+                    admin.hashed_password = new_hash
+                    await verify_session.commit()
+                    logger.warning(
+                        "STARTUP: Admin password hash REPAIRED — env password "
+                        "did not match DB hash (hash_valid=%s). New hash=%s...",
+                        _hash_ok, new_hash[:10],
+                    )
+                else:
+                    logger.critical(
+                        "STARTUP: Admin password hash is WRONG and bcrypt "
+                        "roundtrip FAILED — login will not work! "
+                        "Run: docker compose exec backend python reset_admin.py"
+                    )
         else:
             logger.critical("STARTUP: Admin user '%s' NOT FOUND after seed!", settings.admin_username)
 
@@ -301,7 +325,7 @@ logger.info("MultiPartParser max_file_size set to 200 MB")
 app = FastAPI(
     title="D.O.C — Drone Operations Command",
     description="Self-hosted mission management, flight log analysis, AI report generation, invoicing, telemetry visualization, and real-time airspace monitoring for commercial drone operators.",
-    version="2.55.3",
+    version="2.55.5",
     lifespan=lifespan,
 )
 
