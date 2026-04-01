@@ -301,7 +301,7 @@ logger.info("MultiPartParser max_file_size set to 200 MB")
 app = FastAPI(
     title="D.O.C — Drone Operations Command",
     description="Self-hosted mission management, flight log analysis, AI report generation, invoicing, telemetry visualization, and real-time airspace monitoring for commercial drone operators.",
-    version="2.55.2",
+    version="2.55.3",
     lifespan=lifespan,
 )
 
@@ -411,15 +411,9 @@ async def log_requests(request: Request, call_next):
 
 
 @app.get("/api/health")
-async def health_check(db: AsyncSession = Depends(get_db)):
-    """Health check — verifies DB connectivity for Docker healthcheck auto-recovery."""
-    from sqlalchemy import text
-    try:
-        await db.execute(text("SELECT 1"))
-        return {"status": "healthy", "service": "D.O.C — Drone Operations Command"}
-    except Exception as exc:
-        logger.error("Health check DB probe failed: %s", exc)
-        raise HTTPException(status_code=503, detail="Database unreachable")
+async def health_check():
+    """Lightweight health check for Docker healthcheck — just confirms the process is up."""
+    return {"status": "healthy", "service": "D.O.C — Drone Operations Command"}
 
 
 @app.get("/api/branding")
