@@ -4,6 +4,7 @@ import { useAuth } from './hooks/useAuth';
 import ErrorBoundary from './components/ErrorBoundary';
 import AppLayout from './components/Layout/AppShell';
 import Login from './pages/Login';
+import Setup from './pages/Setup';
 import Dashboard from './pages/Dashboard';
 import Missions from './pages/Missions';
 import MissionNew from './pages/MissionNew';
@@ -21,7 +22,7 @@ import Airspace from './pages/Airspace';
 import FlightReplay from './pages/FlightReplay';
 
 export default function App() {
-  const { isAuthenticated, loading, login, logout } = useAuth();
+  const { isAuthenticated, needsSetup, loading, login, logout, completeSetup } = useAuth();
 
   if (loading) {
     return (
@@ -39,6 +40,7 @@ export default function App() {
 
         {/* All other routes require authentication */}
         <Route path="*" element={
+          needsSetup ? <Setup onSetupComplete={completeSetup} /> :
           !isAuthenticated ? <Login onLogin={login} /> : (
             <Routes>
               <Route element={<AppLayout onLogout={logout} />}>

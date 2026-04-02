@@ -3,24 +3,45 @@ import api from '../api/client';
 
 export function useAuth() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [needsSetup, setNeedsSetup] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const token = localStorage.getItem('access_token');
-    if (token) {
-      api.get('/auth/account')
-        .then(() => {
-          setIsAuthenticated(true);
-        })
-        .catch(() => {
-          localStorage.removeItem('access_token');
-          localStorage.removeItem('refresh_token');
-          setIsAuthenticated(false);
-        })
-        .finally(() => setLoading(false));
-    } else {
-      setLoading(false);
-    }
+    const init = async () => {
+      try {
+        const setupResp = await api.get('/auth/setup-status');
+        if (setupResp.data.needs_setup) {
+          setNeedsSetup(true);
+          setLoading(false);
+          return;
+        }
+        const token = localStorage.getItem('access_token');
+        if (token) {
+          try {
+            await api.get('/auth/account');
+            setIsAuthenticated(true);
+          } catch {
+            localStorage.removeItem('access_token');
+            localStorage.removeItem('refresh_token');
+            setIsAuthenticated(false);
+          }
+        }
+      } catch {
+        const token = localStorage.getItem('access_token');
+        if (token) {
+          try {
+            await api.get('/auth/account');
+            setIsAuthenticated(true);
+          } catch {
+            localStorage.removeItem('access_token');
+            localStorage.removeItem('refresh_token');
+          }
+        }
+      } finally {
+        setLoading(false);
+      }
+    };
+    init();
   }, []);
 
   const login = useCallback(async (username: string, password: string) => {
@@ -36,5 +57,12 @@ export function useAuth() {
     setIsAuthenticated(false);
   }, []);
 
-  return { isAuthenticated, loading, login, logout };
+  const completeSetup = useCallback((accessToken: string, refreshToken: string) => {
+    localStorage.setItem('access_token', accessToken);
+    localStorage.setItem('refresh_token', refreshToken);
+    setNeedsSetup(false);
+    setIsAuthenticated(true);
+  }, []);
+
+  return { isAuthenticated, needsSetup, loading, login, logout, completeSetup };
 }
