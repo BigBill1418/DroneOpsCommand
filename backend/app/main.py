@@ -184,8 +184,6 @@ async def lifespan(app: FastAPI):
     # Warn about insecure default credentials
     if settings.jwt_secret_key == "changeme_generate_a_random_secret":
         logger.warning("SECURITY: JWT_SECRET_KEY is using the default value — change it in production!")
-    if settings.admin_password == "changeme_in_production":
-        logger.warning("SECURITY: ADMIN_PASSWORD is using the default value — change it in production!")
 
     # Wait for dependencies to be ready (handles restart race conditions)
     await _wait_for_db()
@@ -208,48 +206,15 @@ async def lifespan(app: FastAPI):
             await seed_demo_data(demo_session)
         logger.info("STARTUP: Demo data seeded")
 
-    # Post-seed verification: ensure admin can actually log in
+    # Post-seed: log setup status (no auto-repair — credentials managed via UI)
     from app.models.user import User
-    from app.auth.jwt import verify_password, hash_password
     async with async_session() as verify_session:
-        result = await verify_session.execute(
-            select(User).where(User.username == settings.admin_username)
-        )
-        admin = result.scalar_one_or_none()
-        if admin:
-            _hash = admin.hashed_password or ""
-            _hash_ok = _hash.startswith("$2b$") and len(_hash) == 60
-            env_matches = verify_password(settings.admin_password, _hash) if _hash_ok else False
-            logger.info(
-                "STARTUP: Admin '%s' hash=%s... hash_valid=%s env_password_matches=%s",
-                admin.username,
-                _hash[:10] if _hash else "EMPTY",
-                _hash_ok,
-                env_matches,
-            )
-
-            # Auto-repair: if env password doesn't match DB hash, fix it
-            # This handles migration/restore scenarios where the hash is
-            # corrupted, truncated, or from a different password.
-            if not env_matches:
-                new_hash = hash_password(settings.admin_password)
-                roundtrip_ok = verify_password(settings.admin_password, new_hash)
-                if roundtrip_ok:
-                    admin.hashed_password = new_hash
-                    await verify_session.commit()
-                    logger.warning(
-                        "STARTUP: Admin password hash REPAIRED — env password "
-                        "did not match DB hash (hash_valid=%s). New hash=%s...",
-                        _hash_ok, new_hash[:10],
-                    )
-                else:
-                    logger.critical(
-                        "STARTUP: Admin password hash is WRONG and bcrypt "
-                        "roundtrip FAILED — login will not work! "
-                        "Run: docker compose exec backend python reset_admin.py"
-                    )
+        result = await verify_session.execute(select(User))
+        user_count = len(result.scalars().all())
+        if user_count == 0:
+            logger.info("STARTUP: No users in database — setup wizard will appear on first visit")
         else:
-            logger.critical("STARTUP: Admin user '%s' NOT FOUND after seed!", settings.admin_username)
+            logger.info("STARTUP: %d user(s) in database — login ready", user_count)
 
     # Ensure upload/report directories exist
     os.makedirs(settings.upload_dir, exist_ok=True)
@@ -325,7 +290,7 @@ logger.info("MultiPartParser max_file_size set to 200 MB")
 app = FastAPI(
     title="D.O.C — Drone Operations Command",
     description="Self-hosted mission management, flight log analysis, AI report generation, invoicing, telemetry visualization, and real-time airspace monitoring for commercial drone operators.",
-    version="2.55.5",
+    version="2.56.0",
     lifespan=lifespan,
 )
 

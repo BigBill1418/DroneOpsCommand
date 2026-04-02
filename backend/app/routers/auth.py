@@ -1,8 +1,8 @@
-"""Authentication router — login, account management, token refresh.
+"""Authentication router — login, account management, token refresh, setup wizard.
 
-v2.43.0: Rebuilt auth system. Password is set ONCE at first boot via seed.
-Seed NEVER modifies existing passwords. To reset, use reset_admin.py.
-RESET_ADMIN_PASSWORD env var removed entirely.
+v2.56.0: Credentials managed entirely via UI. No env vars for passwords.
+First visit shows setup wizard when no users exist in database.
+To reset: docker compose exec backend python reset_to_setup.py
 """
 
 import logging
@@ -92,6 +92,53 @@ def _clear_failures(ip: str) -> None:
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+class SetupRequest(BaseModel):
+    username: str
+    password: str
+
+
+@router.get("/setup-status")
+async def setup_status(db: AsyncSession = Depends(get_db)):
+    """Public endpoint — returns whether initial setup is needed."""
+    result = await db.execute(select(User))
+    users = result.scalars().all()
+    return {"needs_setup": len(users) == 0}
+
+
+@router.post("/setup")
+@limiter.limit("5/minute")
+async def initial_setup(request: Request, body: SetupRequest, db: AsyncSession = Depends(get_db)):
+    """Create the first admin user. Only works when no users exist."""
+    client_ip = get_remote_address(request)
+    result = await db.execute(select(User))
+    existing = result.scalars().all()
+    if len(existing) > 0:
+        logger.warning("Setup attempt rejected — %d user(s) already exist (ip=%s)", len(existing), client_ip)
+        raise HTTPException(status_code=403, detail="Setup already completed. Use login instead.")
+    if not body.username or len(body.username.strip()) < 3:
+        raise HTTPException(status_code=400, detail="Username must be at least 3 characters")
+    failures = check_password_complexity(body.password)
+    if failures:
+        raise HTTPException(status_code=400, detail=f"Password does not meet complexity requirements: {'; '.join(failures)}")
+    new_hash = await hash_password_async(body.password)
+    roundtrip_ok = await verify_password_async(body.password, new_hash)
+    if not roundtrip_ok:
+        logger.critical("SETUP: Bcrypt roundtrip FAILED for new admin user '%s' (ip=%s)", body.username, client_ip)
+        raise HTTPException(status_code=500, detail="Password hashing failed — please retry")
+    admin = User(username=body.username.strip(), hashed_password=new_hash)
+    db.add(admin)
+    await db.commit()
+    logger.info("SETUP COMPLETE: Admin user '%s' created (ip=%s)", admin.username, client_ip)
+    return {
+        "status": "ok",
+        "username": admin.username,
+        "access_token": create_access_token({"sub": admin.username}),
+        "refresh_token": create_refresh_token({"sub": admin.username}),
+        "token_type": "bearer",
+    }
+
+
+
 # Login
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 @router.post("/login")
@@ -253,7 +300,7 @@ async def refresh(request: RefreshRequest, db: AsyncSession = Depends(get_db)):
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Auth diagnostics — GET /api/auth/diag (no auth required)
-# Checks bcrypt, database connectivity, and admin user status.
+# Checks bcrypt, database connectivity, and user status.
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 @router.get("/diag")
 async def auth_diagnostics(db: AsyncSession = Depends(get_db)):
@@ -263,10 +310,8 @@ async def auth_diagnostics(db: AsyncSession = Depends(get_db)):
     diag = {
         "bcrypt_version": _bcrypt.__version__,
         "bcrypt_roundtrip": False,
-        "admin_user_exists": False,
-        "admin_username": settings.admin_username,
-        "admin_hash_prefix": None,
-        "admin_is_active": None,
+        "user_count": 0,
+        "needs_setup": True,
         "lockouts_active": len(_lockouts),
         "failed_attempt_ips": len(_failed_attempts),
     }
@@ -279,20 +324,14 @@ async def auth_diagnostics(db: AsyncSession = Depends(get_db)):
     except Exception as exc:
         diag["bcrypt_error"] = str(exc)
 
-    # Check admin user in DB
+    # Check users in DB
     try:
-        result = await db.execute(select(User).where(User.username == settings.admin_username))
-        admin = result.scalar_one_or_none()
-        if admin:
-            diag["admin_user_exists"] = True
-            diag["admin_hash_prefix"] = admin.hashed_password[:7] if admin.hashed_password else "EMPTY"
-            diag["admin_hash_length"] = len(admin.hashed_password) if admin.hashed_password else 0
-            diag["admin_is_active"] = admin.is_active
-            # Check if the env ADMIN_PASSWORD matches the DB hash
-            # (tells you if the password was changed via UI vs what env expects)
-            diag["env_password_matches_db"] = await verify_password_async(
-                settings.admin_password, admin.hashed_password
-            ) if admin.hashed_password else False
+        result = await db.execute(select(User))
+        users = result.scalars().all()
+        diag["user_count"] = len(users)
+        diag["needs_setup"] = len(users) == 0
+        if users:
+            diag["users"] = [{"username": u.username, "is_active": u.is_active, "hash_valid": bool(u.hashed_password and u.hashed_password.startswith("$2b$") and len(u.hashed_password) == 60)} for u in users]
     except Exception as exc:
         diag["db_error"] = str(exc)
 
