@@ -37,14 +37,10 @@ services:
     ports:
       - "3081:8080"
 
-  # Cloudflare tunnel is run as a standalone container with --network host
-  # because compose containers can't reach host ports (localhost:3081).
-  # Start it with:
-  #   docker run -d --name demo-tunnel --network host \
-  #     cloudflare/cloudflared:latest tunnel --no-autoupdate run --token $TOKEN
+  # Cloudflare tunnel — routes command-demo.barnardhq.com → frontend:8080
+  # Token is set via CLOUDFLARE_TUNNEL_TOKEN in .env.demo
   cloudflared:
-    deploy:
-      replicas: 0
+    restart: unless-stopped
 
   # Disable Ollama in demo (no GPU needed, LLM shows as "offline")
   ollama:
@@ -59,3 +55,8 @@ services:
   watchtower:
     deploy:
       replicas: 0
+
+  # Override DB port to avoid conflict with DroneOps Command (which uses 5434)
+  db:
+    ports: !override
+      - "5435:5432"
