@@ -39,8 +39,11 @@ services:
 
   # Cloudflare tunnel — routes command-demo.barnardhq.com → localhost:3081
   # Uses host network so cloudflared can reach frontend on host port
+  # Force HTTP/2 protocol — QUIC is unstable on this host due to small UDP buffers
+  # (rmem_max=208KiB, cloudflared wants 7168KiB, causes connection drops)
   # Token is set via CLOUDFLARE_TUNNEL_TOKEN in .env.demo
   cloudflared:
+    command: tunnel --no-autoupdate --protocol http2 run
     network_mode: host
     restart: unless-stopped
 
