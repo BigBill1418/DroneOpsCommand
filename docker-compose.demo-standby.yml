@@ -1,0 +1,34 @@
+# docker-compose.demo-standby.yml — PostgreSQL streaming replication standby
+# Runs on HSH-HQ (10.99.0.1) to maintain a hot standby of the DroneOps Demo
+# primary database running on CHAD-HQ (10.99.0.2:5435).
+#
+# Usage:
+#   docker compose -f docker-compose.demo-standby.yml up -d
+#
+# First-time setup requires pg_basebackup (see scripts/init-demo-standby.sh).
+
+services:
+  db-demo-standby:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      PGDATA: /var/lib/postgresql/data
+    volumes:
+      - droneops_demo_standby_pgdata:/var/lib/postgresql/data
+    ports:
+      - "5437:5432"
+    command: >
+      postgres
+        -c hot_standby=on
+        -c primary_conninfo='host=10.99.0.2 port=5435 user=replicator password=SecureDemoRepl2026 application_name=hsh_hq_demo_standby'
+        -c primary_slot_name='hsh_hq_demo_standby'
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U replicator || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  droneops_demo_standby_pgdata:
+    external: true
+    name: droneops_demo_standby_pgdata
