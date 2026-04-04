@@ -2,12 +2,17 @@ services:
   db:
     image: postgres:16-alpine
     restart: unless-stopped
+    entrypoint: ["/scripts/primary-entrypoint.sh"]
+    command: ["postgres"]
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-doc}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme_in_production}
       POSTGRES_DB: ${POSTGRES_DB:-doc}
+      REPLICATION_PASSWORD: ${REPLICATION_PASSWORD:-SecureDroneRepl2026}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./scripts/primary-entrypoint.sh:/scripts/primary-entrypoint.sh:ro
+      - ./scripts/init-primary.sh:/docker-entrypoint-initdb.d/init-primary.sh:ro
     ports:
       - "5434:5432"
     healthcheck:
