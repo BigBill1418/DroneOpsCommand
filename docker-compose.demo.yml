@@ -37,9 +37,8 @@ services:
     ports:
       - "3081:8080"
 
-  # Cloudflare tunnel — routes command-demo.barnardhq.com
-  # Uses host network so cloudflared can reach frontend on localhost:3081
-  # Update Cloudflare dashboard route to: http://localhost:3081
+  # Cloudflare tunnel — routes command-demo.barnardhq.com → localhost:3081
+  # Uses host network so cloudflared can reach frontend on host port
   # Token is set via CLOUDFLARE_TUNNEL_TOKEN in .env.demo
   cloudflared:
     network_mode: host
