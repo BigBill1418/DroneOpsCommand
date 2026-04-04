@@ -336,11 +336,22 @@ After logging in, go to **Settings > Branding** to set your company name, taglin
 |---------|-----------|------|---------|
 | Frontend | React 18 + Vite + Mantine UI | 80 (nginx) | SPA web interface |
 | Backend | Python 3.12, FastAPI, SQLAlchemy 2.0 | internal | REST API (via nginx) |
-| Database | PostgreSQL 16 Alpine | 5432 | Persistent storage |
+| Database | PostgreSQL 16 Alpine | 5434:5432 | Persistent storage with replication support |
 | Flight Parser | Python microservice | 8100 | DJI flight log decryption and parsing |
 | LLM | Ollama (Llama 3.1 8B quantized) | 11434 | Local AI report generation |
 | Queue | Redis 7 Alpine | 6379 | Celery task broker |
 | Worker | Celery (same backend image) | — | Async report generation |
+
+### PostgreSQL Streaming Replication
+
+The primary database is configured for WAL streaming replication to a standby on CHAD-HQ (10.99.0.2). This provides:
+
+- **Hot standby** — read-only replica available for failover
+- **Continuous WAL shipping** — changes stream in real-time to the standby
+- **Replication user** — dedicated `replicator` role with `REPLICATION` privileges
+- **Managed by NOC** — replication health monitored by NOC Master's continuous replication monitor (30s checks, auto-recovery)
+
+The primary entrypoint script (`scripts/primary-entrypoint.sh`) configures `pg_hba.conf` for replication access and WAL sender settings. The standby configuration is in `docker-compose.standby.yml`.
 
 ### Frontend Stack
 - **React 18** with TypeScript
