@@ -40,3 +40,4 @@ docker-compose.override.yml
 .last_deployed_commit
 .autopull.lock
 autopull.log
+.claude/worktrees/
