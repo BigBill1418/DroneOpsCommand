@@ -243,3 +243,84 @@ async def send_intake_email(
         raise
 
     return True
+
+
+async def send_client_portal_email(
+    to_email: str,
+    customer_name: str | None,
+    mission_title: str,
+    portal_url: str,
+    expires_at: object,
+    db: AsyncSession | None = None,
+) -> bool:
+    """Send client portal link to customer via email."""
+    import time as _time
+    start = _time.perf_counter()
+
+    logger.info(
+        "[EMAIL-PORTAL] Preparing portal email to=%s, customer=%s, mission='%s'",
+        to_email, customer_name, mission_title,
+    )
+
+    if db:
+        smtp = await get_smtp_settings(db)
+    else:
+        smtp = {
+            "smtp_host": settings.smtp_host,
+            "smtp_port": str(settings.smtp_port),
+            "smtp_user": settings.smtp_user,
+            "smtp_password": settings.smtp_password,
+            "smtp_from_email": settings.smtp_from_email,
+            "smtp_from_name": settings.smtp_from_name,
+            "smtp_use_tls": settings.smtp_use_tls,
+        }
+
+    if not smtp["smtp_host"]:
+        logger.error("[EMAIL-PORTAL] SMTP not configured — cannot send portal email to %s", to_email)
+        raise ValueError("SMTP not configured. Set SMTP_HOST in settings.")
+
+    branding = await _get_branding(db)
+
+    template = jinja_env.get_template("client_portal_email.html")
+    html_body = template.render(
+        customer_name=customer_name,
+        mission_title=mission_title,
+        portal_url=portal_url,
+        expires_at=expires_at.strftime("%B %d, %Y") if hasattr(expires_at, "strftime") else str(expires_at),
+        **branding,
+    )
+
+    msg = MIMEMultipart()
+    msg["From"] = f"{smtp['smtp_from_name']} <{smtp['smtp_from_email']}>"
+    msg["To"] = to_email
+    cn = branding.get("company_name", "DroneOps")
+    msg["Subject"] = f"Your Mission Portal — {cn}"
+    msg.attach(MIMEText(html_body, "html"))
+
+    try:
+        smtp_port = int(smtp["smtp_port"])
+    except (ValueError, TypeError):
+        raise ValueError(f"Invalid SMTP port: {smtp['smtp_port']}")
+
+    tls_flag = smtp["smtp_use_tls"] if isinstance(smtp["smtp_use_tls"], bool) else _parse_bool(str(smtp["smtp_use_tls"]), True)
+    tls_kwargs = {"use_tls": True} if smtp_port == 465 else {"start_tls": tls_flag}
+
+    logger.info("[EMAIL-PORTAL] Sending via SMTP host=%s:%s to=%s", smtp["smtp_host"], smtp_port, to_email)
+
+    try:
+        await aiosmtplib.send(
+            msg,
+            hostname=smtp["smtp_host"],
+            port=smtp_port,
+            username=smtp["smtp_user"] or None,
+            password=smtp["smtp_password"] or None,
+            **tls_kwargs,
+        )
+        elapsed = _time.perf_counter() - start
+        logger.info("[EMAIL-PORTAL] SUCCESS — Sent to %s in %.3fs", to_email, elapsed)
+    except Exception as exc:
+        elapsed = _time.perf_counter() - start
+        logger.error("[EMAIL-PORTAL] FAILED — SMTP send to %s failed after %.3fs: %s", to_email, elapsed, exc, exc_info=True)
+        raise
+
+    return True

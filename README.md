@@ -2,7 +2,7 @@
 
 **Self-hosted mission management, flight log analysis, GPS flight replay with video export, AI report generation, invoicing, and real-time airspace monitoring for commercial drone operators.**
 
-**Version 2.56.1** | [Quick Start](#quick-start) | [Features](#features) | [Configuration](#configuration) | [Contributing](CONTRIBUTING.md) | [License](LICENSE)
+**Version 2.57.0** | [Quick Start](#quick-start) | [Features](#features) | [Configuration](#configuration) | [Contributing](CONTRIBUTING.md) | [License](LICENSE)
 
 ---
 

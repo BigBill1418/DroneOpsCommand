@@ -33,4 +33,8 @@ class Customer(Base):
     signature_data: Mapped[str | None] = mapped_column(Text, nullable=True)
     tos_pdf_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
+    # Client portal auth
+    portal_password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    portal_password_set_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
     missions = relationship("Mission", back_populates="customer", lazy="noload")

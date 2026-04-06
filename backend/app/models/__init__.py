@@ -10,6 +10,7 @@ from app.models.battery import Battery, BatteryLog
 from app.models.maintenance import MaintenanceRecord, MaintenanceSchedule
 from app.models.pilot import Pilot
 from app.models.device_api_key import DeviceApiKey
+from app.models.client_portal import ClientAccessToken
 
 __all__ = [
     "Customer",
@@ -34,5 +35,5 @@ __all__ = [
     "MaintenanceSchedule",
     "Pilot",
     "DeviceApiKey",
+    "ClientAccessToken",
 ]
-from app.models.device_api_key import DeviceApiKey

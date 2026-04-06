@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="margin: 0; padding: 0; font-family: Arial, Helvetica, sans-serif; background: #f5f7fa;">
+
+<table width="100%" cellpadding="0" cellspacing="0" style="max-width: 600px; margin: 0 auto; background: #ffffff;">
+  <!-- Header -->
+  <tr>
+    <td style="background: linear-gradient(135deg, {{ brand_primary_color | default('#050608') }} 0%, {{ brand_primary_color | default('#050608') }}dd 100%); padding: 30px; text-align: center;">
+      {% if company_logo_url %}
+      <img src="{{ company_logo_url }}" alt="{{ company_name }}" style="max-height: 50px; max-width: 180px; margin-bottom: 8px;" />
+      <br>
+      {% endif %}
+      <div style="font-family: 'Arial Black', Arial, sans-serif; font-size: 28px; letter-spacing: 3px; color: #e8edf2;">
+        {{ company_name | upper }}
+      </div>
+      <div style="font-size: 10px; color: #5a6478; letter-spacing: 3px; margin-top: 4px;">
+        {{ company_tagline | upper }}
+      </div>
+    </td>
+  </tr>
+
+  <!-- Body -->
+  <tr>
+    <td style="padding: 30px;">
+      <p style="font-size: 16px; color: #1a1a2e; margin: 0 0 15px 0;">
+        Dear {{ customer_name or 'Valued Customer' }},
+      </p>
+
+      <p style="font-size: 14px; color: #333; line-height: 1.6; margin: 0 0 15px 0;">
+        Your mission portal is ready. You can now view the status and details
+        of your mission: <strong>{{ mission_title }}</strong>.
+      </p>
+
+      <p style="font-size: 14px; color: #333; line-height: 1.6; margin: 0 0 20px 0;">
+        Click the button below to access your secure client portal:
+      </p>
+
+      <div style="text-align: center; margin: 25px 0;">
+        <a href="{{ portal_url }}" style="display: inline-block; padding: 14px 40px; background: {{ brand_accent_color | default('#00d4ff') }}; color: #050608; font-family: 'Arial Black', Arial, sans-serif; font-size: 16px; letter-spacing: 2px; text-decoration: none; border-radius: 4px;">
+          VIEW MISSION
+        </a>
+      </div>
+
+      <div style="background: #0e1117; border-radius: 6px; padding: 15px 20px; margin: 20px 0;">
+        <div style="font-size: 12px; color: #5a6478; letter-spacing: 1px; margin-bottom: 6px;">
+          WHAT YOU CAN DO:
+        </div>
+        <ul style="color: #e8edf2; font-size: 13px; line-height: 1.8; margin: 0; padding-left: 20px;">
+          <li>View your mission status and details</li>
+          <li>Track mission progress in real-time</li>
+          <li>Access deliverables when available</li>
+        </ul>
+      </div>
+
+      <div style="font-size: 12px; color: #ff6b1a; margin: 15px 0; text-align: center;">
+        This link expires on {{ expires_at }}
+      </div>
+
+      <p style="font-size: 14px; color: #333; line-height: 1.6; margin: 20px 0 5px 0;">
+        If you have any questions about your mission, please don't hesitate to reach out.
+      </p>
+
+      <p style="font-size: 14px; color: #333; margin: 15px 0 5px 0;">
+        Best regards,<br>
+        <strong>{{ company_name }} {{ company_tagline }}</strong>
+      </p>
+
+      <div style="margin-top: 25px; padding: 15px 18px; background: #f8f9fb; border-left: 4px solid #0e1117; border-radius: 0 4px 4px 0;">
+        <p style="font-size: 11px; color: #555; line-height: 1.6; margin: 0;">
+          <strong style="color: #1a1a2e;">NOTE:</strong>
+          This is a secure link unique to you. Please do not share it with others.
+          If you did not expect this email, you may safely ignore it.
+        </p>
+      </div>
+    </td>
+  </tr>
+
+  <!-- Footer -->
+  <tr>
+    <td style="background: #050608; padding: 20px; text-align: center;">
+      <div style="font-family: 'Arial Black', Arial, sans-serif; font-size: 16px; letter-spacing: 2px; color: #e8edf2; margin-bottom: 8px;">
+        {{ company_name | upper }}
+      </div>
+      {% if company_website or company_social_url %}
+      <div style="margin: 8px 0;">
+        {% if company_website %}
+        <a href="{{ company_website }}" style="color: {{ brand_accent_color | default('#00d4ff') }}; text-decoration: none; font-size: 12px;">{{ company_website | replace('https://', '') | replace('http://', '') }}</a>
+        {% endif %}
+        {% if company_website and company_social_url %}
+        &nbsp;&nbsp;|&nbsp;&nbsp;
+        {% endif %}
+        {% if company_social_url %}
+        <a href="{{ company_social_url }}" style="color: {{ brand_accent_color | default('#00d4ff') }}; text-decoration: none; font-size: 12px;">{{ company_social_url | replace('https://', '') | replace('http://', '') }}</a>
+        {% endif %}
+      </div>
+      {% endif %}
+      <div style="color: #5a6478; font-size: 10px; margin-top: 8px;">
+        FAA Part 107 Certified | {{ company_tagline }}
+      </div>
+    </td>
+  </tr>
+</table>
+
+</body>
+</html>
