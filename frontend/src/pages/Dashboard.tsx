@@ -225,7 +225,7 @@ export default function Dashboard() {
   const [initiateModalOpen, setInitiateModalOpen] = useState(false);
   const [initiateEmail, setInitiateEmail] = useState('');
   const [initiateLoading, setInitiateLoading] = useState(false);
-  const [intakeResult, setIntakeResult] = useState<{ intake_url: string } | null>(null);
+  const [intakeResult, setIntakeResult] = useState<{ intake_url: string; customer_id?: string } | null>(null);
   const [linkCopied, setLinkCopied] = useState(false);
   const navigate = useNavigate();
 
@@ -285,13 +285,13 @@ export default function Dashboard() {
 
   const handleSendIntakeEmail = async () => {
     if (!intakeResult) return;
+    if (!intakeResult.customer_id) {
+      notifications.show({ title: 'Error', message: 'No customer associated with this intake', color: 'red' });
+      return;
+    }
     try {
-      const customersResp = await api.get('/customers');
-      const found = customersResp.data.find((c: Customer) => c.intake_token && intakeResult.intake_url.includes(c.intake_token));
-      if (found) {
-        await api.post(`/intake/${found.id}/send-email`);
-        notifications.show({ title: 'Sent', message: `Intake email sent to ${found.email}`, color: 'green' });
-      }
+      await api.post(`/intake/${intakeResult.customer_id}/send-email`);
+      notifications.show({ title: 'Sent', message: 'Intake email sent', color: 'green' });
     } catch (err: unknown) {
       const axiosErr = err as { response?: { data?: { detail?: string } } };
       notifications.show({ title: 'Error', message: axiosErr.response?.data?.detail || 'Failed to send email', color: 'red' });
