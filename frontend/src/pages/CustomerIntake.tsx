@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  Autocomplete,
   Box,
   Button,
   Card,
@@ -99,19 +100,29 @@ export default function CustomerIntake() {
   const [tosPdfBlobUrl, setTosPdfBlobUrl] = useState<string | null>(null);
 
   // Address autofill (Nominatim / OpenStreetMap)
-  const [addressSuggestions, setAddressSuggestions] = useState<NominatimResult[]>([]);
+  const [addressSuggestions, setAddressSuggestions] = useState<{ value: string; label: string; raw: NominatimResult }[]>([]);
   const [addressLoading, setAddressLoading] = useState(false);
-  const [addressPopover, setAddressPopover] = useState(false);
   const addressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const nominatimCache = useRef<Map<string, NominatimResult>>(new Map());
 
   const sigRef = useRef<SignatureCanvas>(null);
   const branding = useBranding();
+
+  const formatSuggestion = (result: NominatimResult): string => {
+    const addr = result.address;
+    if (!addr) return result.display_name;
+    const street = [addr.house_number, addr.road].filter(Boolean).join(' ');
+    const cityName = addr.city || addr.town || addr.village || '';
+    const stateAbbr = STATE_NAME_TO_ABBR[addr.state || ''] || addr.state || '';
+    const zip = addr.postcode || '';
+    const parts = [street, cityName, stateAbbr, zip].filter(Boolean);
+    return parts.length > 0 ? parts.join(', ') : result.display_name;
+  };
 
   const searchAddress = useCallback((query: string) => {
     if (addressTimerRef.current) clearTimeout(addressTimerRef.current);
     if (query.length < 4) {
       setAddressSuggestions([]);
-      setAddressPopover(false);
       return;
     }
     addressTimerRef.current = setTimeout(async () => {
@@ -122,8 +133,14 @@ export default function CustomerIntake() {
           { headers: { 'Accept-Language': 'en' } }
         );
         const data: NominatimResult[] = await resp.json();
-        setAddressSuggestions(data);
-        setAddressPopover(data.length > 0);
+        const newCache = new Map<string, NominatimResult>();
+        const suggestions = data.map((r) => {
+          const formatted = formatSuggestion(r);
+          newCache.set(formatted, r);
+          return { value: formatted, label: formatted, raw: r };
+        });
+        nominatimCache.current = newCache;
+        setAddressSuggestions(suggestions);
       } catch {
         setAddressSuggestions([]);
       } finally {
@@ -132,20 +149,20 @@ export default function CustomerIntake() {
     }, 400);
   }, []);
 
-  const selectAddress = (result: NominatimResult) => {
+  const selectAddress = (value: string) => {
+    const result = nominatimCache.current.get(value);
+    if (!result) return;
     const addr = result.address;
     if (addr) {
       const street = [addr.house_number, addr.road].filter(Boolean).join(' ');
       if (street) setAddress(street);
       setCity(addr.city || addr.town || addr.village || '');
-      // Convert full state name to abbreviation for the dropdown
       const rawState = addr.state || '';
       setStateVal(STATE_NAME_TO_ABBR[rawState] || rawState);
       setZipCode(addr.postcode || '');
     } else {
       setAddress(result.display_name);
     }
-    setAddressPopover(false);
   };
 
   useEffect(() => {
@@ -349,43 +366,30 @@ export default function CustomerIntake() {
             MAILING ADDRESS *
           </Text>
 
-          <div style={{ position: 'relative' }}>
-            <TextInput
+          <div>
+            <Autocomplete
               label="Street Address"
               required
-              autoComplete="address-line1"
+              autoComplete="off"
               leftSection={addressLoading ? <Loader size={14} color="cyan" /> : <IconMapPin size={14} />}
               value={address}
-              onChange={(e) => {
-                setAddress(e.target.value);
-                searchAddress(e.target.value);
+              onChange={(val) => {
+                setAddress(val);
+                searchAddress(val);
               }}
-              onFocus={() => { if (addressSuggestions.length > 0) setAddressPopover(true); }}
-              onBlur={() => { setTimeout(() => setAddressPopover(false), 200); }}
-              styles={inputStyles}
+              onOptionSubmit={(val) => selectAddress(val)}
+              data={addressSuggestions.map((s) => s.value)}
+              filter={({ options }) => options}
+              styles={{
+                input: { background: '#050608', borderColor: '#1a1f2e', color: '#e8edf2' },
+                label: { color: '#5a6478', fontFamily: "'Share Tech Mono', monospace", fontSize: '13px', letterSpacing: '1px' },
+                dropdown: { background: '#0e1117', borderColor: '#1a1f2e' },
+                option: { color: '#e8edf2', fontSize: '13px', '&[data-selected]': { background: '#00d4ff' } },
+              }}
             />
-            {addressPopover && addressSuggestions.length > 0 && (
-              <div
-                style={{
-                  position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 100,
-                  background: '#0e1117', border: '1px solid #1a1f2e', borderRadius: 6,
-                  maxHeight: 200, overflow: 'auto', marginTop: 2,
-                }}
-              >
-                {addressSuggestions.map((s, i) => (
-                  <Text
-                    key={i}
-                    size="sm"
-                    c="#e8edf2"
-                    p="xs"
-                    style={{ cursor: 'pointer', borderBottom: '1px solid #1a1f2e' }}
-                    onMouseDown={(e) => { e.preventDefault(); selectAddress(s); }}
-                  >
-                    {s.display_name}
-                  </Text>
-                ))}
-              </div>
-            )}
+            <Text c="#3d4557" size="xs" mt={2} style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: '10px' }}>
+              Powered by OpenStreetMap
+            </Text>
           </div>
 
           <TextInput label="City" required value={city} onChange={(e) => setCity(e.target.value)} autoComplete="address-level2" styles={inputStyles} />

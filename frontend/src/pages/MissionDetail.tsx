@@ -1,23 +1,31 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import {
+  ActionIcon,
   Badge,
   Button,
   Card,
+  CopyButton,
   Group,
   Loader,
   Stack,
   Switch,
   Text,
   Textarea,
+  TextInput,
   Title,
+  Tooltip,
 } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import PdfViewer from '../components/PDFPreview/PdfViewer';
 import {
+  IconCheck,
+  IconCopy,
   IconDeviceFloppy,
   IconDownload,
   IconEdit,
+  IconExternalLink,
   IconLink,
+  IconMail,
   IconRobot,
   IconSend,
   IconTrash,
@@ -42,6 +50,12 @@ export default function MissionDetail() {
   const [generating, setGenerating] = useState(false);
   const [includeDownloadLink, setIncludeDownloadLink] = useState(false);
   const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null);
+  const [portalUrl, setPortalUrl] = useState<string | null>(null);
+  const [portalLoading, setPortalLoading] = useState(false);
+  const [portalSending, setPortalSending] = useState(false);
+  const [portalSentTo, setPortalSentTo] = useState<string | null>(null);
+  const [clientNotes, setClientNotes] = useState('');
+  const [clientNotesDirty, setClientNotesDirty] = useState(false);
   const navigate = useNavigate();
 
   // Polling for Celery report generation
@@ -57,7 +71,10 @@ export default function MissionDetail() {
     if (!id) return;
     stopPolling();
     setGenerating(false);
-    api.get(`/missions/${id}`).then((r) => setMission(r.data)).catch(() => navigate('/'));
+    api.get(`/missions/${id}`).then((r) => {
+      setMission(r.data);
+      setClientNotes(r.data.client_notes || '');
+    }).catch(() => navigate('/'));
     api.get(`/missions/${id}/report`).then((r) => {
       setReport(r.data);
       setNarrative(r.data.user_narrative || '');
@@ -171,6 +188,45 @@ export default function MissionDetail() {
     } catch (err: unknown) {
       const axiosErr = err as { response?: { data?: { detail?: string } } };
       notifications.show({ title: 'Error', message: axiosErr.response?.data?.detail || 'Send failed', color: 'red' });
+    }
+  };
+
+  const handleGeneratePortalLink = async () => {
+    setPortalLoading(true);
+    try {
+      const resp = await api.post(`/missions/${id}/client-link`, { expires_days: 30 });
+      setPortalUrl(resp.data.portal_url);
+      notifications.show({ title: 'Link Generated', message: 'Client portal link is ready', color: 'cyan' });
+    } catch (err: unknown) {
+      const axiosErr = err as { response?: { data?: { detail?: string } } };
+      notifications.show({ title: 'Error', message: axiosErr.response?.data?.detail || 'Failed to generate link', color: 'red' });
+    } finally {
+      setPortalLoading(false);
+    }
+  };
+
+  const handleSendPortalEmail = async () => {
+    setPortalSending(true);
+    try {
+      await api.post(`/missions/${id}/client-link/send`);
+      setPortalSentTo(mission?.customer_id ? 'customer' : null);
+      notifications.show({ title: 'Sent', message: 'Portal link emailed to customer', color: 'green' });
+    } catch (err: unknown) {
+      const axiosErr = err as { response?: { data?: { detail?: string } } };
+      notifications.show({ title: 'Error', message: axiosErr.response?.data?.detail || 'Failed to send email', color: 'red' });
+    } finally {
+      setPortalSending(false);
+    }
+  };
+
+  const handleSaveClientNotes = async () => {
+    try {
+      await api.put(`/missions/${id}`, { client_notes: clientNotes || null });
+      setClientNotesDirty(false);
+      notifications.show({ title: 'Saved', message: 'Client notes updated', color: 'cyan' });
+    } catch (err: unknown) {
+      const axiosErr = err as { response?: { data?: { detail?: string } } };
+      notifications.show({ title: 'Error', message: axiosErr.response?.data?.detail || 'Failed to save notes', color: 'red' });
     }
   };
 
@@ -350,6 +406,91 @@ export default function MissionDetail() {
             EMAIL TO CUSTOMER
           </Button>
         </Group>
+      </Card>
+
+      {/* Client Portal */}
+      <Card padding="lg" radius="md" style={cardStyle}>
+        <Title order={3} c="#e8edf2" mb="md" style={{ letterSpacing: '1px' }}>CLIENT PORTAL</Title>
+        {mission.customer_id ? (
+          <Stack gap="md">
+            <Group gap="sm" wrap="wrap">
+              <Button
+                leftSection={portalLoading ? <Loader size={14} color="white" /> : <IconExternalLink size={16} />}
+                color="cyan"
+                variant="light"
+                onClick={handleGeneratePortalLink}
+                loading={portalLoading}
+                styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}
+              >
+                GENERATE CLIENT LINK
+              </Button>
+              <Button
+                leftSection={portalSending ? <Loader size={14} color="white" /> : <IconMail size={16} />}
+                color="orange"
+                variant="light"
+                onClick={handleSendPortalEmail}
+                loading={portalSending}
+                styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}
+              >
+                SEND TO CUSTOMER
+              </Button>
+            </Group>
+            {portalUrl && (
+              <TextInput
+                label="Portal URL"
+                value={portalUrl}
+                readOnly
+                styles={{
+                  input: { background: '#050608', borderColor: '#1a1f2e', color: '#e8edf2', fontFamily: "'Share Tech Mono', monospace", fontSize: '12px' },
+                  label: { color: '#5a6478', fontFamily: "'Share Tech Mono', monospace", fontSize: '13px', letterSpacing: '1px' },
+                }}
+                rightSection={
+                  <CopyButton value={portalUrl}>
+                    {({ copied, copy }) => (
+                      <Tooltip label={copied ? 'Copied' : 'Copy link'}>
+                        <ActionIcon color={copied ? 'green' : 'cyan'} variant="subtle" onClick={copy}>
+                          {copied ? <IconCheck size={16} /> : <IconCopy size={16} />}
+                        </ActionIcon>
+                      </Tooltip>
+                    )}
+                  </CopyButton>
+                }
+              />
+            )}
+            <Textarea
+              label="Client Notes"
+              description="Visible to the customer in their portal view"
+              value={clientNotes}
+              onChange={(e) => { setClientNotes(e.target.value); setClientNotesDirty(true); }}
+              minRows={3}
+              autosize
+              styles={{
+                input: { background: '#050608', borderColor: '#1a1f2e', color: '#e8edf2' },
+                label: { color: '#5a6478', fontFamily: "'Share Tech Mono', monospace", fontSize: '13px', letterSpacing: '1px' },
+                description: { color: '#3d4557', fontFamily: "'Share Tech Mono', monospace", fontSize: '11px' },
+              }}
+            />
+            {clientNotesDirty && (
+              <Button
+                leftSection={<IconDeviceFloppy size={16} />}
+                color="cyan"
+                variant="light"
+                size="xs"
+                onClick={handleSaveClientNotes}
+                styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px', alignSelf: 'flex-start' } }}
+              >
+                SAVE NOTES
+              </Button>
+            )}
+            <Text c="#5a6478" size="xs" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+              {portalSentTo ? 'Portal link sent to customer' : portalUrl ? 'Link generated — ready to share' : 'No link generated yet'}
+            </Text>
+          </Stack>
+        ) : (
+          <Text c="#5a6478" size="sm" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+            Assign a customer to enable the client portal
+          </Text>
+        )}
       </Card>
 
       {/* Inline PDF Preview */}
