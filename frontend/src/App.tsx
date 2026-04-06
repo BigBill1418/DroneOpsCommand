@@ -25,6 +25,7 @@ import FlightReplay from './pages/FlightReplay';
 // Client portal — code-split for separate bundle
 const ClientPortal = lazy(() => import('./pages/client/ClientPortal'));
 const ClientLogin = lazy(() => import('./pages/client/ClientLogin'));
+const ClientMissionDetail = lazy(() => import('./pages/client/ClientMissionDetail'));
 
 const ClientFallback = (
   <Center h="100vh" style={{ background: '#050608' }}>
@@ -48,6 +49,7 @@ export default function App() {
       <Routes>
         {/* Public routes — no auth required */}
         <Route path="/intake/:token" element={<CustomerIntake />} />
+        <Route path="/client/mission/:missionId" element={<Suspense fallback={ClientFallback}><ClientMissionDetail /></Suspense>} />
         <Route path="/client/login" element={<Suspense fallback={ClientFallback}><ClientLogin /></Suspense>} />
         <Route path="/client/:token" element={<Suspense fallback={ClientFallback}><ClientPortal /></Suspense>} />
 

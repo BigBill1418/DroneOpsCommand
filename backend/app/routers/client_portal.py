@@ -264,6 +264,7 @@ async def get_client_mission(
         mission_date=str(mission.mission_date) if mission.mission_date else None,
         location_name=mission.location_name,
         status=mission.status.value if hasattr(mission.status, "value") else str(mission.status),
+        client_notes=mission.client_notes,
         created_at=mission.created_at,
         image_count=image_count,
     )

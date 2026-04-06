@@ -23,6 +23,11 @@ class MissionType(str, enum.Enum):
 
 class MissionStatus(str, enum.Enum):
     DRAFT = "draft"
+    SCHEDULED = "scheduled"
+    IN_PROGRESS = "in_progress"
+    PROCESSING = "processing"
+    REVIEW = "review"
+    DELIVERED = "delivered"
     COMPLETED = "completed"
     SENT = "sent"
 
@@ -49,6 +54,7 @@ class Mission(Base):
     unas_folder_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
     download_link_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     download_link_expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    client_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

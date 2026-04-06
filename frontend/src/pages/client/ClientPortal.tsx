@@ -135,9 +135,14 @@ function ClientDashboardInline({ auth }: { auth: ReturnType<typeof useClientAuth
   }, []);
 
   const statusColor: Record<string, string> = {
-    draft: 'yellow',
+    draft: 'gray',
+    scheduled: 'blue',
+    in_progress: 'yellow',
+    processing: 'orange',
+    review: 'cyan',
+    delivered: 'green',
     completed: 'green',
-    sent: 'cyan',
+    sent: 'teal',
   };
 
   const typeLabel: Record<string, string> = {
@@ -222,6 +227,7 @@ function ClientDashboardInline({ auth }: { auth: ReturnType<typeof useClientAuth
                 onMouseLeave={(e) => {
                   (e.currentTarget as HTMLElement).style.borderColor = '#1a1f2e';
                 }}
+                onClick={() => window.location.href = `/client/mission/${m.id}`}
               >
                 <Group justify="space-between" mb="xs">
                   <Group gap="xs">
