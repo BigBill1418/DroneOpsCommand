@@ -8,7 +8,12 @@ export const cardStyle = { background: '#0e1117', border: '1px solid #1a1f2e' };
 export const monoFont = { fontFamily: "'Share Tech Mono', monospace" };
 
 export const statusColors: Record<string, string> = {
-  draft: 'yellow',
-  completed: 'cyan',
-  sent: 'green',
+  draft: 'gray',
+  scheduled: 'blue',
+  in_progress: 'yellow',
+  processing: 'orange',
+  review: 'cyan',
+  delivered: 'green',
+  completed: 'green',
+  sent: 'teal',
 };

@@ -58,6 +58,7 @@ export interface Mission {
   unas_folder_path: string | null;
   download_link_url: string | null;
   download_link_expires_at: string | null;
+  client_notes: string | null;
   created_at: string;
   updated_at: string;
   flights: MissionFlight[];

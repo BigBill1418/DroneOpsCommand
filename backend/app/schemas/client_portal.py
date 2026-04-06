@@ -70,6 +70,7 @@ class ClientMissionDetail(BaseModel):
     mission_date: str | None = None
     location_name: str | None = None
     status: str
+    client_notes: str | None = None
     created_at: datetime
     image_count: int = 0
 

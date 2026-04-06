@@ -62,6 +62,7 @@ class MissionUpdate(BaseModel):
     unas_folder_path: str | None = None
     download_link_url: str | None = None
     download_link_expires_at: datetime | None = None
+    client_notes: str | None = None
 
 
 class MissionResponse(BaseModel):
@@ -78,6 +79,7 @@ class MissionResponse(BaseModel):
     unas_folder_path: str | None = None
     download_link_url: str | None = None
     download_link_expires_at: datetime | None = None
+    client_notes: str | None = None
     created_at: datetime
     updated_at: datetime
     flights: list[MissionFlightResponse] = []
