@@ -42,6 +42,9 @@ class Settings(BaseSettings):
     frontend_url: str = "http://localhost:3080"
     intake_token_expire_days: int = 7
 
+    # Client portal
+    client_token_expire_days: int = 30
+
     # Demo mode
     demo_mode: bool = False
     demo_reset_interval_hours: int = 24

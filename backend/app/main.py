@@ -18,7 +18,7 @@ from starlette.formparsers import MultiPartParser
 from app.config import settings
 from app.database import Base, async_session, engine, get_db
 import app.models  # noqa: F401 — ensure all models registered with Base before create_all
-from app.routers import auth, customers, aircraft, missions, flights, maps, reports, invoices, rate_templates, llm, system_settings, financials, weather, intake, flight_library, batteries, maintenance, backup, device_keys, pilots
+from app.routers import auth, customers, aircraft, missions, flights, maps, reports, invoices, rate_templates, llm, system_settings, financials, weather, intake, flight_library, batteries, maintenance, backup, device_keys, pilots, client_portal
 
 # Configure root logger for the app
 logging.basicConfig(
@@ -95,6 +95,8 @@ def _add_missing_columns(conn):
                 ("city", "ALTER TABLE customers ADD COLUMN city VARCHAR(255)"),
                 ("state", "ALTER TABLE customers ADD COLUMN state VARCHAR(100)"),
                 ("zip_code", "ALTER TABLE customers ADD COLUMN zip_code VARCHAR(20)"),
+                ("portal_password_hash", "ALTER TABLE customers ADD COLUMN portal_password_hash VARCHAR(255)"),
+                ("portal_password_set_at", "ALTER TABLE customers ADD COLUMN portal_password_set_at TIMESTAMP"),
             ],
             "mission_flights": [
                 ("flight_id", "ALTER TABLE mission_flights ADD COLUMN flight_id UUID REFERENCES flights(id) ON DELETE SET NULL"),
@@ -290,7 +292,7 @@ logger.info("MultiPartParser max_file_size set to 200 MB")
 app = FastAPI(
     title="D.O.C — Drone Operations Command",
     description="Self-hosted mission management, flight log analysis, AI report generation, invoicing, telemetry visualization, and real-time airspace monitoring for commercial drone operators.",
-    version="2.56.1",
+    version="2.57.0",
     lifespan=lifespan,
 )
 
@@ -367,6 +369,7 @@ app.include_router(maintenance.router)
 app.include_router(backup.router)
 app.include_router(device_keys.router)
 app.include_router(pilots.router)
+app.include_router(client_portal.router)
 
 
 # ── Demo status endpoint (no auth required) ───────────────────────────
