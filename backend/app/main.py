@@ -18,7 +18,7 @@ from starlette.formparsers import MultiPartParser
 from app.config import settings
 from app.database import Base, async_session, engine, get_db
 import app.models  # noqa: F401 — ensure all models registered with Base before create_all
-from app.routers import auth, customers, aircraft, missions, flights, maps, reports, invoices, rate_templates, llm, system_settings, financials, weather, intake, flight_library, batteries, maintenance, backup, device_keys, pilots, client_portal
+from app.routers import auth, customers, aircraft, missions, flights, maps, reports, invoices, rate_templates, llm, system_settings, financials, weather, intake, flight_library, batteries, maintenance, backup, device_keys, pilots, client_portal, stripe_webhook
 
 # Configure root logger for the app
 logging.basicConfig(
@@ -111,6 +111,12 @@ def _add_missing_columns(conn):
             ],
             "aircraft": [
                 ("serial_number", "ALTER TABLE aircraft ADD COLUMN serial_number VARCHAR(255)"),
+            ],
+            "invoices": [
+                ("stripe_payment_intent_id", "ALTER TABLE invoices ADD COLUMN stripe_payment_intent_id VARCHAR(255)"),
+                ("stripe_checkout_session_id", "ALTER TABLE invoices ADD COLUMN stripe_checkout_session_id VARCHAR(255)"),
+                ("payment_method", "ALTER TABLE invoices ADD COLUMN payment_method VARCHAR(50)"),
+                ("paid_at", "ALTER TABLE invoices ADD COLUMN paid_at TIMESTAMP"),
             ],
             "maintenance_records": [
                 ("images", "ALTER TABLE maintenance_records ADD COLUMN images JSONB DEFAULT '[]'"),
@@ -371,6 +377,7 @@ app.include_router(backup.router)
 app.include_router(device_keys.router)
 app.include_router(pilots.router)
 app.include_router(client_portal.router)
+app.include_router(stripe_webhook.router)
 
 
 # ── Demo status endpoint (no auth required) ───────────────────────────

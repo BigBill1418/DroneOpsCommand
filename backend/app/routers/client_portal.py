@@ -438,3 +438,291 @@ async def revoke_client_link(
     elapsed = time.perf_counter() - start
     logger.info("[CLIENT-LINK-REVOKE] Token %s revoked (%.3fs)", token_id, elapsed)
     return {"message": "Token revoked"}
+
+
+@router.get("/api/client/missions/{mission_id}/invoice", response_model=ClientInvoiceResponse | None)
+async def get_client_invoice(
+    mission_id: UUID,
+    request: Request,
+    client: ClientContext = Depends(get_current_client),
+    db: AsyncSession = Depends(get_db),
+):
+    """Client auth: get invoice for a mission (filtered — no operator notes)."""
+    start = time.perf_counter()
+    client_ip = _client_ip(request)
+
+    if not client.can_access_mission(str(mission_id)):
+        logger.warning("[CLIENT-INVOICE] ACCESS DENIED — customer=%s cannot access mission=%s", client.customer_id, mission_id)
+        raise HTTPException(status_code=403, detail="You do not have access to this mission")
+
+    result = await db.execute(
+        select(Invoice).where(Invoice.mission_id == mission_id)
+    )
+    invoice = result.scalar_one_or_none()
+
+    if not invoice:
+        elapsed = time.perf_counter() - start
+        logger.info("[CLIENT-INVOICE] No invoice for mission=%s (%.3fs)", mission_id, elapsed)
+        return None
+
+    line_items = [
+        ClientInvoiceLineItem(
+            description=item.description,
+            quantity=float(item.quantity),
+            unit_price=float(item.unit_price),
+            total=float(item.total),
+        )
+        for item in (invoice.line_items or [])
+    ]
+
+    elapsed = time.perf_counter() - start
+    logger.info(
+        "[CLIENT-INVOICE] Served invoice=%s for mission=%s, paid=%s (%.3fs)",
+        invoice.id, mission_id, invoice.paid_in_full, elapsed,
+    )
+
+    return ClientInvoiceResponse(
+        id=str(invoice.id),
+        total=float(invoice.total),
+        paid_in_full=invoice.paid_in_full,
+        paid_at=invoice.paid_at,
+        payment_method=invoice.payment_method,
+        line_items=line_items,
+    )
+
+
+@router.post("/api/client/missions/{mission_id}/invoice/pay", response_model=ClientPaymentResponse)
+async def create_client_payment(
+    mission_id: UUID,
+    request: Request,
+    client: ClientContext = Depends(get_current_client),
+    db: AsyncSession = Depends(get_db),
+):
+    """Client auth: create a Stripe Checkout session to pay the invoice."""
+    start = time.perf_counter()
+    client_ip = _client_ip(request)
+
+    logger.info("[CLIENT-PAY] Payment requested for mission=%s by customer=%s from ip=%s", mission_id, client.customer_id, client_ip)
+
+    if not client.can_access_mission(str(mission_id)):
+        logger.warning("[CLIENT-PAY] ACCESS DENIED — customer=%s cannot access mission=%s", client.customer_id, mission_id)
+        raise HTTPException(status_code=403, detail="You do not have access to this mission")
+
+    result = await db.execute(
+        select(Invoice).where(Invoice.mission_id == mission_id)
+    )
+    invoice = result.scalar_one_or_none()
+
+    if not invoice:
+        raise HTTPException(status_code=404, detail="No invoice found for this mission")
+
+    if invoice.paid_in_full:
+        raise HTTPException(status_code=400, detail="Invoice is already paid")
+
+    if float(invoice.total) <= 0:
+        raise HTTPException(status_code=400, detail="Invoice total must be greater than zero")
+
+    # Load customer for email
+    cust_result = await db.execute(select(Customer).where(Customer.id == UUID(client.customer_id)))
+    customer = cust_result.scalar_one_or_none()
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+
+    # Build success/cancel URLs pointing back to client portal
+    frontend_url = settings.frontend_url.rstrip("/")
+    success_url = f"{frontend_url}/client/missions/{mission_id}?payment=success"
+    cancel_url = f"{frontend_url}/client/missions/{mission_id}?payment=cancelled"
+
+    from app.services.stripe_service import create_checkout_session
+
+    try:
+        checkout_url = await create_checkout_session(
+            invoice=invoice,
+            customer=customer,
+            success_url=success_url,
+            cancel_url=cancel_url,
+            db=db,
+        )
+    except ValueError as exc:
+        logger.error("[CLIENT-PAY] Stripe not configured: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+    except Exception as exc:
+        logger.error("[CLIENT-PAY] Failed to create checkout session for mission=%s: %s", mission_id, exc)
+        raise HTTPException(status_code=500, detail="Failed to create payment session")
+
+    await db.commit()
+
+    elapsed = time.perf_counter() - start
+    logger.info("[CLIENT-PAY] Checkout session created for mission=%s, customer=%s (%.3fs)", mission_id, client.customer_id, elapsed)
+
+    return ClientPaymentResponse(checkout_url=checkout_url)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# OPERATOR ENDPOINTS — /api/missions/{id}/client-link
+# ═══════════════════════════════════════════════════════════════════════
+
+@router.post("/api/missions/{mission_id}/client-link", response_model=ClientLinkResponse)
+async def create_client_link(
+    mission_id: UUID,
+    data: ClientLinkCreate,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """Operator auth: generate a client portal token/URL for a mission."""
+    start = time.perf_counter()
+    client_ip = _client_ip(request)
+
+    logger.info("[CLIENT-LINK-CREATE] Operator creating link for mission=%s, expires_days=%d from ip=%s", mission_id, data.expires_days, client_ip)
+
+    result = await db.execute(select(Mission).where(Mission.id == mission_id))
+    mission = result.scalar_one_or_none()
+    if not mission:
+        logger.warning("[CLIENT-LINK-CREATE] Mission not found: %s", mission_id)
+        raise HTTPException(status_code=404, detail="Mission not found")
+
+    if not mission.customer_id:
+        logger.warning("[CLIENT-LINK-CREATE] Mission %s has no customer assigned", mission_id)
+        raise HTTPException(status_code=400, detail="Mission must have a customer assigned")
+
+    # Create the JWT
+    mission_ids = [str(mission.id)]
+    client_jwt = create_client_token(mission.customer_id, mission_ids, data.expires_days)
+
+    # Store token record for tracking/revocation
+    token_record = ClientAccessToken(
+        customer_id=mission.customer_id,
+        token_hash=hash_token(client_jwt),
+        mission_scope=[str(mission.id)],
+        expires_at=datetime.utcnow() + timedelta(days=data.expires_days),
+        ip_address=client_ip,
+    )
+    db.add(token_record)
+    await db.flush()
+
+    frontend_url = settings.frontend_url.rstrip("/")
+    portal_url = f"{frontend_url}/client/{client_jwt}"
+
+    elapsed = time.perf_counter() - start
+    logger.info(
+        "[CLIENT-LINK-CREATE] Token created id=%s for mission=%s, customer=%s (%.3fs)",
+        token_record.id, mission_id, mission.customer_id, elapsed,
+    )
+
+    return ClientLinkResponse(
+        token_id=str(token_record.id),
+        portal_url=portal_url,
+        expires_at=token_record.expires_at,
+        customer_id=str(mission.customer_id),
+        mission_ids=mission_ids,
+    )
+
+
+@router.post("/api/missions/{mission_id}/client-link/send")
+async def send_client_link(
+    mission_id: UUID,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """Operator auth: email the client portal link to the customer."""
+    start = time.perf_counter()
+    client_ip = _client_ip(request)
+
+    logger.info("[CLIENT-LINK-SEND] Sending portal link for mission=%s from ip=%s", mission_id, client_ip)
+
+    result = await db.execute(select(Mission).where(Mission.id == mission_id))
+    mission = result.scalar_one_or_none()
+    if not mission:
+        raise HTTPException(status_code=404, detail="Mission not found")
+    if not mission.customer_id:
+        raise HTTPException(status_code=400, detail="Mission has no customer assigned")
+
+    cust_result = await db.execute(select(Customer).where(Customer.id == mission.customer_id))
+    customer = cust_result.scalar_one_or_none()
+    if not customer or not customer.email:
+        raise HTTPException(status_code=400, detail="Customer has no email address")
+
+    # Generate a fresh token
+    mission_ids = [str(mission.id)]
+    client_jwt = create_client_token(customer.id, mission_ids, settings.client_token_expire_days)
+    expires_at = datetime.utcnow() + timedelta(days=settings.client_token_expire_days)
+
+    token_record = ClientAccessToken(
+        customer_id=customer.id,
+        token_hash=hash_token(client_jwt),
+        mission_scope=[str(mission.id)],
+        expires_at=expires_at,
+        ip_address=client_ip,
+    )
+    db.add(token_record)
+    await db.flush()
+
+    frontend_url = settings.frontend_url.rstrip("/")
+    portal_url = f"{frontend_url}/client/{client_jwt}"
+
+    # Send email
+    from app.services.email_service import send_client_portal_email
+
+    try:
+        await send_client_portal_email(
+            to_email=customer.email,
+            customer_name=customer.name,
+            mission_title=mission.title,
+            portal_url=portal_url,
+            expires_at=expires_at,
+            db=db,
+        )
+    except Exception as exc:
+        elapsed = time.perf_counter() - start
+        logger.error(
+            "[CLIENT-LINK-SEND] FAILED to send email to %s for mission=%s: %s (%.3fs)",
+            customer.email, mission_id, exc, elapsed, exc_info=True,
+        )
+        raise HTTPException(status_code=500, detail="Email delivery failed")
+
+    elapsed = time.perf_counter() - start
+    logger.info(
+        "[CLIENT-LINK-SEND] Email sent to %s for mission=%s, token_id=%s (%.3fs)",
+        customer.email, mission_id, token_record.id, elapsed,
+    )
+    return {"message": "Client portal link sent", "portal_url": portal_url}
+
+
+@router.delete("/api/missions/{mission_id}/client-link/{token_id}")
+async def revoke_client_link(
+    mission_id: UUID,
+    token_id: UUID,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """Operator auth: revoke a client portal token."""
+    start = time.perf_counter()
+    client_ip = _client_ip(request)
+
+    logger.info("[CLIENT-LINK-REVOKE] Revoking token=%s for mission=%s from ip=%s", token_id, mission_id, client_ip)
+
+    result = await db.execute(
+        select(ClientAccessToken).where(
+            ClientAccessToken.id == token_id,
+            ClientAccessToken.mission_scope.contains([str(mission_id)]),
+        )
+    )
+    token_record = result.scalar_one_or_none()
+
+    if not token_record:
+        logger.warning("[CLIENT-LINK-REVOKE] Token not found: %s for mission=%s", token_id, mission_id)
+        raise HTTPException(status_code=404, detail="Token not found")
+
+    if token_record.revoked_at:
+        logger.info("[CLIENT-LINK-REVOKE] Token %s already revoked at %s", token_id, token_record.revoked_at)
+        return {"message": "Token already revoked"}
+
+    token_record.revoked_at = datetime.utcnow()
+    await db.flush()
+
+    elapsed = time.perf_counter() - start
+    logger.info("[CLIENT-LINK-REVOKE] Token %s revoked (%.3fs)", token_id, elapsed)
+    return {"message": "Token revoked"}

@@ -75,3 +75,25 @@ class ClientMissionDetail(BaseModel):
     image_count: int = 0
 
     model_config = {"from_attributes": True}
+
+
+# ── Client invoice views ────────────────────────────────────────────
+
+class ClientInvoiceLineItem(BaseModel):
+    description: str
+    quantity: float
+    unit_price: float
+    total: float
+
+
+class ClientInvoiceResponse(BaseModel):
+    id: str
+    total: float
+    paid_in_full: bool
+    paid_at: datetime | None = None
+    payment_method: str | None = None
+    line_items: list[ClientInvoiceLineItem] = []
+
+
+class ClientPaymentResponse(BaseModel):
+    checkout_url: str
