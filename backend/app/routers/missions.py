@@ -3,7 +3,7 @@ import io
 import logging
 import os
 import uuid as uuid_mod
-from datetime import datetime
+from datetime import datetime, timedelta
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, status
@@ -12,9 +12,12 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.auth.client_auth import create_client_token, hash_token
 from app.auth.jwt import get_current_user
 from app.config import settings
 from app.database import get_db
+from app.models.client_portal import ClientAccessToken
+from app.models.customer import Customer
 from app.models.mission import Mission, MissionFlight, MissionImage
 from app.models.user import User
 from app.schemas.mission import (
@@ -30,6 +33,51 @@ from app.services.opendronelog import opendronelog_client
 logger = logging.getLogger("doc.missions")
 
 router = APIRouter(prefix="/api/missions", tags=["missions"])
+
+
+async def _send_portal_email_for_mission(mission_id: UUID, customer_id: UUID, db: AsyncSession) -> None:
+    """Generate a client portal token and email it to the customer. Non-blocking on failure."""
+    try:
+        result = await db.execute(select(Customer).where(Customer.id == customer_id))
+        customer = result.scalar_one_or_none()
+        if not customer or not customer.email:
+            logger.info("Skipping portal email for mission=%s: customer %s has no email", mission_id, customer_id)
+            return
+
+        result = await db.execute(select(Mission).where(Mission.id == mission_id))
+        mission = result.scalar_one_or_none()
+        if not mission:
+            logger.warning("Skipping portal email: mission=%s not found after create", mission_id)
+            return
+
+        mission_ids = [str(mission.id)]
+        client_jwt = create_client_token(customer.id, mission_ids, settings.client_token_expire_days)
+        expires_at = datetime.utcnow() + timedelta(days=settings.client_token_expire_days)
+
+        token_record = ClientAccessToken(
+            customer_id=customer.id,
+            token_hash=hash_token(client_jwt),
+            mission_scope=[str(mission.id)],
+            expires_at=expires_at,
+        )
+        db.add(token_record)
+        await db.flush()
+
+        frontend_url = settings.frontend_url.rstrip("/")
+        portal_url = f"{frontend_url}/client/{client_jwt}"
+
+        from app.services.email_service import send_client_portal_email
+        await send_client_portal_email(
+            to_email=customer.email,
+            customer_name=customer.name,
+            mission_title=mission.title,
+            portal_url=portal_url,
+            expires_at=expires_at,
+            db=db,
+        )
+        logger.info("Auto-sent portal email to %s for mission=%s", customer.email, mission_id)
+    except Exception as exc:
+        logger.error("Failed to auto-send portal email for mission=%s: %s", mission_id, exc, exc_info=True)
 
 
 @router.get("", response_model=list[MissionResponse])
@@ -72,6 +120,11 @@ async def create_mission(
             )
         )
         mission = result.scalar_one()
+
+        # Auto-send client portal email if customer is assigned
+        if mission.customer_id:
+            await _send_portal_email_for_mission(mission.id, mission.customer_id, db)
+
         return mission
     except Exception as exc:
         logger.exception("Failed to create mission: %s", exc)
@@ -110,7 +163,10 @@ async def update_mission(
         raise HTTPException(status_code=404, detail="Mission not found")
 
     try:
-        for key, value in data.model_dump(exclude_unset=True).items():
+        old_customer_id = mission.customer_id
+        update_fields = data.model_dump(exclude_unset=True)
+
+        for key, value in update_fields.items():
             # Strip timezone from expires_at — DB column is TIMESTAMP WITHOUT TIME ZONE
             if key == "download_link_expires_at" and isinstance(value, datetime):
                 value = value.replace(tzinfo=None)
@@ -126,6 +182,12 @@ async def update_mission(
             )
         )
         mission = result.scalar_one()
+
+        # Auto-send portal email if customer_id was set or changed
+        new_customer_id = update_fields.get("customer_id")
+        if new_customer_id and new_customer_id != old_customer_id:
+            await _send_portal_email_for_mission(mission.id, new_customer_id, db)
+
         return mission
     except Exception as exc:
         logger.exception("Failed to update mission: %s", exc)
