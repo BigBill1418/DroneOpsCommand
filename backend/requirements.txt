@@ -40,6 +40,9 @@ aiosmtplib==3.0.2
 # Rate Limiting
 slowapi==0.1.9
 
+# Payments
+stripe==11.4.1
+
 # Utilities
 pydantic==2.10.3
 pydantic-settings==2.7.0

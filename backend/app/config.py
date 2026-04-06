@@ -45,6 +45,11 @@ class Settings(BaseSettings):
     # Client portal
     client_token_expire_days: int = 30
 
+    # Stripe (optional — falls back to DB-stored settings)
+    stripe_secret_key: str = ""
+    stripe_webhook_secret: str = ""
+    stripe_publishable_key: str = ""
+
     # Demo mode
     demo_mode: bool = False
     demo_reset_interval_hours: int = 24

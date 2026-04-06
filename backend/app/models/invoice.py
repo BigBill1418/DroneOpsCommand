@@ -31,6 +31,10 @@ class Invoice(Base):
     tax_amount: Mapped[float] = mapped_column(Numeric(10, 2), default=0)
     total: Mapped[float] = mapped_column(Numeric(10, 2), default=0)
     paid_in_full: Mapped[bool] = mapped_column(Boolean, default=False)
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    payment_method: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    stripe_checkout_session_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    stripe_payment_intent_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 

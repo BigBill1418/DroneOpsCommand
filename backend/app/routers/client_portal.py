@@ -34,6 +34,8 @@ from app.models.customer import Customer
 from app.models.mission import Mission
 from app.models.user import User
 from app.schemas.client_portal import (
+    ClientInvoiceLineItem,
+    ClientInvoiceResponse,
     ClientLinkCreate,
     ClientLinkResponse,
     ClientLinkSendRequest,
@@ -41,6 +43,7 @@ from app.schemas.client_portal import (
     ClientLoginResponse,
     ClientMissionDetail,
     ClientMissionSummary,
+    ClientPaymentResponse,
     ClientTokenValidateResponse,
 )
 
