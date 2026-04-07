@@ -69,9 +69,10 @@ def generate_report_task(
         import httpx as _httpx
         for attempt in range(6):
             try:
-                _resp = loop.run_until_complete(
-                    _httpx.AsyncClient(timeout=5).get(f"{settings.ollama_base_url}/api/tags")
-                )
+                async def _check_ollama():
+                    async with _httpx.AsyncClient(timeout=5) as _client:
+                        return await _client.get(f"{settings.ollama_base_url}/api/tags")
+                _resp = loop.run_until_complete(_check_ollama())
                 if _resp.status_code == 200:
                     break
             except Exception:

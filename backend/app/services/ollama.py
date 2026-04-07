@@ -73,9 +73,11 @@ Generate the after-action report:"""
 
     logger.info("LLM report generation starting for '%s' (%s)", mission_title, location)
     try:
-        async with httpx.AsyncClient(timeout=300) as client:
+        async with httpx.AsyncClient(timeout=300, headers={"Connection": "close"}) as client:
+            url = f"{settings.ollama_base_url}/api/generate"
+            logger.info("LLM request: POST %s model=%s", url, settings.ollama_model)
             resp = await client.post(
-                f"{settings.ollama_base_url}/api/generate",
+                url,
                 json={
                     "model": settings.ollama_model,
                     "prompt": user_prompt,
@@ -94,6 +96,7 @@ Generate the after-action report:"""
                 },
             )
             resp.raise_for_status()
+            logger.info("LLM response: %d in %.1fs", resp.status_code, resp.elapsed.total_seconds())
             data = resp.json()
             response_text = data.get("response", "")
             logger.info("LLM report generated: %d chars", len(response_text))
