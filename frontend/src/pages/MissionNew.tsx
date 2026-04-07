@@ -317,6 +317,11 @@ export default function MissionNew() {
           flights = resp.data.flights || resp.data.data || resp.data.results || resp.data.items || [];
         }
       }
+      flights.sort((a: any, b: any) => {
+        const dateA = a.start_time || a.startTime || a.date || a.created_at || "";
+        const dateB = b.start_time || b.startTime || b.date || b.created_at || "";
+        return dateB.localeCompare(dateA);
+      });
       setAvailableFlights(flights);
       if (flights.length === 0) {
         notifications.show({ title: 'Flights', message: 'No flights found. Upload flight logs on the Flights page first.', color: 'yellow' });
