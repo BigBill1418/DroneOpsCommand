@@ -40,6 +40,7 @@ import {
   IconBattery,
   IconBatteryOff,
   IconCalendarDue,
+  IconPlayerSkipForward,
   IconSend,
   IconCheck,
   IconCopy,
@@ -263,6 +264,29 @@ export default function Dashboard() {
   const batteryAlerts = batteries.filter(
     (b) => b.status === 'active' && (b.health_pct < 40 || b.cycle_count > 200)
   );
+
+  const handleSkipMaintenance = async (scheduleId: string) => {
+    try {
+      await api.post(`/maintenance/schedules/${scheduleId}/skip`);
+      notifications.show({ title: 'Deferred', message: 'Pushed out to next interval', color: 'cyan' });
+      api.get('/maintenance/due').then((r) => setMaintenanceAlerts(Array.isArray(r.data) ? r.data : [])).catch(() => {});
+      api.get('/maintenance/next-due').then((r) => setNextServiceDue(r.data)).catch(() => setNextServiceDue(null));
+    } catch {
+      notifications.show({ title: 'Error', message: 'Failed to defer', color: 'red' });
+    }
+  };
+
+  const handleDeferAllOverdue = async () => {
+    try {
+      const r = await api.post('/maintenance/defer-all-overdue');
+      notifications.show({ title: 'Deferred', message: `${r.data.deferred} overdue items pushed out`, color: 'cyan' });
+      api.get('/maintenance/due').then((r) => setMaintenanceAlerts(Array.isArray(r.data) ? r.data : [])).catch(() => {});
+      api.get('/maintenance/next-due').then((r) => setNextServiceDue(r.data)).catch(() => setNextServiceDue(null));
+    } catch {
+      notifications.show({ title: 'Error', message: 'Failed to defer', color: 'red' });
+    }
+  };
+
   const hasAlerts = maintenanceAlerts.length > 0 || batteryAlerts.length > 0;
 
   const handleInitiateServices = async () => {
@@ -939,6 +963,12 @@ export default function Dashboard() {
                     <Text size="xs" c="#ff6b1a" fw={700} style={{ ...monoXs, letterSpacing: '2px' }}>
                       MAINTENANCE ALERTS
                     </Text>
+                    {maintenanceAlerts.some((a) => a.overdue) && (
+                      <Button size="compact-xs" variant="subtle" color="red" onClick={handleDeferAllOverdue}
+                        styles={{ root: { ...monoXs, padding: '0 6px', height: 18, fontSize: '9px' } }}>
+                        DEFER ALL OVERDUE
+                      </Button>
+                    )}
                   </Group>
                   <Stack gap={3}>
                     {maintenanceAlerts.slice(0, 3).map((alert, i) => (
@@ -957,12 +987,20 @@ export default function Dashboard() {
                               {alert.aircraft_name || ''}
                             </Text>
                           </Group>
-                          <Badge color={alert.overdue ? 'red' : 'orange'} variant="light" size="xs">
-                            {alert.overdue
-                              ? `${Math.abs(alert.days_until)}d OVERDUE`
-                              : alert.days_until === 0 ? 'TODAY' : `${alert.days_until}d`
-                            }
-                          </Badge>
+                          <Group gap={4} wrap="nowrap">
+                            <Badge color={alert.overdue ? 'red' : 'orange'} variant="light" size="xs">
+                              {alert.overdue
+                                ? `${Math.abs(alert.days_until)}d OVERDUE`
+                                : alert.days_until === 0 ? 'TODAY' : `${alert.days_until}d`
+                              }
+                            </Badge>
+                            {alert.schedule_id && (
+                              <ActionIcon size="xs" variant="subtle" color="gray" title="Defer"
+                                onClick={(e: React.MouseEvent) => { e.stopPropagation(); handleSkipMaintenance(alert.schedule_id!); }}>
+                                <IconPlayerSkipForward size={10} />
+                              </ActionIcon>
+                            )}
+                          </Group>
                         </Group>
                       </div>
                     ))}

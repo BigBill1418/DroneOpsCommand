@@ -365,6 +365,53 @@ async def delete_schedule(
     await db.delete(schedule)
 
 
+
+
+# ── Skip / Defer ─────────────────────────────────────────────────────
+
+@router.post("/schedules/{schedule_id}/skip")
+async def skip_schedule(
+    schedule_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """Skip a single maintenance reminder — resets last_performed to today."""
+    result = await db.execute(select(MaintenanceSchedule).where(MaintenanceSchedule.id == schedule_id))
+    schedule = result.scalar_one_or_none()
+    if not schedule:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+    schedule.last_performed = date.today()
+    await db.flush()
+    next_due = date.today() + timedelta(days=schedule.interval_days) if schedule.interval_days else None
+    logger.info("Schedule %s (%s) skipped — next due %s", schedule_id, schedule.maintenance_type, next_due)
+    return {"message": "Skipped", "next_due": next_due.isoformat() if next_due else None}
+
+
+@router.post("/defer-all-overdue")
+async def defer_all_overdue(
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """Defer ALL overdue maintenance schedules by resetting last_performed to today."""
+    result = await db.execute(select(MaintenanceSchedule))
+    schedules = result.scalars().all()
+    deferred = 0
+    for sched in schedules:
+        if not sched.interval_days:
+            continue
+        if not sched.last_performed:
+            sched.last_performed = date.today()
+            deferred += 1
+            continue
+        days_since = (date.today() - sched.last_performed).days
+        if days_since >= sched.interval_days:
+            sched.last_performed = date.today()
+            deferred += 1
+    await db.flush()
+    logger.info("Deferred %d overdue maintenance schedules", deferred)
+    return {"message": f"Deferred {deferred} overdue items", "deferred": deferred}
+
+
 # ── Seed Defaults ─────────────────────────────────────────────────────
 
 @router.post("/seed-defaults")
