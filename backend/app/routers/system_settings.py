@@ -571,6 +571,69 @@ async def test_opensky_credentials(
         return {"status": "error", "message": f"Test failed: {str(e)}"}
 
 
+LLM_KEYS = [
+    "llm_provider",
+    "anthropic_api_key",
+]
+
+
+class LlmSettings(BaseModel):
+    llm_provider: str = "ollama"
+    anthropic_api_key: str = ""
+
+
+@router.get("/llm")
+async def get_llm_settings(
+    _user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get LLM provider settings. API key is masked."""
+    result = await db.execute(
+        select(SystemSetting).where(SystemSetting.key.in_(LLM_KEYS))
+    )
+    rows = {r.key: r.value for r in result.scalars().all()}
+
+    data = {}
+    for key in LLM_KEYS:
+        data[key] = rows.get(key, "")
+    # Default provider to config value if not set in DB
+    if not data["llm_provider"]:
+        data["llm_provider"] = app_settings.llm_provider
+    # Mask API key for frontend display
+    if data.get("anthropic_api_key"):
+        val = data["anthropic_api_key"]
+        data["anthropic_api_key"] = val[:7] + "••••••••" + val[-4:] if len(val) > 11 else "••••••••"
+    return data
+
+
+@router.put("/llm")
+async def update_llm_settings(
+    payload: LlmSettings,
+    _user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update LLM provider settings."""
+    updates = payload.model_dump()
+
+    for key, value in updates.items():
+        # Skip masked API key — don't overwrite with mask
+        if key == "anthropic_api_key" and "••••" in value:
+            continue
+
+        result = await db.execute(
+            select(SystemSetting).where(SystemSetting.key == key)
+        )
+        existing = result.scalar_one_or_none()
+        if existing:
+            existing.value = value
+        else:
+            db.add(SystemSetting(key=key, value=value))
+
+    await db.commit()
+    logger.info("LLM settings updated by user %s (provider=%s)", _user.username, updates.get("llm_provider"))
+    return {"status": "ok"}
+
+
 @router.get("/payment")
 async def get_payment_settings(
     _user: User = Depends(get_current_user),

@@ -31,6 +31,9 @@ pyproj==3.7.0
 staticmap==0.5.7
 folium==0.18.0
 
+# LLM — Claude API
+anthropic>=0.40.0
+
 # HTTP Client (for OpenDroneLog + Ollama)
 httpx==0.28.1
 

@@ -7,6 +7,7 @@ import {
   Group,
   Image,
   Loader,
+  Select,
   Stack,
   Text,
   TextInput,
@@ -22,7 +23,7 @@ import {
 } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
-import { IconCheck, IconX, IconPlus, IconEdit, IconTrash, IconCurrencyDollar, IconMail, IconSend, IconBrandPaypal, IconCash, IconDrone, IconPlugConnected, IconMapPin, IconSearch, IconSignature, IconUpload, IconSettings, IconReceipt, IconPlane, IconPalette, IconWorldWww, IconKey, IconUser, IconLock, IconDatabaseExport, IconDatabaseImport, IconShieldCheck, IconDownload, IconAlertTriangle, IconPhoto, IconRadar2, IconUsers, IconTool, IconClock, IconCalendar, IconRefresh, IconPlayerPlay } from '@tabler/icons-react';
+import { IconCheck, IconX, IconPlus, IconEdit, IconTrash, IconCurrencyDollar, IconMail, IconSend, IconBrandPaypal, IconCash, IconDrone, IconPlugConnected, IconMapPin, IconSearch, IconSignature, IconUpload, IconSettings, IconReceipt, IconPlane, IconPalette, IconWorldWww, IconKey, IconUser, IconLock, IconDatabaseExport, IconDatabaseImport, IconShieldCheck, IconDownload, IconAlertTriangle, IconPhoto, IconRadar2, IconUsers, IconTool, IconClock, IconCalendar, IconRefresh, IconPlayerPlay, IconRobot } from '@tabler/icons-react';
 import api from '../api/client';
 import { Aircraft, RateTemplate } from '../api/types';
 import { inputStyles, cardStyle } from '../components/shared/styles';
@@ -73,6 +74,8 @@ export default function Settings() {
     status: string; message?: string; parser_online?: boolean;
     dji_api_reachable?: boolean; key_source?: string;
   } | null>(null);
+  const [llmSaving, setLlmSaving] = useState(false);
+
   const [openskySaving, setOpenskySaving] = useState(false);
   const [openskyTesting, setOpenskyTesting] = useState(false);
   const [openskyStatus, setOpenskyStatus] = useState<{ status: string; message?: string } | null>(null);
@@ -151,6 +154,10 @@ export default function Settings() {
     initialValues: { opensky_client_id: '', opensky_client_secret: '' },
   });
 
+  const llmForm = useForm({
+    initialValues: { llm_provider: 'ollama', anthropic_api_key: '' },
+  });
+
   const accountForm = useForm({
     initialValues: { current_password: '', new_username: '', new_password: '', confirm_password: '' },
     validate: {
@@ -191,6 +198,7 @@ export default function Settings() {
     api.get('/settings/opendronelog').then((r) => odlForm.setValues(r.data)).catch(() => {});
     api.get('/settings/dji').then((r) => djiForm.setValues(r.data)).catch(() => {});
     api.get('/settings/opensky').then((r) => openskyForm.setValues(r.data)).catch(() => {});
+    api.get('/settings/llm').then((r) => llmForm.setValues(r.data)).catch(() => {});
     api.get('/flight-library/reprocess/status').then((r) => setReprocessStatus(r.data)).catch(() => {});
     api.get('/auth/account').then((r) => { setCurrentUsername(r.data.username); accountForm.setFieldValue('new_username', r.data.username); }).catch(() => {});
     api.get('/settings/weather').then((r) => weatherForm.setValues(r.data)).catch(() => {});
@@ -472,6 +480,23 @@ export default function Settings() {
       setOdlStatus({ status: 'error', message: axiosErr.response?.data?.detail || 'Connection failed' });
     } finally {
       setOdlTesting(false);
+    }
+  };
+
+  const handleSaveLlm = async (values: typeof llmForm.values) => {
+    setLlmSaving(true);
+    try {
+      await api.put('/settings/llm', values);
+      notifications.show({ title: 'Saved', message: 'LLM settings updated', color: 'cyan' });
+      const r = await api.get('/settings/llm');
+      llmForm.setValues(r.data);
+      // Refresh LLM status to reflect new provider
+      setLlmLoading(true);
+      api.get('/llm/status').then((s) => setLlmStatus(s.data)).catch(() => setLlmStatus({ status: 'offline' })).finally(() => setLlmLoading(false));
+    } catch {
+      notifications.show({ title: 'Error', message: 'Failed to save LLM settings', color: 'red' });
+    } finally {
+      setLlmSaving(false);
     }
   };
 
@@ -862,6 +887,9 @@ export default function Settings() {
           <Tabs.Tab value="general" leftSection={<IconSettings size={14} />}>
             GENERAL
           </Tabs.Tab>
+          <Tabs.Tab value="ai" leftSection={<IconRobot size={14} />}>
+            AI / REPORTS
+          </Tabs.Tab>
           <Tabs.Tab value="email" leftSection={<IconMail size={14} />}>
             EMAIL & BILLING
           </Tabs.Tab>
@@ -1045,8 +1073,44 @@ export default function Settings() {
         </Tabs.Panel>
 
         {/* ═══ GENERAL TAB ═══ */}
-        <Tabs.Panel value="general" pt="md">
+        {/* ═══ AI / REPORT GENERATION TAB ═══ */}
+        <Tabs.Panel value="ai" pt="md">
           <Stack gap="md">
+            {/* LLM Provider Settings */}
+            <Card padding="lg" radius="md" style={cardStyle}>
+              <Group gap="sm" mb="md">
+                <IconRobot size={20} color="#00d4ff" />
+                <Title order={3} c="#e8edf2" style={{ letterSpacing: '1px' }}>AI / REPORT GENERATION</Title>
+              </Group>
+              <Text c="#5a6478" size="xs" mb="md" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+                Choose the LLM provider used for generating after-action reports. Claude API is faster and higher quality; Ollama runs locally on your hardware.
+              </Text>
+              <form onSubmit={llmForm.onSubmit(handleSaveLlm)}>
+                <Stack gap="sm">
+                  <Select
+                    label="LLM Provider"
+                    data={[
+                      { value: 'claude', label: 'Claude API (Anthropic)' },
+                      { value: 'ollama', label: 'Ollama (Local)' },
+                    ]}
+                    {...llmForm.getInputProps('llm_provider')}
+                    styles={inputStyles}
+                  />
+                  {llmForm.values.llm_provider === 'claude' && (
+                    <PasswordInput
+                      label="Anthropic API Key"
+                      placeholder="sk-ant-..."
+                      {...llmForm.getInputProps('anthropic_api_key')}
+                      styles={inputStyles}
+                    />
+                  )}
+                  <Button type="submit" color="cyan" loading={llmSaving} styles={{ root: { fontFamily: "'Bebas Neue', sans-serif" } }}>
+                    SAVE LLM SETTINGS
+                  </Button>
+                </Stack>
+              </form>
+            </Card>
+
             {/* LLM Status */}
             <Card padding="lg" radius="md" style={cardStyle}>
               <Title order={3} c="#e8edf2" mb="md" style={{ letterSpacing: '1px' }}>LLM STATUS</Title>
@@ -1054,6 +1118,12 @@ export default function Settings() {
                 <Loader color="cyan" size="sm" />
               ) : (
                 <Stack gap="sm">
+                  <Group>
+                    <Text c="#5a6478" style={{ fontFamily: "'Share Tech Mono', monospace" }}>PROVIDER:</Text>
+                    <Badge color="cyan" variant="light">
+                      {(llmStatus as any)?.provider === 'claude' ? 'Claude API' : 'Ollama'}
+                    </Badge>
+                  </Group>
                   <Group>
                     <Text c="#5a6478" style={{ fontFamily: "'Share Tech Mono', monospace" }}>STATUS:</Text>
                     <Badge
@@ -1077,7 +1147,11 @@ export default function Settings() {
                 </Stack>
               )}
             </Card>
+          </Stack>
+        </Tabs.Panel>
 
+        <Tabs.Panel value="general" pt="md">
+          <Stack gap="md">
             {/* Weather / Airspace Location */}
             <Card padding="lg" radius="md" style={cardStyle}>
               <Group gap="sm" mb="md">

@@ -58,47 +58,59 @@ def generate_report_task(
     from sqlalchemy import create_engine, select
     from sqlalchemy.orm import Session
 
+    from app.database import async_session
     from app.models.report import Report
-    from app.services.ollama import generate_report as llm_generate_report
+    from app.services.llm_provider import generate_report as llm_generate_report
+    from app.services.llm_provider import get_llm_provider
 
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
     try:
-        # Wait for Ollama to be ready before calling LLM
-        import httpx as _httpx
-        for attempt in range(6):
-            try:
-                async def _check_ollama():
-                    async with _httpx.AsyncClient(timeout=5) as _client:
-                        return await _client.get(f"{settings.ollama_base_url}/api/tags")
-                _resp = loop.run_until_complete(_check_ollama())
-                if _resp.status_code == 200:
-                    break
-            except Exception:
-                pass
-            if attempt < 5:
-                import time
-                logger.info("Waiting for Ollama to be ready (attempt %d/6)...", attempt + 1)
-                time.sleep(5)
-        else:
-            raise RuntimeError(f"Ollama not reachable at {settings.ollama_base_url} after 30s")
+        # Determine provider — only wait for Ollama if that's the active provider
+        async def _resolve_provider():
+            async with async_session() as db:
+                return await get_llm_provider(db)
 
-        # Call the LLM
-        llm_content = loop.run_until_complete(
-            llm_generate_report(
-                user_narrative=user_narrative,
-                mission_title=mission_title,
-                mission_type=mission_type,
-                location=location,
-                flight_summaries=flight_summaries,
-                ground_covered_acres=ground_covered_acres,
-                total_duration_seconds=total_duration,
-                total_distance_meters=total_distance,
-                mission_date=mission_date,
-                company_name=company_name,
-            )
-        )
+        provider = loop.run_until_complete(_resolve_provider())
+
+        if provider == "ollama":
+            import httpx as _httpx
+            for attempt in range(6):
+                try:
+                    async def _check_ollama():
+                        async with _httpx.AsyncClient(timeout=5) as _client:
+                            return await _client.get(f"{settings.ollama_base_url}/api/tags")
+                    _resp = loop.run_until_complete(_check_ollama())
+                    if _resp.status_code == 200:
+                        break
+                except Exception:
+                    pass
+                if attempt < 5:
+                    import time
+                    logger.info("Waiting for Ollama to be ready (attempt %d/6)...", attempt + 1)
+                    time.sleep(5)
+            else:
+                raise RuntimeError(f"Ollama not reachable at {settings.ollama_base_url} after 30s")
+
+        # Call the LLM via the dispatcher (passes its own async DB session)
+        async def _generate():
+            async with async_session() as db:
+                return await llm_generate_report(
+                    db=db,
+                    user_narrative=user_narrative,
+                    mission_title=mission_title,
+                    mission_type=mission_type,
+                    location=location,
+                    flight_summaries=flight_summaries,
+                    ground_covered_acres=ground_covered_acres,
+                    total_duration_seconds=total_duration,
+                    total_distance_meters=total_distance,
+                    mission_date=mission_date,
+                    company_name=company_name,
+                )
+
+        llm_content = loop.run_until_complete(_generate())
 
         # Save result to database using sync engine
         engine = create_engine(settings.database_url_sync)

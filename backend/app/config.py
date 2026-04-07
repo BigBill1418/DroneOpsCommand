@@ -10,7 +10,13 @@ class Settings(BaseSettings):
 
     # Ollama
     ollama_base_url: str = "http://ollama:11434"
-    ollama_model: str = "llama3.1:8b-instruct-q4_K_M"
+    ollama_model: str = "qwen2.5:3b"
+
+    # Claude (Anthropic)
+    anthropic_api_key: str = ""
+
+    # LLM provider selection: "ollama" or "claude"
+    llm_provider: str = "ollama"
 
     # OpenDroneLog
     opendronelog_url: str = ""

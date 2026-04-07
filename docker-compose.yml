@@ -64,8 +64,8 @@ services:
       sh -c "
         echo 'Waiting for Ollama to be ready...' &&
         until curl -s http://ollama:11434/api/tags > /dev/null 2>&1; do sleep 2; done &&
-        echo 'Pulling Llama 3.1 8B model...' &&
-        curl -s http://ollama:11434/api/pull -d '{\"name\": \"llama3.1:8b-instruct-q4_K_M\"}' &&
+        echo 'Pulling Qwen 2.5 3B model...' &&
+        curl -s http://ollama:11434/api/pull -d '{\"name\": \"qwen2.5:3b\"}' &&
         echo 'Model pulled. Will load into RAM on first use.'
       "
 
@@ -97,7 +97,7 @@ services:
       - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://doc:changeme_in_production@db:5432/doc}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://ollama:11434}
-      - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.1:8b-instruct-q4_K_M}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5:3b}
       - OPENDRONELOG_URL=${OPENDRONELOG_URL:-}
       - JWT_SECRET_KEY=${JWT_SECRET_KEY:-changeme_generate_a_random_secret}
       - JWT_ALGORITHM=${JWT_ALGORITHM:-HS256}
@@ -149,7 +149,7 @@ services:
       - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://doc:changeme_in_production@db:5432/doc}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://ollama:11434}
-      - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.1:8b-instruct-q4_K_M}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5:3b}
       - SMTP_HOST=${SMTP_HOST:-}
       - SMTP_PORT=${SMTP_PORT:-587}
       - SMTP_USER=${SMTP_USER:-}
