@@ -2,6 +2,8 @@ services:
   db:
     image: postgres:16-alpine
     restart: unless-stopped
+    labels:
+      - "com.centurylinklabs.watchtower.scope=droneops"
     entrypoint: ["/scripts/primary-entrypoint.sh"]
     command: ["postgres"]
     environment:
@@ -20,19 +22,30 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+      start_period: 10s
 
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    labels:
+      - "com.centurylinklabs.watchtower.scope=droneops"
+    # NOTE: Redis warns "Memory overcommit must be enabled!" for background saves.
+    # vm.overcommit_memory=1 is a host-level sysctl — cannot be set via compose.
+    # Set on the Docker host:
+    #   sysctl -w vm.overcommit_memory=1
+    #   echo 'vm.overcommit_memory = 1' > /etc/sysctl.d/99-redis.conf
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-h", "127.0.0.1", "ping"]
       interval: 5s
       timeout: 5s
       retries: 5
+      start_period: 5s
 
   ollama:
     image: ollama/ollama:latest
     restart: unless-stopped
+    labels:
+      - "com.centurylinklabs.watchtower.scope=droneops"
     volumes:
       - ollama_data:/root/.ollama
     environment:
@@ -48,7 +61,7 @@ services:
     cpuset: "0-5"
     mem_reservation: 8g
     healthcheck:
-      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/11434' || exit 1"]
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/127.0.0.1/11434' || exit 1"]
       interval: 15s
       timeout: 10s
       retries: 5
@@ -81,15 +94,20 @@ services:
       - WATCHTOWER_MONITOR_ONLY=${WATCHTOWER_MONITOR_ONLY:-false}
       - WATCHTOWER_NOTIFICATION_URL=${WATCHTOWER_NOTIFICATION_URL:-}
       - WATCHTOWER_NOTIFICATIONS_HOSTNAME=droneops-server
+      - WATCHTOWER_SCOPE=droneops
       - DOCKER_API_VERSION=1.45
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+    labels:
+      - "com.centurylinklabs.watchtower.scope=droneops"
 
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
     restart: unless-stopped
+    labels:
+      - "com.centurylinklabs.watchtower.scope=droneops"
     dns:
       - 1.1.1.1
       - 8.8.8.8
@@ -127,7 +145,7 @@ services:
       ollama:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:8000/api/health || exit 1"]
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8000/api/health || exit 1"]
       interval: 15s
       timeout: 10s
       retries: 5
@@ -138,6 +156,8 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     restart: unless-stopped
+    labels:
+      - "com.centurylinklabs.watchtower.scope=droneops"
     command: celery -A app.tasks.celery_tasks worker --loglevel=info
     healthcheck:
       test: ["CMD-SHELL", "celery -A app.tasks.celery_tasks inspect ping --timeout 10 || exit 1"]
@@ -172,8 +192,10 @@ services:
       context: ./flight-parser
       dockerfile: Dockerfile
     restart: unless-stopped
+    labels:
+      - "com.centurylinklabs.watchtower.scope=droneops"
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:8100/health || exit 1"]
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8100/health || exit 1"]
       interval: 15s
       timeout: 10s
       retries: 3
@@ -190,8 +212,10 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     restart: unless-stopped
+    labels:
+      - "com.centurylinklabs.watchtower.scope=droneops"
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:8080/ || exit 1"]
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8080/ || exit 1"]
       interval: 15s
       timeout: 10s
       retries: 3
@@ -208,6 +232,8 @@ services:
   cloudflared:
     image: cloudflare/cloudflared:latest
     restart: unless-stopped
+    labels:
+      - "com.centurylinklabs.watchtower.scope=droneops"
     command: tunnel run
     environment:
       - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN:-}
