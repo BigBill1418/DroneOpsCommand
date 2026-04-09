@@ -20,7 +20,7 @@ services:
     command: >
       postgres
         -c hot_standby=on
-        -c primary_conninfo='host=10.99.0.2 port=5435 user=replicator password=SecureDemoRepl2026 application_name=hsh_hq_demo_standby'
+        -c primary_conninfo='host=10.99.0.2 port=5435 user=replicator password=SecureDroneRepl2026 application_name=hsh_hq_demo_standby'
         -c primary_slot_name='hsh_hq_demo_standby'
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U replicator || exit 1"]

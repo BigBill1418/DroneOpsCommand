@@ -13,7 +13,7 @@ set -euo pipefail
 PRIMARY_HOST="10.99.0.2"
 PRIMARY_PORT="5435"
 REPL_USER="replicator"
-REPL_PASSWORD="SecureDemoRepl2026"
+REPL_PASSWORD="SecureDroneRepl2026"
 VOLUME_NAME="droneops_demo_standby_pgdata"
 COMPOSE_FILE="docker-compose.demo-standby.yml"
 
