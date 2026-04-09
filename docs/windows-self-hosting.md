@@ -14,7 +14,7 @@ Complete guide for running DroneOpsCommand on a Windows 10/11 machine using Dock
 | CPU | 4 cores | 8 cores |
 | Virtualization | Enabled in BIOS | — |
 
-> The AI report engine (Ollama/Llama 3.1 8B) reserves ~8 GB of RAM by itself. With 8 GB total you will be tight — 16 GB is strongly recommended.
+> The AI report engine (Ollama/Qwen 2.5 3B) reserves ~8 GB of RAM. With 8 GB total you will be tight — 16 GB is strongly recommended. Alternatively, use `LLM_PROVIDER=claude` with an Anthropic API key to skip the local model entirely.
 
 ---
 
@@ -106,13 +106,14 @@ Now edit `.env` with Notepad (or any text editor):
 notepad .env
 ```
 
-**Change these three values at minimum** (do not use the defaults in production):
+**Change these two values at minimum** (do not use the defaults in production):
 
 ```
 POSTGRES_PASSWORD=your_secure_database_password
 JWT_SECRET_KEY=your_random_secret_string_here
-ADMIN_PASSWORD=your_admin_login_password
 ```
+
+> **Note:** There is no `ADMIN_PASSWORD` env var. The admin account is created via the setup wizard on first visit in your browser.
 
 > **Tip:** To generate a random secret, run this in PowerShell:
 > ```powershell
@@ -140,7 +141,7 @@ docker compose up -d
 The first run will:
 1. **Build** the backend, frontend, and flight-parser images (5-10 minutes)
 2. **Download** PostgreSQL, Redis, and Ollama base images (~2 GB)
-3. **Pull the AI model** — Llama 3.1 8B is ~4 GB
+3. **Pull the AI model** — Qwen 2.5 3B is ~1.5 GB
 
 Watch the model download progress:
 
@@ -159,9 +160,7 @@ Open your browser and go to:
 - **Web UI:** [http://localhost:3080](http://localhost:3080)
 - **API docs:** [http://localhost:3080/docs](http://localhost:3080/docs)
 
-Log in with:
-- **Username:** `admin` (or whatever you set for `ADMIN_USERNAME`)
-- **Password:** the `ADMIN_PASSWORD` you set in `.env`
+On first visit, the setup wizard will prompt you to create your admin account. On subsequent visits, log in with the credentials you created.
 
 ---
 

@@ -122,10 +122,10 @@ docker --version
 # Docker Compose v2 plugin
 docker compose version
 
-# Disk space (need at least 15GB free — images + data + Ollama 4GB model)
+# Disk space (need at least 15GB free — images + data + Ollama model)
 df -h /
 
-# RAM (8GB minimum — Ollama loads a 4GB quantized model into RAM)
+# RAM (8GB minimum — Ollama loads the AI model into RAM)
 free -h
 
 # Git
@@ -184,7 +184,7 @@ nano /opt/droneops/.env
 |----------|--------|
 | `FRONTEND_URL` | Update to `http://<ubuntu-vm-ip>:3080` |
 | `FRONTEND_PORT` | `3080` unless you want a different port |
-| `RESET_ADMIN_PASSWORD` | **MUST be `false`** — `true` overwrites your password on every restart |
+| `LLM_PROVIDER` | Set to `ollama` or `claude` depending on your preference |
 
 **Values that stay as-is (internal Docker networking):**
 - `DATABASE_URL` host stays `db` (Docker service name)
@@ -205,7 +205,7 @@ diff <(grep -v '^#' .env.example | grep -v '^$' | sort) <(grep -v '^#' .env | gr
 ```bash
 cd /opt/droneops
 
-# Build all images (Rust flight-parser is the slowest — be patient)
+# Build all images (flight-parser may be slow on first build)
 docker compose build
 
 # Verify all images built
@@ -289,7 +289,7 @@ docker compose logs -f --tail=50
 # Wait until you see:
 #   backend:  "Application startup complete"
 #   worker:   "celery@... ready"
-#   ollama-setup: "Model pulled" (first time — downloads ~4GB, be patient)
+#   ollama-setup: "Model pulled" (first time — downloads ~1.5GB, be patient)
 ```
 
 **GATE:** All services running:

@@ -4,6 +4,8 @@
 
 **Version 2.61.3** | [Quick Start](#quick-start) | [Features](#features) | [Configuration](#configuration) | [Contributing](CONTRIBUTING.md) | [License](LICENSE)
 
+**Live Demo:** [command-demo.barnardhq.com](https://command-demo.barnardhq.com) (login: `demo` / `demo123`)
+
 ---
 
 DroneOpsCommand is a self-hosted, full-stack platform for managing commercial drone operations end-to-end. It covers the complete lifecycle from flight data ingestion and GPS telemetry visualization through AI-powered report generation, invoicing, and client delivery — all running on your own hardware.
@@ -13,7 +15,7 @@ Designed for FAA Part 107 certified operators running missions such as search & 
 ### Why DroneOpsCommand?
 
 - **100% self-hosted** — runs on your own hardware via Docker Compose. No cloud dependencies, no per-seat licensing, no subscription fees.
-- **AI stays local** — report generation uses Ollama (Llama 3.1 8B) so client data never leaves your network.
+- **AI report generation** — local via Ollama (Qwen 2.5 3B default) or cloud via Claude API. Your data stays on your hardware with Ollama; Claude API available for faster, higher-quality output.
 - **White-label ready** — company name, tagline, and branding are fully configurable from the Settings UI. No code changes needed to make it yours.
 - **Full lifecycle** — flight log upload, GPS path visualization, animated flight replay with video export, telemetry analysis, mission management, AI reports, PDF export, invoicing, and email delivery in one platform.
 - **Real-time airspace** — live aircraft tracking via OpenSky Network with anonymous or authenticated access.
@@ -60,26 +62,25 @@ cp .env.example .env
 #    Edit .env and update at minimum:
 #    - POSTGRES_PASSWORD
 #    - JWT_SECRET_KEY
-#    - ADMIN_PASSWORD
 
 # 3. Launch
 docker compose up -d
 
-# 4. Wait for the AI model to download (first run only, ~4GB)
+# 4. Wait for the AI model to download (first run only, ~1.5GB)
 docker compose logs -f ollama-setup
 
 # 5. Open the app
 #    Web UI:   http://localhost:3080
 #    API docs: http://localhost:3080/docs
-#    Login:    admin / (your ADMIN_PASSWORD from .env)
+#    First visit shows the setup wizard — create your admin account there.
 ```
 
 ### What happens on first startup
 
 1. PostgreSQL schema is created automatically
-2. Admin user is seeded with your configured credentials
+2. Setup wizard prompts you to create the admin account (no env vars needed)
 3. Aircraft fleet (6 DJI models) and rate templates (8 billing presets) are pre-loaded
-4. Ollama downloads and loads the Llama 3.1 8B model
+4. Ollama downloads the Qwen 2.5 3B model (~1.5GB)
 5. All storage directories are created
 
 ### Auto-start & auto-deploy (one command)
@@ -170,12 +171,15 @@ After logging in, go to **Settings > Branding** to set your company name, taglin
 - Connection testing from Settings page
 
 ### AI Report Generation
-- Local LLM via Ollama (Llama 3.1 8B by default) — your data stays on your hardware
+- Dual LLM provider support: local via Ollama or cloud via Claude API (Anthropic)
+- Ollama default model: Qwen 2.5 3B — runs on your hardware, data stays local
+- Claude API option: Claude Sonnet for faster, higher-quality reports (requires API key)
+- Switchable from Settings page — choose provider per deployment
 - Operator enters field notes/narrative, LLM generates professional after-action report
 - Structured report sections: Mission Overview, Area Coverage, Flight Operations Summary, Key Findings, Recommendations
 - Async generation via Celery worker with status polling
 - Editable output — review and modify the generated report before finalizing
-- LLM status monitoring on Settings page (online/offline, loaded model)
+- LLM status monitoring on Settings page (online/offline, loaded model, active provider)
 - Configurable model, temperature, and token limits
 
 ### Rich Text Editing
@@ -212,6 +216,12 @@ After logging in, go to **Settings > Branding** to set your company name, taglin
 - Configurable default quantity, unit (hours, miles, flat, each), and rate
 - Active/inactive toggle
 - Add/edit/delete from Settings page
+
+### Pilot Management
+- Pilot profiles with name, FAA certificate number, and certifications
+- Per-pilot flight hour tracking and summary
+- Assign pilots to flights for regulatory compliance
+- Managed from the Settings page
 
 ### Battery Management
 - Track individual batteries by serial number and custom name
@@ -300,6 +310,15 @@ After logging in, go to **Settings > Branding** to set your company name, taglin
 - Browser-native MediaRecorder with VP9/VP8 codec support
 - Ideal for after-action reports and customer deliverables
 
+### Client Portal
+- Client-facing view of their missions and invoices — no operator internals exposed
+- Signed JWT links emailed to clients with configurable expiry — no account creation needed
+- Optional password-protected persistent login for repeat clients
+- Mission status visibility: Scheduled, In Progress, Processing, Review, Delivered
+- Client views and pays invoices via Stripe (card/ACH) directly in the portal
+- Stripe webhook automatically marks invoices paid in the operator's financial dashboard
+- Operator generates client access links from the mission detail page
+
 ### Authentication & Security
 - JWT access tokens (configurable expiration, default 30 min)
 - Refresh token rotation (configurable, default 30 days)
@@ -334,13 +353,15 @@ After logging in, go to **Settings > Branding** to set your company name, taglin
 
 | Service | Technology | Port | Purpose |
 |---------|-----------|------|---------|
-| Frontend | React 18 + Vite + Mantine UI | 80 (nginx) | SPA web interface |
-| Backend | Python 3.12, FastAPI, SQLAlchemy 2.0 | internal | REST API (via nginx) |
+| Frontend | React 18 + Vite + Mantine UI | 3080 (nginx) | SPA web interface |
+| Backend | Python 3.12, FastAPI, SQLAlchemy 2.0 | 8000 | REST API |
 | Database | PostgreSQL 16 Alpine | 5434:5432 | Persistent storage with replication support |
 | Flight Parser | Python microservice | 8100 | DJI flight log decryption and parsing |
-| LLM | Ollama (Llama 3.1 8B quantized) | 11434 | Local AI report generation |
+| LLM | Ollama (Qwen 2.5 3B default) or Claude API | 11434 | AI report generation |
 | Queue | Redis 7 Alpine | 6379 | Celery task broker |
 | Worker | Celery (same backend image) | — | Async report generation |
+| Watchtower | containrrr/watchtower | — | Base image auto-update |
+| Cloudflared | cloudflare/cloudflared | — | Secure tunnel (optional) |
 
 ### PostgreSQL Streaming Replication
 
@@ -407,15 +428,18 @@ All settings are configured via environment variables in the `.env` file.
 | `JWT_ALGORITHM` | `HS256` | Token signing algorithm |
 | `JWT_ACCESS_TOKEN_EXPIRE_MINUTES` | `30` | Access token lifetime |
 | `JWT_REFRESH_TOKEN_EXPIRE_DAYS` | `30` | Refresh token lifetime |
-| `ADMIN_USERNAME` | `admin` | Initial admin account |
-| `ADMIN_PASSWORD` | `changeme_in_production` | Initial admin password |
+
+> **Note:** Admin credentials are created via the first-run setup wizard in the browser. There are no `ADMIN_USERNAME`/`ADMIN_PASSWORD` environment variables.
 
 ### Integrations
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `OPENDRONELOG_URL` | *(empty)* | Your OpenDroneLog server URL (e.g., `http://192.168.1.50:8080`) |
+| `DJI_API_KEY` | *(empty)* | DJI Cloud API key for encrypted flight log parsing ([register here](https://developer.dji.com)) |
 | `OLLAMA_BASE_URL` | `http://ollama:11434` | Ollama API endpoint |
-| `OLLAMA_MODEL` | `llama3.1:8b-instruct-q4_K_M` | LLM model for report generation |
+| `OLLAMA_MODEL` | `qwen2.5:3b` | Ollama model for report generation |
+| `LLM_PROVIDER` | `ollama` | Active LLM provider: `ollama` or `claude` |
+| `ANTHROPIC_API_KEY` | *(empty)* | Anthropic API key (required when `LLM_PROVIDER=claude`) |
 
 ### Email (SMTP)
 | Variable | Default | Description |
@@ -430,11 +454,46 @@ All settings are configured via environment variables in the `.env` file.
 
 SMTP settings can also be configured from the Settings page in the web UI (stored in database, overrides env vars).
 
+### Stripe (Client Portal Payments)
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `STRIPE_SECRET_KEY` | *(empty)* | Stripe secret key for payment processing |
+| `STRIPE_PUBLISHABLE_KEY` | *(empty)* | Stripe publishable key (exposed to frontend) |
+| `STRIPE_WEBHOOK_SECRET` | *(empty)* | Stripe webhook signing secret |
+
+### Networking
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `FRONTEND_URL` | `http://localhost:3080` | Public URL used in intake emails and client portal links |
+| `FRONTEND_PORT` | `3080` | Host port for the frontend. Use `127.0.0.1:3080` to restrict to localhost when behind a tunnel |
+| `CLOUDFLARE_TUNNEL_TOKEN` | *(empty)* | Cloudflare Tunnel token for secure remote access without opening ports |
+
+### Watchtower (Auto-Update)
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `WATCHTOWER_MONITOR_ONLY` | `false` | Set to `true` to get notifications only (no auto-update) |
+| `WATCHTOWER_NOTIFICATION_URL` | *(empty)* | Shoutrrr notification URL (Slack, Discord, email, etc.) |
+
+### Replication
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `REPLICATION_PASSWORD` | `SecureDroneRepl2026` | Password for the PostgreSQL replication user |
+
 ### Storage
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `UPLOAD_DIR` | `/data/uploads` | Mission image storage path |
 | `REPORTS_DIR` | `/data/reports` | Generated PDFs and map images |
+
+### LLM Provider Selection
+Two LLM providers are supported, configurable from the Settings page or via environment variables:
+
+| Provider | Model | Where it runs | When to use |
+|----------|-------|---------------|-------------|
+| **Ollama** (default) | Qwen 2.5 3B | Local, on your hardware | Data stays on-premises, no API costs |
+| **Claude API** | Claude Sonnet | Anthropic cloud | Faster, higher-quality reports, requires API key |
+
+Set `LLM_PROVIDER=claude` and `ANTHROPIC_API_KEY` in `.env` to use Claude, or switch providers in Settings at runtime.
 
 ### Ollama Performance Tuning
 The `docker-compose.yml` pins Ollama to 6 CPU cores (leaving 2 for the OS and database), sets 8GB RAM reservation, enables flash attention, and keeps the model loaded permanently (`OLLAMA_KEEP_ALIVE=-1`).
@@ -443,23 +502,28 @@ The `docker-compose.yml` pins Ollama to 6 CPU cores (leaving 2 for the OS and da
 
 ## Updating
 
-An `update.sh` script is included for deployments. It:
+### Auto-Deploy (recommended)
 
-1. Pulls the latest code from the branch
+The `autopull.sh` script runs via systemd timer (every 60 seconds), polling the tracked git branch for new commits. When changes are detected, it:
+
+1. Pulls the latest code
 2. Detects which services changed (frontend, backend, or both)
 3. Rebuilds only the changed Docker images
 4. Restarts services with `docker compose up -d`
-5. Tracks deployed commits to avoid unnecessary rebuilds
+5. Verifies the deploy via health checks
+6. Tracks deployed commits to avoid unnecessary rebuilds
+
+Install auto-deploy with `setup-server.sh` (see [Quick Start](#auto-start--auto-deploy-one-command)).
+
+### Watchtower (base image updates)
+
+Watchtower runs as a sidecar service checking for updated base images (PostgreSQL, Redis, Ollama) daily. By default it auto-updates; set `WATCHTOWER_MONITOR_ONLY=true` to get notifications without auto-updating. Configure `WATCHTOWER_NOTIFICATION_URL` in `.env` for alerts (supports Slack, Discord, email, etc. via [Shoutrrr](https://containrrr.dev/shoutrrr/)).
+
+### Manual update
 
 ```bash
-# Standard update — rebuilds only changed services
-./update.sh
-
-# Force rebuild everything (no Docker cache)
-./update.sh --clean
-
-# Rebuild all services even if no changes detected
-./update.sh --all
+git pull
+docker compose up -d --build
 ```
 
 ---
@@ -511,14 +575,22 @@ Customer CRM with add/edit/delete, address auto-complete via OpenStreetMap geoco
 ### Financials (`/financials`)
 Revenue dashboard with total/average/outstanding metrics, breakdowns by drone, category, mission type, month, and customer. Full invoice table with search.
 
+### Setup (`/setup`)
+First-run wizard shown when no users exist. Creates the initial admin account. To reset: `docker compose exec backend python reset_to_setup.py`.
+
+### Client Portal (`/client`)
+Client-facing mission dashboard and invoice payment. Clients access via signed JWT links sent from the operator. Separate authentication scope from the operator UI.
+
 ### Settings (`/settings`)
 System configuration across multiple tabs:
-- **LLM Status** — Ollama connection status and loaded model
+- **LLM** — Provider selection (Ollama or Claude API), connection status, loaded model, API key configuration
 - **Flight Data** — OpenSky Network credentials, DJI API key, OpenDroneLog server URL with connection test
 - **SMTP** — Email server configuration with test email
 - **Payment Links** — PayPal and Venmo URLs for invoices
+- **Stripe** — Stripe API keys for client portal payments
 - **Home Location** — Coordinates for weather, airspace, and METAR data
 - **Aircraft Fleet** — Add/edit/delete aircraft with specifications
+- **Pilots** — Add/edit/delete pilot profiles with certifications and flight hour tracking
 - **Rate Templates** — Add/edit/delete billing rate presets
 - **Device Keys** — API key management for DroneOpsSync companion app
 - **Backup** — Database export and restore
@@ -534,8 +606,11 @@ Renders branded PDF reports from Jinja2 HTML templates via WeasyPrint. Includes 
 ### Email Service
 Async SMTP client that sends HTML emails with the PDF report attached. Loads configuration from database settings first, falls back to environment variables. Supports TLS.
 
-### Ollama LLM Client
-HTTP client to the Ollama `/api/generate` endpoint. Sends a structured prompt with mission data, flight telemetry, and operator notes. Returns a professional after-action report. Temperature 0.3 for consistency, 300s timeout, 6 CPU threads.
+### LLM Provider Service
+Dual-provider LLM client supporting Ollama and Claude API. The active provider is selectable from Settings or via `LLM_PROVIDER` env var.
+
+- **Ollama** — HTTP client to the `/api/generate` endpoint. Sends a structured prompt with mission data, flight telemetry, and operator notes. Temperature 0.3 for consistency, 300s timeout, 6 CPU threads.
+- **Claude API** — Anthropic SDK client using Claude Sonnet. Same structured prompt, cloud-processed. Requires `ANTHROPIC_API_KEY`.
 
 ### OpenDroneLog Client
 REST client that fetches flight data from a self-hosted OpenDroneLog instance. Handles multiple API endpoint patterns for version compatibility. Normalizes field names between camelCase and snake_case. Extracts GPS tracks for map rendering.
@@ -604,55 +679,24 @@ Full interactive API documentation is available at `http://localhost:3080/docs` 
 | GET/PUT | `/api/settings/payment` | PayPal/Venmo payment links |
 | GET/POST/PUT/DELETE | `/api/rate-templates` | Rate template CRUD |
 | GET | `/api/llm/status` | Ollama/LLM connection status |
+| GET/POST | `/api/pilots` | Pilot CRUD |
+| GET | `/api/pilots/{id}/hours-summary` | Pilot flight hour breakdown |
+| POST | `/api/client/auth/validate` | Validate client portal token |
+| POST | `/api/client/auth/login` | Client portal login |
+| GET | `/api/client/missions` | Client's mission list |
+| GET | `/api/client/missions/{id}` | Client mission detail |
+| GET | `/api/client/missions/{id}/invoice` | Client invoice view |
+| POST | `/api/client/missions/{id}/invoice/pay` | Initiate Stripe payment |
+| POST | `/api/missions/{id}/client-link` | Generate client access link |
+| POST | `/api/missions/{id}/client-link/send` | Email client access link |
+| POST | `/api/webhooks/stripe` | Stripe payment webhook |
+| GET | `/api/auth/setup-status` | Check if initial setup is needed |
+| POST | `/api/auth/setup` | Create initial admin account |
 | GET | `/api/health` | Health check |
 
 ---
 
 ## Roadmap
-
-### Now — Client Portal
-
-A client-facing interface within Command that gives customers visibility into their missions and deliverables without exposing operator internals. Lives under a `/client` route scope with scoped authentication separate from the operator UI.
-
-**Authentication & Access**
-- Signed JWT links emailed to clients — no account creation required. Link scopes the client to their missions only.
-- Optional password-protected persistent login for repeat clients.
-- Token expiry and revocation controls in the operator Settings page.
-
-**Mission Dashboard (Client View)**
-- Client sees their missions with status progression: Scheduled → In Progress → Processing → Review → Delivered.
-- Filtered view — no financials, flight logs, fleet data, or internal notes visible. Only mission name, date, status, and deliverables.
-- `client_visible` boolean flags on existing mission fields control what surfaces.
-
-**Deliverable Review & Approval**
-- Watermarked preview of videos and photos — watermark strips on approval + payment.
-- Inline PDF viewer for AI-generated mission reports.
-- Approve or Request Revision workflow with comment box.
-- Revision requests create a task in the operator dashboard with the client's feedback attached.
-
-**File Delivery via UNAS NAS Integration**
-- Extends the existing UNAS integration: approved deliverables generate time-limited download links pointing to files on the operator's NAS via Cloudflare tunnel.
-- No third-party storage — client downloads directly from operator infrastructure.
-- Large file support: folder share links or "Request Physical Delivery" option for raw footage and orthomosaics.
-
-**Invoice & Payment**
-- Client views their invoice in the portal.
-- Stripe integration: card and ACH payment directly in the portal. Payment webhook marks the invoice paid in Command's financial dashboard automatically.
-- Replaces manual PayPal/Venmo chase with a closed-loop payment flow.
-
-**Signature Capture**
-- E-signature widget for client sign-off on deliverables before final delivery.
-- Signature stored in mission record with timestamp and IP address.
-- Critical for legal, insurance, and security investigation deliverables.
-
-**Data Model Additions**
-- `client_access_tokens` — JWT tracking, expiry, scope
-- `deliverables` — mission_id, file_path, file_type, watermarked_url, status (pending / approved / revision_requested)
-- `client_reviews` — deliverable_id, status, comment, timestamp
-- `signatures` — mission_id, client_id, signature_data, timestamp, ip_address
-- `client_visible` boolean flags on existing mission fields
-
----
 
 ### Next — Multi-Tenant Managed Hosting
 
@@ -698,12 +742,12 @@ Transform DroneOpsCommand from a self-hosted tool into a revenue-generating SaaS
 - **Notification System** — Email and in-app alerts for overdue invoices, upcoming maintenance, battery cycle limits, certificate expirations, and completed report generation.
 - **Report Template Library** — Multiple PDF templates for different mission types. Inspection reports, SAR after-action reports, videography delivery summaries. Operator-buildable custom templates. LLM prompt adapts per template type.
 - **Airspace Pre-Check Workflow** — Drop a pin before mission creation and get a pre-flight airspace assessment: LAANC status, nearby TFRs, Class B/C/D proximity. Uses existing weather/FAA API infrastructure.
-- **Claude API Integration** — Replace local Ollama with Claude API for faster, higher-quality report generation.
+- ~~**Claude API Integration**~~ — **Done.** Switchable from Settings or via `LLM_PROVIDER=claude` env var.
 - **React Native Android App** — Mission creation, photo capture on-site, report review, and customer lookup from the field. Communicates with the stack via JWT-authenticated HTTPS API.
 - **Voice-to-Text** — On-device speech recognition in the Android app for dictating operator field notes hands-free during or after missions.
 - **DroneOpsSync Deep Integration** — Field-captured photos auto-upload to the correct mission. Field notes from the controller pre-populate report narrative. JWT API is already in place.
 - **Public API & Webhooks** — Let third-party tools (dispatch software, QuickBooks, project management) integrate with Command. Webhooks on mission status changes, invoice payment, and report delivery.
-- **Public Demo Instance** — ~~Planned~~ **Live** at `command-demo.barnardhq.com` with pre-loaded sample data, sandboxed operations (demo guard middleware), demo-mode banner with "Deploy Your Own" CTA. See `docker-compose.demo.yml` for deployment config.
+- **Public Demo Instance** — **Live** at [command-demo.barnardhq.com](https://command-demo.barnardhq.com) with pre-loaded sample data, sandboxed operations (demo guard middleware), demo-mode banner with "Deploy Your Own" CTA, and 24-hour auto-reset. See `docker-compose.demo.yml` for deployment config.
 
 ---
 

@@ -72,7 +72,7 @@ Requires PostgreSQL and Redis running (easiest via `docker compose up db redis -
 | Backend | FastAPI + SQLAlchemy 2.0 (async) | REST API |
 | Database | PostgreSQL 16 | Persistent storage |
 | Flight Parser | Python microservice | DJI flight log decryption |
-| LLM | Ollama (Mistral 7B) | Local AI report generation |
+| LLM | Ollama (Qwen 2.5 3B) or Claude API | AI report generation |
 | Queue | Redis 7 + Celery | Async task processing |
 
 ## Reporting Bugs
