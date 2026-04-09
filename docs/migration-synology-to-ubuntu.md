@@ -173,7 +173,7 @@ nano /opt/droneops/.env
 | `POSTGRES_DB` | Must match backup |
 | `DATABASE_URL` | Same password in connection string |
 | `JWT_SECRET_KEY` | Or all sessions invalidate |
-| `ADMIN_USERNAME` / `ADMIN_PASSWORD` | Same as Synology |
+| `ADMIN_USERNAME` / `ADMIN_PASSWORD` | Removed — admin is created via setup wizard. If migrating, your existing admin user is in the database backup |
 | `DJI_API_KEY` | Same |
 | `SMTP_*` | All SMTP settings same |
 | `CLOUDFLARE_TUNNEL_TOKEN` | Same (if using tunnel) |
@@ -366,11 +366,17 @@ sudo ufw status
 
 ```bash
 cd /opt/droneops
-./update.sh           # Interactive menu
-./update.sh dev       # Pull + deploy dev branch
-./update.sh prod      # Pull + deploy production
-./update.sh status    # Show running services
-./update.sh dev --clean   # Full rebuild, no Docker cache
+
+# Manual update
+git pull && docker compose up -d --build
+
+# Or install auto-deploy (recommended)
+sudo ./setup-server.sh              # tracks claude/dev by default
+sudo ./setup-server.sh --branch main  # track main instead
+
+# Check auto-deploy status
+systemctl status droneops
+systemctl list-timers droneops-autopull*
 ```
 
 ---
