@@ -221,7 +221,18 @@ async def lifespan(app: FastAPI):
         result = await verify_session.execute(select(User))
         user_count = len(result.scalars().all())
         if user_count == 0:
-            logger.info("STARTUP: No users in database — setup wizard will appear on first visit")
+            # Managed instance: auto-create admin from env vars instead of setup wizard
+            if settings.managed_instance and settings.admin_username and settings.admin_password:
+                from app.auth.jwt import hash_password
+                admin = User(
+                    username=settings.admin_username,
+                    hashed_password=hash_password(settings.admin_password),
+                )
+                verify_session.add(admin)
+                await verify_session.commit()
+                logger.info("STARTUP: Managed instance — admin user '%s' created from env vars", settings.admin_username)
+            else:
+                logger.info("STARTUP: No users in database — setup wizard will appear on first visit")
         else:
             logger.info("STARTUP: %d user(s) in database — login ready", user_count)
 
@@ -413,7 +424,12 @@ async def log_requests(request: Request, call_next):
 @app.get("/api/health")
 async def health_check():
     """Lightweight health check for Docker healthcheck — just confirms the process is up."""
-    return {"status": "healthy", "service": "D.O.C — Drone Operations Command"}
+    resp = {"status": "healthy", "service": "D.O.C — Drone Operations Command"}
+    if settings.managed_instance:
+        resp["managed"] = True
+        if settings.client_id:
+            resp["client_id"] = settings.client_id
+    return resp
 
 
 @app.get("/api/branding")

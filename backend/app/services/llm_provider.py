@@ -1,4 +1,7 @@
-"""LLM provider dispatcher — routes report generation to Claude or Ollama."""
+"""LLM provider dispatcher — routes report generation to Claude or Ollama.
+
+When MANAGED_INSTANCE=true, always uses Claude regardless of DB settings.
+"""
 
 import logging
 
@@ -18,8 +21,14 @@ async def _get_setting(db: AsyncSession, key: str) -> str | None:
 
 
 async def get_llm_provider(db: AsyncSession) -> str:
-    """Determine the active LLM provider. DB setting takes precedence over config."""
+    """Determine the active LLM provider.
+
+    Managed instances always use Claude. Self-hosted checks DB then config.
+    """
     from app.config import settings
+
+    if settings.managed_instance:
+        return "claude"
 
     provider = await _get_setting(db, "llm_provider")
     if provider and provider in ("claude", "ollama"):
