@@ -587,7 +587,13 @@ async def get_llm_settings(
     _user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get LLM provider settings. API key is masked."""
+    """Get LLM provider settings. API key is masked.
+
+    Managed instances hide LLM settings entirely — provider is forced to Claude.
+    """
+    if app_settings.managed_instance:
+        return {"llm_provider": "claude", "managed": True}
+
     result = await db.execute(
         select(SystemSetting).where(SystemSetting.key.in_(LLM_KEYS))
     )
@@ -612,7 +618,10 @@ async def update_llm_settings(
     _user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Update LLM provider settings."""
+    """Update LLM provider settings. Blocked on managed instances."""
+    if app_settings.managed_instance:
+        raise HTTPException(status_code=403, detail="LLM settings are managed by the hosting provider")
+
     updates = payload.model_dump()
 
     for key, value in updates.items():

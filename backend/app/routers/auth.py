@@ -99,7 +99,12 @@ class SetupRequest(BaseModel):
 
 @router.get("/setup-status")
 async def setup_status(db: AsyncSession = Depends(get_db)):
-    """Public endpoint — returns whether initial setup is needed."""
+    """Public endpoint — returns whether initial setup is needed.
+
+    Managed instances skip the setup wizard — admin is pre-created on startup.
+    """
+    if settings.managed_instance:
+        return {"needs_setup": False}
     result = await db.execute(select(User))
     users = result.scalars().all()
     return {"needs_setup": len(users) == 0}

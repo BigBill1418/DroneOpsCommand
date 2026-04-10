@@ -56,6 +56,14 @@ class Settings(BaseSettings):
     stripe_webhook_secret: str = ""
     stripe_publishable_key: str = ""
 
+    # Managed instance (hosted by BarnardHQ)
+    managed_instance: bool = False
+    client_id: str = ""
+
+    # Admin credentials for managed instance auto-provisioning
+    admin_username: str = ""
+    admin_password: str = ""
+
     # Demo mode
     demo_mode: bool = False
     demo_reset_interval_hours: int = 24
