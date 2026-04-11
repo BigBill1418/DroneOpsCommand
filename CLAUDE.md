@@ -1,5 +1,19 @@
 # CLAUDE.md — Project instructions for Claude Code
 
+## Failover & Resilience Guard (MANDATORY)
+
+Every code change MUST be evaluated for its impact on failover, blue-green deployment, and replication BEFORE being made. This is non-negotiable.
+
+Before committing ANY change, ask:
+1. Will this break PostgreSQL streaming replication? (port bindings, pg_hba, connection strings)
+2. Will this survive a container recreation? (runtime-only changes vs init scripts/volumes)
+3. Will this break the blue-green swap flow? (standby-first deploy, fencing, promotion)
+4. Will this break the failover engine? (quorum voting, health monitoring, WireGuard connectivity)
+5. Will this affect any customer-facing service during a site failover?
+
+If the answer to ANY of these is yes — either find an alternative approach that preserves resilience, or do not make the change. There are no exceptions.
+
+
 ## Version Bumping (REQUIRED on every code change)
 
 Every commit that changes application code MUST include a version bump. Use semantic versioning (MAJOR.MINOR.PATCH). Bump PATCH for fixes/tweaks, MINOR for new features, MAJOR for breaking changes.
