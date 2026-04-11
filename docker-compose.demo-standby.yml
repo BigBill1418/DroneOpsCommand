@@ -16,7 +16,8 @@ services:
     volumes:
       - droneops_demo_standby_pgdata:/var/lib/postgresql/data
     ports:
-      - "5437:5432"
+      - "127.0.0.1:5437:5432"
+      - "10.99.0.1:5437:5432"
     command: >
       postgres
         -c hot_standby=on
