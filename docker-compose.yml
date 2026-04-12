@@ -159,7 +159,14 @@ services:
     restart: unless-stopped
     labels:
       - "com.centurylinklabs.watchtower.scope=droneops"
-    command: celery -A app.tasks.celery_tasks worker --loglevel=info
+    # init: true runs tini as PID 1, reaping zombie children. Without this,
+    # celery's forked workers that die leave <defunct> entries on the host —
+    # the 2026-04-12 incident saw 31+ zombies accumulating under this container.
+    init: true
+    # --max-tasks-per-child recycles the worker process every N tasks, which
+    # releases leaked memory/file-descriptors and forces DB/connection reset.
+    # This is the standard celery hygiene flag.
+    command: celery -A app.tasks.celery_tasks worker --loglevel=info --max-tasks-per-child=100
     healthcheck:
       test: ["CMD-SHELL", "celery -A app.tasks.celery_tasks inspect ping --timeout 10 || exit 1"]
       interval: 30s
