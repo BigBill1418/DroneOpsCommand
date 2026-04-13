@@ -36,20 +36,12 @@ Include the version tag in the commit message (e.g. `— v1.7.8`).
 
 ## Branch Workflow (REQUIRED)
 
-- **`claude/dev`** — development & testing branch (all new work goes here first)
-- **`main`** — production-stable (only promoted, tested code)
-
-**Before committing any code change, ALWAYS ask the user:** "Should this go to `claude/dev`, `main`, or both?"
-- Do NOT assume a target branch — always ask first.
-- Default to `claude/dev` unless told otherwise.
+All commits go directly to **`main`**. There is no `claude/dev` branch anymore — commit, push, deploy. No promotion step, no dev/prod split.
 
 **Server update commands:**
-- `./update.sh` — interactive menu (prompts for action)
-- `./update.sh dev` — pull `claude/dev`, rebuild, test
-- `./update.sh prod` — pull `main`, rebuild, deploy production
-- `./update.sh promote` — merge `claude/dev` → `main`, rebuild production
+- `./update.sh` — pull `main`, rebuild changed services, restart
+- `./update.sh --clean` — full rebuild, no Docker cache
 - `./update.sh status` — show branch info & running services
-- `./update.sh dev --clean` — full rebuild, no Docker cache
 
 ## Decision-Making (REQUIRED)
 

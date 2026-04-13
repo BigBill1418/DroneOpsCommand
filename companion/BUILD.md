@@ -66,13 +66,16 @@ npm install
 
 ### Step 2: Update your server URL (optional)
 
-Edit `src/sync.ts` and change `DEFAULT_SERVER_URL` to your actual server:
+`DEFAULT_SERVER_URL` in `src/sync.ts` ships blank so the APK doesn't carry any
+real infrastructure address. End users enter the server URL in the app on first
+launch. If you are building a private APK for a single known network, you *can*
+edit the default here:
 
 ```typescript
-export const DEFAULT_SERVER_URL = 'http://192.168.1.50:3080';
+export const DEFAULT_SERVER_URL = 'http://192.168.x.x:3080';
 ```
 
-You can also change this in the app after install.
+Do not commit a real IP.
 
 ### Step 3: Build
 

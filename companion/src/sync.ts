@@ -38,7 +38,9 @@ export const PREF_AUTO_DELETE = 'autoDelete';
 export const PREF_SYNCED_HASHES = 'syncedHashes';
 
 // ── Default URL ───────────────────────────────────────────────────────
-export const DEFAULT_SERVER_URL = 'http://192.168.50.20:3080';
+// No hardcoded default — the user must enter their own server URL in Settings.
+// Shipping a real IP here previously leaked internal infrastructure into clients.
+export const DEFAULT_SERVER_URL = '';
 
 // ── DJI log paths (relative to /storage/emulated/0/) ──────────────────
 // All paths scanned — no public/restricted distinction needed on Android 10.

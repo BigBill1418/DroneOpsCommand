@@ -6,8 +6,8 @@
 #   2. droneops-autopull.timer — auto-deploy new git commits (every 60s)
 #
 # Usage:
-#   sudo ./setup-server.sh                  # defaults: claude/dev branch
-#   sudo ./setup-server.sh --branch main    # track main instead
+#   sudo ./setup-server.sh                  # defaults: main branch
+#   sudo ./setup-server.sh --branch <name>  # track a different branch
 #   sudo ./setup-server.sh --uninstall      # remove all systemd units
 #
 # ──────────────────────────────────────────────────────────────────
@@ -23,8 +23,15 @@ BOLD='\033[1m'
 NC='\033[0m'
 
 # ── Parse args ───────────────────────────────────────────────────
-BRANCH="claude/dev"
+BRANCH="main"
 UNINSTALL=false
+
+# ── Minimum requirements (warn-only, never blocks install) ───────
+MIN_RAM_GB=8
+REC_RAM_GB=16
+MIN_CPU=4
+REC_CPU=6
+MIN_DISK_GB=30
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -32,7 +39,7 @@ while [[ $# -gt 0 ]]; do
     --uninstall) UNINSTALL=true; shift ;;
     -h|--help)
       echo "Usage: sudo $0 [--branch <branch>] [--uninstall]"
-      echo "  --branch <branch>  Git branch to auto-deploy (default: claude/dev)"
+      echo "  --branch <branch>  Git branch to auto-deploy (default: main)"
       echo "  --uninstall        Remove all DroneOpsCommand systemd units"
       exit 0
       ;;
@@ -100,6 +107,36 @@ fi
 if ! command -v docker &>/dev/null; then
   echo -e "${RED}ERROR: Docker is not installed${NC}"
   exit 1
+fi
+
+# ── Preflight: host resource check (warn-only) ───────────────────
+echo -e "${CYAN}Checking host resources...${NC}"
+HOST_RAM_GB=$(awk '/MemTotal/ {printf "%.0f", $2/1024/1024}' /proc/meminfo 2>/dev/null || echo 0)
+HOST_CPU=$(nproc 2>/dev/null || echo 0)
+HOST_DISK_GB=$(df -BG "$INSTALL_DIR" 2>/dev/null | awk 'NR==2 {gsub("G","",$4); print $4}' || echo 0)
+
+PREFLIGHT_WARN=0
+if [ "$HOST_RAM_GB" -lt "$MIN_RAM_GB" ]; then
+  echo -e "${YELLOW}  ⚠  RAM: ${HOST_RAM_GB}GB detected — below minimum ${MIN_RAM_GB}GB (recommended ${REC_RAM_GB}GB)${NC}"
+  echo -e "${YELLOW}     Ollama alone needs ~4GB for the quantized model. You may hit OOM crashes under load.${NC}"
+  PREFLIGHT_WARN=1
+fi
+if [ "$HOST_CPU" -lt "$MIN_CPU" ]; then
+  echo -e "${YELLOW}  ⚠  CPU: ${HOST_CPU} cores — below minimum ${MIN_CPU} (recommended ${REC_CPU})${NC}"
+  echo -e "${YELLOW}     docker-compose.yml pins Ollama to 6 cores; on fewer cores, AI reports will be slow.${NC}"
+  PREFLIGHT_WARN=1
+fi
+if [ -n "$HOST_DISK_GB" ] && [ "$HOST_DISK_GB" -lt "$MIN_DISK_GB" ] 2>/dev/null; then
+  echo -e "${YELLOW}  ⚠  Disk: ${HOST_DISK_GB}GB free at $INSTALL_DIR — below minimum ${MIN_DISK_GB}GB${NC}"
+  echo -e "${YELLOW}     Flight logs, Postgres, and the Ollama model can grow quickly.${NC}"
+  PREFLIGHT_WARN=1
+fi
+
+if [ "$PREFLIGHT_WARN" -eq 1 ]; then
+  echo -e "${YELLOW}  Install will continue, but expect crashes or slowness. Docker Desktop users: raise the VM resource allocation in Settings → Resources.${NC}"
+  sleep 2
+else
+  echo -e "${GREEN}  ✓ RAM: ${HOST_RAM_GB}GB, CPU: ${HOST_CPU} cores, Disk: ${HOST_DISK_GB}GB free${NC}"
 fi
 
 # ── Install: droneops.service ────────────────────────────────────

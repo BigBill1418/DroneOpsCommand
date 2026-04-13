@@ -202,7 +202,7 @@ export default function App() {
                 <label>Server URL (LAN)</label>
                 <input
                   type="url"
-                  placeholder="http://192.168.50.20:3080"
+                  placeholder="http://192.168.x.x:3080"
                   value={serverUrl}
                   onChange={(e) => { setServerUrl(e.target.value); setTestStatus('idle'); }}
                 />

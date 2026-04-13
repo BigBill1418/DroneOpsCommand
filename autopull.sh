@@ -6,7 +6,7 @@
 #
 # Config (env vars or defaults):
 #   DOC_DIR      Install directory (default: script's own directory)
-#   DOC_BRANCH   Git branch to track (default: claude/dev)
+#   DOC_BRANCH   Git branch to track (default: main)
 #
 # Cron example (every minute):
 #   * * * * * /home/user/droneops/autopull.sh
@@ -19,7 +19,7 @@
 set -euo pipefail
 
 DIR="${DOC_DIR:-$(cd "$(dirname "$0")" && pwd)}"
-BRANCH="${DOC_BRANCH:-claude/dev}"
+BRANCH="${DOC_BRANCH:-main}"
 LOGFILE="$DIR/autopull.log"
 LOCKFILE="$DIR/.autopull.lock"
 MAX_LOG_SIZE=1048576  # 1MB
@@ -48,11 +48,8 @@ touch "$LOCKFILE"
 cd "$DIR"
 
 # ── Determine deploy mode for update.sh ─────────────────────────
-# update.sh expects "dev" or "prod" — map branch name to mode
-case "$BRANCH" in
-  main|master)    MODE="prod" ;;
-  claude/dev|*)   MODE="dev" ;;
-esac
+# Everything runs in "prod" mode now — single-branch workflow.
+MODE="prod"
 
 # ── Fetch and compare ───────────────────────────────────────────
 DOCKER="docker compose"

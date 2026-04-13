@@ -2,7 +2,7 @@
 
 **Self-hosted mission management, flight log analysis, GPS flight replay with video export, AI report generation, invoicing, and real-time airspace monitoring for commercial drone operators.**
 
-**Version 2.61.4** | [Quick Start](#quick-start) | [Features](#features) | [Configuration](#configuration) | [Contributing](CONTRIBUTING.md) | [License](LICENSE)
+**Version 2.61.5** | [Quick Start](#quick-start) | [Features](#features) | [Configuration](#configuration) | [Contributing](CONTRIBUTING.md) | [License](LICENSE)
 
 **Live Demo:** [command-demo.barnardhq.com](https://command-demo.barnardhq.com) (login: `demo` / `demo123`)
 
@@ -45,8 +45,17 @@ Designed for FAA Part 107 certified operators running missions such as search & 
 ### Prerequisites
 
 - [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/install/) (v2+)
-- 8GB+ RAM recommended (Ollama loads a 4GB quantized model)
 - x86_64 or ARM64 host
+
+**Minimum resources (self-hosted):**
+
+| Resource | Minimum | Recommended | Notes |
+|----------|---------|-------------|-------|
+| RAM      | 8 GB    | 16 GB       | Ollama alone reserves ~4 GB for the quantized model; backend + Postgres + flight-parser + Redis under load push past 8 GB total. |
+| CPU      | 4 cores | 6–8 cores   | `docker-compose.yml` pins Ollama to 6 cores. Fewer cores means slow AI report generation. |
+| Disk     | 30 GB   | 100 GB+     | Flight logs, Postgres, Ollama model, video exports. Grows with usage. |
+
+> **Docker Desktop users (Windows/Mac) — READ THIS.** Docker Desktop runs containers inside a Linux VM with its own RAM/CPU limits. The defaults are usually **too low** for DroneOpsCommand. Open **Docker Desktop → Settings → Resources** and raise **Memory to at least 8 GB** (16 GB recommended) and **CPUs to at least 4** before `docker compose up`. If the VM runs out of memory the stack will crash at startup or under load with no clear error. `setup-server.sh` does not run on Windows/Mac, so you won't see a preflight warning — allocate the VM resources manually.
 
 > **Windows?** See the [Windows Self-Hosting Guide](docs/windows-self-hosting.md) for step-by-step Docker Desktop + WSL 2 setup.
 
@@ -88,8 +97,8 @@ docker compose logs -f ollama-setup
 Run the setup script to install boot auto-start and git-based auto-deploy:
 
 ```bash
-sudo ./setup-server.sh                    # tracks claude/dev by default
-sudo ./setup-server.sh --branch main      # track main instead
+sudo ./setup-server.sh                    # tracks main by default
+sudo ./setup-server.sh --branch <name>    # track a different branch
 sudo ./setup-server.sh --uninstall        # remove everything
 ```
 
