@@ -6,6 +6,7 @@
 services:
   backend:
     environment:
+      - DATABASE_URL=postgresql+asyncpg://doc_demo:DemoDb2026!SecureRandom@db:5432/doc_demo
       - DEMO_MODE=true
       - DEMO_RESET_INTERVAL_HOURS=24
       - ADMIN_USERNAME=demo

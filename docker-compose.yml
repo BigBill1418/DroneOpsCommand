@@ -2,8 +2,6 @@ services:
   db:
     image: postgres:16-alpine
     restart: unless-stopped
-    labels:
-      - "com.centurylinklabs.watchtower.scope=droneops"
     entrypoint: ["/scripts/primary-entrypoint.sh"]
     command: ["postgres"]
     environment:
@@ -16,37 +14,26 @@ services:
       - ./scripts/primary-entrypoint.sh:/scripts/primary-entrypoint.sh:ro
       - ./scripts/init-primary.sh:/docker-entrypoint-initdb.d/init-primary.sh:ro
     ports:
-      - "127.0.0.1:5434:5432"
-      - "10.99.0.1:5434:5432"
+      - "127.0.0.1:5435:5432"
+      - "10.99.0.2:5435:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-doc}"]
       interval: 5s
       timeout: 5s
       retries: 5
-      start_period: 10s
 
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    labels:
-      - "com.centurylinklabs.watchtower.scope=droneops"
-    # NOTE: Redis warns "Memory overcommit must be enabled!" for background saves.
-    # vm.overcommit_memory=1 is a host-level sysctl — cannot be set via compose.
-    # Set on the Docker host:
-    #   sysctl -w vm.overcommit_memory=1
-    #   echo 'vm.overcommit_memory = 1' > /etc/sysctl.d/99-redis.conf
     healthcheck:
-      test: ["CMD", "redis-cli", "-h", "127.0.0.1", "ping"]
+      test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 5s
       retries: 5
-      start_period: 5s
 
   ollama:
     image: ollama/ollama:latest
     restart: unless-stopped
-    labels:
-      - "com.centurylinklabs.watchtower.scope=droneops"
     volumes:
       - ollama_data:/root/.ollama
     environment:
@@ -62,7 +49,7 @@ services:
     cpuset: "0-5"
     mem_reservation: 8g
     healthcheck:
-      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/127.0.0.1/11434' || exit 1"]
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/11434' || exit 1"]
       interval: 15s
       timeout: 10s
       retries: 5
@@ -78,8 +65,8 @@ services:
       sh -c "
         echo 'Waiting for Ollama to be ready...' &&
         until curl -s http://ollama:11434/api/tags > /dev/null 2>&1; do sleep 2; done &&
-        echo 'Pulling Qwen 2.5 3B model...' &&
-        curl -s http://ollama:11434/api/pull -d '{\"name\": \"qwen2.5:3b\"}' &&
+        echo 'Pulling Llama 3.1 8B model...' &&
+        curl -s http://ollama:11434/api/pull -d '{\"name\": \"llama3.1:8b-instruct-q4_K_M\"}' &&
         echo 'Model pulled. Will load into RAM on first use.'
       "
 
@@ -95,20 +82,15 @@ services:
       - WATCHTOWER_MONITOR_ONLY=${WATCHTOWER_MONITOR_ONLY:-false}
       - WATCHTOWER_NOTIFICATION_URL=${WATCHTOWER_NOTIFICATION_URL:-}
       - WATCHTOWER_NOTIFICATIONS_HOSTNAME=droneops-server
-      - WATCHTOWER_SCOPE=droneops
       - DOCKER_API_VERSION=1.45
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-    labels:
-      - "com.centurylinklabs.watchtower.scope=droneops"
 
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
     restart: unless-stopped
-    labels:
-      - "com.centurylinklabs.watchtower.scope=droneops"
     dns:
       - 1.1.1.1
       - 8.8.8.8
@@ -116,7 +98,7 @@ services:
       - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://doc:changeme_in_production@db:5432/doc}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://ollama:11434}
-      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5:3b}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.1:8b-instruct-q4_K_M}
       - OPENDRONELOG_URL=${OPENDRONELOG_URL:-}
       - JWT_SECRET_KEY=${JWT_SECRET_KEY:-changeme_generate_a_random_secret}
       - JWT_ALGORITHM=${JWT_ALGORITHM:-HS256}
@@ -146,7 +128,7 @@ services:
       ollama:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8000/api/health || exit 1"]
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000/api/health || exit 1"]
       interval: 15s
       timeout: 10s
       retries: 5
@@ -157,16 +139,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     restart: unless-stopped
-    labels:
-      - "com.centurylinklabs.watchtower.scope=droneops"
-    # init: true runs tini as PID 1, reaping zombie children. Without this,
-    # celery's forked workers that die leave <defunct> entries on the host —
-    # the 2026-04-12 incident saw 31+ zombies accumulating under this container.
-    init: true
-    # --max-tasks-per-child recycles the worker process every N tasks, which
-    # releases leaked memory/file-descriptors and forces DB/connection reset.
-    # This is the standard celery hygiene flag.
-    command: celery -A app.tasks.celery_tasks worker --loglevel=info --max-tasks-per-child=100
+    command: celery -A app.tasks.celery_tasks worker --loglevel=info
     healthcheck:
       test: ["CMD-SHELL", "celery -A app.tasks.celery_tasks inspect ping --timeout 10 || exit 1"]
       interval: 30s
@@ -177,7 +150,7 @@ services:
       - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://doc:changeme_in_production@db:5432/doc}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://ollama:11434}
-      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5:3b}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.1:8b-instruct-q4_K_M}
       - SMTP_HOST=${SMTP_HOST:-}
       - SMTP_PORT=${SMTP_PORT:-587}
       - SMTP_USER=${SMTP_USER:-}
@@ -200,10 +173,8 @@ services:
       context: ./flight-parser
       dockerfile: Dockerfile
     restart: unless-stopped
-    labels:
-      - "com.centurylinklabs.watchtower.scope=droneops"
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8100/health || exit 1"]
+      test: ["CMD-SHELL", "curl -sf http://localhost:8100/health || exit 1"]
       interval: 15s
       timeout: 10s
       retries: 3
@@ -220,10 +191,8 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     restart: unless-stopped
-    labels:
-      - "com.centurylinklabs.watchtower.scope=droneops"
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8080/ || exit 1"]
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/ || exit 1"]
       interval: 15s
       timeout: 10s
       retries: 3
@@ -240,8 +209,6 @@ services:
   cloudflared:
     image: cloudflare/cloudflared:latest
     restart: unless-stopped
-    labels:
-      - "com.centurylinklabs.watchtower.scope=droneops"
     command: tunnel run
     environment:
       - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN:-}
