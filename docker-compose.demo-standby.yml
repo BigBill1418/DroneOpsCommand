@@ -6,9 +6,16 @@
 #   docker compose -f docker-compose.demo-standby.yml up -d
 #
 # First-time setup requires pg_basebackup (see scripts/init-demo-standby.sh).
+#
+# NOTE: explicit project name 'droneops-demo-standby' prevents the default
+# 'droneops' project (main compose) from treating this container as an orphan
+# and removing it when someone runs `docker compose up -d` in the same dir.
+# Discovered 2026-04-15 — main compose was silently wiping this standby.
+name: droneops-demo-standby
 
 services:
   db-demo-standby:
+    container_name: droneops-db-demo-standby-1
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
