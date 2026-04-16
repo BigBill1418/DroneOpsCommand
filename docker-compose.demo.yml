@@ -5,6 +5,8 @@
 
 services:
   backend:
+    env_file:
+      - .env.demo
     environment:
       - DATABASE_URL=postgresql+asyncpg://doc_demo:DemoDb2026!SecureRandom@db:5432/doc_demo
       - DEMO_MODE=true
@@ -35,6 +37,8 @@ services:
 
   # Demo frontend on port 3081 (prod uses 3080)
   frontend:
+    env_file:
+      - .env.demo
     ports:
       - "3081:8080"
 
@@ -44,6 +48,8 @@ services:
   # (rmem_max=208KiB, cloudflared wants 7168KiB, causes connection drops)
   # Token is set via CLOUDFLARE_TUNNEL_TOKEN in .env.demo
   cloudflared:
+    env_file:
+      - .env.demo
     command: tunnel --no-autoupdate --protocol http2 run
     network_mode: host
     restart: unless-stopped
@@ -64,5 +70,7 @@ services:
 
   # Override DB port to avoid conflict with DroneOps Command (which uses 5434)
   db:
+    env_file:
+      - .env.demo
     ports: !override
       - "5435:5432"

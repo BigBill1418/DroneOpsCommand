@@ -2,6 +2,38 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## [Ops] — 2026-04-16 — Demo bootstrap.sh guard + explicit env_file on demo override
+
+### Added
+- **`bootstrap.sh`** at repo root — idempotent launcher for the demo stack.
+  Refuses to start if `.env.demo` is missing or critical vars are empty
+  (POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB, DATABASE_URL,
+  JWT_SECRET_KEY, DEMO_ADMIN_USERNAME, DEMO_ADMIN_PASSWORD,
+  CLOUDFLARE_TUNNEL_TOKEN). Symlinks `.env → .env.demo` if `.env` is
+  absent so compose loads the right file even from a bare
+  `docker compose up -d` call. `./bootstrap.sh --clean` for a no-cache
+  rebuild.
+- **Operator usage:** `cd ~/droneops-demo && ./bootstrap.sh` instead of
+  `docker compose up -d` directly.
+
+### Changed
+- **`docker-compose.demo.yml`** — added `env_file: .env.demo` to every
+  demo-override service (backend, frontend, cloudflared, db). Second
+  layer of safety so even a plain `docker compose up -d` (without the
+  `--env-file` flag) still loads demo credentials for each service.
+
+### Why
+
+Root cause of 2026-04-16 DroneOps-Demo 6h 26m outage: demo stack was
+restarted without `--env-file .env.demo` and without a `.env` symlink in
+place. Compose silently fell back to the base defaults
+(`POSTGRES_USER=doc`, `POSTGRES_PASSWORD=changeme_in_production`), which
+did not match the DB volume initialized on 2026-04-04 with `doc_demo`
+credentials. Backend crash-looped on `password authentication failed for
+user "doc"`. The fail-loud script + explicit `env_file` directives mean
+this class of failure can't happen again without a human seeing an
+explicit error message.
+
 ## [Ops] — 2026-04-16 — Watchtower scoped to `--label-enable` (opt-in)
 
 ### Changed

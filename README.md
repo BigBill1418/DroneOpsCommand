@@ -756,7 +756,7 @@ Transform DroneOpsCommand from a self-hosted tool into a revenue-generating SaaS
 - **Voice-to-Text** — On-device speech recognition in the Android app for dictating operator field notes hands-free during or after missions.
 - **DroneOpsSync Deep Integration** — Field-captured photos auto-upload to the correct mission. Field notes from the controller pre-populate report narrative. JWT API is already in place.
 - **Public API & Webhooks** — Let third-party tools (dispatch software, QuickBooks, project management) integrate with Command. Webhooks on mission status changes, invoice payment, and report delivery.
-- **Public Demo Instance** — **Live** at [command-demo.barnardhq.com](https://command-demo.barnardhq.com) with pre-loaded sample data, sandboxed operations (demo guard middleware), demo-mode banner with "Deploy Your Own" CTA, and 24-hour auto-reset. See `docker-compose.demo.yml` for deployment config.
+- **Public Demo Instance** — **Live** at [command-demo.barnardhq.com](https://command-demo.barnardhq.com) with pre-loaded sample data, sandboxed operations (demo guard middleware), demo-mode banner with "Deploy Your Own" CTA, and 24-hour auto-reset. See `docker-compose.demo.yml` for deployment config. **Always start the demo via `./bootstrap.sh`** — never `docker compose up -d` directly. The bootstrap script validates `.env.demo` before compose runs, so a missing or incomplete env file produces a clear error instead of silently falling back to default credentials (the failure mode that caused a 6h+ outage on 2026-04-16).
 
 ---
 
