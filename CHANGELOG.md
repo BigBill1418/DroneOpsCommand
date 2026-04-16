@@ -2,6 +2,21 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## [Ops] — 2026-04-16 — Watchtower scoped to `--label-enable` (opt-in)
+
+### Changed
+- **`docker-compose.yml` / watchtower service** — added
+  `WATCHTOWER_LABEL_ENABLE=true` to the environment block. Watchtower now
+  only updates containers explicitly labelled
+  `com.centurylinklabs.watchtower.enable=true`. No container carries that
+  label yet → Watchtower is a no-op until explicit opt-in. Rationale:
+  infrastructure containers (cloudflared, postgres, anything on a Swarm
+  manager) must not be auto-updated — a surprise pull could restart a
+  critical container at any hour. Part of the 2026-04-16 incident
+  remediation; see NOC Master ADR-0007 (Docker daemon is infrastructure)
+  for the full argument. To re-enable auto-update on a specific app
+  container later, add the label to its compose block and redeploy.
+
 ## [Ops] — 2026-04-16 — DroneOps autopull systemd timer disabled
 
 ### Changed
