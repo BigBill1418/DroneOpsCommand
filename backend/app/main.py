@@ -18,7 +18,7 @@ from starlette.formparsers import MultiPartParser
 from app.config import settings
 from app.database import Base, async_session, engine, get_db
 import app.models  # noqa: F401 — ensure all models registered with Base before create_all
-from app.routers import auth, customers, aircraft, missions, flights, maps, reports, invoices, rate_templates, llm, system_settings, financials, weather, intake, flight_library, batteries, maintenance, backup, device_keys, pilots, client_portal, stripe_webhook
+from app.routers import auth, customers, aircraft, missions, flights, maps, reports, invoices, rate_templates, llm, system_settings, financials, weather, intake, flight_library, batteries, maintenance, backup, device_keys, pilots, client_portal, stripe_webhook, business_signals
 
 # Configure root logger for the app
 logging.basicConfig(
@@ -310,7 +310,7 @@ logger.info("MultiPartParser max_file_size set to 200 MB")
 app = FastAPI(
     title="D.O.C — Drone Operations Command",
     description="Self-hosted mission management, flight log analysis, AI report generation, invoicing, telemetry visualization, and real-time airspace monitoring for commercial drone operators.",
-    version="2.61.5",
+    version="2.62.0",
     lifespan=lifespan,
 )
 
@@ -389,6 +389,7 @@ app.include_router(device_keys.router)
 app.include_router(pilots.router)
 app.include_router(client_portal.router)
 app.include_router(stripe_webhook.router)
+app.include_router(business_signals.router)
 
 
 # ── Demo status endpoint (no auth required) ───────────────────────────
