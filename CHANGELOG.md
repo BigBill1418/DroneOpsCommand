@@ -2,6 +2,27 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## [Ops] — 2026-04-16 — DroneOps autopull systemd timer disabled
+
+### Changed
+- **`droneops-autopull.timer` / `droneops-autopull.service`** — stopped and
+  disabled (`systemctl disable --now droneops-autopull.timer`). NOC Master
+  Control is the single canonical deployer for all BarnardHQ stacks
+  (registered in `~/noc-master/data/config.yml` as
+  `BigBill1418/DroneOpsCommand` → `/host-home/droneops` on `main`,
+  `enabled: true`). The per-repo autopull script had been silently failing
+  for 3 days (log last advanced 2026-04-13 01:22) because it doesn't respect
+  `~/droneops/.deployer-disabled` — disabling the timer removes the dead
+  schedule without deleting the unit files, which stay in
+  `/etc/systemd/system/` for emergency re-enable.
+- Matches the post-2026-04-09-incident rule: "single centralized deployer"
+  for every stack. No behavioural change for production — the script had
+  stopped doing useful work on 04-13 anyway.
+
+### Resilience guard
+- Pure systemd state change, no code change, no rebuild. Zero blast radius
+  on replication, failover, blue-green.
+
 ## [2.62.0] — 2026-04-16 — Business-signals endpoint for Jarvis Innovation Engine
 
 ### Added
