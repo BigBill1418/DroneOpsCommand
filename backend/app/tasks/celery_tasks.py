@@ -3,8 +3,40 @@ import logging
 from datetime import datetime
 
 from celery import Celery
+from celery.signals import after_setup_logger, after_setup_task_logger
+from pythonjsonlogger import json as json_logger
 
 from app.config import settings
+
+
+def _apply_json_formatter(logger_instance: logging.Logger) -> None:
+    """Replace every handler's formatter with ``python-json-logger``.
+
+    Celery installs its own stream handlers before our code runs — and
+    the ``after_setup_logger`` / ``after_setup_task_logger`` signals
+    fire immediately after that happens. We mutate the formatters in
+    place so both worker-level and per-task log lines land in Loki as
+    JSON, matching the ``droneops-api`` shape.
+    """
+    formatter = json_logger.JsonFormatter(
+        fmt="%(asctime)s %(levelname)s %(name)s %(message)s",
+        rename_fields={"asctime": "timestamp", "levelname": "level"},
+    )
+    for handler in logger_instance.handlers:
+        handler.setFormatter(formatter)
+
+
+@after_setup_logger.connect
+def _setup_worker_json_logging(logger=None, **kwargs):  # noqa: ARG001 — Celery signal
+    if logger is not None:
+        _apply_json_formatter(logger)
+
+
+@after_setup_task_logger.connect
+def _setup_task_json_logging(logger=None, **kwargs):  # noqa: ARG001 — Celery signal
+    if logger is not None:
+        _apply_json_formatter(logger)
+
 
 logger = logging.getLogger(__name__)
 

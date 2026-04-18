@@ -51,3 +51,10 @@ pydantic==2.10.3
 pydantic-settings==2.7.0
 python-dotenv==1.0.1
 Pillow==11.0.0
+
+# Structured JSON logging — Phase 5 observability pre-req.
+# Replaces the plain `logging.basicConfig(format=...)` setup in app/main.py.
+# Alloy discovers containers by com.barnardhq.* labels, so log shape change
+# is safe at the collector; any downstream greps over plaintext `[LEVEL]`
+# prefixes will need updating.
+python-json-logger==3.2.1

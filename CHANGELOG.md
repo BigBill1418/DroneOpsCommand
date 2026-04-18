@@ -4,6 +4,34 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## [2.63.0] — 2026-04-18 — Structured JSON logging (observability Phase 5 pre-req)
+
+### Added
+- `python-json-logger==3.2.1` in `backend/requirements.txt`.
+- `_setup_json_logging()` in `backend/app/main.py` — replaces the plain
+  `logging.basicConfig(format=...)` setup with a `pythonjsonlogger.json.JsonFormatter`
+  that renames `asctime`→`timestamp`, `levelname`→`level`, and emits every
+  log line as a parseable JSON object on the root logger.
+- Celery signal hooks (`after_setup_logger`, `after_setup_task_logger`) in
+  `backend/app/tasks/celery_tasks.py` — swap the formatter on worker
+  bootstrap so the worker stream matches the API stream shape.
+
+### Why
+
+Alloy (the central Loki pump on HSH-HQ + CHAD-HQ) discovers containers by
+`com.barnardhq.*` labels and stamps `service=droneops-api` / `droneops-worker`
+on the stream. Downstream queries in Grafana need parseable fields, not
+`YYYY-MM-DD HH:MM:SS [LEVEL] name: msg` prose. This is the pre-req before
+the Sentry/OTel SDKs go in the next commit.
+
+### Log shape change — operator notice
+
+Any downstream consumer that greps plaintext `[INFO]` / `[WARNING]` level
+prefixes in DroneOps container logs will need to migrate to JSON parsing
+(`.level`, `.message`, `.name`, `.timestamp`). The FastAPI request-logger
+middleware in `log_requests()` continues to use the same structlog message
+keys — only the wire format changes.
+
 ## [Ops] — 2026-04-16 — Demo bootstrap.sh guard + explicit env_file on demo override
 
 ### Added

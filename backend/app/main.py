@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from pythonjsonlogger import json as json_logger
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi.staticfiles import StaticFiles
@@ -20,12 +21,36 @@ from app.database import Base, async_session, engine, get_db
 import app.models  # noqa: F401 — ensure all models registered with Base before create_all
 from app.routers import auth, customers, aircraft, missions, flights, maps, reports, invoices, rate_templates, llm, system_settings, financials, weather, intake, flight_library, batteries, maintenance, backup, device_keys, pilots, client_portal, stripe_webhook, business_signals
 
-# Configure root logger for the app
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
+
+def _setup_json_logging() -> None:
+    """Wire structured-JSON logging on the root logger.
+
+    Phase 5 observability pre-req — replaces the plain
+    ``logging.basicConfig(format="%(asctime)s [%(levelname)s] ...")``
+    setup with a ``python-json-logger`` handler so every log line Docker
+    collects is a parseable JSON object. Alloy's label-based discovery
+    then stamps ``service=droneops-api``/``droneops-worker`` + tenant/env
+    on the stream at ingest. Non-Docker consumers that grep plaintext
+    level prefixes need to migrate to JSON parsing — see ADR.
+    """
+    handler = logging.StreamHandler()
+    formatter = json_logger.JsonFormatter(
+        fmt="%(asctime)s %(levelname)s %(name)s %(message)s",
+        rename_fields={"asctime": "timestamp", "levelname": "level"},
+    )
+    handler.setFormatter(formatter)
+
+    root = logging.getLogger()
+    root.handlers.clear()
+    root.addHandler(handler)
+    root.setLevel(logging.INFO)
+
+    # Keep uvicorn.access noise at WARNING — the middleware below logs
+    # every request/response with our own structured fields.
+    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+
+
+_setup_json_logging()
 logger = logging.getLogger("doc")
 
 
@@ -310,7 +335,7 @@ logger.info("MultiPartParser max_file_size set to 200 MB")
 app = FastAPI(
     title="D.O.C — Drone Operations Command",
     description="Self-hosted mission management, flight log analysis, AI report generation, invoicing, telemetry visualization, and real-time airspace monitoring for commercial drone operators.",
-    version="2.62.0",
+    version="2.63.0",
     lifespan=lifespan,
 )
 
