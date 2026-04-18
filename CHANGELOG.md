@@ -4,6 +4,28 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## [Ops] — 2026-04-18 — Worker healthcheck timeout raised post-observability (commit 7b33169)
+
+### Changed
+- `docker-compose.yml` worker healthcheck: `timeout 15s -> 30s`,
+  `interval 30s -> 60s`, `start_period 30s -> 60s`.
+
+### Why
+
+After v2.63.1 deployed, `celery -A app.tasks.celery_tasks inspect ping`
+started exceeding the 15s docker healthcheck window. Root cause: the
+inspect subcommand spawns a fresh Python that re-imports
+`app.tasks.celery_tasks`, which now triggers `init_sentry()` +
+`init_otel()` and their downstream SQLAlchemy / httpx / Celery /
+logging instrumentors. Measured ~22s end-to-end on the wall clock.
+
+The worker itself responds `OK / pong` inside the window — it was the
+subprocess boot that exceeded timeout. Bumping the timeout adds
+headroom; the worker's failure-detection SLA is now "unhealthy after
+3 minutes" (60s × 3 retries) instead of the previous ~90s. Acceptable
+because a Celery worker's failure mode is queue-depth growth, not
+request-path latency.
+
 ## [2.63.1] — 2026-04-18 — Sentry + OTel SDKs + compose labels (observability Phase 5)
 
 ### Added
