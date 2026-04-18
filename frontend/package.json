@@ -1,7 +1,7 @@
 {
   "name": "doc-frontend",
   "private": true,
-  "version": "2.63.0",
+  "version": "2.63.1",
   "description": "Self-hosted drone operations command center — mission management, flight log analysis, GPS flight replay with video export, AI reports, invoicing, and airspace monitoring",
   "keywords": [
     "drone",
@@ -51,6 +51,7 @@
     "@tiptap/extension-underline": "^2.10.0",
     "@tiptap/react": "^2.10.0",
     "@tiptap/starter-kit": "^2.10.0",
+    "@sentry/react": "^8.40.0",
     "axios": "^1.7.9",
     "dayjs": "^1.11.13",
     "leaflet": "^1.9.4",

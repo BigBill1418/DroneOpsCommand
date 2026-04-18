@@ -53,6 +53,16 @@ def _setup_json_logging() -> None:
 _setup_json_logging()
 logger = logging.getLogger("doc")
 
+# Observability bootstrap. Both inits are DSN/endpoint-gated — unset
+# env = no-op, so self-hosted single-tenant installs keep working
+# without the central plane. Runs AFTER logging setup so the init logs
+# are JSON-shaped, BEFORE FastAPI construction so the SDK's integrations
+# can hook import paths that routers may trigger.
+from app.observability import init_otel, init_sentry, instrument_fastapi  # noqa: E402
+
+init_sentry(service="droneops-api")
+init_otel(service="droneops-api")
+
 
 def _add_missing_columns(conn):
     """Add columns and enum values that create_all won't add to existing tables.
@@ -335,9 +345,12 @@ logger.info("MultiPartParser max_file_size set to 200 MB")
 app = FastAPI(
     title="D.O.C — Drone Operations Command",
     description="Self-hosted mission management, flight log analysis, AI report generation, invoicing, telemetry visualization, and real-time airspace monitoring for commercial drone operators.",
-    version="2.63.0",
+    version="2.63.1",
     lifespan=lifespan,
 )
+
+# OTel FastAPI auto-instrumentation — no-op unless OTEL endpoint is set.
+instrument_fastapi(app)
 
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)

@@ -2,6 +2,25 @@
 #
 # Usage from /opt/droneops-demo/:
 #   docker compose -p droneops-demo -f docker-compose.yml -f docker-compose.demo.yml --env-file .env.demo up -d --build
+#
+# Phase-5 observability note: this override pins `com.barnardhq.env=demo`
+# on every label and the Alloy OTLP endpoint to CHAD-HQ's local collector
+# (10.99.0.2). Alloy on CHAD-HQ then cascades to the HSH-HQ plane over
+# WireGuard — keeps the demo host's spans/logs off the WG wire unless
+# they need to be correlated with prod.
+
+x-barnardhq-labels-demo: &barnardhq-labels-demo
+  com.barnardhq.project: "droneops"
+  com.barnardhq.env: "demo"
+  com.barnardhq.tenant: "shared"
+  com.barnardhq.stack: "droneops-demo"
+
+x-logging-demo: &logging-demo
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "5"
+    labels: "com.barnardhq.service,com.barnardhq.project,com.barnardhq.env,com.barnardhq.tenant,com.barnardhq.stack"
 
 services:
   backend:
@@ -20,6 +39,11 @@ services:
       - SMTP_HOST=
       - SMTP_USER=
       - SMTP_PASSWORD=
+      # Phase-5 observability — demo pins CHAD-HQ Alloy + env=demo.
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://10.99.0.2:4317}
+      - OTEL_SERVICE_NAME=droneops-api
+      - ENV=demo
+      - SENTRY_ENVIRONMENT=demo
     # Override base port mapping — use 8001 to avoid conflict with prod on 8000
     ports: !override
       - "8001:8000"
@@ -29,6 +53,10 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    labels:
+      <<: *barnardhq-labels-demo
+      com.barnardhq.service: "droneops-api"
+    logging: *logging-demo
 
   # Disable worker in demo (no Celery tasks needed)
   worker:
@@ -39,8 +67,19 @@ services:
   frontend:
     env_file:
       - .env.demo
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_SENTRY_DSN: ${VITE_SENTRY_DSN:-}
+        VITE_SENTRY_ENVIRONMENT: demo
+        VITE_APP_VERSION: "2.63.1"
     ports:
       - "3081:8080"
+    labels:
+      <<: *barnardhq-labels-demo
+      com.barnardhq.service: "droneops-frontend"
+    logging: *logging-demo
 
   # Cloudflare tunnel — routes command-demo.barnardhq.com → localhost:3081
   # Uses host network so cloudflared can reach frontend on host port
@@ -53,6 +92,10 @@ services:
     command: tunnel --no-autoupdate --protocol http2 run
     network_mode: host
     restart: unless-stopped
+    labels:
+      <<: *barnardhq-labels-demo
+      com.barnardhq.service: "droneops-cloudflared"
+    logging: *logging-demo
 
   # Disable Ollama in demo (no GPU needed, LLM shows as "offline")
   ollama:
@@ -74,3 +117,7 @@ services:
       - .env.demo
     ports: !override
       - "5435:5432"
+    labels:
+      <<: *barnardhq-labels-demo
+      com.barnardhq.service: "droneops-db"
+    logging: *logging-demo

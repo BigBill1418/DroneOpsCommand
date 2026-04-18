@@ -1,6 +1,17 @@
 # Build stage
 FROM node:20-alpine AS build
 WORKDIR /app
+
+# Phase-5 observability build args — Vite inlines every `VITE_*` that's
+# set at build time into the bundled JS. Compose (prod + demo override)
+# passes these through; unset = frontend Sentry init no-ops.
+ARG VITE_SENTRY_DSN=""
+ARG VITE_SENTRY_ENVIRONMENT="production"
+ARG VITE_APP_VERSION="dev"
+ENV VITE_SENTRY_DSN=${VITE_SENTRY_DSN} \
+    VITE_SENTRY_ENVIRONMENT=${VITE_SENTRY_ENVIRONMENT} \
+    VITE_APP_VERSION=${VITE_APP_VERSION}
+
 COPY package.json package-lock.json ./
 RUN npm ci --legacy-peer-deps
 COPY . .

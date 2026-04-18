@@ -58,3 +58,17 @@ Pillow==11.0.0
 # is safe at the collector; any downstream greps over plaintext `[LEVEL]`
 # prefixes will need updating.
 python-json-logger==3.2.1
+
+# Observability — Sentry/GlitchTip + OpenTelemetry. DSN/endpoint gated in
+# app/observability/{sentry,otel}.py — unset env = no-op, so dev and any
+# self-hosted single-tenant install keeps working without the central
+# plane. See docs/adr/0001-observability.md.
+sentry-sdk[fastapi,celery,sqlalchemy]>=2.18.0
+opentelemetry-api>=1.28.0
+opentelemetry-sdk>=1.28.0
+opentelemetry-exporter-otlp>=1.28.0
+opentelemetry-instrumentation-fastapi>=0.49b0
+opentelemetry-instrumentation-celery>=0.49b0
+opentelemetry-instrumentation-sqlalchemy>=0.49b0
+opentelemetry-instrumentation-httpx>=0.49b0
+opentelemetry-instrumentation-logging>=0.49b0

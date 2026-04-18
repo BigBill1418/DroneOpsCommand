@@ -4,6 +4,56 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## [2.63.1] — 2026-04-18 — Sentry + OTel SDKs + compose labels (observability Phase 5)
+
+### Added
+- `backend/app/observability/` package with `sentry.py`, `otel.py`, and
+  `pii.py`. Both SDK inits are DSN/endpoint-gated — unset env is a
+  no-op, so self-hosted single-tenant installs keep working without the
+  central plane on HSH-HQ.
+- Backend deps in `backend/requirements.txt`:
+  `sentry-sdk[fastapi,celery,sqlalchemy]>=2.18.0` + the full OTel
+  SDK/exporter/instrumentor block (`opentelemetry-api`, `-sdk`,
+  `-exporter-otlp`, instrumentors for fastapi, celery, sqlalchemy,
+  httpx, logging).
+- `init_sentry("droneops-api")` + `init_otel("droneops-api")` in
+  `backend/app/main.py` and `init_sentry("droneops-worker")` +
+  `init_otel("droneops-worker")` in
+  `backend/app/tasks/celery_tasks.py`. FastAPI auto-instrumentation
+  wired via `instrument_fastapi(app)` after `app = FastAPI(...)`.
+- `frontend/src/lib/sentry.ts` — `initFrontendSentry()` bootstrap. Bails
+  out when `VITE_SENTRY_DSN` is unset. Invoked from `frontend/src/main.tsx`
+  before `createRoot` so it catches React error boundaries.
+- `@sentry/react@^8.40.0` in `frontend/package.json`.
+- `frontend/Dockerfile` build-args for `VITE_SENTRY_DSN`,
+  `VITE_SENTRY_ENVIRONMENT`, `VITE_APP_VERSION` — Vite inlines these at
+  build time.
+- `com.barnardhq.*` labels (`project`, `env`, `tenant`, `stack`, plus
+  per-service `service`) on every service in `docker-compose.yml` and
+  `docker-compose.demo.yml` via YAML anchors, plus a shared `json-file`
+  logging driver config so Alloy can discover + tail the streams.
+- `docker-compose.demo.yml` override pins `com.barnardhq.env=demo`,
+  `OTEL_EXPORTER_OTLP_ENDPOINT=http://10.99.0.2:4317` (CHAD-HQ Alloy),
+  and `SENTRY_ENVIRONMENT=demo`.
+- New env vars in `.env.example`: `SENTRY_DSN`,
+  `SENTRY_TRACES_SAMPLE_RATE`, `SENTRY_ENVIRONMENT`,
+  `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME`, `TENANT`, `ENV`,
+  `VITE_SENTRY_DSN`, `VITE_SENTRY_ENVIRONMENT`.
+
+### Why
+
+Closes Phase 5 of the BarnardHQ observability rollout. Prod DroneOps on
+HSH-HQ now reports to GlitchTip project 10 + HSH-HQ Alloy; demo on
+CHAD-HQ reports to GlitchTip project 11 + CHAD-HQ Alloy. Per the
+topology reference, BOTH hosts are verified after every deploy.
+
+### Resilience
+
+Every init path is wrapped — a failed Sentry SDK import, a broken DSN, a
+double-instrument attempt, or an unreachable collector will log a
+WARNING and continue. DroneOps is first-responder tier-1; observability
+must never be the reason a container fails to start.
+
 ## [2.63.0] — 2026-04-18 — Structured JSON logging (observability Phase 5 pre-req)
 
 ### Added

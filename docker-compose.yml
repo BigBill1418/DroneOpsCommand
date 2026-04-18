@@ -1,3 +1,21 @@
+# Phase-5 observability: labels + json-file logging anchors.
+# HSH-HQ Alloy discovers this container by `com.barnardhq.*` and stamps
+# project/service/tenant/env on every log stream. `docker-compose.demo.yml`
+# (CHAD-HQ) overrides `com.barnardhq.env` to `demo`. Do NOT change label
+# keys without updating `/opt/observability-agent/alloy/config.alloy`.
+x-barnardhq-labels: &barnardhq-labels
+  com.barnardhq.project: "droneops"
+  com.barnardhq.env: "prod"
+  com.barnardhq.tenant: "shared"
+  com.barnardhq.stack: "droneops"
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "5"
+    labels: "com.barnardhq.service,com.barnardhq.project,com.barnardhq.env,com.barnardhq.tenant,com.barnardhq.stack"
+
 services:
   db:
     image: postgres:16-alpine
@@ -21,6 +39,10 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    labels:
+      <<: *barnardhq-labels
+      com.barnardhq.service: "droneops-db"
+    logging: *logging
 
   redis:
     image: redis:7-alpine
@@ -30,6 +52,10 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    labels:
+      <<: *barnardhq-labels
+      com.barnardhq.service: "droneops-redis"
+    logging: *logging
 
   ollama:
     image: ollama/ollama:latest
@@ -54,6 +80,10 @@ services:
       timeout: 10s
       retries: 5
       start_period: 30s
+    labels:
+      <<: *barnardhq-labels
+      com.barnardhq.service: "droneops-ollama"
+    logging: *logging
 
   ollama-setup:
     image: curlimages/curl:latest
@@ -69,6 +99,10 @@ services:
         curl -s http://ollama:11434/api/pull -d '{\"name\": \"llama3.1:8b-instruct-q4_K_M\"}' &&
         echo 'Model pulled. Will load into RAM on first use.'
       "
+    labels:
+      <<: *barnardhq-labels
+      com.barnardhq.service: "droneops-ollama-setup"
+    logging: *logging
 
   # ── Watchtower — Auto-update monitoring ────────────────────────
   # Checks for new images daily and sends notifications.
@@ -86,6 +120,10 @@ services:
       - DOCKER_API_VERSION=1.45
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+    labels:
+      <<: *barnardhq-labels
+      com.barnardhq.service: "droneops-watchtower"
+    logging: *logging
 
   backend:
     build:
@@ -117,6 +155,15 @@ services:
       - UPLOAD_DIR=/data/uploads
       - REPORTS_DIR=/data/reports
       - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3080}
+      # Phase-5 observability — all DSN/endpoint gated (unset = no-op).
+      - SENTRY_DSN=${SENTRY_DSN:-}
+      - SENTRY_TRACES_SAMPLE_RATE=${SENTRY_TRACES_SAMPLE_RATE:-0.05}
+      - SENTRY_ENVIRONMENT=${SENTRY_ENVIRONMENT:-production}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      - OTEL_SERVICE_NAME=droneops-api
+      - TENANT=${TENANT:-shared}
+      - ENV=${ENV:-prod}
+      - APP_VERSION=2.63.1
     volumes:
       - app_data:/data
     ports:
@@ -134,6 +181,10 @@ services:
       timeout: 10s
       retries: 5
       start_period: 45s
+    labels:
+      <<: *barnardhq-labels
+      com.barnardhq.service: "droneops-api"
+    logging: *logging
 
   worker:
     build:
@@ -161,6 +212,15 @@ services:
       - SMTP_USE_TLS=${SMTP_USE_TLS:-true}
       - UPLOAD_DIR=/data/uploads
       - REPORTS_DIR=/data/reports
+      # Phase-5 observability — all DSN/endpoint gated (unset = no-op).
+      - SENTRY_DSN=${SENTRY_DSN:-}
+      - SENTRY_TRACES_SAMPLE_RATE=${SENTRY_TRACES_SAMPLE_RATE:-0.05}
+      - SENTRY_ENVIRONMENT=${SENTRY_ENVIRONMENT:-production}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      - OTEL_SERVICE_NAME=droneops-worker
+      - TENANT=${TENANT:-shared}
+      - ENV=${ENV:-prod}
+      - APP_VERSION=2.63.1
     volumes:
       - app_data:/data
     depends_on:
@@ -168,6 +228,10 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    labels:
+      <<: *barnardhq-labels
+      com.barnardhq.service: "droneops-worker"
+    logging: *logging
 
   flight-parser:
     build:
@@ -186,11 +250,21 @@ services:
     environment:
       - DJI_API_KEY=${DJI_API_KEY:-}
       - PARSER_PORT=8100
+    labels:
+      <<: *barnardhq-labels
+      com.barnardhq.service: "droneops-flight-parser"
+    logging: *logging
 
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        # Sentry DSN is bundled into the JS at build time — Vite inlines
+        # any `VITE_*` var that's in scope when `npm run build` runs.
+        VITE_SENTRY_DSN: ${VITE_SENTRY_DSN:-}
+        VITE_SENTRY_ENVIRONMENT: ${VITE_SENTRY_ENVIRONMENT:-production}
+        VITE_APP_VERSION: "2.63.1"
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8080/ || exit 1"]
@@ -203,6 +277,10 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+    labels:
+      <<: *barnardhq-labels
+      com.barnardhq.service: "droneops-frontend"
+    logging: *logging
 
   # ── Cloudflare Tunnel ─────────────────────────────────────────────
   # Exposes the app securely without opening router ports.
@@ -218,6 +296,10 @@ services:
         condition: service_healthy
       backend:
         condition: service_healthy
+    labels:
+      <<: *barnardhq-labels
+      com.barnardhq.service: "droneops-cloudflared"
+    logging: *logging
 
 volumes:
   postgres_data:

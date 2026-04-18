@@ -40,6 +40,14 @@ def _setup_task_json_logging(logger=None, **kwargs):  # noqa: ARG001 — Celery 
 
 logger = logging.getLogger(__name__)
 
+# Observability bootstrap — runs at worker import time so task execution
+# is traced and exceptions are captured. DSN/endpoint gated; no-op if
+# SENTRY_DSN / OTEL_EXPORTER_OTLP_ENDPOINT are unset.
+from app.observability import init_otel, init_sentry  # noqa: E402
+
+init_sentry(service="droneops-worker")
+init_otel(service="droneops-worker")
+
 celery_app = Celery("doc", broker=settings.redis_url, backend=settings.redis_url)
 celery_app.conf.update(
     task_serializer="json",
