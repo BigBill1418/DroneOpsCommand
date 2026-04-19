@@ -130,6 +130,10 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     restart: unless-stopped
+    # tini reaps orphan curl/subprocesses spawned by FastAPI handlers so
+    # they never accumulate as <defunct> (matches worker service; observed
+    # uvicorn zombies 2026-04-19 during HSH-HQ high-load incident).
+    init: true
     dns:
       - 1.1.1.1
       - 8.8.8.8

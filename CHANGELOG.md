@@ -4,6 +4,28 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## [Ops] — 2026-04-19 — Backend zombie-leak fix (follow-up to worker fix)
+
+### Changed
+- `docker-compose.yml` backend service: added `init: true` (tini PID 1
+  reaper) — matches the worker fix shipped earlier today.
+
+### Why
+
+Follow-up investigation to the HSH-HQ high-load incident found 3
+fresh `<defunct>` curl children accumulating under the uvicorn master
+(PID 3888871 = `droneops-backend-1`). Same SIGCHLD reap leak pattern
+as the worker, different container — the earlier `init: true` fix
+only covered the worker service. Backend spawns curl via health-probe
+/ outbound HTTP and loses the occasional reap the same way.
+
+`init: true` on backend makes the leak structurally impossible here
+too. No application code change, no version bump.
+
+See `~/noc-master/docs/incidents/2026-04-19-hsh-hq-high-load.md`.
+
+---
+
 ## [Ops] — 2026-04-19 — Worker zombie-leak fix: init reaper + max-tasks-per-child
 
 ### Changed
