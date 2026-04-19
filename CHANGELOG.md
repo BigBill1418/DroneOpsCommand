@@ -4,6 +4,57 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-04-19 — Zombie-leak fixes + Redis-heartbeat healthcheck
+
+### Redis-heartbeat celery healthcheck (v2.63.2)
+
+Celery worker docker healthcheck no longer spawns `celery ... inspect ping`
+every 60s — that was re-importing the full OTel instrumentation chain on
+each check (~3-5s of wasted CPU + memory churn per minute, 1440×/day).
+
+**New design:** Celery's `worker_heartbeat` signal fires on the control
+loop (~every 2s when the worker is alive). A tiny handler in
+`backend/app/tasks/celery_tasks.py` writes a unix-timestamp key to Redis
+(`droneops:worker:heartbeat`, 120s TTL). The docker healthcheck is now a
+single Redis GET + age check (interval 30s, timeout 5s, start_period 30s).
+Fresh key = worker control loop alive; stale/missing = frozen/crashed →
+docker restarts.
+
+**Failover/resilience:** PG replication, container recreation, blue-green
+swap, and failover engine all unaffected. Repair quality: `redis-tools`
+added to Dockerfile; roundtrip (SETEX + GET) verified against redis:7.
+
+### Backend zombie-leak fix (init reaper)
+
+Follow-up to the worker fix: `docker-compose.yml` backend service now has
+`init: true` (tini PID 1 reaper). Investigation of the HSH-HQ high-load
+incident found 3 fresh `<defunct>` curl children accumulating under the
+uvicorn master. Same SIGCHLD reap leak pattern as the worker — backend
+spawns curl via health-probe/outbound HTTP and loses the occasional reap.
+`init: true` makes the leak structurally impossible. No application code
+change, no version bump.
+
+### Worker zombie-leak fix (init reaper + max-tasks-per-child)
+
+The 2026-04-19 HSH-HQ high-load incident found 33 defunct celery children
+of the worker master accumulating ~2/hr over 18h, contributing to
+`HostZombieProcesses` alert. Root cause: the celery prefork master loses
+occasional `SIGCHLD` reaps on Python 3.12 when child cleanup races with
+task completion.
+
+**Changes to `docker-compose.yml` worker service:**
+- Added `init: true` (tini PID 1 reaper), which adopts and reaps any orphan
+  process — making the reap leak structurally impossible regardless of
+  celery internals.
+- Added `--max-tasks-per-child=50` to the celery command for belt-and-suspenders:
+  each child recycles after 50 tasks, so even a leaked child is short-lived.
+  50 was chosen to amortize Sentry/OTEL init cost (~3-5s) fine across
+  report+email tasks.
+
+No application code touched, so no version bump.
+
+See `~/noc-master/docs/incidents/2026-04-19-hsh-hq-high-load.md` (DF-1).
+
 ## v2.63.2 — 2026-04-19 — Redis-heartbeat celery healthcheck (replaces inspect ping)
 
 Celery worker docker healthcheck no longer spawns `celery ... inspect ping`

@@ -4,6 +4,36 @@ Maintained alongside `CHANGELOG.md` and `docs/adr/`. `CHANGELOG.md` is
 the ledger of shipped changes; this file tracks what's in-flight or
 blocked.
 
+## 2026-04-19 — Zombie-leak incident (RESOLVED)
+
+Completed: zombie-leak fixes + Redis-heartbeat healthcheck.
+
+- **v2.63.2** (commit `897c78a`) — Redis-heartbeat docker healthcheck.
+  Replaces `celery inspect ping` subprocess (which re-imported the full OTel
+  chain every 60s) with a lightweight Redis age check. Worker's
+  `worker_heartbeat` signal writes unix-ts to `droneops:worker:heartbeat`
+  (120s TTL); healthcheck is `redis-cli GET + age < 60s`. Interval 30s,
+  timeout 5s, start_period 30s. Fast path, resilient to Redis brief outages.
+
+- **Ops** (commit `98f7309`) — Backend zombie-leak fix (follow-up).
+  Investigation found 3 fresh `<defunct>` curl children accumulating under
+  uvicorn master. Same SIGCHLD reap leak pattern as worker, different
+  container. Added `init: true` (tini PID 1) to backend service in compose.
+
+- **Ops** (commit `9ae3c95`) — Worker zombie-leak fix (primary).
+  HSH-HQ high-load incident found 33 defunct celery children accumulating
+  ~2/hr over 18h. Root cause: celery prefork master loses occasional SIGCHLD
+  reaps on Python 3.12. Added `init: true` (tini) + `--max-tasks-per-child=50`
+  to worker service. Per-child task cap keeps leaked children short-lived;
+  tini as PID 1 makes the leak structurally impossible.
+
+### Repair quality
+- All changes compose-only; no application code touched.
+- Failover-safe: per-container health signals, no cross-container state.
+- Docker inspect: confirms `redis-cli` present in new backend image.
+- Roundtrip tested: SETEX/GET on redis:7 (stack image).
+- Incident log: `~/noc-master/docs/incidents/2026-04-19-hsh-hq-high-load.md`.
+
 ## 2026-04-18 — Observability Phase 5 (COMPLETE on code side)
 
 Ships in two functional commits + one doc commit:
