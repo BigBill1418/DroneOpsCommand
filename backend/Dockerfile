@@ -1,7 +1,7 @@
 FROM python:3.12-slim
 
-# Install system dependencies for WeasyPrint, fonts, geospatial libs, gosu, and curl
-# Cache-bust: v2.55.5 (added curl for Docker healthcheck)
+# Install system dependencies for WeasyPrint, fonts, geospatial libs, gosu, curl, redis-cli
+# Cache-bust: v2.63.2 (added redis-tools for celery-worker heartbeat healthcheck)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libpango-1.0-0 \
@@ -20,6 +20,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     fonts-noto-core \
     curl \
     gosu \
+    redis-tools \
     && rm -rf /var/lib/apt/lists/* \
     && fc-cache -f
 

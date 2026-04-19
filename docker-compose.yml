@@ -209,19 +209,25 @@ services:
     # by Sentry/OTEL init (~3-5s), so 50/child amortizes that fine.
     command: celery -A app.tasks.celery_tasks worker --loglevel=info --max-tasks-per-child=50
     healthcheck:
-      # NOTE: `celery ... inspect ping` runs a fresh Python import of
-      # app.tasks.celery_tasks, which now triggers init_sentry() +
-      # init_otel() (Phase 5 observability). That boot adds ~3-5s of
-      # overhead — so the timeout must accommodate the full import
-      # chain (SQLAlchemy/httpx/celery instrumentation) plus the
-      # network round trip to the live worker. Raised 15s -> 30s after
-      # Phase 5 observability deploy (v2.63.1). Healthcheck still fires
-      # every 30s so failure detection SLA is unchanged.
-      test: ["CMD-SHELL", "celery -A app.tasks.celery_tasks inspect ping --timeout 10 || exit 1"]
-      interval: 60s
-      timeout: 30s
+      # Redis-backed worker heartbeat (replaces the old `celery inspect ping`
+      # subprocess which re-imported the full OTel chain every 60s — 3-5s of
+      # wasted CPU per check). The worker writes a unix-ts key to Redis on
+      # every `worker_heartbeat` Celery signal (~2s cadence). Healthcheck
+      # reads the key and verifies age < 60s.
+      #   - Fresh key → Celery control loop is alive → worker healthy.
+      #   - Stale/missing key → worker frozen/crashed → docker restarts.
+      # Fast path: no Python process spawn, just a Redis GET.
+      test:
+        - CMD-SHELL
+        - >
+          K=$$(redis-cli -h redis -p 6379 get droneops:worker:heartbeat 2>/dev/null);
+          if [ -z "$$K" ]; then exit 1; fi;
+          AGE=$$(( $$(date +%s) - $$K ));
+          if [ $$AGE -gt 60 ]; then exit 1; else exit 0; fi
+      interval: 30s
+      timeout: 5s
       retries: 3
-      start_period: 60s
+      start_period: 30s
     environment:
       - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://doc:changeme_in_production@db:5432/doc}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}

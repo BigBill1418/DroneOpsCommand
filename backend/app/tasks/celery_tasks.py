@@ -3,7 +3,7 @@ import logging
 from datetime import datetime
 
 from celery import Celery
-from celery.signals import after_setup_logger, after_setup_task_logger
+from celery.signals import after_setup_logger, after_setup_task_logger, worker_heartbeat, worker_ready
 from pythonjsonlogger import json as json_logger
 
 from app.config import settings
@@ -56,6 +56,53 @@ celery_app.conf.update(
     timezone="UTC",
     enable_utc=True,
 )
+
+
+# Redis-backed worker heartbeat — replaces the wasteful
+# `celery -A app.tasks.celery_tasks inspect ping` docker healthcheck which
+# spawned a fresh Python process every 60s and re-imported the full OTel
+# instrumentation chain (measured ~3-5s per check).
+#
+# Celery emits a `worker_heartbeat` signal on its control loop (every ~2s
+# by default). We write a Redis key on each tick; the container
+# healthcheck reads the key age via redis-cli. If the worker is alive and
+# processing its event loop, the key is fresh. If the worker is frozen
+# (deadlock, network wedge, GC pause beyond threshold), the key ages out
+# and the healthcheck fails → docker restarts the container.
+#
+# Design notes:
+#   - `setex` with 120s TTL so a dead worker's key clears itself within
+#     one extra interval, preventing false-positives on healthcheck races.
+#   - `on_error='ignore'` equivalent via try/except — a Redis outage must
+#     NOT crash the worker; healthcheck will fail loudly instead, which is
+#     the correct signal.
+#   - Value is the unix timestamp so the healthcheck can compute age
+#     without depending on Redis server time.
+_HEARTBEAT_KEY = "droneops:worker:heartbeat"
+
+
+def _write_heartbeat() -> None:
+    try:
+        import time
+
+        import redis  # local import keeps cold start unaffected
+        r = redis.from_url(settings.redis_url, socket_timeout=2)
+        r.setex(_HEARTBEAT_KEY, 120, int(time.time()))
+    except Exception as exc:  # pragma: no cover — best-effort
+        logger.debug("doc.worker.heartbeat: write failed: %s", exc)
+
+
+@worker_ready.connect
+def _on_worker_ready(**_kwargs):
+    # Seed the key immediately so the docker start_period window sees a
+    # fresh heartbeat instead of waiting for the first control-loop tick.
+    _write_heartbeat()
+    logger.info("doc.worker.ready: heartbeat seeded")
+
+
+@worker_heartbeat.connect
+def _on_worker_heartbeat(**_kwargs):
+    _write_heartbeat()
 
 
 @celery_app.task(name="send_report_email")

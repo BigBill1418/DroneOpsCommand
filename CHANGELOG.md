@@ -4,6 +4,50 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## v2.63.2 — 2026-04-19 — Redis-heartbeat celery healthcheck (replaces inspect ping)
+
+Celery worker docker healthcheck no longer spawns `celery ... inspect ping`
+every 60s — that was re-importing the full OTel instrumentation chain on
+each check (~3-5s of wasted CPU + memory churn per minute, 1440×/day).
+
+**New design:** Celery's `worker_heartbeat` signal fires on the control
+loop (~every 2s when the worker is alive). A tiny handler in
+`backend/app/tasks/celery_tasks.py` writes a unix-timestamp key to Redis
+(`droneops:worker:heartbeat`, 120s TTL). The docker healthcheck is now a
+single Redis GET + age check:
+
+```
+K=$(redis-cli -h redis -p 6379 get droneops:worker:heartbeat)
+AGE=$(( $(date +%s) - K ))
+[ $AGE -le 60 ] || exit 1
+```
+
+Interval 30s, timeout 5s, start_period 30s. Fresh key = worker control
+loop alive; stale/missing = frozen/crashed → docker restarts.
+
+**Failover/resilience review:**
+1. PG replication — unaffected (Redis-only signal).
+2. Container recreation — the seed write on `worker_ready` populates the
+   key within seconds of startup; healthcheck's 30s start_period covers
+   the boot gap.
+3. Blue-green swap — unaffected (per-container health only).
+4. Failover engine — unaffected.
+5. Customer-facing — zero impact; healthcheck is an internal signal.
+
+**Repair quality audit:**
+- Dockerfile: `redis-tools` added to apt-get. `which redis-cli` confirmed
+  missing in current container; the new image includes it.
+- Secondary failures: if Redis is down, the write fails (caught, logged
+  at DEBUG) and the healthcheck reads a stale/missing key → container
+  marked unhealthy → docker restarts. Correct behavior; replaces what
+  used to be a silent `inspect ping` timeout.
+- Roundtrip verified: `SETEX` writes + `GET` reads tested against redis:7
+  used by this stack.
+
+Files: `backend/app/tasks/celery_tasks.py`, `backend/Dockerfile`,
+`docker-compose.yml` (worker service healthcheck).
+
+
 ## [Ops] — 2026-04-19 — Backend zombie-leak fix (follow-up to worker fix)
 
 ### Changed
