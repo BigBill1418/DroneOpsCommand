@@ -4,6 +4,34 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## [Ops] — 2026-04-19 — Worker zombie-leak fix: init reaper + max-tasks-per-child
+
+### Changed
+- `docker-compose.yml` worker service: added `init: true` (tini PID 1
+  reaper) and `--max-tasks-per-child=50` to the celery command.
+
+### Why
+
+The 2026-04-19 HSH-HQ high-load incident found 33 defunct celery
+children of the worker master (PID 3888863) accumulating ~2/hr over
+18h, contributing to the `HostZombieProcesses` alert. Root cause: the
+celery prefork master loses occasional `SIGCHLD` reaps on Python 3.12
+when child cleanup races with task completion. Without a PID-1 reaper
+inside the container, those orphans pile up.
+
+`init: true` injects tini as PID 1, which adopts and reaps any orphan
+process — making the reap leak structurally impossible regardless of
+celery internals. `--max-tasks-per-child=50` adds belt-and-suspenders:
+each child recycles after 50 tasks, so even a leaked child is
+short-lived. 50 was picked because report+email tasks are short and
+child startup cost is dominated by Sentry/OTEL init (~3-5s); 50/child
+amortizes that fine.
+
+This is a compose-only change — no application code touched, so no
+version bump.
+
+See `~/noc-master/docs/incidents/2026-04-19-hsh-hq-high-load.md` (DF-1).
+
 ## [Ops] — 2026-04-18 — Worker healthcheck timeout raised post-observability (commit 7b33169)
 
 ### Changed

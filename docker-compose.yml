@@ -191,7 +191,19 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     restart: unless-stopped
-    command: celery -A app.tasks.celery_tasks worker --loglevel=info
+    # PID 1 init reaper — without this, celery prefork children that exit
+    # become zombies if the master loses a SIGCHLD reap. The 2026-04-19
+    # high-load incident found 33 defunct celery children of the worker
+    # master accumulating ~2/hr over 18h, contributing to the
+    # HostZombieProcesses alert. tini (docker init: true) reaps any orphan.
+    # See docs/incidents/2026-04-19-hsh-hq-high-load.md.
+    init: true
+    # --max-tasks-per-child=50 forces each prefork child to recycle after
+    # 50 tasks. Combined with init: true, this guarantees zombies cannot
+    # accumulate even if a child cleanup path raises. 50 is conservative —
+    # report+email tasks are short-lived, child startup cost is dominated
+    # by Sentry/OTEL init (~3-5s), so 50/child amortizes that fine.
+    command: celery -A app.tasks.celery_tasks worker --loglevel=info --max-tasks-per-child=50
     healthcheck:
       # NOTE: `celery ... inspect ping` runs a fresh Python import of
       # app.tasks.celery_tasks, which now triggers init_sentry() +

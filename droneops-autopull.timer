@@ -1,19 +1,24 @@
 # DroneOpsCommand — Auto-deploy timer
 #
-# Triggers droneops-autopull.service every 60 seconds to check
+# Triggers droneops-autopull.service every 3 minutes to check
 # for new git commits and auto-deploy.
+#
+# Cadence raised from 60s -> 3min on 2026-04-19 per the HSH-HQ
+# high-load incident (DF-3). Each tick forks bash + git fetch +
+# subprocess; aggregate timer noise was a measured contributor.
+# See ~/noc-master/docs/incidents/2026-04-19-hsh-hq-high-load.md.
 #
 # Install via: ./setup-server.sh
 # Status: systemctl status droneops-autopull.timer
 #         systemctl list-timers droneops-autopull*
 #
 [Unit]
-Description=DroneOpsCommand — Auto-deploy timer (polls git every 60s)
+Description=DroneOpsCommand — Auto-deploy timer (polls git every 3min)
 
 [Timer]
 OnBootSec=120
-OnUnitActiveSec=60
-AccuracySec=10
+OnUnitActiveSec=3min
+AccuracySec=15
 
 [Install]
 WantedBy=timers.target
