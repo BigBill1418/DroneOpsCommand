@@ -3,7 +3,7 @@ import logging
 from datetime import datetime
 
 from celery import Celery
-from celery.signals import after_setup_logger, after_setup_task_logger, worker_heartbeat, worker_ready
+from celery.signals import after_setup_logger, after_setup_task_logger, heartbeat_sent, worker_ready
 from pythonjsonlogger import json as json_logger
 
 from app.config import settings
@@ -100,7 +100,7 @@ def _on_worker_ready(**_kwargs):
     logger.info("doc.worker.ready: heartbeat seeded")
 
 
-@worker_heartbeat.connect
+@heartbeat_sent.connect
 def _on_worker_heartbeat(**_kwargs):
     _write_heartbeat()
 
