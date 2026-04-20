@@ -99,3 +99,13 @@ Any code change, feature change, or forward-looking plan MUST be recorded in a l
 - **Progress on in-flight work** → update `PROGRESS.md` or the relevant plan doc.
 
 No undocumented changes. If a repo lacks the right file, create it. Commit the docs alongside the code — never in a separate follow-up that might get forgotten.
+
+## Deployment topology (as of 2026-04-20)
+
+Current primary host: **BOS-HQ** (Hostinger Boston, 10.99.0.4, Swarm worker).
+
+Migrated from droneops during the 2026-04-20 6-stack migration night. NOC config.yml is authoritative; see `~/noc-master/docs/incidents/2026-04-20-helix-hub-dry-run/observations.md` for migration forensics.
+
+PG streaming: promoted standby (droneops-standby-db) is now primary. Compose override neutralizes duplicate 'db' service and routes backend/worker/flight-parser DATABASE_URL to droneops-standby-db:5432. CHAD-HQ is failback standby.
+
+Deployer: managed by NOC Master Control (`~/noc-master`) — all per-repo autopull scripts are disabled (`.deployer-disabled` marker in repo root).
