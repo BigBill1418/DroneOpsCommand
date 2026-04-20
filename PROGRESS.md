@@ -15,10 +15,19 @@ Calibration et al.) could not be cleared via "+ Log Maintenance".
 - Migration script `scripts/migrate_maintenance_type_vocab.py` rewrites
   legacy snake_case record rows → canonical Title-Case. Idempotent.
 
-**Follow-up** — run the migration once per host after deploy lands:
-`docker compose exec backend python scripts/migrate_maintenance_type_vocab.py`
-on HSH-HQ (prod) and CHAD-HQ (demo). Then log one Compass record per
-affected aircraft to clear the three visible alerts.
+**Status** — HSH-HQ prod: v2.63.3 live `2026-04-20`, 5 legacy records
+remapped to Title-Case via the migration script. User logs a Compass
+Calibration record per affected aircraft through the UI to clear the
+three overdue schedules (now possible because the dropdown has the
+option and the backend schedule-match will fire).
+
+**Deferred — CHAD-HQ demo:** still on `dfad0a3`. `git pull` blocked by
+uncommitted operational fixes on `docker-compose.demo.yml`,
+`docker-compose.standby.yml`, `.env.demo` (port-binding hardening +
+primary_conninfo IP correction). Demo has **zero maintenance records**
+so the migration would be a no-op there anyway. The frontend fix for
+demo can land when someone reconciles the uncommitted compose edits
+— scope for a separate session.
 
 ## 2026-04-19 — Zombie-leak incident (RESOLVED)
 
