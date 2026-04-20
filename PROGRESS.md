@@ -4,6 +4,22 @@ Maintained alongside `CHANGELOG.md` and `docs/adr/`. `CHANGELOG.md` is
 the ledger of shipped changes; this file tracks what's in-flight or
 blocked.
 
+## 2026-04-20 — Maintenance type vocabulary unified (v2.63.3)
+
+Fixes a long-standing bug where overdue schedule alerts (Compass
+Calibration et al.) could not be cleared via "+ Log Maintenance".
+
+- Frontend `MAINTENANCE_TYPES` now mirrors backend
+  `DJI_MAINTENANCE_DEFAULTS` exactly — 10 DJI categories + `General
+  Service` + `Other`, Title-Case as both value and label.
+- Migration script `scripts/migrate_maintenance_type_vocab.py` rewrites
+  legacy snake_case record rows → canonical Title-Case. Idempotent.
+
+**Follow-up** — run the migration once per host after deploy lands:
+`docker compose exec backend python scripts/migrate_maintenance_type_vocab.py`
+on HSH-HQ (prod) and CHAD-HQ (demo). Then log one Compass record per
+affected aircraft to clear the three visible alerts.
+
 ## 2026-04-19 — Zombie-leak incident (RESOLVED)
 
 Completed: zombie-leak fixes + Redis-heartbeat healthcheck.
@@ -84,10 +100,10 @@ Unset = no-op. Nothing in the app code fails if these are absent.
   `~/droneops/companion/` (Kotlin) is not instrumented in Phase 5. If
   the companion needs `SentryAndroid.init`, that's a separate commit +
   an APK rebuild + release — flagged for the user, not scoped here.
-- **Managed-hosting branch.** `project_droneops_managed.md` notes the
-  `managed-hosting-v2` branch with env-var gates that hasn't merged.
-  Phase 5 edits only `main` so there's no collision — but when the
-  managed branch merges, its `.env.managed` template should include the
-  observability block.
+- ~~**Managed-hosting branch.**~~ Resolved: `managed-hosting-v2` merged
+  `2026-04-10` as v2.62.0 (merge commit `85f28e9`). `.env.example` already
+  carries the observability block (`SENTRY_DSN`, `OTEL_EXPORTER_OTLP_ENDPOINT`,
+  `VITE_SENTRY_DSN`, etc.), so managed instances get the hooks by default;
+  operators just paste the DSN.
 - **Dashboards (Aegis-F / Phase 7).** DroneOps-specific Grafana
   dashboards aren't in scope for this phase; Aegis-F is planning them.

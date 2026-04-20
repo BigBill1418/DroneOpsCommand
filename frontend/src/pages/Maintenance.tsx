@@ -44,17 +44,24 @@ import { Aircraft, MaintenanceRecordType, MaintenanceAlert } from '../api/types'
 import StatCard from '../components/shared/StatCard';
 import { cardStyle, inputStyles, monoFont } from '../components/shared/styles';
 
+// Canonical vocabulary — must match backend DJI_MAINTENANCE_DEFAULTS
+// (`backend/app/routers/maintenance.py`) so record.maintenance_type matches
+// MaintenanceSchedule.maintenance_type and `last_performed` updates clear
+// the /due alert. Values == labels (Title-Case) so snake_case drift can't
+// recur.
 const MAINTENANCE_TYPES = [
-  { value: 'prop_replacement', label: 'Propeller Replacement' },
-  { value: 'motor_inspection', label: 'Motor Inspection' },
-  { value: 'firmware_update', label: 'Firmware Update' },
-  { value: 'gimbal_calibration', label: 'Gimbal Calibration' },
-  { value: 'sensor_calibration', label: 'Sensor Calibration' },
-  { value: 'battery_check', label: 'Battery Check' },
-  { value: 'airframe_inspection', label: 'Airframe Inspection' },
-  { value: 'antenna_check', label: 'Antenna Check' },
-  { value: 'general_service', label: 'General Service' },
-  { value: 'other', label: 'Other' },
+  { value: 'Propeller Replacement', label: 'Propeller Replacement' },
+  { value: 'Motor Inspection', label: 'Motor Inspection' },
+  { value: 'Gimbal Calibration', label: 'Gimbal Calibration' },
+  { value: 'IMU Calibration', label: 'IMU Calibration' },
+  { value: 'Compass Calibration', label: 'Compass Calibration' },
+  { value: 'Airframe Inspection', label: 'Airframe Inspection' },
+  { value: 'Battery Health Check', label: 'Battery Health Check' },
+  { value: 'Firmware Review', label: 'Firmware Review' },
+  { value: 'Remote Controller Inspection', label: 'Remote Controller Inspection' },
+  { value: 'Sensor Cleaning', label: 'Sensor Cleaning' },
+  { value: 'General Service', label: 'General Service' },
+  { value: 'Other', label: 'Other' },
 ];
 
 export default function Maintenance() {
@@ -85,7 +92,7 @@ export default function Maintenance() {
   const [dragOver, setDragOver] = useState(false);
   const [form, setForm] = useState({
     aircraft_id: '',
-    maintenance_types: ['general_service'] as string[],
+    maintenance_types: ['General Service'] as string[],
     description: '',
     performed_at: new Date(),
     flight_hours_at: null as number | null,
@@ -138,7 +145,7 @@ export default function Maintenance() {
       });
       notifications.show({ title: 'Maintenance Logged', message: 'Record added successfully', color: 'cyan' });
       setAddOpen(false);
-      setForm({ aircraft_id: '', maintenance_types: ['general_service'], description: '', performed_at: new Date(), flight_hours_at: null, next_due_date: null, cost: null, notes: '' });
+      setForm({ aircraft_id: '', maintenance_types: ['General Service'], description: '', performed_at: new Date(), flight_hours_at: null, next_due_date: null, cost: null, notes: '' });
       loadData();
     } catch (err: any) {
       notifications.show({ title: 'Error', message: err.response?.data?.detail || 'Failed to add record', color: 'red' });
@@ -549,7 +556,7 @@ export default function Maintenance() {
                   label="Maintenance Type(s)"
                   data={MAINTENANCE_TYPES}
                   value={editForm.maintenance_types}
-                  onChange={(v) => setEditForm({ ...editForm, maintenance_types: v.length > 0 ? v : ['general_service'] })}
+                  onChange={(v) => setEditForm({ ...editForm, maintenance_types: v.length > 0 ? v : ['General Service'] })}
                   styles={inputStyles}
                 />
                 <Textarea
@@ -840,7 +847,7 @@ export default function Maintenance() {
             label="Maintenance Type(s)"
             data={MAINTENANCE_TYPES}
             value={form.maintenance_types}
-            onChange={(v) => setForm({ ...form, maintenance_types: v.length > 0 ? v : ['general_service'] })}
+            onChange={(v) => setForm({ ...form, maintenance_types: v.length > 0 ? v : ['General Service'] })}
             placeholder="Select one or more categories"
             styles={inputStyles}
           />

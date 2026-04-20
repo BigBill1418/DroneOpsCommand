@@ -4,6 +4,63 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-04-20 — Maintenance type vocabulary unified (v2.63.3)
+
+Overdue schedule alerts like "Compass Calibration" could not be cleared
+because the frontend + backend disagreed on how `maintenance_type` was
+encoded.
+
+**Backend** (`routers/maintenance.py`) seeded `MaintenanceSchedule`
+rows with Title-Case label strings from `DJI_MAINTENANCE_DEFAULTS`
+(e.g. `"Compass Calibration"`).
+
+**Frontend** (`pages/Maintenance.tsx::MAINTENANCE_TYPES`) offered
+snake_case values (`compass_calibration` wasn't even present;
+`gimbal_calibration`, `battery_check`, `firmware_update`, etc. were).
+
+Two consequences:
+1. The schedule-clear loop at `maintenance.py:120-129` matched
+   `MaintenanceSchedule.maintenance_type == mtype` case-sensitive —
+   Title-Case vs. snake_case never matched, so `last_performed` never
+   updated. Every seeded DJI schedule eventually drifted into a
+   permanent alert with no UI escape.
+2. Six DJI categories (Compass Calibration, IMU Calibration, Battery
+   Health Check, Firmware Review, Remote Controller Inspection, Sensor
+   Cleaning) had no dropdown entry at all, so a user facing an overdue
+   alert for any of them literally could not submit a matching record.
+
+### Fix
+
+- Replaced `MAINTENANCE_TYPES` with the canonical 12-entry Title-Case
+  list that exactly mirrors `DJI_MAINTENANCE_DEFAULTS` plus
+  `General Service` / `Other` catch-alls. Both `value` and `label` are
+  the Title-Case string — drift can't recur because the UI value is
+  the canonical key.
+- Default form value flipped from `'general_service'` to
+  `'General Service'` in the three places it was hard-coded.
+- One-shot migration script `scripts/migrate_maintenance_type_vocab.py`
+  rewrites existing `MaintenanceRecord.maintenance_type` rows from
+  legacy snake_case to the new canonical Title-Case. Handles
+  comma-separated multi-category values. Safe to re-run (already-Title
+  values pass through).
+
+### Deploy
+
+1. NOC Master picks up the push on `main` and runs the build/up on
+   HSH-HQ (prod) + CHAD-HQ (demo) per `verify-deploy.sh`.
+2. After deploy, run the record-remap migration once per host inside
+   the backend container:
+   `docker compose exec backend python scripts/migrate_maintenance_type_vocab.py`
+3. Log a new Compass Calibration record on each affected aircraft —
+   `last_performed` now updates and the alert clears.
+
+### Failover / resilience
+
+- No schema change, no migration DDL. Migration is idempotent data-only.
+- No port / connection-string / PG-replication impact.
+- Blue-green swap and failover-engine untouched.
+- `docker-compose.yml` untouched.
+
 ## 2026-04-19 — Zombie-leak fixes + Redis-heartbeat healthcheck
 
 ### Redis-heartbeat celery healthcheck (v2.63.2)
