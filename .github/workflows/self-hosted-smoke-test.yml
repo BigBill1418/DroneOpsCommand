@@ -1,0 +1,35 @@
+name: Self-Hosted Runner Smoke Test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: [self-hosted, linux, x64, bos]
+    steps:
+      - name: Report environment
+        run: |
+          set -e
+          echo "=== hostname ==="
+          hostname
+          echo "=== OS ==="
+          lsb_release -a 2>/dev/null || cat /etc/os-release | head -3
+          echo "=== JDK ==="
+          java -version 2>&1
+          echo "=== Node (default) ==="
+          node --version
+          echo "=== Node 20 ==="
+          /usr/local/node20/bin/node --version
+          echo "=== Android SDK ==="
+          ls "$ANDROID_HOME/platforms"
+          ls "$ANDROID_HOME/build-tools"
+          echo "=== awscli ==="
+          aws --version
+          echo "=== Docker client ==="
+          docker --version
+          echo "=== DinD reachability ==="
+          docker info --format 'ServerVersion={{.ServerVersion}} OS={{.OperatingSystem}} StorageDriver={{.Driver}}'
+          echo "=== Resources ==="
+          nproc
+          free -h | head -2
+          df -h "$HOME" | tail -1
