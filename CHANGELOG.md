@@ -4,6 +4,25 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-04-21 — ci: companion APK + claude auto-merge moved to BOS-HQ self-hosted runners (ADR-0029)
+
+DroneOpsCommand CI no longer consumes paid `ubuntu-latest` minutes. Both workflows (`companion-apk.yml`, `auto-merge-claude.yml`) flipped to `runs-on: [self-hosted, linux, x64, bos]`. The runner is a single `--ephemeral` container (`runner-droneopscommand`) on BOS-HQ, behind its own Docker-in-Docker sidecar — a compromised CI job cannot reach the host's Swarm socket.
+
+Post-cutover validation:
+- `Build DroneOpsSync companion APK` succeeded in 1 m 32 s on `runner-droneopscommand` (vs 2 m 7 s on ubuntu-latest) — ~35 s faster with warm gradle cache in the per-runner named volume.
+- Permanent `.github/workflows/self-hosted-smoke-test.yml` workflow added (`workflow_dispatch`-only, ~9 s runtime) for on-demand runner health-checks.
+
+Security posture (this repo is public on GitHub):
+- Existing triggers are `push` + `workflow_dispatch` only — **no `pull_request` trigger** — so outside-collaborator fork PRs cannot currently reach the self-hosted runner.
+- GitHub "Require approval for all outside collaborators" setting is recommended as defense-in-depth (not load-bearing against current triggers). Setting lives at Settings → Actions → General → Fork pull request workflows from outside collaborators.
+
+Commits: `652eee0` (smoke test workflow), `68b4bc4` (2 runs-on flips). No application version bump — CI infrastructure change, not application code (per CLAUDE.md versioning rule).
+
+Authoritative decision record and runbook live in NOC-Master-Control-SWARM:
+- ADR: `docs/adr/0029-gh-actions-self-hosted-on-bos-hq.md`
+- Runbook: `docs/runbooks/gh-runners.md`
+- Plan: `docs/plans/2026-04-21-gh-runners-on-bos-hq.md`
+
 ## 2026-04-20 — Maintenance type vocabulary unified (v2.63.3)
 
 Overdue schedule alerts like "Compass Calibration" could not be cleared
