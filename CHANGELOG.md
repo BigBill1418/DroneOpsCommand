@@ -4,6 +4,36 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-04-24 — Capacitor `companion/` fork abandoned, Kotlin app lives (ADR-0002 §7)
+
+Six weeks of commits against `companion/` in this repo turned out to have
+zero device installs. Bill's RC Pro has always run the native Kotlin app
+from `BigBill1418/DroneOpsSync`, last released as `v1.3.23` on 2026-03-29.
+The two client-visible fixes shipped here as companion v2.62.0
+(`890b875`, HTTPS coercion) and companion v2.62.1 (`306a2b8`, landscape
+lock + silent-drift watchdog layers 1 + 2) are ported into Kotlin and
+shipped as DroneOpsSync `v1.3.24`.
+
+- **Removed:** `companion/` tree (the entire Capacitor app) and
+  `.github/workflows/companion-apk.yml`. The three orphan GitHub releases
+  (`companion-v2.61.5`, `companion-v2.62.0`, `companion-v2.62.1`) are
+  preserved with an "ABANDONED — DO NOT INSTALL" banner prepended to
+  their release bodies — the APK assets remain as forensic evidence that
+  zero devices downloaded them.
+- **Backend:** unchanged. Layers 3 + 4 of §5.2 (Celery beat
+  `check_device_silence_task` + first-401 Pushover) stay here because
+  they are backend code, and they alert on silent drift regardless of
+  which client implementation the device runs.
+- **Docs:** ADR-0002 gains §7 "Kotlin app lives, Capacitor fork
+  abandoned". Full plan + post-mortem at
+  `BigBill1418/DroneOpsSync/docs/adr/0001-kotlin-resumption-abandon-capacitor-fork.md`
+  and `.../docs/plans/2026-04-24-kotlin-resumption-ota-repair.md`.
+
+No backend version bump — this commit changes nothing the server runtime
+sees. The companion deletion removes a parallel build pipeline; the
+`/api/flight-library/device-health` + `/api/flight-library/device-upload`
+endpoints remain in place and are called by the Kotlin v1.3.24 client.
+
 ## 2026-04-24 — DroneOpsSync prevention mechanisms + landscape lock — v2.63.5 (backend) / v2.62.1 (companion) (ADR-0002 §5)
 
 Follow-up to the 2026-04-23 Capacitor `Preferences` wipe that lost three flight days on Bill's RC Pro. The §4.1 rotation restored Bill's uploads; this commit ships the safety net so the class of bug cannot recur silently on any controller.

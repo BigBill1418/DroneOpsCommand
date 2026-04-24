@@ -242,3 +242,68 @@ Four defenses, all ON by default, each catching the failure at a different point
 - **Fleet audit** — how many DJI RC Pro / DJI Pilot 2 controllers are in the field, and what APK version does each run? Needed before a fleet-wide OTA push can be planned.
 - **Managed tenant timeline** — is any DroneOps managed customer in the pipeline that would force §2.2's discovery endpoint to move from deferred to blocker?
 - **Device key lifecycle** — is there an expiry or rotation policy for `device_api_keys`? Current model is revoke-on-demand only; 90-day rotation with a grace window might be worth adding, but is out of scope for this incident.
+
+---
+
+## 7. Addendum 2026-04-24 — Kotlin app lives, Capacitor fork abandoned
+
+On 2026-04-24 it emerged that the `companion/` Capacitor fork shipped in this
+repo as `companion-v2.33.0` → `companion-v2.62.1` has **zero device installs,
+ever**. Bill's RC Pro — the operator-primary controller this ADR's original
+§1 incident was diagnosed against — has always run the native Kotlin app from
+`BigBill1418/DroneOpsSync`, last released as `v1.3.23` on 2026-03-29. Every
+substantive client-side fix committed here since 2026-03-29, including:
+
+- §4 HTTPS-only base URL coercion (companion v2.62.0 / commit `890b875`)
+- §5.1 landscape orientation lock (companion v2.62.1 / commit `306a2b8`)
+- §5.2 layered silent-drift watchdog **layers 1 + 2** (pairing banner +
+  preflight health gate, companion v2.62.1 / commit `306a2b8`)
+
+…landed in the wrong repo. The 2026-04-23 upload-blocked incident that
+prompted this ADR was misdiagnosed at least twice during intermediate aegis
+turns as a stale-APK problem that a sideload would fix; operator (Bill) caught
+the misdiagnosis when he pointed out there was zero device traffic in BOS
+logs from the RC Pro's IP. The actual root cause was device-side Capacitor
+`Preferences` drift — but critically, **the device was not running Capacitor
+at all.** The drift theory applied to a device that didn't exist.
+
+### Decision
+
+1. The Kotlin app in `BigBill1418/DroneOpsSync` is canonical. The Capacitor
+   fork is abandoned.
+2. §4 and §5.1 / §5.2 layers 1 + 2 are re-implemented in Kotlin in
+   `BigBill1418/DroneOpsSync` v1.3.24. See
+   `BigBill1418/DroneOpsSync/docs/adr/0001-kotlin-resumption-abandon-capacitor-fork.md`
+   and its companion plan
+   `docs/plans/2026-04-24-kotlin-resumption-ota-repair.md`.
+3. §5.2 layers 3 + 4 — the server-side Celery beat `check_device_silence_task`
+   and the first-401 Pushover tripwire — **stay in this repo**. They are
+   backend code and are already live. They alert on silent drift regardless
+   of which client implementation the device runs.
+4. The `companion/` tree in this repo is deleted in the commit that lands
+   this addendum. The `companion-apk.yml` workflow is deleted alongside it.
+   The three orphan GitHub releases (`companion-v2.61.5`, `companion-v2.62.0`,
+   `companion-v2.62.1`) have their bodies prepended with an "ABANDONED — DO
+   NOT INSTALL" banner pointing at DroneOpsSync; the releases themselves are
+   NOT deleted because their APK assets remain as forensic evidence that
+   zero devices downloaded them.
+
+### Consequence
+
+- Single source of truth for the DroneOpsSync mobile app.
+- Six weeks of Capacitor commit history in this repo becomes archaeology,
+  retrievable via `git log --all -- companion/` up to the deletion commit.
+- The `/api/flight-library/device-health` endpoint used by §5.2 layer 2 now
+  answers to both clients — the Kotlin app's port of `preflightHealth()` and
+  any hypothetical future Capacitor re-adoption — with no server-side change
+  required.
+
+### Related
+
+- **DroneOpsSync ADR-0001** (this addendum's counterpart):
+  `BigBill1418/DroneOpsSync/docs/adr/0001-kotlin-resumption-abandon-capacitor-fork.md`
+- **DroneOpsSync v1.3.24 plan**:
+  `BigBill1418/DroneOpsSync/docs/plans/2026-04-24-kotlin-resumption-ota-repair.md`
+- **Fleet self-hosted CI policy**:
+  `BigBill1418/NOC-Master-Control-SWARM/docs/adr/0029-gh-actions-self-hosted-on-bos-hq.md`
+  (DroneOpsSync's release pipeline now runs on the same BOS-HQ runner pool).
