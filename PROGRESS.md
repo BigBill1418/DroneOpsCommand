@@ -13,10 +13,14 @@ AFTER-measurement appended to ADR-0005.
 - **FIX-1 — v2.63.7 — SHIPPED + VERIFIED on BOS-HQ:** weather endpoint
   parallelized via `asyncio.gather` + 5-min Redis cache (failure-open).
   Cold p95 7.4-8.3 s → 1.09 s; warm p95 7.4 s → 6.8-19 ms. 6 tests green.
-- **FIX-2 — v2.63.8 — SHIPPED in this branch:** raised async DB pool
-  5+10 → 20+20 + added 60 s in-process cache around `get_current_user`.
-  5 new tests, all green. AFTER pool/burst measurements pending BOS-HQ
-  autopull.
+- **FIX-2 — v2.63.8 — SHIPPED + VERIFIED on BOS-HQ:** pool 5+10 → 20+20
+  + 60 s cached `get_current_user`. 30-parallel `/api/customers` burst:
+  cold-cache p95 0.67 s, warm-cache p95 0.30 s. All 5 user-cache tests
+  green.
+- **FIX-3 — v2.63.9 — SHIPPED in this branch:** code-split 17 main
+  pages (`React.lazy`) + Vite `manualChunks` for vendor bundles.
+  Local build verified: main chunk 1.9 MB → 83 KB (29 KB gzipped).
+  AFTER measurement on BOS-HQ pending autopull + frontend rebuild.
 - **FIX-3 — v2.63.9 — pending:** code-split 17 main pages + Vite
   `manualChunks` for vendor bundles.
 - **FIX-4 — v2.63.10 — pending:** custom `useApiCache` hook + apply to

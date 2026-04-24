@@ -4,6 +4,39 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## [2.63.9] — 2026-04-24 — perf: code-split 17 main pages + Vite vendor chunks (FIX-3, ADR-0005)
+
+Third of five performance fixes from the 2026-04-24 perf audit. Targets
+the bundle-bloat root cause: the operator's first paint was gated on
+downloading and parsing a single 1.9 MB / 251 KB CSS bundle that
+included Leaflet (used only on /airspace + /flights/replay), react-pdf
+(client portal only), tiptap (mission editor only), Mantine forms /
+dropzone / dates (heavy), and @sentry/react.
+
+- **`frontend/src/App.tsx`** — converted all 17 main authenticated
+  pages to `React.lazy()` + a single shared `Suspense` fallback that
+  uses the same dark-theme cyan loader the auth flow already uses (no
+  visible flash on route transition). Login + Setup remain eager —
+  they are pre-auth and tiny, and bundling them avoids first-paint flash.
+- **`frontend/vite.config.ts`** — added `build.rollupOptions.output.
+  manualChunks` to split vendor bundles: `mantine-core`, `mantine-rich`,
+  `leaflet`, `tiptap`, `pdf`, `icons` (`@tabler/icons-react`), `sentry`.
+  Each is cached independently by CF and persists across deploys whose
+  Mantine/Leaflet/etc versions don't change.
+- **Bundle graph (verified locally via `npm run build`):**
+  - main `index-*.js`: **83 KB** (gzip **29 KB**) — was 1,900 KB.
+  - Heaviest single chunk: `mantine-core` 467 KB / gzip 146 KB,
+    cached separately, only paid once per Mantine version bump.
+  - All 17 pages now ship as their own on-demand chunks
+    (Dashboard 26 KB / 6.7 KB gz, Settings 73 KB / 16.8 KB gz, etc).
+- **Expected gain (target):** Cold first-paint perceived latency on
+  residential uplink drops from ~9.5 s (1.9 MB main + 250 KB CSS +
+  weather sequential) to ~1.5-2.0 s (small router shell + Mantine core
+  + first page chunk + cached weather). Heaviest pages
+  (Settings/MissionNew/FlightReplay) load on demand.
+- **Failover guard:** ✓ pure build-time change. CI rebuilds the frontend
+  container; old hashes invalidate naturally.
+
 ## [2.63.8] — 2026-04-24 — perf: async DB pool tuning + cached `get_current_user` (FIX-2, ADR-0005)
 
 Second of five performance fixes from the 2026-04-24 perf audit. Targets
