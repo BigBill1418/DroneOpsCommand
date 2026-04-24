@@ -4,6 +4,37 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## [2.63.8] — 2026-04-24 — perf: async DB pool tuning + cached `get_current_user` (FIX-2, ADR-0005)
+
+Second of five performance fixes from the 2026-04-24 perf audit. Targets
+the second highest-impact root cause — Settings page fan-out (34
+sequential `api.get` calls) saturating the SQLAlchemy async connection
+pool, plus a `SELECT * FROM users` on every authenticated request.
+
+- **`backend/app/database.py`** — `pool_size` 5 → 20, `max_overflow`
+  10 → 20. Total ceiling 15 → 40. Headroom verified live on BOS-HQ
+  (Postgres `max_connections=100`, current usage 6) — worker(5) +
+  beat(2) + flight-parser(5) + backend(40) = 52, leaves 48% PG headroom.
+- **`backend/app/auth/jwt.py`** — added a 60 s in-process TTL cache
+  around the User-row lookup in `get_current_user`. Keyed by
+  `(username, token[:16])` so token rotation invalidates immediately.
+  Cached payload is safe-to-replay primitives only (id, username,
+  hashed_password, is_active, created_at) — a transient ORM `User`
+  is rebuilt per hit. `invalidate_user_cache(username|None)` exposed
+  for explicit invalidation; `auth.update_account` now calls it on
+  password / username change.
+- **5 new pytest cases** under `backend/tests/test_user_cache.py`
+  (HIT, MISS, inactive-user reject, per-user invalidate, all-invalidate,
+  TTL expiry).
+- **Documented staleness window:** token revocation lag <=60 s; container
+  restart wipes the cache (revalidates immediately). For self-hosted
+  single-operator deployment this is acceptable. ADR-0005 §FIX-2.
+- **Expected gain (target):** Settings p95 first-paint ~3.2 s → ~600 ms;
+  30-parallel `/api/customers` burst < 700 ms.
+- **Failover guard:** ✓ pool sizing is per-process and survives container
+  restart; user cache is in-process only (no shared state); no schema
+  change; no replication impact.
+
 ## [2.63.7] — 2026-04-24 — perf: parallelize + Redis-cache /api/weather/current (FIX-1, ADR-0005)
 
 First of five performance fixes from the 2026-04-24 perf audit

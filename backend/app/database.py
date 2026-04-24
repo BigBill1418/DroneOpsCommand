@@ -10,8 +10,12 @@ engine = create_async_engine(
     pool_pre_ping=True,
     # Recycle connections every 30 min to prevent stale TCP sockets
     pool_recycle=1800,
-    pool_size=5,
-    max_overflow=10,
+    # FIX-2 (v2.63.8): pool sized for the Settings-page fan-out (34 GETs in
+    # parallel) plus the Dashboard burst. Headroom verified live on BOS-HQ
+    # (max_connections=100, current=6). Worker(5) + beat(2) + parser(5)
+    # + backend(40) = 52, leaves 48% PG headroom.
+    pool_size=20,
+    max_overflow=20,
 )
 async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 

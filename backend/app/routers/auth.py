@@ -24,6 +24,7 @@ from app.auth.jwt import (
     get_current_user,
     hash_password,
     hash_password_async,
+    invalidate_user_cache,
     verify_password,
     verify_password_async,
     check_password_complexity,
@@ -213,6 +214,7 @@ async def update_account(
     if not body.new_username and not body.new_password:
         raise HTTPException(status_code=400, detail="Nothing to update")
 
+    old_username = user.username  # capture before any rename for cache invalidation
     if body.new_username and body.new_username != user.username:
         existing = await db.execute(select(User).where(User.username == body.new_username))
         if existing.scalar_one_or_none():
@@ -237,6 +239,15 @@ async def update_account(
 
     # Explicit commit — do NOT rely on get_db cleanup
     await db.commit()
+
+    # FIX-2 (v2.63.8): drop any cached User rows for the username(s) so
+    # subsequent requests (with the new token) repopulate from DB. Both
+    # the pre-rename and post-rename names are invalidated to cover the
+    # username-change path. Token-prefix-keyed cache + new token mean
+    # this is belt-and-suspenders, but cheap and correct.
+    invalidate_user_cache(old_username)
+    if body.new_username and body.new_username != old_username:
+        invalidate_user_cache(body.new_username)
 
     # Read-back verification: re-query the database to confirm the write stuck
     if body.new_password:

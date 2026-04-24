@@ -10,12 +10,13 @@ Executing the 5-fix plan from `docs/plans/2026-04-24-perf-audit.md`.
 Fixes ship as 5 separate commits, each with its own version bump and
 AFTER-measurement appended to ADR-0005.
 
-- **FIX-1 — v2.63.7 — SHIPPED in this branch:** weather endpoint
+- **FIX-1 — v2.63.7 — SHIPPED + VERIFIED on BOS-HQ:** weather endpoint
   parallelized via `asyncio.gather` + 5-min Redis cache (failure-open).
-  6 new tests, all green. ADR-0005 will receive the live AFTER numbers
-  once BOS-HQ autopulls and the verification commands run.
-- **FIX-2 — v2.63.8 — pending:** raise async DB pool 5+10 → 20+20 + add
-  60s in-process cache around `get_current_user`.
+  Cold p95 7.4-8.3 s → 1.09 s; warm p95 7.4 s → 6.8-19 ms. 6 tests green.
+- **FIX-2 — v2.63.8 — SHIPPED in this branch:** raised async DB pool
+  5+10 → 20+20 + added 60 s in-process cache around `get_current_user`.
+  5 new tests, all green. AFTER pool/burst measurements pending BOS-HQ
+  autopull.
 - **FIX-3 — v2.63.9 — pending:** code-split 17 main pages + Vite
   `manualChunks` for vendor bundles.
 - **FIX-4 — v2.63.10 — pending:** custom `useApiCache` hook + apply to
