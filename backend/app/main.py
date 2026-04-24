@@ -345,7 +345,7 @@ logger.info("MultiPartParser max_file_size set to 200 MB")
 app = FastAPI(
     title="D.O.C — Drone Operations Command",
     description="Self-hosted mission management, flight log analysis, AI report generation, invoicing, telemetry visualization, and real-time airspace monitoring for commercial drone operators.",
-    version="2.63.3",
+    version="2.63.4",
     lifespan=lifespan,
 )
 
@@ -469,6 +469,23 @@ async def health_check():
         if settings.client_id:
             resp["client_id"] = settings.client_id
     return resp
+
+
+@app.get("/health")
+async def health_check_root():
+    """Top-level /health alias.
+
+    Publicly tunneled clients (stale DroneOpsSync APKs, CF tunnel health probes,
+    generic uptime monitors) commonly hit bare ``/health`` rather than the
+    ``/api/health`` path that the SPA reserves under ``/api/*``. Without this
+    route, nginx/React serves the SPA HTML and any non-browser client chokes
+    trying to parse it as JSON (the DroneOpsSync diagnostic log showed
+    ``IOException: Use JsonReader.setLenient(true)...`` when this happened
+    against a pre-2.34 APK on the operator's DJI RC Pro — 2026-04-24).
+
+    Returns the same payload as ``/api/health`` so the alias is safe to rely on.
+    """
+    return await health_check()
 
 
 @app.get("/api/branding")

@@ -148,7 +148,16 @@ export default function App() {
   // ── Settings: save and sync ───────────────────────────────────────
   async function saveAndSync() {
     if (!serverUrl.trim() || !apiKey.trim()) return;
-    await saveConfig(serverUrl.trim(), apiKey.trim(), autoDelete);
+    try {
+      await saveConfig(serverUrl.trim(), apiKey.trim(), autoDelete);
+    } catch (err: any) {
+      // validateServerUrl throws on plaintext public URLs (ADR-0002).
+      // Surface to the test-banner area so the operator sees it next to
+      // the URL field instead of blank-reloading.
+      setTestStatus('fail');
+      setTestMsg(err.message || 'Invalid server URL');
+      return;
+    }
     hasRun.current = false;
     setView('loading');
     await runSync(serverUrl.trim(), apiKey.trim(), autoDelete);
@@ -517,7 +526,7 @@ export default function App() {
 
       {/* Footer */}
       <div className="footer">
-        DRONEOPSSYNC v2.36.0 LAN — BARNARD HQ
+        DRONEOPSSYNC v2.62.0 — BARNARD HQ
       </div>
     </div>
   );

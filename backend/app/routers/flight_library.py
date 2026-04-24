@@ -732,10 +732,16 @@ async def device_upload_flights(
     Identical processing to /upload but authenticates via X-Device-Api-Key header
     instead of a user JWT, allowing automated sync from DroneOpsSync without
     requiring a human login session on the controller.
+
+    Emits a single INFO audit log at the end of each call (ADR-0002 §2.4)
+    covering device label, file count, total bytes, and outcome counts. The
+    raw API key is never logged; the `device_label` + `device.id` are the
+    correlation handles.
     """
     imported = []
     skipped = 0
     errors = []
+    total_bytes = 0
 
     # Fetch DJI API key from settings to pass to the parser
     dji_key = await _get_dji_api_key(db)
@@ -746,6 +752,7 @@ async def device_upload_flights(
     for upload in files:
         try:
             content = await upload.read()
+            total_bytes += len(content)
             file_hash = hashlib.sha256(content).hexdigest()
 
             # Save original file for future re-processing
@@ -828,6 +835,20 @@ async def device_upload_flights(
             errors.append(f"{upload.filename}: flight-parser service unavailable")
         except Exception as e:
             errors.append(f"{upload.filename}: {str(e)}")
+
+    logger.info(
+        "device_upload",
+        extra={
+            "event": "device_upload",
+            "device_label": _device.label,
+            "device_id": str(_device.id),
+            "file_count": len(files),
+            "total_bytes": total_bytes,
+            "imported": len(imported),
+            "skipped": skipped,
+            "error_count": len(errors),
+        },
+    )
 
     return FlightUploadResponse(
         imported=len(imported),

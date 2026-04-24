@@ -4,6 +4,57 @@ Maintained alongside `CHANGELOG.md` and `docs/adr/`. `CHANGELOG.md` is
 the ledger of shipped changes; this file tracks what's in-flight or
 blocked.
 
+## 2026-04-24 — DroneOpsSync upload auth + HTTPS-only base URL (ADR-0002)
+
+Operator's personal DJI RC Pro (no camera) could not upload 3 post-flight
+logs (~17 MB) to `http://droneops.barnardhq.com`. Two-symptom failure:
+
+1. `/health` GET returned HTML (CF HTTP→HTTPS redirect body); stale APK's
+   Gson client crashed at `line 1 column 1` because it ran with default
+   `setLenient(false)`.
+2. Upload POST returned `403 {"detail":"Not authenticated"}` — FastAPI's
+   default `get_current_user` JWT rejection, i.e. stale APK hit a
+   JWT-gated endpoint instead of the current `X-Device-Api-Key`-gated
+   `POST /api/flight-library/device-upload`.
+
+Root cause: the APK on the controller is pre-v2.33.0, pre-dates the
+Capacitor rewrite, and uses a Gson-based client against legacy paths.
+The current server surface is correct — device-health and device-upload
+endpoints are already wired to `validate_device_api_key`
+(`backend/app/auth/device.py`) with SHA-256 hash lookup.
+
+**Status — SHIPPED 2026-04-24 by aegis.** Backend v2.63.4, companion
+v2.62.0. Scope delivered:
+- Companion: `validateServerUrl()` in `sync.ts` rejects plaintext public
+  URLs with RFC-1918 + loopback carve-out; `DEFAULT_SERVER_URL`
+  pre-baked to `https://droneops.barnardhq.com`;
+  `App.tsx::saveAndSync` catches validation errors into the Settings
+  test-status banner. Footer bumped. APK will be cut by
+  `companion-apk.yml` on BOS-HQ self-hosted runner on push.
+- Server: top-level `GET /health` alias (JSON, same payload as
+  `/api/health`); structured INFO log on `/device-upload` and WARN log
+  on device-auth failure (`key_prefix` only — never the raw key).
+- Operator: existing `M4TD` row in `device_api_keys` is already valid
+  (last used 2026-04-19); no rotation. Bill reuses the raw key value
+  he already has.
+
+**Pending operator action**: install `DroneOpsSync-2.62.0.apk` from the
+upcoming release on the RC Pro; paste server URL + existing `M4TD` key;
+tap SAVE & SYNC. The 3 pending DJIFlightRecord files upload.
+
+Docs:
+- **ADR-0002** (`docs/adr/0002-droneopssync-upload-auth.md`) — auth-model
+  decision + HTTPS-only + forward path for managed-tenant discovery
+  (deferred; pattern copy from EyesOn ADR-0020 when first tenant ships).
+- **CHANGELOG** — 2026-04-24 entry above ADR-0029.
+- **ROADMAP** — follow-up items (fleet audit, `/health` shim, Grafana
+  stale-client tripwire) filed under "Observability + Fleet Hygiene".
+
+Hardware constraint: DJI RC Pro has no usable rear camera for field
+operation. No QR / visual pairing ever. Auth model aligns with EyesOn
+ADR-0019 (keypad / non-visual enrollment). See
+`feedback_dji_rc_pro_no_camera.md`.
+
 ## 2026-04-20 — Maintenance type vocabulary unified (v2.63.3)
 
 Fixes a long-standing bug where overdue schedule alerts (Compass

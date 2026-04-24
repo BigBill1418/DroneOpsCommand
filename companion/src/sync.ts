@@ -38,9 +38,13 @@ export const PREF_AUTO_DELETE = 'autoDelete';
 export const PREF_SYNCED_HASHES = 'syncedHashes';
 
 // ── Default URL ───────────────────────────────────────────────────────
-// No hardcoded default — the user must enter their own server URL in Settings.
-// Shipping a real IP here previously leaked internal infrastructure into clients.
-export const DEFAULT_SERVER_URL = '';
+// Pre-baked public URL for the primary instance (mirrors EyesOn ADR-0019's
+// BuildConfig.DEFAULT_SERVER_URL pattern). This is a PUBLIC hostname — no
+// private IP is leaked. Operators can overwrite it in Settings for
+// LAN-only deploys. v2.34.0 blanked this field to stop leaking an
+// internal 10.x IP; shipping the public hostname reinstates out-of-box
+// usability without reintroducing the leak.
+export const DEFAULT_SERVER_URL = 'https://droneops.barnardhq.com';
 
 // ── DJI log paths (relative to /storage/emulated/0/) ──────────────────
 // All paths scanned — no public/restricted distinction needed on Android 10.
@@ -80,6 +84,47 @@ export interface HealthResult {
   upload_endpoint: string;
 }
 
+// ── URL validation (ADR-0002) ─────────────────────────────────────────
+/**
+ * Reject plaintext `http://` base URLs unless the host is RFC-1918,
+ * loopback, or link-local — i.e. a LAN-only deploy. Public hostnames
+ * MUST use HTTPS so Cloudflare's 80→443 redirect can't return HTML
+ * that breaks JSON parsing (the root-cause of the 2026-04-24 DJI RC Pro
+ * incident against a stale pre-v2.34 APK).
+ *
+ * Throws with an operator-friendly message on rejection. Returns
+ * normalized URL (trailing slashes stripped) on success.
+ */
+export function validateServerUrl(raw: string): string {
+  const trimmed = (raw || '').trim().replace(/\/+$/, '');
+  if (!trimmed) throw new Error('Server URL is required');
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    throw new Error(`Invalid server URL: ${trimmed}`);
+  }
+  if (parsed.protocol === 'https:') return trimmed;
+  if (parsed.protocol !== 'http:') {
+    throw new Error(`Unsupported scheme ${parsed.protocol} — use https://`);
+  }
+  const host = parsed.hostname;
+  const isPrivate =
+    host === 'localhost' ||
+    host === '127.0.0.1' ||
+    host === '::1' ||
+    /^10\./.test(host) ||
+    /^192\.168\./.test(host) ||
+    /^172\.(1[6-9]|2\d|3[01])\./.test(host) ||
+    /^169\.254\./.test(host);
+  if (!isPrivate) {
+    throw new Error(
+      `Plaintext http:// is only allowed for LAN hosts (10.x / 172.16-31.x / 192.168.x / localhost). Use https://${host} instead.`,
+    );
+  }
+  return trimmed;
+}
+
 // ── Preferences helpers ────────────────────────────────────────────────
 export async function getConfig() {
   const [urlRes, keyRes, delRes] = await Promise.all([
@@ -99,8 +144,12 @@ export async function saveConfig(
   apiKey: string,
   autoDelete: boolean,
 ) {
+  // Fail-fast on plaintext public URLs before we even persist them. This
+  // is the operator's first guardrail against the CF-HTML-redirect class
+  // of failure (ADR-0002).
+  const normalized = validateServerUrl(serverUrl);
   await Promise.all([
-    Preferences.set({ key: PREF_SERVER_URL, value: serverUrl }),
+    Preferences.set({ key: PREF_SERVER_URL, value: normalized }),
     Preferences.set({ key: PREF_API_KEY, value: apiKey }),
     Preferences.set({ key: PREF_AUTO_DELETE, value: String(autoDelete) }),
   ]);
@@ -172,7 +221,8 @@ export async function scanForLogs(
 
 // ── Health check ───────────────────────────────────────────────────────
 export async function checkHealth(serverUrl: string, apiKey: string): Promise<HealthResult> {
-  const url = `${serverUrl.replace(/\/+$/, '')}/api/flight-library/device-health`;
+  const base = validateServerUrl(serverUrl);
+  const url = `${base}/api/flight-library/device-health`;
   let resp: Response;
   try {
     resp = await fetch(url, {
@@ -200,7 +250,8 @@ export async function uploadLogs(
   files: LogFile[],
   onProgress?: (uploaded: number, total: number, currentFile: string) => void,
 ): Promise<SyncResult> {
-  const url = `${serverUrl.replace(/\/+$/, '')}/api/flight-library/device-upload`;
+  const base = validateServerUrl(serverUrl);
+  const url = `${base}/api/flight-library/device-upload`;
   const result: SyncResult = { imported: 0, skipped: 0, errors: [], files: [] };
   const syncedPaths: string[] = [];
 

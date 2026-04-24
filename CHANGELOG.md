@@ -4,6 +4,62 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-04-24 — DroneOpsSync upload auth + HTTPS-only base URL — v2.63.4 (backend) / v2.62.0 (companion) (ADR-0002)
+
+Operator's personal DJI RC Pro (no camera) reported two-symptom failure uploading three post-flight logs (~17 MB total) to `http://droneops.barnardhq.com`:
+
+1. `[HEALTH] GET /health → IOException: Use JsonReader.setLenient(true) ... line 1 column 1 path $`
+2. `[UPLOAD] DJIFlightRecord_2026-04-23_[21-11-04].txt → HTTP 403 {"detail":"Not authenticated"}`
+
+### Root cause
+
+Three composing failures, none of them server-side:
+
+- The APK on the controller is a **pre-v2.33.0 native Android build**, not the current v2.36.x Capacitor build. It hits legacy `/health` (unprefixed) with a Gson client at default `setLenient(false)`. CF's HTTP→HTTPS redirect returns an HTML body; Gson crashes at `line 1 column 1` before the response can authenticate anything.
+- The stale APK's upload path hits a JWT-gated endpoint — `{"detail":"Not authenticated"}` is FastAPI's default response when `get_current_user` fails, not the device-api-key validator (which returns `"Invalid or revoked device API key"`).
+- Operator-entered `http://` base URL is what triggers the HTML-body redirect. The current Capacitor client uses `fetch()` (which would silently follow the redirect) but the stale Gson client cannot.
+
+The current server surface is already correct: `GET /api/flight-library/device-health` and `POST /api/flight-library/device-upload` both gate on `validate_device_api_key` (`backend/app/auth/device.py`), SHA-256-hash the inbound `X-Device-Api-Key`, look it up in `device_api_keys`, and 401 on miss. No endpoint change required; the client is stale.
+
+### Fix shipped (aegis)
+
+Companion-side (`companion/` → v2.62.0):
+
+- Added `validateServerUrl()` in `companion/src/sync.ts` — rejects plaintext `http://` public URLs with the RFC-1918 + loopback + link-local carve-out (same shape as EyesOn's `isPrivateAddress`). Applied in `saveConfig`, `checkHealth`, and `uploadLogs`.
+- Pre-baked `DEFAULT_SERVER_URL = "https://droneops.barnardhq.com"`. v2.34.0's `1544b9e` blanked this to stop leaking a private `10.x` IP; shipping the public FQDN reinstates out-of-box usability without reintroducing the leak.
+- `App.tsx` `saveAndSync` now catches validation errors and surfaces them in the Settings test-status banner instead of swallowing them. Footer bumped to v2.62.0.
+- Fresh APK will be cut by `.github/workflows/companion-apk.yml` on push (BOS-HQ self-hosted runner per ADR-0029) and published as release `companion-v2.62.0`.
+
+Server-side (`backend/` → v2.63.4):
+
+- Added `GET /health` top-level alias in `backend/app/main.py` returning JSON — matches what stale clients expect and lets CF tunnel / uptime probes succeed without hitting the SPA HTML.
+- Structured-JSON INFO log on every `/api/flight-library/device-upload` call: `{event, device_label, device_id, file_count, total_bytes, imported, skipped, error_count}`. Raw API key never logged.
+- Structured-JSON WARN log on every device-auth failure in `backend/app/auth/device.py`: `{event, key_prefix (8-char SHA-256 prefix), ip, user_agent, path}`.
+- No schema change; no migration; additive route + log lines only.
+
+Operator action (one-time):
+
+- Install `DroneOpsSync-2.62.0.apk` once the release lands (watch <https://github.com/BigBill1418/DroneOpsCommand/releases>).
+- Settings → Device Access on the server already has an `M4TD` row for the RC Pro (last used 2026-04-19). Re-use that raw key value (Bill has it stored); no rotation needed.
+- Tap SAVE & SYNC — the three pending `DJIFlightRecord_2026-04-23_*.txt` files upload to BOS-HQ.
+
+### Verified (end-to-end against production)
+
+- `POST https://droneops.barnardhq.com/api/flight-library/device-upload` with a valid `X-Device-Api-Key` + a multipart file → **HTTP 200** with a well-formed `FlightUploadResponse`. The device-auth path is fully healthy; the bug was 100% the stale APK.
+- `GET https://droneops.barnardhq.com/api/flight-library/device-health` with a wrong key → 401 `"Invalid or revoked device API key"` (correct).
+- `GET https://droneops.barnardhq.com/api/flight-library/device-health` with a missing header → 422 validation error (correct; will become 401-on-auth when reached via the new `/health` alias once the alias is deployed).
+
+Auth model recorded in `docs/adr/0002-droneopssync-upload-auth.md` — flipped **Proposed → Accepted**. `X-Device-Api-Key` header remains the primitive. Rejected JWT-bearer, mTLS, OAuth device-flow. Managed-tenant discovery deferred to first live tenant but forward path codified as a copy of EyesOn ADR-0020's `GET /api/discovery/pair/:code` pattern.
+
+### Failover / resilience
+
+- No schema change, no migration. Additive device-key row only.
+- Compose-only on the server if the `/health` shim lands; no cross-service dependency.
+- Blue-green swap and failover-engine untouched.
+- Managed-tenant instances (when live) inherit the same model; no divergent code path.
+
+Hardware constraint acknowledged per `feedback_dji_rc_pro_no_camera.md` — no QR, no visual pairing. ADR-0002 aligns with EyesOn ADR-0019's validated camera-less UX pattern.
+
 ## 2026-04-21 — ci: companion APK + claude auto-merge moved to BOS-HQ self-hosted runners (ADR-0029)
 
 DroneOpsCommand CI no longer consumes paid `ubuntu-latest` minutes. Both workflows (`companion-apk.yml`, `auto-merge-claude.yml`) flipped to `runs-on: [self-hosted, linux, x64, bos]`. The runner is a single `--ephemeral` container (`runner-droneopscommand`) on BOS-HQ, behind its own Docker-in-Docker sidecar — a compromised CI job cannot reach the host's Swarm socket.
