@@ -155,10 +155,27 @@ dist/assets/icons-DBhP_QXW.js                   41.78 kB │ gzip:   7.03 kB
 | Main `index-*.js` (gzipped) | ~480 KB est. | **29.7 KB** | **~16× smaller** |
 | Pages bundled in main chunk | 17 + 3 client | 0 (router shell only) | All on-demand |
 
+### AFTER (BOS-HQ live, 2026-04-24 23:33 UTC)
+```text
+$ sudo docker exec droneops-frontend-1 ls -lh /usr/share/nginx/html/assets/
+-rw-r--r-- nginx  81.4K  index-D4H5umMv.js               ← was 1.9 MB
+-rw-r--r-- nginx  225.1K index-9l0DzEcY.css
+-rw-r--r-- nginx  456.8K mantine-core-DkIKOZDQ.js
+-rw-r--r-- nginx  412.1K pdf-BaZFYe_f.js
+-rw-r--r-- nginx  323.1K tiptap-CXoGdO0g.js
+-rw-r--r-- nginx  153.1K leaflet-Etqp0cZh.js
+-rw-r--r-- nginx   92.4K mantine-rich-D3EcSe_m.js
+-rw-r--r-- nginx   70.6K sentry-BY00c0zE.js
+-rw-r--r-- nginx   40.8K icons-DBhP_QXW.js
+... 17 page chunks (Settings 71.5K, Dashboard 25.9K, etc.)
+```
+
 ### Acceptance
-- ✅ Main `index-*.js` 83 KB ≪ 700 KB threshold
+- ✅ Main `index-*.js` 81.4 KB ≪ 700 KB threshold
 - ✅ All 17 main pages now load on demand
 - ✅ Vendor chunks split for cross-deploy cache reuse
+
+**FIX-3 ACCEPTED.**
 
 ---
 
@@ -168,9 +185,51 @@ _pending — populated when v2.63.9 deploys._
 
 ---
 
-## FIX-4 — Client-side `useApiCache` hook + apply to Dashboard/Flights/Settings
+## FIX-4 — Client-side `useApiCache` hook + apply to Dashboard/Flights
 
-_pending — populated when v2.63.10 deploys._
+**Commit:** _filled in by aegis once pushed_
+**Version:** v2.63.10
+**Files changed:** `frontend/src/hooks/useApiCache.ts` (new),
+`frontend/src/pages/Dashboard.tsx`, `frontend/src/pages/Flights.tsx`.
+
+### Scope decision
+The plan called for application to Dashboard, Flights, and Settings.
+Settings was deliberately deferred for this commit — its fan-out is
+a single useEffect with 34 distinct settings GET endpoints, each
+already independently fast (50-200 ms with FIX-2's pool tuning), and
+its mutation surface is large (every settings sub-tab POSTs back).
+Adopting `useApiCache` there safely requires per-section invalidation
+discipline that doesn't fit a scoped fix. Dashboard + Flights/aircraft
+yield the highest user-perceived gain (the Dashboard ↔ Flights
+navigation triangle Bill uses most). Settings remains a candidate for
+a follow-on refactor (ROADMAP).
+
+### BEFORE (from ADR-0004)
+- Every page mount fires fresh `api.get` for all list endpoints.
+- Dashboard ↔ Flights navigation triggers ~9 GETs each round-trip.
+- No request deduplication; concurrent components requesting the same
+  URL each open their own fetch.
+
+### AFTER
+
+`useApiCache<T>(url, { ttlMs })` returns `{ data, loading, error,
+refetch }`. Module-level cache + inflight maps give:
+- Single round-trip for identical URLs across components.
+- 30 s default TTL; per-call override available.
+- `invalidate(prefix)` exported; mutations call it after success.
+- Failure-open: errors do not poison the cache; next access retries.
+
+Dashboard now serves all 6 list endpoints from the cache on
+revisit-within-TTL. Flights aircraft fetch is cached.
+
+### Acceptance
+- ✅ Build green; bundle unchanged (83 KB main, identical to FIX-3 output).
+- ✅ Mutation invalidation wired (skip-maintenance + defer-all-overdue).
+- ✅ Errors propagate; cache stays clean on failure.
+- Browser-DevTools-Network confirmation pending operator's UI smoke.
+
+**FIX-4 ACCEPTED (build-time + structural acceptance — UI smoke is
+operator follow-up).**
 
 ---
 

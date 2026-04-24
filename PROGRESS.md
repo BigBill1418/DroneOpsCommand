@@ -17,16 +17,15 @@ AFTER-measurement appended to ADR-0005.
   + 60 s cached `get_current_user`. 30-parallel `/api/customers` burst:
   cold-cache p95 0.67 s, warm-cache p95 0.30 s. All 5 user-cache tests
   green.
-- **FIX-3 — v2.63.9 — SHIPPED in this branch:** code-split 17 main
-  pages (`React.lazy`) + Vite `manualChunks` for vendor bundles.
-  Local build verified: main chunk 1.9 MB → 83 KB (29 KB gzipped).
-  AFTER measurement on BOS-HQ pending autopull + frontend rebuild.
-- **FIX-3 — v2.63.9 — pending:** code-split 17 main pages + Vite
-  `manualChunks` for vendor bundles.
-- **FIX-4 — v2.63.10 — pending:** custom `useApiCache` hook + apply to
-  Dashboard / Flights / Settings.
+- **FIX-3 — v2.63.9 — SHIPPED + VERIFIED on BOS-HQ:** code-split 17 main
+  pages + Vite `manualChunks`. Live frontend container confirms main
+  chunk 1.9 MB → 81.4 KB; vendor chunks split as designed.
+- **FIX-4 — v2.63.10 — SHIPPED in this branch:** custom `useApiCache`
+  hook (~100 lines) + Dashboard + Flights/aircraft adoption. Build
+  green; bundle unchanged. Settings deferred (large mutation surface;
+  scope decision documented in ADR-0005 §FIX-4).
 - **FIX-5 — v2.63.11 — pending:** docs final pass — flip ADR-0004 to
-  `accepted`, append AFTER tables to ADR-0005.
+  `accepted`, append final summary table to ADR-0005.
 
 ## 2026-04-24 EVENING — SHIPPED PR: Zero-touch device API key rotation (ADR-0003 / FU-7)
 

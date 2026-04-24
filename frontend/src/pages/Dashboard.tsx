@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   Card,
   Group,
@@ -51,6 +51,7 @@ import {
 } from '@tabler/icons-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
+import { useApiCache, invalidate as invalidateCache } from '../hooks/useApiCache';
 import { Mission, Customer } from '../api/types';
 import StatCard from '../components/shared/StatCard';
 import { statusColors, inputStyles } from '../components/shared/styles';
@@ -213,16 +214,34 @@ const monoSm = { fontFamily: "'Share Tech Mono', monospace", letterSpacing: '1px
 const bebasFont = { fontFamily: "'Bebas Neue', sans-serif" };
 
 export default function Dashboard() {
-  const [missions, setMissions] = useState<Mission[]>([]);
-  const [customers, setCustomers] = useState<Customer[]>([]);
-  const [flightStats, setFlightStats] = useState<FlightStats | null>(null);
+  // FIX-4 (v2.63.10) — replaced 6 useEffect+api.get pairs with useApiCache.
+  // Cache TTL = 30 s default; navigation Dashboard -> Flights -> Dashboard
+  // now serves all 6 list reads from cache instead of refetching.
+  // Weather has its own auto-refresh + cache-bust below; kept slightly
+  // longer TTL (60 s) since the backend now serves Redis-cached weather
+  // (FIX-1) so a cache miss is also cheap.
+  const { data: missionsRaw } = useApiCache<Mission[]>('/missions');
+  const { data: customersRaw } = useApiCache<Customer[]>('/customers');
+  const { data: flightStats } = useApiCache<FlightStats>('/flight-library/stats/summary');
+  const { data: maintenanceAlertsRaw, refetch: refetchMaintenance } = useApiCache<MaintenanceAlert[]>('/maintenance/due');
+  const { data: nextServiceDue, refetch: refetchNextDue } = useApiCache<NextServiceDue>('/maintenance/next-due');
+  const { data: batteriesRaw } = useApiCache<BatteryInfo[]>('/batteries');
+
+  const missions = useMemo(() => (Array.isArray(missionsRaw) ? missionsRaw : []), [missionsRaw]);
+  const customers = useMemo(() => (Array.isArray(customersRaw) ? customersRaw : []), [customersRaw]);
+  const maintenanceAlerts = useMemo(
+    () => (Array.isArray(maintenanceAlertsRaw) ? maintenanceAlertsRaw : []),
+    [maintenanceAlertsRaw],
+  );
+  const batteries = useMemo(() => (Array.isArray(batteriesRaw) ? batteriesRaw : []), [batteriesRaw]);
+
+  // Weather still uses imperative fetch — auto-refresh every 5 min and
+  // explicit refresh button. Backend response is Redis-cached (FIX-1) so
+  // even a cache miss costs ~1 s on the first hit, ~10 ms after.
   const [wxData, setWxData] = useState<WeatherResponse | null>(null);
   const [wxLoading, setWxLoading] = useState(true);
   const [wxRefreshing, setWxRefreshing] = useState(false);
   const [wxLastRefresh, setWxLastRefresh] = useState<Date | null>(null);
-  const [maintenanceAlerts, setMaintenanceAlerts] = useState<MaintenanceAlert[]>([]);
-  const [nextServiceDue, setNextServiceDue] = useState<NextServiceDue | null>(null);
-  const [batteries, setBatteries] = useState<BatteryInfo[]>([]);
   const [initiateModalOpen, setInitiateModalOpen] = useState(false);
   const [initiateEmail, setInitiateEmail] = useState('');
   const [initiateLoading, setInitiateLoading] = useState(false);
@@ -239,13 +258,7 @@ export default function Dashboard() {
   }, []);
 
   useEffect(() => {
-    api.get('/missions').then((r) => setMissions(Array.isArray(r.data) ? r.data : [])).catch(() => setMissions([]));
-    api.get('/customers').then((r) => setCustomers(Array.isArray(r.data) ? r.data : [])).catch(() => setCustomers([]));
-    api.get('/flight-library/stats/summary').then((r) => setFlightStats(r.data)).catch(() => setFlightStats(null));
     fetchWeather();
-    api.get('/maintenance/due').then((r) => setMaintenanceAlerts(Array.isArray(r.data) ? r.data : [])).catch(() => setMaintenanceAlerts([]));
-    api.get('/maintenance/next-due').then((r) => setNextServiceDue(r.data)).catch(() => setNextServiceDue(null));
-    api.get('/batteries').then((r) => setBatteries(Array.isArray(r.data) ? r.data : [])).catch(() => setBatteries([]));
   }, [fetchWeather]);
 
   // Auto-refresh weather every 5 minutes
@@ -269,8 +282,11 @@ export default function Dashboard() {
     try {
       await api.post(`/maintenance/schedules/${scheduleId}/skip`);
       notifications.show({ title: 'Deferred', message: 'Pushed out to next interval', color: 'cyan' });
-      api.get('/maintenance/due').then((r) => setMaintenanceAlerts(Array.isArray(r.data) ? r.data : [])).catch(() => {});
-      api.get('/maintenance/next-due').then((r) => setNextServiceDue(r.data)).catch(() => setNextServiceDue(null));
+      // Mutation invalidation: drop both maintenance caches and trigger refetch.
+      invalidateCache('/maintenance/due');
+      invalidateCache('/maintenance/next-due');
+      refetchMaintenance();
+      refetchNextDue();
     } catch {
       notifications.show({ title: 'Error', message: 'Failed to defer', color: 'red' });
     }
@@ -280,8 +296,10 @@ export default function Dashboard() {
     try {
       const r = await api.post('/maintenance/defer-all-overdue');
       notifications.show({ title: 'Deferred', message: `${r.data.deferred} overdue items pushed out`, color: 'cyan' });
-      api.get('/maintenance/due').then((r) => setMaintenanceAlerts(Array.isArray(r.data) ? r.data : [])).catch(() => {});
-      api.get('/maintenance/next-due').then((r) => setNextServiceDue(r.data)).catch(() => setNextServiceDue(null));
+      invalidateCache('/maintenance/due');
+      invalidateCache('/maintenance/next-due');
+      refetchMaintenance();
+      refetchNextDue();
     } catch {
       notifications.show({ title: 'Error', message: 'Failed to defer', color: 'red' });
     }

@@ -57,6 +57,7 @@ import {
 } from '@tabler/icons-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../api/client';
+import { useApiCache } from '../hooks/useApiCache';
 import { Aircraft, FlightRecord } from '../api/types';
 import FlightMap from '../components/FlightMap/FlightMap';
 import StatCard from '../components/shared/StatCard';
@@ -313,10 +314,13 @@ export default function Flights() {
     }
   }, [flights, searchParams, detailFlight, setSearchParams]);
 
-  // Load fleet aircraft for reassignment
+  // Load fleet aircraft for reassignment.
+  // FIX-4 (v2.63.10): cached client-side since aircraft list rarely
+  // changes; navigation back-and-forth no longer re-fetches.
+  const { data: aircraftRaw } = useApiCache<typeof aircraft>('/aircraft');
   useEffect(() => {
-    api.get('/aircraft').then((r) => setAircraft(Array.isArray(r.data) ? r.data : [])).catch(() => {});
-  }, []);
+    if (Array.isArray(aircraftRaw)) setAircraft(aircraftRaw);
+  }, [aircraftRaw]);
 
   // Fetch full flight detail (with gps_track) when drawer opens
   useEffect(() => {

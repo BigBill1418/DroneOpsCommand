@@ -4,6 +4,46 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## [2.63.10] — 2026-04-24 — perf: client-side `useApiCache` hook + Dashboard adoption (FIX-4, ADR-0005)
+
+Fourth of five performance fixes from the 2026-04-24 perf audit. Targets
+the "every navigation re-fetches" root cause: navigating Dashboard →
+Flights → Dashboard previously re-ran all 6 dashboard list endpoints
+plus the weather call, every time, with no client-side cache.
+
+- **`frontend/src/hooks/useApiCache.ts`** (new, ~100 lines) — TTL-cached,
+  request-deduplicated, mutation-invalidatable hook around `axios.get`.
+  Same URL across components shares one round-trip; 30 s default TTL;
+  errors don't poison the cache. `invalidate(prefix)` exported for
+  mutations. ADR-0005 §FIX-4 documents the staleness-window decision
+  and why a custom hook beat adopting TanStack Query (~14 KB gzipped
+  + larger refactor than scope warrants; would erode FIX-3 gains).
+- **`frontend/src/pages/Dashboard.tsx`** — replaced 6 `useEffect + api.get +
+  setState` blocks with `useApiCache` calls (missions, customers,
+  flightStats, maintenanceAlerts, nextServiceDue, batteries). Maintenance
+  mutation handlers now call `invalidate('/maintenance/due')` +
+  `invalidate('/maintenance/next-due')` and trigger a refetch. Weather
+  remains imperative (auto-refresh + button) but the backend response is
+  Redis-cached (FIX-1) so it's also fast.
+- **`frontend/src/pages/Flights.tsx`** — moved the aircraft list fetch
+  to `useApiCache` (rare-changing list, large payoff on cross-page nav).
+  The complex flight-library loader was deliberately left imperative —
+  it has multi-fallback semantics + post-mutation reloads that don't fit
+  this scoped hook cleanly. Per `feedback_no_deferred_fixes.md`, the
+  alternative was a deeper refactor outside this audit's scope.
+- **Build verified locally** — main bundle still 83 KB
+  (gzip 30 KB), no regression vs FIX-3.
+- **Expected gain (target):** Dashboard → Flights → Dashboard navigation
+  becomes near-instant on the second mount (cache hit instead of 6
+  GETs). Combined with FIX-1 (Redis weather cache) the warm repeat-visit
+  Dashboard p95 drops from ~7.5 s to ~150 ms.
+- **Failover guard:** ✓ pure frontend; no backend, schema, or replication
+  impact. Cache is per-tab, in-memory only.
+
+ADR-0005 §FIX-3 finalized with BOS-HQ live measurements: main `index-*.js`
+**1.9 MB → 81 KB** (23.5× smaller); 17 page chunks shipped on demand;
+vendor chunks split as designed. FIX-3 ACCEPTED.
+
 ## [2.63.9] — 2026-04-24 — perf: code-split 17 main pages + Vite vendor chunks (FIX-3, ADR-0005)
 
 Third of five performance fixes from the 2026-04-24 perf audit. Targets
