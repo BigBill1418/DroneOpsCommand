@@ -703,6 +703,13 @@ async def device_health(
     Returns 200 with device info if the API key is valid and the server is
     reachable.  DroneOpsSync can hit this endpoint on startup to verify the
     connection before attempting file uploads.
+
+    ADR-0003 — when the device authenticated via the OLD key during a
+    rotation grace window, include ``rotated_key`` (the new raw key, read
+    from the Redis hint) and ``rotation_grace_until`` (ISO-8601 UTC) so
+    the paired controller can self-update without operator interaction.
+    The fields are omitted otherwise; clients that don't know about
+    them keep parsing the response unchanged.
     """
     parser_ok = False
     try:
@@ -712,12 +719,29 @@ async def device_health(
     except Exception:
         pass
 
-    return {
+    response: dict = {
         "status": "connected",
         "device_label": device.label,
         "parser_available": parser_ok,
         "upload_endpoint": "/api/flight-library/device-upload",
     }
+
+    # ADR-0003 hint emission. The auth dep tagged the row with
+    # ``_authenticated_via_old_key`` when both the OLD key matched AND a
+    # rotation is in flight. Read the new raw key out of the Redis
+    # side-channel; degrade silently if Redis is unreachable (the device
+    # will retry on its next preflight tick).
+    if getattr(device, "_authenticated_via_old_key", False):
+        from app.services.rotation_hint import get_rotation_hint
+
+        new_raw_key = await get_rotation_hint(str(device.id))
+        if new_raw_key and device.rotation_grace_until is not None:
+            response["rotated_key"] = new_raw_key
+            response["rotation_grace_until"] = (
+                device.rotation_grace_until.isoformat() + "Z"
+            )
+
+    return response
 
 
 # ── Device upload (field controllers via X-Device-Api-Key) ───────────

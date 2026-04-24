@@ -19,7 +19,7 @@ from starlette.formparsers import MultiPartParser
 from app.config import settings
 from app.database import Base, async_session, engine, get_db
 import app.models  # noqa: F401 — ensure all models registered with Base before create_all
-from app.routers import auth, customers, aircraft, missions, flights, maps, reports, invoices, rate_templates, llm, system_settings, financials, weather, intake, flight_library, batteries, maintenance, backup, device_keys, pilots, client_portal, stripe_webhook, business_signals
+from app.routers import auth, customers, aircraft, missions, flights, maps, reports, invoices, rate_templates, llm, system_settings, financials, weather, intake, flight_library, batteries, maintenance, backup, device_keys, pilots, client_portal, stripe_webhook, business_signals, admin_device_rotation
 
 
 def _setup_json_logging() -> None:
@@ -155,6 +155,15 @@ def _add_missing_columns(conn):
             ],
             "maintenance_records": [
                 ("images", "ALTER TABLE maintenance_records ADD COLUMN images JSONB DEFAULT '[]'"),
+            ],
+            # ADR-0003 — zero-touch device API key rotation grace window.
+            # Additive only; existing rows have NULLs for both columns which
+            # means "no rotation in flight". Failover-safe per repo CLAUDE.md
+            # §Failover Guard (no PK / FK / index changes; standby promotion
+            # runs the same idempotent ALTER).
+            "device_api_keys": [
+                ("rotated_to_key_hash",  "ALTER TABLE device_api_keys ADD COLUMN rotated_to_key_hash VARCHAR(64)"),
+                ("rotation_grace_until", "ALTER TABLE device_api_keys ADD COLUMN rotation_grace_until TIMESTAMP"),
             ],
             # password_compliant column removed from model in v2.43.0 — column left in DB (harmless)
         }
@@ -345,7 +354,7 @@ logger.info("MultiPartParser max_file_size set to 200 MB")
 app = FastAPI(
     title="D.O.C — Drone Operations Command",
     description="Self-hosted mission management, flight log analysis, AI report generation, invoicing, telemetry visualization, and real-time airspace monitoring for commercial drone operators.",
-    version="2.63.5",
+    version="2.63.6",
     lifespan=lifespan,
 )
 
@@ -428,6 +437,7 @@ app.include_router(pilots.router)
 app.include_router(client_portal.router)
 app.include_router(stripe_webhook.router)
 app.include_router(business_signals.router)
+app.include_router(admin_device_rotation.router)
 
 
 # ── Demo status endpoint (no auth required) ───────────────────────────

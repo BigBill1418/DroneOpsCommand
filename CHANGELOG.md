@@ -4,6 +4,50 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## [2.63.6] — 2026-04-24 — Zero-touch device API key rotation (ADR-0003)
+
+Backend half of the v1.3.25 client release. Eliminates the manual key-paste
+step that the 2026-04-24 incident required: when an operator rotates a
+device's API key server-side, the paired DJI RC Pro now picks up the new
+key automatically on its next preflight call. ROADMAP FU-7 closed.
+
+- **Schema** — `device_api_keys` gains two nullable columns
+  (`rotated_to_key_hash`, `rotation_grace_until`). Additive, failover-safe.
+  Wired through `_add_missing_columns` per the project's existing migration
+  pattern (no Alembic toolchain change).
+- **Auth dep** (`backend/app/auth/device.py`) — accepts either `key_hash`
+  or `rotated_to_key_hash` while `rotation_grace_until > now()`. Tags the
+  matched row with `_authenticated_via_old_key` so the device-health
+  endpoint can branch on credential class.
+- **Endpoint** — `POST /api/admin/devices/{device_id}/rotate-key`. Admin
+  auth (same `get_current_user` gate the existing device-keys endpoints
+  use; ADR-0003 §6 flags RBAC as follow-up). Returns the new raw key
+  exactly **once**. 409 on overlapping rotation; 503 if Redis is down
+  (fail-closed).
+- **Hint side-channel** — new `app.services.rotation_hint` module wraps a
+  Redis SET/GET/DEL keyed `doc:rotation:hint:{device_id}` with TTL =
+  grace window. The DB only ever stores hashes; raw new key lives in
+  Redis until the device picks it up or grace expires.
+- **Device-health response** — `GET /api/flight-library/device-health`
+  emits `rotated_key` + `rotation_grace_until` ONLY when authenticated
+  via the OLD key during grace. Existing clients that don't know about
+  the fields keep working unchanged.
+- **Celery finalizer** — new `finalize_key_rotations_task` on a 15-min
+  beat schedule promotes `rotated_to_key_hash` → `key_hash` and clears
+  the grace columns once `rotation_grace_until` has passed.
+- **Pushover FYI** — single info-priority alert on rotation success;
+  best-effort, never blocks. Env-gated identically to ADR-0002 §5.
+- **Tests** — `backend/tests/test_device_key_rotation.py`, 15 tests, all
+  green. Bootstraps the previously-absent `backend/tests/` infrastructure
+  (`pytest.ini`, `conftest.py`, `requirements-dev.txt`).
+- **ADR** — [`docs/adr/0003-zero-touch-device-key-rotation.md`](docs/adr/0003-zero-touch-device-key-rotation.md);
+  cross-links to ADR-0002 §6.
+- **Plan** — [`docs/plans/2026-04-24-zero-touch-key-rotation.md`](docs/plans/2026-04-24-zero-touch-key-rotation.md).
+
+Paired client release: DroneOpsSync **v1.3.25** parses the hint, persists
+to SharedPreferences, calls `ApiClient.invalidate()`, and surfaces a one-shot
+"API key auto-updated" toast. CI auto-bump on merge.
+
 ## 2026-04-24 — Capacitor `companion/` fork abandoned, Kotlin app lives (ADR-0002 §7)
 
 Six weeks of commits against `companion/` in this repo turned out to have

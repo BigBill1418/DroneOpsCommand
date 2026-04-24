@@ -110,9 +110,10 @@ None yet captured here. When a new forward-looking plan is drafted,
 append it under its own heading with the same Scope / Trigger /
 Deliverable / Owner block structure.
 
-### FU-7 — Zero-touch device API key rotation (scheduled 2026-04-24T18:58Z)
+### FU-7 — Zero-touch device API key rotation — **CLOSED 2026-04-24** (v2.63.6 / DroneOpsSync v1.3.25)
 
-- **Scope.** Backend grace-window dual-key auth + rotated-key hint in `/api/flight-library/device-health` response + celery finalizer task + Pushover FYI. Paired with DroneOpsSync v1.3.25 Kotlin client that parses the hint and auto-updates its stored key.
-- **Trigger.** Bill rotated M4TD in-place 2026-04-24 AM; operator had to manually paste new key on RC Pro Settings. v1.3.24's preflight gate surfaced the invalid-key state correctly, but eliminating the paste step is the real goal.
-- **Deliverable.** ADR-0003 + migration + endpoint + Celery task + tests; open PR. Remote routine `trig_01KiBK88vqs6vtRf75rkxcw8` (https://claude.ai/code/routines/trig_01KiBK88vqs6vtRf75rkxcw8) produces both PRs (this repo + DroneOpsSync).
-- **Owner.** Remote-agent scaffold; Bill reviews + merges.
+- **Status.** PR open against `main` on this repo (`claude/zero-touch-key-rotation-backend`); paired DroneOpsSync PR open against `main` (`claude/auto-rotation-client`). Operator reviews + merges.
+- **Shipped scope.** Backend grace-window dual-key auth + rotated-key hint in `/api/flight-library/device-health` response + Celery finalizer task (15-min beat) + Pushover FYI + admin endpoint `POST /api/admin/devices/{id}/rotate-key`. Bootstrapped `backend/tests/` infrastructure (15 tests, all green).
+- **Trigger.** Bill rotated M4TD in-place 2026-04-24 AM; operator had to manually paste new key on RC Pro Settings. v1.3.24's preflight gate surfaced the invalid-key state correctly, but eliminating the paste step was the real goal.
+- **Deliverable.** ADR-0003 (`docs/adr/0003-zero-touch-device-key-rotation.md`) + plan (`docs/plans/2026-04-24-zero-touch-key-rotation.md`) + migration + endpoint + Celery task + tests. Remote routine `trig_01KiBK88vqs6vtRf75rkxcw8` initially shipped an empty branch; aegis re-ran and produced both PRs.
+- **Owner.** aegis (scaffold); Bill (review + merge).

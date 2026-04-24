@@ -67,6 +67,15 @@ celery_app.conf.beat_schedule = {
         "task": "check_device_silence",
         "schedule": crontab(minute=17),  # offset from the wall-clock hour
     },
+    # ADR-0003 — promote rotated_to_key_hash → key_hash once the grace
+    # window expires. Runs every 15 minutes so a finished rotation is
+    # cleared from the dual-key auth path within 15 min of the deadline.
+    # Beat schedule entries are crontab(minute='*/15') = 0/15/30/45,
+    # offset from the silence watchdog (minute=17) to avoid co-firing.
+    "device-key-rotation-finalizer": {
+        "task": "finalize_key_rotations",
+        "schedule": crontab(minute="*/15"),
+    },
 }
 
 
@@ -341,3 +350,98 @@ def check_device_silence_task() -> dict:
         engine.dispose()
 
     return {"alerts": len(alerts)}
+
+
+# ── ADR-0003 — zero-touch device API key rotation finalizer ───────────
+@celery_app.task(name="finalize_key_rotations")
+def finalize_key_rotations_task() -> dict:
+    """Promote ``rotated_to_key_hash`` → ``key_hash`` for any device whose
+    rotation grace window has expired.
+
+    Find rows where ``rotation_grace_until IS NOT NULL AND rotation_grace_until < now()``,
+    move ``rotated_to_key_hash`` into ``key_hash``, clear both grace columns,
+    delete the Redis hint. After this runs, the OLD key no longer
+    authenticates — the device must use the new key (which it should
+    already have picked up via the device-health hint during the grace
+    window).
+
+    Idempotent: a row whose grace has expired but whose ``rotated_to_key_hash``
+    is NULL is skipped (defensive — should never happen, but cheaper than a
+    crash).
+    """
+    from sqlalchemy import create_engine, select, and_
+    from sqlalchemy.orm import Session
+
+    from app.models.device_api_key import DeviceApiKey
+    from app.services.rotation_hint import delete_rotation_hint_sync
+
+    now = datetime.utcnow()
+    promoted: list[dict] = []
+
+    logger.info(
+        "finalize_key_rotations_start",
+        extra={"event": "finalize_key_rotations_start", "now": now.isoformat() + "Z"},
+    )
+
+    engine = create_engine(settings.database_url_sync, pool_pre_ping=True)
+    try:
+        with Session(engine) as db:
+            rows = db.execute(
+                select(DeviceApiKey).where(
+                    and_(
+                        DeviceApiKey.rotation_grace_until.isnot(None),
+                        DeviceApiKey.rotation_grace_until < now,
+                    )
+                )
+            ).scalars().all()
+
+            for row in rows:
+                if not row.rotated_to_key_hash:
+                    # Defensive: grace expired with no new hash. Just clear
+                    # the grace timestamp so we don't keep selecting the row.
+                    row.rotation_grace_until = None
+                    continue
+
+                old_prefix = row.key_hash[:8] if row.key_hash else "????????"
+                new_prefix = row.rotated_to_key_hash[:8]
+                row.key_hash = row.rotated_to_key_hash
+                row.rotated_to_key_hash = None
+                row.rotation_grace_until = None
+
+                # Best-effort hint delete; the Redis TTL would clean up
+                # eventually anyway.
+                delete_rotation_hint_sync(str(row.id))
+
+                entry = {
+                    "event": "rotate_key_finalized",
+                    "device_id": str(row.id),
+                    "device_label": row.label,
+                    "old_key_prefix": old_prefix,
+                    "new_key_prefix": new_prefix,
+                }
+                logger.info("rotate_key_finalized", extra=entry)
+                promoted.append(entry)
+
+            if rows:
+                db.commit()
+
+        logger.info(
+            "finalize_key_rotations_done",
+            extra={
+                "event": "finalize_key_rotations_done",
+                "promoted_count": len(promoted),
+            },
+        )
+    except Exception as exc:
+        logger.error(
+            "finalize_key_rotations_failed",
+            extra={
+                "event": "finalize_key_rotations_failed",
+                "error": str(exc),
+            },
+        )
+        raise
+    finally:
+        engine.dispose()
+
+    return {"promoted": len(promoted)}

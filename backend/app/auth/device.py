@@ -1,11 +1,23 @@
-"""Device API key authentication dependency for field controllers."""
+"""Device API key authentication dependency for field controllers.
+
+ADR-0003 (2026-04-24) extends the original single-key match to a dual-key
+match during a 24h rotation grace window. Either ``key_hash`` (the primary
+key) or ``rotated_to_key_hash`` (the new key, valid only while
+``rotation_grace_until > now()``) authenticates a field-controller request.
+
+The auth dep tags the returned ``DeviceApiKey`` ORM instance with a
+transient ``_authenticated_via_old_key`` attribute so the device-health
+endpoint can decide whether to emit the ``rotated_key`` hint in its
+response. The attribute is never persisted (SQLAlchemy ignores attributes
+that aren't mapped columns).
+"""
 
 import hashlib
 import logging
 from datetime import datetime
 
 from fastapi import Depends, Header, HTTPException, Request, status
-from sqlalchemy import select
+from sqlalchemy import or_, select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -26,6 +38,12 @@ async def validate_device_api_key(
     The raw key is never stored — only its SHA-256 digest.  A 401 is returned for
     any key that is missing, unknown, or has been revoked.
 
+    During an ADR-0003 rotation grace window, the dependency also accepts
+    ``rotated_to_key_hash`` (provided ``rotation_grace_until > now()``).
+    The matched row is tagged with ``_authenticated_via_old_key`` so callers
+    (the device-health endpoint) can branch on which credential the device
+    presented.
+
     Logs WARN-level structured events on auth failure so a stale-APK incident
     can be diagnosed from logs alone (see ADR-0002). The raw key is never
     logged — only the first 8 chars of the SHA-256 digest (`key_prefix`).
@@ -39,10 +57,18 @@ async def validate_device_api_key(
     key_hash = hashlib.sha256(x_device_api_key.encode()).hexdigest()
     key_prefix = key_hash[:8]
 
+    now = datetime.utcnow()
     result = await db.execute(
         select(DeviceApiKey).where(
-            DeviceApiKey.key_hash == key_hash,
             DeviceApiKey.is_active.is_(True),
+            or_(
+                DeviceApiKey.key_hash == key_hash,
+                and_(
+                    DeviceApiKey.rotated_to_key_hash == key_hash,
+                    DeviceApiKey.rotation_grace_until.isnot(None),
+                    DeviceApiKey.rotation_grace_until > now,
+                ),
+            ),
         )
     )
     device_key = result.scalar_one_or_none()
@@ -84,9 +110,21 @@ async def validate_device_api_key(
             detail="Invalid or revoked device API key",
         )
 
+    # Tag the matched row with which credential authenticated. The
+    # device-health endpoint reads this attribute to decide whether to
+    # emit the ADR-0003 ``rotated_key`` hint. It is a runtime-only
+    # attribute (not a mapped column) — SQLAlchemy ignores it on flush.
+    authenticated_via_old_key = (
+        device_key.key_hash == key_hash
+        and device_key.rotated_to_key_hash is not None
+        and device_key.rotation_grace_until is not None
+        and device_key.rotation_grace_until > now
+    )
+    device_key._authenticated_via_old_key = authenticated_via_old_key  # type: ignore[attr-defined]
+
     # Record last-used timestamp (best effort — do not fail the request if this write fails)
     try:
-        device_key.last_used_at = datetime.utcnow()
+        device_key.last_used_at = now
     except Exception:
         pass
 

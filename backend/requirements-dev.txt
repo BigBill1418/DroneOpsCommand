@@ -1,0 +1,9 @@
+# Test-only dependencies for `backend/tests/`. Install via:
+#   pip install -r requirements.txt -r requirements-dev.txt
+#
+# Pinned to versions compatible with the prod runtime. Specifically the
+# pytest-asyncio version below works with sqlalchemy[asyncio]==2.0.36
+# and httpx==0.28.1 (already in requirements.txt).
+pytest==8.3.4
+pytest-asyncio==0.24.0
+fakeredis==2.26.1

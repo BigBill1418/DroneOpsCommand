@@ -4,6 +4,27 @@ Maintained alongside `CHANGELOG.md` and `docs/adr/`. `CHANGELOG.md` is
 the ledger of shipped changes; this file tracks what's in-flight or
 blocked.
 
+## 2026-04-24 EVENING — SHIPPED PR: Zero-touch device API key rotation (ADR-0003 / FU-7)
+
+Backend v2.63.6, paired with DroneOpsSync v1.3.25. Closes the manual key-paste step that the 2026-04-24 morning incident required.
+
+**Branch:** `claude/zero-touch-key-rotation-backend` (PR open, **not merged** — operator reviews per the routine spec).
+
+**What landed:**
+
+- Two nullable columns on `device_api_keys` (`rotated_to_key_hash`, `rotation_grace_until`); additive, failover-safe per CLAUDE.md §Failover Guard.
+- Dual-key auth in `validate_device_api_key` during grace.
+- New admin endpoint `POST /api/admin/devices/{device_id}/rotate-key`.
+- Redis side-channel for the raw new-key hint (`app.services.rotation_hint`); fail-closed if Redis is down.
+- Device-health response emits `rotated_key` + `rotation_grace_until` ONLY for OLD-key auth during grace; transparent to existing clients.
+- Celery finalizer task on 15-min beat (`finalize_key_rotations_task`).
+- Single Pushover FYI per rotation; env-gated like the rest of ADR-0002 §5.
+- 15 unit tests, all green; `backend/tests/` infrastructure bootstrapped (`pytest.ini`, `conftest.py`, `requirements-dev.txt`).
+
+**Notable about the routine handoff:** Claude Code remote routine `trig_01KiBK88vqs6vtRf75rkxcw8` shipped an empty branch on its first run. aegis re-ran the spec from this conversation and produced both PRs. ROADMAP FU-7 closed.
+
+**Not deployed yet** — operator merge → `update.sh` rebuild on BOS-HQ → Celery beat picks up the new task on next worker restart.
+
 ## 2026-04-24 — SHIPPED: DroneOpsSync prevention mechanisms + landscape lock (ADR-0002 §5)
 
 Backend v2.63.5 / companion v2.62.1. Bill's uploads are recoverable per §4.1 (operator paste the rotated `M4TD` key on his RC Pro); this follow-up makes the class of failure non-recurrent.
