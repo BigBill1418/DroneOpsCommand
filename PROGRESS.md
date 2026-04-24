@@ -193,3 +193,28 @@ Unset = no-op. Nothing in the app code fails if these are absent.
   operators just paste the DSN.
 - **Dashboards (Aegis-F / Phase 7).** DroneOps-specific Grafana
   dashboards aren't in scope for this phase; Aegis-F is planning them.
+
+---
+
+## 2026-04-24 PM — Capacitor companion abandoned; Kotlin path restored; v1.3.25 queued
+
+### Completed
+- `companion/` directory deleted from this repo (commit `4b87e65`, 20 files / 5,306 lines). Abandoned Capacitor fork had zero device installs after 4 weeks of parallel-track work. ADR-0002 §7 added cross-linking DroneOpsSync ADR-0001. Workflow `.github/workflows/companion-apk.yml` removed.
+- Three orphan GH releases (`companion-v2.61.5`, `companion-v2.62.0`, `companion-v2.62.1`) edited with `⚠ ABANDONED` banner pointing at DroneOpsSync repo.
+- BOS-HQ Pushover watchdog verified end-to-end. `~/droneops/.env` already had `PUSHOVER_TOKEN` + `PUSHOVER_USER_KEY` set this morning (06:51Z); container `droneops-backend-1` has both vars loaded; `curl api.pushover.net/1/users/validate.json` returns `status:1, devices:["PrimaryPhoneS25"]`. Smoke-test notification `3eac9d51-fc67-4248-8a8a-038daac5a023` delivered to Bill's phone. ADR-0002 §5 layers 3+4 can now page the operator.
+
+### Scheduled (not yet executed)
+- Remote routine `trig_01KiBK88vqs6vtRf75rkxcw8` (https://claude.ai/code/routines/trig_01KiBK88vqs6vtRf75rkxcw8, fired 2026-04-24T18:58Z) will open PRs for zero-touch device API key rotation. This repo lands ADR-0003 + backend grace-window + dual-key auth + celery finalizer + Pushover FYI. Paired with DroneOpsSync v1.3.25 that parses the `rotated_key` field from preflight response.
+
+### Decisions
+- Real DroneOps companion app lives in `BigBill1418/DroneOpsSync` (native Kotlin), NOT in this repo. A future session that wants to "fix the companion" MUST work there. `feedback_verify_before_planning` applied — verifying which codebase actually runs on Bill's RC Pro before planning should have been step 1 this morning, not step N.
+- Pushover token in `~/droneops/.env` is a dedicated DroneOps app (distinct from NOC's), giving DroneOps its own rate-limit bucket and notification identity on Bill's phone. USER_KEY matches NOC canonical.
+
+### Evidence
+- DroneOpsCommand `main` HEAD: `4b87e65` (companion removal).
+- DroneOpsSync `main` HEAD: `832585c` (v1.3.24 released, 4 commits land since `cae8c30`).
+- DroneOpsSync release v1.3.24: https://github.com/BigBill1418/DroneOpsSync/releases/tag/v1.3.24 — signer fingerprint identical to v1.3.23.
+
+### Next
+- Wait for `trig_01KiBK88vqs6vtRf75rkxcw8`; review + squash-merge PRs when they arrive.
+- No backend changes land until those PRs merge. Current HEAD is production-stable.

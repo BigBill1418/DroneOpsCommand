@@ -109,3 +109,10 @@ a different controller.
 None yet captured here. When a new forward-looking plan is drafted,
 append it under its own heading with the same Scope / Trigger /
 Deliverable / Owner block structure.
+
+### FU-7 — Zero-touch device API key rotation (scheduled 2026-04-24T18:58Z)
+
+- **Scope.** Backend grace-window dual-key auth + rotated-key hint in `/api/flight-library/device-health` response + celery finalizer task + Pushover FYI. Paired with DroneOpsSync v1.3.25 Kotlin client that parses the hint and auto-updates its stored key.
+- **Trigger.** Bill rotated M4TD in-place 2026-04-24 AM; operator had to manually paste new key on RC Pro Settings. v1.3.24's preflight gate surfaced the invalid-key state correctly, but eliminating the paste step is the real goal.
+- **Deliverable.** ADR-0003 + migration + endpoint + Celery task + tests; open PR. Remote routine `trig_01KiBK88vqs6vtRf75rkxcw8` (https://claude.ai/code/routines/trig_01KiBK88vqs6vtRf75rkxcw8) produces both PRs (this repo + DroneOpsSync).
+- **Owner.** Remote-agent scaffold; Bill reviews + merges.
