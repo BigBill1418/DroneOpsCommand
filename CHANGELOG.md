@@ -4,6 +4,23 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## [2.63.11] — 2026-04-24 — docs: ADR-0004/0005 finalized; perf-audit series complete (FIX-5)
+
+Fifth and final commit of the 2026-04-24 perf audit. Code-only this is
+a no-op; documentation completes the loop.
+
+- ADR-0004 status flipped from `proposed` to `accepted` with a pointer
+  to ADR-0005 for the AFTER measurements.
+- ADR-0005 final summary table populated with BOS-HQ measurements,
+  acceptance verdict against plan §6 thresholds, anti-goals respected
+  list, honest deltas section, and follow-up parking lot.
+- ROADMAP unchanged (per audit, F-7 / F-8 / F-9 already entered there
+  during the audit phase).
+- Final headline: weather endpoint p95 7.4-8.3 s → 6-19 ms warm
+  (~400-1200× faster) / 1.09 s cold (6.8-7.6× faster); 30-parallel
+  `/api/customers` p95 est. 1.5-3.0 s → 0.27 s warm (5.5-11×); frontend
+  main bundle 1.9 MB → 81 KB (23.5×).
+
 ## [2.63.10] — 2026-04-24 — perf: client-side `useApiCache` hook + Dashboard adoption (FIX-4, ADR-0005)
 
 Fourth of five performance fixes from the 2026-04-24 perf audit. Targets

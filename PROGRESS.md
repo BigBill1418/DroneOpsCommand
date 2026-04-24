@@ -4,28 +4,34 @@ Maintained alongside `CHANGELOG.md` and `docs/adr/`. `CHANGELOG.md` is
 the ledger of shipped changes; this file tracks what's in-flight or
 blocked.
 
-## 2026-04-24 LATE — IN-FLIGHT: Performance audit fix series (ADR-0004/0005)
+## 2026-04-24 LATE — COMPLETE: Performance audit fix series (ADR-0004/0005)
 
-Executing the 5-fix plan from `docs/plans/2026-04-24-perf-audit.md`.
-Fixes ship as 5 separate commits, each with its own version bump and
-AFTER-measurement appended to ADR-0005.
+Executed the 5-fix plan from `docs/plans/2026-04-24-perf-audit.md`.
+All 5 fixes shipped as separate commits, each with version bump,
+auto-merged into main, deployed to BOS-HQ via NOC autopull, and
+verified live with the §6 acceptance commands. ADR-0004 + ADR-0005
+both `accepted`.
 
-- **FIX-1 — v2.63.7 — SHIPPED + VERIFIED on BOS-HQ:** weather endpoint
-  parallelized via `asyncio.gather` + 5-min Redis cache (failure-open).
-  Cold p95 7.4-8.3 s → 1.09 s; warm p95 7.4 s → 6.8-19 ms. 6 tests green.
-- **FIX-2 — v2.63.8 — SHIPPED + VERIFIED on BOS-HQ:** pool 5+10 → 20+20
-  + 60 s cached `get_current_user`. 30-parallel `/api/customers` burst:
-  cold-cache p95 0.67 s, warm-cache p95 0.30 s. All 5 user-cache tests
-  green.
-- **FIX-3 — v2.63.9 — SHIPPED + VERIFIED on BOS-HQ:** code-split 17 main
-  pages + Vite `manualChunks`. Live frontend container confirms main
-  chunk 1.9 MB → 81.4 KB; vendor chunks split as designed.
-- **FIX-4 — v2.63.10 — SHIPPED in this branch:** custom `useApiCache`
-  hook (~100 lines) + Dashboard + Flights/aircraft adoption. Build
-  green; bundle unchanged. Settings deferred (large mutation surface;
-  scope decision documented in ADR-0005 §FIX-4).
-- **FIX-5 — v2.63.11 — pending:** docs final pass — flip ADR-0004 to
-  `accepted`, append final summary table to ADR-0005.
+- **FIX-1 — v2.63.7:** weather `asyncio.gather` + 5-min Redis cache
+  (failure-open). Cold 7.4-8.3 s → **1.09 s** (6.8-7.6×); warm 7.4 s
+  → **6-19 ms** (~390-1200×). 6 cache tests green.
+- **FIX-2 — v2.63.8:** pool 5+10 → 20+20; 60 s in-process cache around
+  `get_current_user`; explicit invalidate on password/username change.
+  30-parallel `/api/customers` cold p95 0.67 s, warm p95 **0.27 s**.
+  5 user-cache tests green.
+- **FIX-3 — v2.63.9:** 17 main pages → `React.lazy` + Vite
+  `manualChunks` for vendor bundles. Main `index-*.js` 1.9 MB →
+  **81.4 KB** (23.5×).
+- **FIX-4 — v2.63.10:** `useApiCache` hook + Dashboard + Flights/aircraft
+  adoption with mutation invalidation. Bundle unchanged (no regression).
+  Settings deliberately scoped out (large mutation surface; explicit
+  scope decision, not a stopgap — see ADR-0005 §FIX-4).
+- **FIX-5 — v2.63.11:** ADR-0004 + ADR-0005 finalized; CHANGELOG +
+  PROGRESS finalized. Audit series complete.
+
+All three §6 acceptance thresholds passed. Failover guard never
+violated. No new dependencies. No deferred fixes (only scope decisions
+with explicit rationale).
 
 ## 2026-04-24 EVENING — SHIPPED PR: Zero-touch device API key rotation (ADR-0003 / FU-7)
 

@@ -1,6 +1,6 @@
 # ADR-0004 — Performance Audit Baseline (2026-04-24)
 
-**Status:** proposed (becomes `accepted` once aegis lands FIX-1..4 and appends AFTER measurements)
+**Status:** accepted (2026-04-24 — all 4 fixes shipped + verified live on BOS-HQ; AFTER measurements appended to ADR-0005)
 **Date:** 2026-04-24
 **HEAD at audit:** `e0295a1` (v2.63.6)
 **Related plan:** `docs/plans/2026-04-24-perf-audit.md`
@@ -159,8 +159,14 @@ Per repo CLAUDE.md "Repair & Fix Quality Standard":
 
 ## AFTER measurements (post-fix)
 
-> _Aegis: append the §6 acceptance block from the plan here once FIX-1..4 are deployed and the verification commands have been run. Flip the Status field at the top from `proposed` to `accepted` only after all three acceptance thresholds in §6 of the plan have passed._
+All AFTER measurements live in **ADR-0005** (`docs/adr/0005-perf-audit-results.md`).
+Each fix has its own subsection with verification command output, delta
+table, and acceptance note. The final summary appears at the end of
+that ADR.
 
-```text
-[ pending — populated by aegis post-deploy ]
-```
+Headline deltas (BOS-HQ live, 2026-04-24):
+- `/api/weather/current` p95 **7.4-8.3 s → 6.8-19 ms** (warm cache).
+- 30-parallel `/api/customers` p95 **est. 1.5-3.0 s → 0.27 s** (warm).
+- Frontend main `index-*.js` **1.9 MB → 81.4 KB**.
+
+All three §6 acceptance thresholds in the perf plan **passed**.
