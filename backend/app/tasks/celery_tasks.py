@@ -1,8 +1,9 @@
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from celery import Celery
+from celery.schedules import crontab
 from celery.signals import after_setup_logger, after_setup_task_logger, heartbeat_sent, worker_ready
 from pythonjsonlogger import json as json_logger
 
@@ -56,6 +57,17 @@ celery_app.conf.update(
     timezone="UTC",
     enable_utc=True,
 )
+
+# ADR-0002 §5 layer 3 — silent-drift watchdog schedule.
+# Runs hourly via the `beat` sidecar service in docker-compose.yml.
+# No flag-gating: the check itself is cheap (one SELECT) and Pushover
+# is a no-op if PUSHOVER_TOKEN / PUSHOVER_USER_KEY are unset.
+celery_app.conf.beat_schedule = {
+    "device-silence-watchdog": {
+        "task": "check_device_silence",
+        "schedule": crontab(minute=17),  # offset from the wall-clock hour
+    },
+}
 
 
 # Redis-backed worker heartbeat — replaces the wasteful
@@ -233,3 +245,99 @@ def generate_report_task(
         raise self.retry(exc=exc, max_retries=3, countdown=15)
     finally:
         loop.close()
+
+
+# ── ADR-0002 §5 layer 3 — silent-drift watchdog ───────────────────────
+@celery_app.task(name="check_device_silence")
+def check_device_silence_task() -> dict:
+    """Detect device API keys that were recently active but have gone silent.
+
+    Threshold logic:
+      - Key is "recently active" if `last_used_at` is within
+        `DEVICE_SILENCE_ACTIVITY_WINDOW_DAYS` days (default 7).
+      - Key is "silent" if `last_used_at` is older than
+        `DEVICE_SILENCE_HOURS` hours (default 48).
+      - Intersection = "was flying, stopped flying" — the exact class
+        of drift that caused the 2026-04-23 incident where Bill's RC
+        Pro silently stopped uploading after a Capacitor Preferences
+        wipe.
+
+    Each matching key fires a Pushover alert, deduped by
+    `DEVICE_SILENCE_DEDUP_HOURS` (default 12) so a long outage does
+    not spam Bill's phone. Emits a structured INFO log regardless of
+    whether Pushover is wired, so Loki/Grafana can surface the same
+    signal without Pushover.
+    """
+    from sqlalchemy import create_engine, select, and_
+    from sqlalchemy.orm import Session
+
+    from app.models.device_api_key import DeviceApiKey
+    from app.services.pushover import send_alert_sync
+
+    now = datetime.utcnow()
+    activity_cutoff = now - timedelta(days=settings.device_silence_activity_window_days)
+    silence_cutoff = now - timedelta(hours=settings.device_silence_hours)
+
+    alerts: list[dict] = []
+
+    engine = create_engine(settings.database_url_sync, pool_pre_ping=True)
+    try:
+        with Session(engine) as db:
+            # is_active + last_used_at >= activity_cutoff + last_used_at < silence_cutoff
+            rows = db.execute(
+                select(DeviceApiKey).where(
+                    and_(
+                        DeviceApiKey.is_active.is_(True),
+                        DeviceApiKey.last_used_at.isnot(None),
+                        DeviceApiKey.last_used_at >= activity_cutoff,
+                        DeviceApiKey.last_used_at < silence_cutoff,
+                    )
+                )
+            ).scalars().all()
+
+            for row in rows:
+                hours_silent = int((now - row.last_used_at).total_seconds() // 3600)
+                key_prefix = row.key_hash[:8] if row.key_hash else "????????"
+                entry = {
+                    "event": "device_silence_detected",
+                    "device_id": str(row.id),
+                    "device_label": row.label,
+                    "key_prefix": key_prefix,
+                    "last_used_at": row.last_used_at.isoformat() + "Z",
+                    "hours_silent": hours_silent,
+                    "activity_window_days": settings.device_silence_activity_window_days,
+                    "silence_threshold_hours": settings.device_silence_hours,
+                }
+                logger.warning("device_silence_detected", extra=entry)
+
+                title = f"DroneOps — {row.label} silent for {hours_silent}h"
+                message = (
+                    f"{row.label} (key {key_prefix}) was last seen "
+                    f"{row.last_used_at.isoformat()}Z "
+                    f"({hours_silent}h ago). Threshold: "
+                    f"{settings.device_silence_hours}h. "
+                    "Check controller: Settings → Device not paired banner? "
+                    "Re-paste key if needed."
+                )
+                dedup = f"device_silence:{row.id}"
+                send_alert_sync(
+                    title,
+                    message,
+                    dedup_key=dedup,
+                    dedup_ttl_seconds=settings.device_silence_dedup_hours * 3600,
+                )
+                alerts.append(entry)
+
+        logger.info(
+            "device_silence_sweep",
+            extra={
+                "event": "device_silence_sweep",
+                "alert_count": len(alerts),
+                "activity_window_days": settings.device_silence_activity_window_days,
+                "silence_threshold_hours": settings.device_silence_hours,
+            },
+        )
+    finally:
+        engine.dispose()
+
+    return {"alerts": len(alerts)}

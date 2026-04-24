@@ -111,6 +111,58 @@ if (manifest.includes('MANAGE_EXTERNAL_STORAGE')) {
   changed = true;
 }
 
+// ── Landscape orientation lock (ADR-0002 §5) ─────────────────────────
+// DJI RC Pro is physically locked in landscape. A twist-of-wrist rotate
+// event that re-created the MainActivity would destroy the Capacitor
+// WebView, hide the "device not paired" red banner, and interrupt an
+// in-progress upload. Lock every <activity> to sensorLandscape so the
+// OS refuses to flip orientation; add configChanges so any device that
+// *does* send a config event doesn't recreate the activity.
+//
+// Rationale for sensorLandscape vs landscape: DJI RC Pro and DJI RC 2
+// are always landscape but can be flipped 180° in some mounts. sensorLandscape
+// allows both landscape-left and landscape-right but never portrait.
+{
+  const activityRe = /<activity\b([^>]*?)\/?>/g;
+  let activitiesPatched = 0;
+  manifest = manifest.replace(activityRe, (match, attrs) => {
+    let newAttrs = attrs;
+    if (!/android:screenOrientation=/.test(newAttrs)) {
+      newAttrs = ` android:screenOrientation="sensorLandscape"${newAttrs}`;
+    }
+    // Ensure configChanges covers orientation+screenSize so OS doesn't
+    // recreate the activity on device-layout events.
+    if (!/android:configChanges=/.test(newAttrs)) {
+      newAttrs = ` android:configChanges="orientation|screenSize|keyboardHidden|screenLayout"${newAttrs}`;
+    } else {
+      // Already present — make sure the required tokens are set.
+      newAttrs = newAttrs.replace(
+        /android:configChanges="([^"]*)"/,
+        (_m, existing) => {
+          const tokens = new Set(existing.split('|').map((t) => t.trim()).filter(Boolean));
+          ['orientation', 'screenSize', 'keyboardHidden', 'screenLayout'].forEach((t) => tokens.add(t));
+          return `android:configChanges="${[...tokens].join('|')}"`;
+        },
+      );
+    }
+    activitiesPatched++;
+    // Preserve self-closing vs open form.
+    const trailing = match.endsWith('/>') ? '/>' : '>';
+    return `<activity${newAttrs}${trailing}`;
+  });
+  if (activitiesPatched > 0) {
+    console.log(`  + Locked ${activitiesPatched} activity/ies to sensorLandscape + configChanges`);
+    changed = true;
+  }
+}
+
+// Final safety check — no <activity> should declare android:screenOrientation="portrait".
+// If we find one, it's a regression from a future Capacitor upgrade.
+if (/android:screenOrientation="portrait"/.test(manifest)) {
+  console.error('  ! FATAL: an <activity> still declares screenOrientation="portrait" — DJI RC Pro is landscape-only.');
+  process.exit(1);
+}
+
 if (changed) {
   fs.writeFileSync(MANIFEST, manifest, 'utf8');
   console.log('\n  Manifest saved.');

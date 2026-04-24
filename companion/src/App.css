@@ -97,6 +97,18 @@ html, body, #root {
   padding: 20px;
 }
 
+/* ADR-0002 §5 layer 1+2 — persistent red banner for unpaired / preflight-failed state. */
+.warning-banner {
+  border: 2px solid var(--red);
+  background: rgba(255, 77, 106, 0.08);
+}
+.warning-banner .status-title {
+  font-family: var(--font-heading);
+  font-size: 20px;
+  letter-spacing: 2px;
+  margin-bottom: 8px;
+}
+
 .card-title {
   font-family: var(--font-heading);
   font-size: 18px;

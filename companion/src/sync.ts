@@ -84,6 +84,94 @@ export interface HealthResult {
   upload_endpoint: string;
 }
 
+/**
+ * Structured pairing state — rendered as a persistent red banner in the
+ * UI when `paired === false`, so the operator sees "device not paired"
+ * instead of silently-failed uploads. `reason` is the diagnostic
+ * surface used by both the banner copy and the diag-log tab.
+ *
+ * ADR-0002 §5 layer 1 (companion-side "not configured" state).
+ */
+export type PairingState =
+  | { paired: true }
+  | { paired: false; reason: 'missing_url' | 'missing_key' | 'invalid_url'; detail?: string };
+
+export function checkPairing(cfg: { serverUrl: string; apiKey: string }): PairingState {
+  if (!cfg.serverUrl?.trim()) return { paired: false, reason: 'missing_url' };
+  if (!cfg.apiKey?.trim()) return { paired: false, reason: 'missing_key' };
+  try {
+    validateServerUrl(cfg.serverUrl);
+  } catch (err: any) {
+    return { paired: false, reason: 'invalid_url', detail: err?.message };
+  }
+  return { paired: true };
+}
+
+/**
+ * Pre-sync health gate — run BEFORE every auto-sync or explicit upload.
+ * Wraps `checkHealth` and returns a structured result instead of
+ * throwing into a catch-all. The caller decides whether to proceed
+ * with the upload attempt.
+ *
+ * Returns `{ ok: true, health }` if the server is reachable and the key
+ * is valid. Returns `{ ok: false, code, message }` otherwise. `code`
+ * maps one-to-one to server-side events: `unreachable`, `invalid_key`,
+ * `revoked_key`, `server_error`.
+ *
+ * ADR-0002 §5 layer 2 (companion-side health gate before every sync).
+ * Eliminates the "silently try and fail" anti-pattern from the
+ * 2026-04-23 incident — the caller now knows WHY upload is blocked
+ * and can surface it in the UI.
+ */
+export interface PreflightOk {
+  ok: true;
+  health: HealthResult;
+}
+export interface PreflightFail {
+  ok: false;
+  code: 'unreachable' | 'invalid_key' | 'revoked_key' | 'server_error';
+  status?: number;
+  message: string;
+}
+export type PreflightResult = PreflightOk | PreflightFail;
+
+export async function preflightHealth(serverUrl: string, apiKey: string): Promise<PreflightResult> {
+  let base: string;
+  try {
+    base = validateServerUrl(serverUrl);
+  } catch (err: any) {
+    return { ok: false, code: 'server_error', message: err?.message || 'Invalid server URL' };
+  }
+  const url = `${base}/api/flight-library/device-health`;
+  let resp: Response;
+  try {
+    resp = await fetch(url, {
+      method: 'GET',
+      headers: { 'X-Device-Api-Key': apiKey },
+    });
+  } catch (err: any) {
+    return {
+      ok: false,
+      code: 'unreachable',
+      message: `Cannot reach ${base} — check Wi-Fi and server status${err?.message ? ` (${err.message})` : ''}`,
+    };
+  }
+  if (resp.status === 401) {
+    return { ok: false, code: 'invalid_key', status: 401, message: 'Invalid or revoked API key — re-paste from Settings → Device Access' };
+  }
+  if (!resp.ok) {
+    let body = '';
+    try { body = (await resp.text()).slice(0, 200); } catch { /* ignore */ }
+    return { ok: false, code: 'server_error', status: resp.status, message: `Server returned ${resp.status}${body ? ` — ${body}` : ''}` };
+  }
+  try {
+    const health = (await resp.json()) as HealthResult;
+    return { ok: true, health };
+  } catch {
+    return { ok: false, code: 'server_error', message: 'Server returned non-JSON body on /device-health' };
+  }
+}
+
 // ── URL validation (ADR-0002) ─────────────────────────────────────────
 /**
  * Reject plaintext `http://` base URLs unless the host is RFC-1918,

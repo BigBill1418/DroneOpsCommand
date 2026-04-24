@@ -7,6 +7,13 @@ const config: CapacitorConfig = {
   android: {
     // Allow HTTP for LAN connections (cleartext to local IPs)
     allowMixedContent: true,
+    // DJI RC Pro is physically fixed in landscape; a rotate reflow would
+    // momentarily hide the "device not paired" banner and destroy the
+    // Capacitor WebView. The manifest patch (scripts/patch-android.cjs)
+    // is what actually enforces this at the OS level — this field is
+    // informational for any Capacitor 6+ tooling that reads it.
+    // See ADR-0002 §5.
+    orientation: 'landscape',
   },
   server: {
     // Capacitor WebView origin — needed so fetch() works to any host

@@ -8,8 +8,10 @@ from fastapi import Depends, Header, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.database import get_db
 from app.models.device_api_key import DeviceApiKey
+from app.services.pushover import send_alert
 
 logger = logging.getLogger("doc.device_auth")
 
@@ -27,6 +29,12 @@ async def validate_device_api_key(
     Logs WARN-level structured events on auth failure so a stale-APK incident
     can be diagnosed from logs alone (see ADR-0002). The raw key is never
     logged — only the first 8 chars of the SHA-256 digest (`key_prefix`).
+
+    ADR-0002 §5 layer 4 — on auth failure we fire a Pushover alert,
+    deduped to the first occurrence of a given (key_prefix, ip) pair
+    per hour. This catches the "key rotated but device still trying"
+    class of drift that the server CAN see (the device did reach the
+    backend but with a stale credential).
     """
     key_hash = hashlib.sha256(x_device_api_key.encode()).hexdigest()
     key_prefix = key_hash[:8]
@@ -52,6 +60,25 @@ async def validate_device_api_key(
                 "path": request.url.path,
             },
         )
+
+        # Fire Pushover alert — first occurrence per (key_prefix, ip) per
+        # hour. Best-effort; never blocks the 401 response. We send on
+        # DEVICE-key paths only (device-health + device-upload) — other
+        # routes that happen to share this dependency should not alert.
+        path = request.url.path
+        if "/device-" in path:
+            await send_alert(
+                title=f"DroneOps — stale device key attempt from {client_ip}",
+                message=(
+                    f"401 on {path} — key prefix {key_prefix} does not "
+                    f"match any active device_api_keys row. Likely a "
+                    f"controller with a revoked or post-rotation key. "
+                    f"UA: {user_agent[:120]}"
+                ),
+                dedup_key=f"device_auth_failed:{key_prefix}:{client_ip}",
+                dedup_ttl_seconds=3600,
+            )
+
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or revoked device API key",

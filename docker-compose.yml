@@ -167,7 +167,14 @@ services:
       - OTEL_SERVICE_NAME=droneops-api
       - TENANT=${TENANT:-shared}
       - ENV=${ENV:-prod}
-      - APP_VERSION=2.63.1
+      - APP_VERSION=2.63.5
+      # ADR-0002 §5 — Pushover alerts for device silence + first-401.
+      # Unset = no-op (structured JSON logs still emit).
+      - PUSHOVER_TOKEN=${PUSHOVER_TOKEN:-}
+      - PUSHOVER_USER_KEY=${PUSHOVER_USER_KEY:-}
+      - DEVICE_SILENCE_ACTIVITY_WINDOW_DAYS=${DEVICE_SILENCE_ACTIVITY_WINDOW_DAYS:-7}
+      - DEVICE_SILENCE_HOURS=${DEVICE_SILENCE_HOURS:-48}
+      - DEVICE_SILENCE_DEDUP_HOURS=${DEVICE_SILENCE_DEDUP_HOURS:-12}
     volumes:
       - app_data:/data
     ports:
@@ -250,7 +257,13 @@ services:
       - OTEL_SERVICE_NAME=droneops-worker
       - TENANT=${TENANT:-shared}
       - ENV=${ENV:-prod}
-      - APP_VERSION=2.63.1
+      - APP_VERSION=2.63.5
+      # ADR-0002 §5 — Pushover alerts from silence watchdog task.
+      - PUSHOVER_TOKEN=${PUSHOVER_TOKEN:-}
+      - PUSHOVER_USER_KEY=${PUSHOVER_USER_KEY:-}
+      - DEVICE_SILENCE_ACTIVITY_WINDOW_DAYS=${DEVICE_SILENCE_ACTIVITY_WINDOW_DAYS:-7}
+      - DEVICE_SILENCE_HOURS=${DEVICE_SILENCE_HOURS:-48}
+      - DEVICE_SILENCE_DEDUP_HOURS=${DEVICE_SILENCE_DEDUP_HOURS:-12}
     volumes:
       - app_data:/data
     depends_on:
@@ -261,6 +274,38 @@ services:
     labels:
       <<: *barnardhq-labels
       com.barnardhq.service: "droneops-worker"
+    logging: *logging
+
+  # ── Celery beat scheduler ─────────────────────────────────────────
+  # Single-replica process that enqueues periodic tasks defined in
+  # `celery_app.conf.beat_schedule`. Kept separate from the worker so
+  # a worker restart does not skip a scheduled tick. ADR-0002 §5.
+  beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    init: true
+    command: celery -A app.tasks.celery_tasks beat --loglevel=info --schedule=/data/celerybeat-schedule
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://doc:changeme_in_production@db:5432/doc}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - TENANT=${TENANT:-shared}
+      - ENV=${ENV:-prod}
+      - APP_VERSION=2.63.5
+      - PUSHOVER_TOKEN=${PUSHOVER_TOKEN:-}
+      - PUSHOVER_USER_KEY=${PUSHOVER_USER_KEY:-}
+      - DEVICE_SILENCE_ACTIVITY_WINDOW_DAYS=${DEVICE_SILENCE_ACTIVITY_WINDOW_DAYS:-7}
+      - DEVICE_SILENCE_HOURS=${DEVICE_SILENCE_HOURS:-48}
+      - DEVICE_SILENCE_DEDUP_HOURS=${DEVICE_SILENCE_DEDUP_HOURS:-12}
+    volumes:
+      - app_data:/data
+    depends_on:
+      redis:
+        condition: service_healthy
+    labels:
+      <<: *barnardhq-labels
+      com.barnardhq.service: "droneops-beat"
     logging: *logging
 
   flight-parser:
@@ -294,7 +339,7 @@ services:
         # any `VITE_*` var that's in scope when `npm run build` runs.
         VITE_SENTRY_DSN: ${VITE_SENTRY_DSN:-}
         VITE_SENTRY_ENVIRONMENT: ${VITE_SENTRY_ENVIRONMENT:-production}
-        VITE_APP_VERSION: "2.63.1"
+        VITE_APP_VERSION: "2.63.5"
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8080/ || exit 1"]

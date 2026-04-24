@@ -4,6 +4,44 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-04-24 — DroneOpsSync prevention mechanisms + landscape lock — v2.63.5 (backend) / v2.62.1 (companion) (ADR-0002 §5)
+
+Follow-up to the 2026-04-23 Capacitor `Preferences` wipe that lost three flight days on Bill's RC Pro. The §4.1 rotation restored Bill's uploads; this commit ships the safety net so the class of bug cannot recur silently on any controller.
+
+### Landscape orientation lock (companion v2.62.1)
+
+DJI RC Pro is physically landscape-only. A rotate reflow would destroy the Capacitor WebView, kill in-progress fetches, and momentarily hide the new pairing banner.
+
+- `companion/scripts/patch-android.cjs` now injects `android:screenOrientation="sensorLandscape"` on every `<activity>` after `npx cap sync android`, plus `android:configChanges="orientation|screenSize|keyboardHidden|screenLayout"` so rogue config events don't cause activity recreation. Build-time fail-hard if any `screenOrientation="portrait"` survives.
+- `companion/capacitor.config.ts` — `android.orientation = "landscape"` for tooling consistency.
+- `sensorLandscape` chosen over `landscape` so mounts that flip the controller 180° still work; portrait refused in both cases.
+- No iOS target exists for this companion; `Info.plist` not touched.
+
+### Layered silent-drift watchdog
+
+Four defenses, all ON by default. Layers 3 + 4 deliver Pushover alerts when `PUSHOVER_TOKEN` + `PUSHOVER_USER_KEY` are set; unset = structured JSON log only (still visible in Loki/Grafana).
+
+1. **Companion "not configured" banner (layer 1).** `companion/src/sync.ts::checkPairing()` inspects `Preferences` on launch; any missing or malformed `serverUrl` / `apiKey` renders a persistent red banner — "DEVICE NOT PAIRED — Open Settings to re-enter API key" — and skips the auto-sync. No dismiss button; banner stays until pairing is restored. Closes the exact failure mode that lost Bill's 3 flight records.
+2. **Companion preflight health gate (layer 2).** New `preflightHealth()` returns a discriminated `{ok, code, message}` instead of throwing. `App.tsx::runSync` uses it before any upload; failures (`unreachable`, `invalid_key`, `server_error`) surface as operator-friendly banner copy and the upload is never attempted against a known-broken path. Ends the "try silently, fail silently, retry silently" loop.
+3. **Server-side silence watchdog (layer 3).** New Celery beat schedule runs `check_device_silence_task` every hour at minute 17 (offset from on-the-hour cron collisions). Detects keys that were recently active (`last_used_at >= now - 7d`) but have gone silent (`last_used_at < now - 48h`) and fires a single Pushover alert per key, deduped 12h via Redis. Thresholds env-tunable: `DEVICE_SILENCE_ACTIVITY_WINDOW_DAYS`, `DEVICE_SILENCE_HOURS`, `DEVICE_SILENCE_DEDUP_HOURS`. Dedicated `beat` compose service so worker restarts don't skip ticks.
+4. **First-401 alert (layer 4).** `validate_device_api_key` now fires a Pushover alert on auth failure for any `/device-*` path (deduped by `(key_prefix, ip)` for 1h). Catches the "key rotated server-side, old device still trying" drift the server CAN see.
+
+### Shipped
+
+- Backend `v2.63.5` — `beat` service added to `docker-compose.yml` with Pushover + silence-threshold env vars; `app/services/pushover.py` (async + sync dual-path, Redis dedup); `check_device_silence_task` scheduled; first-401 alert in `backend/app/auth/device.py`.
+- Companion `v2.62.1` — `checkPairing()`, `preflightHealth()`, `PairingState` / `PreflightResult` types exported from `companion/src/sync.ts`; persistent red banner + operator-friendly message helpers in `App.tsx`; manifest landscape lock in `patch-android.cjs`; footer bumped; CSS `warning-banner` class added.
+- Demo override disables the `beat` service (silence-watchdog is prod-only); demo `VITE_APP_VERSION` bumped to 2.63.5.
+- ADR-0002 §5 + test plan added; §6 renumbered from old §5 open questions.
+
+### What Bill will notice
+
+- On next APK install: if Preferences are intact, no visible change. If they've been wiped, a red "DEVICE NOT PAIRED" banner appears immediately on launch instead of a silent failed sync.
+- If Bill misconfigures or revokes a key, the banner explains exactly what to do.
+- If a controller hasn't uploaded in 48h despite being recently active, Bill gets one Pushover per controller per 12h (requires `PUSHOVER_TOKEN` + `PUSHOVER_USER_KEY` in the server `.env`).
+- If any device uploads with a stale key, Bill gets one Pushover per (device, IP) per hour.
+
+---
+
 ## 2026-04-24 — DroneOpsSync upload auth — root-cause CORRECTION (ADR-0002 §4.1)
 
 The v2.63.4 commit (`890b875`) hypothesized a stale pre-v2.33 Gson APK as the root cause of Bill's 403 upload. **That hypothesis was wrong.** Bill challenged it and `git show ab32335:companion/src/sync.ts` proved v2.61.5 (the APK actually on his RC Pro per memory) already posts to `/api/flight-library/device-upload` with `X-Device-Api-Key`.

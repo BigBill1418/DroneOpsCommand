@@ -1,6 +1,6 @@
 # ADR-0002 — DroneOpsSync upload auth model + HTTPS-only base URL
 
-- **Status:** **Accepted** — shipped 2026-04-24. Backend v2.63.4, companion v2.62.0. See §4 "Implementation checkpoint" for the actual delivered scope and references.
+- **Status:** **Accepted** — shipped 2026-04-24. Primary fix: backend v2.63.4 / companion v2.62.0 (§4). Prevention-mechanism follow-up: backend v2.63.5 / companion v2.62.1 (§5).
 - **Date:** 2026-04-24
 - **Authors:** Terry (research/architect); implementation handoff to aegis (companion + backend)
 - **Scope:** DroneOpsSync companion app + FastAPI flight-library upload endpoints
@@ -203,7 +203,41 @@ No CF config edits. No code rollback. No `/upload` vs `/device-upload` confusion
 
 ---
 
-## 5. Open questions
+## 5. Prevention mechanisms (shipped 2026-04-24 — backend v2.63.5 / companion v2.62.1)
+
+§4.1 identified the class of bug: device-side config silently drifted (Capacitor `Preferences` wipe), the app kept quietly failing to POST, and three flight days were lost before anyone noticed. A one-time key rotation fixes the immediate symptom but leaves the class of bug free to recur on any controller. This section ships the safety net.
+
+### 5.1 Landscape orientation lock (companion v2.62.1)
+
+DJI RC Pro is physically fixed in landscape. A twist-of-wrist rotate event would recreate the Capacitor `MainActivity`, destroy the WebView (and any in-progress `fetch`), and momentarily hide the pairing banner this section introduces. The lock is applied at three layers:
+
+- **AndroidManifest.xml (authoritative).** `companion/scripts/patch-android.cjs` injects `android:screenOrientation="sensorLandscape"` on every `<activity>` tag after `npx cap sync android`, along with `android:configChanges="orientation|screenSize|keyboardHidden|screenLayout"` so any config event that does arrive is handled by the running activity rather than causing a recreation. A final safety check fails the build if any `screenOrientation="portrait"` survives.
+- **`capacitor.config.ts`.** `android.orientation = "landscape"` — informational for Capacitor 6+ tooling; the manifest patch is what the OS actually reads.
+- **Choice of `sensorLandscape`, not `landscape`.** DJI RC Pro and RC 2 sit landscape but can be mounted 180° flipped in some rigs; `sensorLandscape` accepts landscape-left + landscape-right and refuses portrait, which is the correct envelope. No iOS build exists for this companion (Android-only), so `Info.plist` is not written; if an iOS target is added later, `UISupportedInterfaceOrientations` must also be landscape-left + landscape-right only.
+
+### 5.2 Layered silent-drift watchdog
+
+Four defenses, all ON by default, each catching the failure at a different point. No flag-gating. Layer 3 + 4 require `PUSHOVER_TOKEN` + `PUSHOVER_USER_KEY` to deliver alerts; unset = structured JSON log only (observable via Loki/Grafana) but the watchdog itself still runs.
+
+1. **Companion "not configured" banner (layer 1).** On app launch and after every `saveAndSync`, `companion/src/sync.ts::checkPairing()` inspects Capacitor `Preferences` for `serverUrl` + `apiKey`. Any missing or malformed value renders a persistent red banner at the top of the app — "DEVICE NOT PAIRED — Open Settings to re-enter API key" — and skips the auto-sync that would otherwise fail. The banner stays until pairing is restored; there is no dismiss button. This closes the exact failure mode that lost Bill's 3 flight records.
+
+2. **Companion preflight health gate (layer 2).** `companion/src/sync.ts::preflightHealth()` replaces the old `checkHealth()` call at the top of `runSync`. It returns a structured `{ok, code, message}` discriminated union with `code ∈ { 'unreachable', 'invalid_key', 'revoked_key', 'server_error' }`. Any `ok: false` result renders the red banner with actionable copy (`Server rejected the API key — re-paste from Settings → Device Access`) and the upload is skipped — never attempted against a known-broken path. Eliminates the "try silently, fail silently, retry silently" loop.
+
+3. **Server-side silence watchdog (layer 3).** Celery beat schedule in `backend/app/tasks/celery_tasks.py` runs `check_device_silence_task` hourly (crontab minute=17, offset from the wall-clock hour to avoid colliding with every other on-the-hour cron in the fleet). For each `device_api_keys` row where `is_active=true AND last_used_at >= now - ACTIVITY_WINDOW_DAYS AND last_used_at < now - SILENCE_HOURS`, a Pushover alert fires containing `device_label`, 8-char `key_prefix`, `last_used_at`, and hours-silent. Dedup key `device_silence:{device_id}` holds 12h so a long outage doesn't spam Bill's phone. Thresholds are env-tunable: `DEVICE_SILENCE_ACTIVITY_WINDOW_DAYS=7`, `DEVICE_SILENCE_HOURS=48`, `DEVICE_SILENCE_DEDUP_HOURS=12`. The beat scheduler runs as a separate compose service so a worker restart never skips a tick.
+
+4. **First-401 alert (layer 4).** `backend/app/auth/device.py::validate_device_api_key` was already emitting a structured WARN on auth failure. It now additionally fires a Pushover alert (deduped by `(key_prefix, client_ip)` for 1h) when the failing path contains `/device-` — catching the "key was rotated server-side, old device still trying" case that layer 3 cannot see (the device IS reaching the backend). Non-device-auth failures do not alert.
+
+### 5.3 Test plan
+
+- **Landscape lock.** Run `npm run cap:sync` against a clean Capacitor project; inspect `companion/android/app/src/main/AndroidManifest.xml` for the injected attributes on `MainActivity` (and any `BridgeActivity` subclass). Grep `screenOrientation="portrait"` should return zero hits. Verified via the build-time fail-hard in `patch-android.cjs`.
+- **Layer 1 banner.** On the test APK, clear app data via Android Settings → Apps → DroneOpsSync → Storage → Clear data. Relaunch; expect red banner + Settings view, no network activity.
+- **Layer 2 preflight.** Point `serverUrl` at a non-existent host; hit Sync Now; expect red banner "Cannot reach ... — check Wi-Fi and server status" and no upload attempt. Enter a bogus API key; expect "Server rejected the API key" banner.
+- **Layer 3 watchdog.** Seed a dev `device_api_keys` row with `last_used_at = now - 50h`; wait for the beat tick (or invoke `celery_app.send_task('check_device_silence')` manually); confirm `device_silence_detected` JSON log and (if Pushover configured) a single alert. Re-run within 12h; confirm dedup suppression.
+- **Layer 4 first-401.** Hit `/api/flight-library/device-health` with a random garbage key; confirm `device_auth_failed` WARN + (if Pushover configured) a single alert; re-fire from the same IP within 1h; confirm dedup suppression.
+
+---
+
+## 6. Open questions
 
 - **Fleet audit** — how many DJI RC Pro / DJI Pilot 2 controllers are in the field, and what APK version does each run? Needed before a fleet-wide OTA push can be planned.
 - **Managed tenant timeline** — is any DroneOps managed customer in the pipeline that would force §2.2's discovery endpoint to move from deferred to blocker?

@@ -3,10 +3,14 @@ import {
   type LogFile,
   type SyncResult,
   type HealthResult,
+  type PairingState,
+  type PreflightResult,
   getConfig,
   saveConfig,
   scanForLogs,
   checkHealth,
+  checkPairing,
+  preflightHealth,
   uploadLogs,
   deleteSyncedFiles,
   checkStorageAccess,
@@ -43,6 +47,12 @@ export default function App() {
   const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle');
   const [testMsg, setTestMsg] = useState('');
 
+  // Persistent pairing / preflight banner (ADR-0002 §5 layers 1+2).
+  // Any non-null value renders a red banner at the top of the app with
+  // actionable copy so the operator never has to open diag-log to see
+  // that uploads are blocked.
+  const [warning, setWarning] = useState<string | null>(null);
+
   const hasRun = useRef(false);
 
   // ── Boot: load config, auto-sync ──────────────────────────────────
@@ -56,7 +66,12 @@ export default function App() {
       if (cfg.apiKey) setApiKey(cfg.apiKey);
       setAutoDelete(cfg.autoDelete);
 
-      if (!cfg.serverUrl || !cfg.apiKey) {
+      // ADR-0002 §5 layer 1 — if Capacitor Preferences were wiped or the
+      // device was never paired, surface it loudly instead of running
+      // auto-sync that can only fail.
+      const pairing = checkPairing({ serverUrl: cfg.serverUrl, apiKey: cfg.apiKey });
+      if (!pairing.paired) {
+        setWarning(pairingMessage(pairing));
         setView('setup');
         return;
       }
@@ -73,14 +88,25 @@ export default function App() {
     setScanErrors([]);
 
     try {
-      // Step 1: Health check
+      // Step 1: Preflight health gate (ADR-0002 §5 layer 2).
+      // Structured preflight — NEVER attempt uploads against a server
+      // we can't reach or a key the server has already revoked. The
+      // 2026-04-23 class of failure was the companion repeatedly trying
+      // to POST against a WebView-relative URL (empty serverUrl) and
+      // eating the error silently. Here we bail out with a clear banner
+      // BEFORE any upload attempt.
       setStatusMsg('CONNECTING');
       setProgressMsg(`Connecting to ${url.replace(/^https?:\/\//, '')}...`);
-      const health = await checkHealth(url, key);
-      setHealthResult(health);
+      const pre = await preflightHealth(url, key);
+      if (!pre.ok) {
+        setWarning(preflightMessage(pre));
+        throw new Error(pre.message);
+      }
+      setWarning(null);
+      setHealthResult(pre.health);
       setProgress(10);
 
-      if (!health.parser_available) {
+      if (!pre.health.parser_available) {
         setProgressMsg('Warning: flight parser offline — uploads may fail');
         await delay(1500);
       }
@@ -158,6 +184,7 @@ export default function App() {
       setTestMsg(err.message || 'Invalid server URL');
       return;
     }
+    setWarning(null);
     hasRun.current = false;
     setView('loading');
     await runSync(serverUrl.trim(), apiKey.trim(), autoDelete);
@@ -190,6 +217,27 @@ export default function App() {
       </div>
 
       <div className="content">
+        {/* ── WARNING BANNER (ADR-0002 §5 layer 1+2) ────────── */}
+        {warning && (
+          <div className="card warning-banner" role="alert" aria-live="polite">
+            <div className="status-title" style={{ color: 'var(--red)' }}>
+              DEVICE NOT PAIRED
+            </div>
+            <div className="status-detail" style={{ color: 'var(--red)' }}>
+              {warning}
+            </div>
+            {view !== 'setup' && view !== 'settings' && (
+              <button
+                className="btn btn-outline"
+                style={{ marginTop: 12 }}
+                onClick={() => setView('settings')}
+              >
+                OPEN SETTINGS
+              </button>
+            )}
+          </div>
+        )}
+
         {/* ── LOADING ──────────────────────────────────────── */}
         {view === 'loading' && (
           <div className="card status-box">
@@ -526,7 +574,7 @@ export default function App() {
 
       {/* Footer */}
       <div className="footer">
-        DRONEOPSSYNC v2.62.0 — BARNARD HQ
+        DRONEOPSSYNC v2.62.1 — BARNARD HQ
       </div>
     </div>
   );
@@ -534,4 +582,27 @@ export default function App() {
 
 function delay(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+/** Banner copy for an unpaired device. Keep operator-friendly. */
+function pairingMessage(pairing: PairingState): string {
+  if (pairing.paired) return '';
+  if (pairing.reason === 'missing_url') {
+    return 'Server URL is not set. Open Settings and enter the DroneOps server URL.';
+  }
+  if (pairing.reason === 'missing_key') {
+    return 'API key is not set. Open Settings → paste the key from DroneOps → Settings → Device Access.';
+  }
+  return `Server URL is not valid${pairing.detail ? ` (${pairing.detail})` : ''}. Open Settings.`;
+}
+
+/** Banner copy for a failed preflight health check. */
+function preflightMessage(pre: PreflightResult & { ok: false }): string {
+  if (pre.code === 'invalid_key' || pre.code === 'revoked_key') {
+    return 'Server rejected the API key. Open Settings → Device Access on the server, copy the key, and re-paste it here.';
+  }
+  if (pre.code === 'unreachable') {
+    return pre.message;
+  }
+  return pre.message || `Server error${pre.status ? ` (HTTP ${pre.status})` : ''}. Try again; if it persists, check the DroneOps server status.`;
 }

@@ -14,14 +14,19 @@ legitimately deferred — not load-bearing for the primary fix, but
 necessary to prevent the class of failure from recurring silently on
 a different controller.
 
-### FU-1 — Fleet APK version audit
+### FU-1 — Fleet APK version audit — ⚠ DE-PRIORITIZED (2026-04-24, ADR-0002 §5)
 
 - **Scope.** Enumerate every DJI RC Pro / DJI Pilot 2 / DJI Fly device
   that has ever paired with DroneOps. Cross-reference against
   `device_api_keys.last_used_at` and, where possible, any version/UA
   hint the server logged on upload.
-- **Trigger.** Before any fleet-wide OTA push of the new v2.36.x
-  DroneOpsSync APK can be planned.
+- **Trigger.** Was: "before a fleet-wide OTA push can be planned".
+  Now: **optional hygiene**. ADR-0002 §5's silence watchdog + layer-1
+  banner make fleet-wide drift self-detecting (any controller that
+  stops uploading for >48h pages Bill's Pushover, any controller with
+  a cleared `Preferences` shows the red banner on next launch). The
+  audit is still useful for proactive APK OTA planning but is no
+  longer load-bearing against silent data loss.
 - **Deliverable.** `scripts/audit-device-fleet.py` + a one-page
   operator report listing each device label, last-seen timestamp, last
   observed APK version (if known), and upgrade plan (OTA-capable vs
