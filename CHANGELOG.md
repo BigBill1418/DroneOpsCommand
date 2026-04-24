@@ -4,6 +4,31 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## [2.63.7] — 2026-04-24 — perf: parallelize + Redis-cache /api/weather/current (FIX-1, ADR-0005)
+
+First of five performance fixes from the 2026-04-24 perf audit
+(`docs/plans/2026-04-24-perf-audit.md`). Targets the highest-impact root
+cause: the Dashboard's "FLIGHT CONDITIONS" panel was calling 5 external
+aviation APIs sequentially (Open-Meteo + AviationWeather METAR/TFR/NOTAM
++ NWS) with **zero caching**, costing 7-8 s wall-clock on every render
+and re-firing every 5 min for every viewer.
+
+- **`backend/app/routers/weather.py`** — the 5 fetches now run
+  concurrently via `asyncio.gather`. Slowest single fetch dominates
+  latency (~1.5-2.5 s) instead of sum-of-fetches (~7-8 s).
+- **`backend/app/services/cache.py`** (new, ~110 lines) — Redis-backed
+  read-through cache helper (`get_or_fetch`). 5-minute TTL keyed by
+  `doc:weather:current:{lat}:{lon}:{airport}`. **Failure-open**: Redis
+  unreachable ⇒ live fetch (slow but correct) — never 500. INFO log
+  on every hit (with TTL remaining) and miss; WARN on Redis failures.
+- **6 new pytest cases** under `backend/tests/test_weather_cache.py`
+  using `fakeredis` — covers HIT, MISS, GET-fail, SET-fail, invalidate,
+  invalidate-failure-swallow.
+- **Expected gain (target):** /api/weather/current cold p95 7-8 s → 1.5-2.5 s;
+  warm p95 7-8 s → <50 ms. Dashboard first-paint p95 ~9.5 s → ~2.5 s.
+- **Failover guard:** ✓ no schema, replication, or quorum impact. Redis
+  is shared but cache is failure-open.
+
 ## [2.63.6] — 2026-04-24 — Zero-touch device API key rotation (ADR-0003)
 
 Backend half of the v1.3.25 client release. Eliminates the manual key-paste

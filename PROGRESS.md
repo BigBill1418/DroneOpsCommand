@@ -4,6 +4,25 @@ Maintained alongside `CHANGELOG.md` and `docs/adr/`. `CHANGELOG.md` is
 the ledger of shipped changes; this file tracks what's in-flight or
 blocked.
 
+## 2026-04-24 LATE — IN-FLIGHT: Performance audit fix series (ADR-0004/0005)
+
+Executing the 5-fix plan from `docs/plans/2026-04-24-perf-audit.md`.
+Fixes ship as 5 separate commits, each with its own version bump and
+AFTER-measurement appended to ADR-0005.
+
+- **FIX-1 — v2.63.7 — SHIPPED in this branch:** weather endpoint
+  parallelized via `asyncio.gather` + 5-min Redis cache (failure-open).
+  6 new tests, all green. ADR-0005 will receive the live AFTER numbers
+  once BOS-HQ autopulls and the verification commands run.
+- **FIX-2 — v2.63.8 — pending:** raise async DB pool 5+10 → 20+20 + add
+  60s in-process cache around `get_current_user`.
+- **FIX-3 — v2.63.9 — pending:** code-split 17 main pages + Vite
+  `manualChunks` for vendor bundles.
+- **FIX-4 — v2.63.10 — pending:** custom `useApiCache` hook + apply to
+  Dashboard / Flights / Settings.
+- **FIX-5 — v2.63.11 — pending:** docs final pass — flip ADR-0004 to
+  `accepted`, append AFTER tables to ADR-0005.
+
 ## 2026-04-24 EVENING — SHIPPED PR: Zero-touch device API key rotation (ADR-0003 / FU-7)
 
 Backend v2.63.6, paired with DroneOpsSync v1.3.25. Closes the manual key-paste step that the 2026-04-24 morning incident required.

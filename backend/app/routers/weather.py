@@ -1,5 +1,6 @@
 """Weather and FAA airspace data for the operations dashboard."""
 
+import asyncio
 import logging
 import re
 from datetime import datetime
@@ -13,6 +14,11 @@ from app.auth.jwt import get_current_user
 from app.database import get_db
 from app.models.system_settings import SystemSetting
 from app.models.user import User
+from app.services.cache import get_or_fetch
+
+# 5-minute Redis cache TTL — METAR/TAF refresh hourly at the FAA, TFR/NOTAM
+# updates are well under this cadence in practice. Tunable here only.
+WEATHER_CACHE_TTL_SECONDS = 300
 
 logger = logging.getLogger(__name__)
 
@@ -86,25 +92,49 @@ async def get_weather_and_airspace(
     _user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Fetch current weather (Open-Meteo + METAR) and FAA data for configured location."""
+    """Fetch current weather (Open-Meteo + METAR) and FAA data for configured location.
+
+    Performance:
+    - The 5 upstream fetches (Open-Meteo, AviationWeather METAR/TFR/NOTAM,
+      NWS alerts) run concurrently via ``asyncio.gather`` — was sequential.
+    - Result is cached in Redis for ``WEATHER_CACHE_TTL_SECONDS`` keyed by
+      lat/lon/airport so the Dashboard's 5-minute auto-refresh and any
+      same-location concurrent viewers all share one upstream fan-out.
+    - Failure-open: Redis down ⇒ live fetch (slow but correct).
+    """
     lat, lon, label, airport = await _load_weather_location(db)
+    cache_key = f"doc:weather:current:{lat:.4f}:{lon:.4f}:{airport}"
 
-    weather = await _fetch_weather(lat, lon)
-    metar = await _fetch_metar(airport)
-    tfrs = await _fetch_tfrs(airport)
-    notams = await _fetch_notams(airport)
-    alerts = await _fetch_nws_alerts(lat, lon)
+    async def _build() -> dict:
+        weather, metar, tfrs, notams, alerts = await asyncio.gather(
+            _fetch_weather(lat, lon),
+            _fetch_metar(airport),
+            _fetch_tfrs(airport),
+            _fetch_notams(airport),
+            _fetch_nws_alerts(lat, lon),
+        )
+        logger.info(
+            "weather_build airport=%s lat=%.4f lon=%.4f",
+            airport,
+            lat,
+            lon,
+        )
+        return {
+            "location": label,
+            "airport": airport,
+            "weather": weather,
+            "metar": metar,
+            "tfrs": tfrs,
+            "notams": notams,
+            "alerts": alerts,
+            "fetched_at": datetime.utcnow().isoformat(),
+        }
 
-    return {
-        "location": label,
-        "airport": airport,
-        "weather": weather,
-        "metar": metar,
-        "tfrs": tfrs,
-        "notams": notams,
-        "alerts": alerts,
-        "fetched_at": datetime.utcnow().isoformat(),
-    }
+    return await get_or_fetch(
+        cache_key,
+        _build,
+        ttl_seconds=WEATHER_CACHE_TTL_SECONDS,
+    )
 
 
 async def _fetch_weather(lat: float, lon: float) -> dict:
