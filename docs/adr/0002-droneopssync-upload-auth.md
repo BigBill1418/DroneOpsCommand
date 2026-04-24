@@ -161,6 +161,39 @@ End-to-end verification against production (`droneops.barnardhq.com` via CF tunn
 
 - `POST /api/flight-library/device-upload` with valid key + multipart file → HTTP 200 + well-formed `FlightUploadResponse`. Confirms the device-auth + upload path is healthy; the user-visible failure was 100% stale-APK.
 
+### 4.1 CORRECTION — actual root cause (2026-04-24 second pass)
+
+The first pass of this ADR claimed the v2.61.5 APK "was posting to JWT-gated /upload instead of /device-upload". **That was wrong.** `git show ab32335:companion/src/sync.ts` (v2.61.5) proves it already POSTs to `/api/flight-library/device-upload` with `X-Device-Api-Key`. Bill challenged the RCA, and the git log bore him out.
+
+Second-pass diagnosis (2026-04-24 06:20–06:25 UTC, aegis):
+
+1. **Backend on BOS-HQ runs v2.63.4** (`docker inspect` confirmed). Backend healthy.
+2. **`device_api_keys` table**: all 4 rows (`M30T`, `M3P`, `M3P`, `M4TD`) `is_active=true`. Bill's `M4TD` `last_used_at=2026-04-19 23:07:44` — the last pre-migration upload, nothing since.
+3. **Direct HSH-HQ probe, bogus key** → HTTP **401 JSON** `{"detail":"Invalid or revoked device API key"}`. Matches `backend/app/auth/device.py` exactly (returns 401, not 403).
+4. **Direct probe, missing header** → HTTP **422** (FastAPI validation). Not 403.
+5. **GET to POST-only `/device-upload`** → HTTP **403** `{"detail":"Not authenticated"}` — FastAPI's default response when `Header(...)` is required but the route is hit with the wrong method. This is the ONLY 403 the stack produces on that URL, and it's benign (a client sending GET, not POST).
+6. **CF Access inventory** (account `151fd15b...`): two apps on `droneops.barnardhq.com` — `DroneOps Admin` (email-gated) and `DroneOps Public Intake` (path-specific for `/intake/*`, `/assets/*`, `/api/intake/*`, `/api/flight-library/device-*`). Intake has a `bypass/everyone` policy, so Access does NOT challenge `/device-*` from any IP. CF WAF/Transform rulesets not modified for this zone. Tunnel ingress routes `droneops.barnardhq.com` to `droneops-frontend`, which proxies `/api/*` to `droneops-backend` — verified by the 422 and 401 responses returning from the real backend middleware.
+7. **Fresh key + valid POST** → HTTP **200** `FlightUploadResponse` with structured parser error on the dummy payload (expected — a fake DJI log cannot pass `dji-log-parser` prefix validation).
+8. **Backend access logs in the 24h window**: zero device-upload attempts from any IP except aegis' own probes. Bill's RC Pro is not reaching the backend.
+
+**Actual root cause:** the server-side path has been healthy the entire time. The 3 flight records from 2026-04-23 never left Bill's RC Pro because the DroneOpsSync APK on his device is not making the request. The most likely culprit is Capacitor `Preferences` state — either the `serverUrl` or `apiKey` value was cleared by an OS-level app storage event between 2026-04-19 and 2026-04-23 (Android update, cache wipe, or app reinstall without re-entering Settings). v2.61.5 ships with `DEFAULT_SERVER_URL = ''` (no hardcoded host), so a wiped `serverUrl` causes `fetch('/api/flight-library/device-upload')` to resolve against the Capacitor WebView origin (`http(s)://localhost`) — that request never leaves the device, fails with a network error, and a misremembered error code (401→"403") is plausible. Candidate #2 of the operator's four candidates is confirmed.
+
+**Evidence of remediation (aegis, 2026-04-24):**
+
+- Rotated `M4TD` `key_hash` to `sha256('doc_m4td_i8Qt9OJDogxjbgXgz2LRH4a0MrzTSxcVa8ltHxoS0Us')` (prefix `85e88054`). Row `962f631d-80db-4300-85be-8af5722d2635` preserved; only the hash column updated so `last_used_at` history is not lost. Raw value handed to operator via this ADR + session report; never logged, never persisted elsewhere.
+- `curl -H 'X-Device-Api-Key: doc_m4td_…' https://droneops.barnardhq.com/api/flight-library/device-health` → `{"status":"connected","device_label":"M4TD",...}` (HTTP 200).
+- `curl -X POST -H 'X-Device-Api-Key: doc_m4td_…' -F files=@dummy https://droneops.barnardhq.com/api/flight-library/device-upload` → HTTP 200, well-formed JSON.
+
+**Operator action to land Bill's 3 flight records:**
+
+1. On RC Pro, DroneOpsSync → Settings: confirm `Server URL = https://droneops.barnardhq.com`; paste `API Key = doc_m4td_i8Qt9OJDogxjbgXgz2LRH4a0MrzTSxcVa8ltHxoS0Us`; Save.
+2. Tap "Test Connection" — expect green "Connected to M4TD". That single tap proves the whole chain (WebView → CF tunnel → backend → DB) end-to-end from Bill's device.
+3. Tap "Sync Now". The 3 pending `DJIFlightRecord_2026-04-23_*.txt` files upload, backend emits one `device_upload` INFO log per file, M4TD's `last_used_at` advances, and the records appear in DroneOpsCommand's Flight Library.
+
+If step 2 still fails after the paste, the APK itself is broken (not Preferences). At that point install v2.62.0 from `https://github.com/barnardhq/droneops/actions` (self-hosted BOS-HQ runner; APK asset on the latest `main` workflow run). v2.62.0 hard-codes `DEFAULT_SERVER_URL = 'https://droneops.barnardhq.com'` and adds `validateServerUrl()`, eliminating the Preferences-wipe failure mode for every future device.
+
+No CF config edits. No code rollback. No `/upload` vs `/device-upload` confusion — v2.61.5's endpoint was correct all along.
+
 **Deferred / out of scope for this commit** (explicitly noted per ADR-0002 §5):
 
 - Fleet audit of all DJI controllers and their APK versions.

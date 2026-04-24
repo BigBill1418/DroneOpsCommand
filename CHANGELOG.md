@@ -4,6 +4,31 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-04-24 — DroneOpsSync upload auth — root-cause CORRECTION (ADR-0002 §4.1)
+
+The v2.63.4 commit (`890b875`) hypothesized a stale pre-v2.33 Gson APK as the root cause of Bill's 403 upload. **That hypothesis was wrong.** Bill challenged it and `git show ab32335:companion/src/sync.ts` proved v2.61.5 (the APK actually on his RC Pro per memory) already posts to `/api/flight-library/device-upload` with `X-Device-Api-Key`.
+
+Second-pass diagnosis verified on BOS-HQ production:
+
+- Backend v2.63.4 running, healthy. CF Access Intake app `bypass/everyone` on `/api/flight-library/device-*` — no IdP challenge. No WAF/Transform rule strips the device header.
+- Direct POST with a valid key → HTTP 200 `FlightUploadResponse`. Direct POST with bogus key → 401 (not 403). Direct POST with missing header → 422 (not 403). The only 403 the stack produces on this URL is for a GET, not a POST.
+- Backend access logs: zero device-upload attempts from Bill's RC Pro in the last 24h. His device is not reaching the backend.
+
+**Actual root cause:** Capacitor `Preferences` state on Bill's RC Pro (stored `serverUrl` + `apiKey`) was wiped or cleared between 2026-04-19 and 2026-04-23. v2.61.5 ships with `DEFAULT_SERVER_URL = ''`, so a missing `serverUrl` resolves fetch() against the WebView origin and the request never leaves the device. The reported "403" is plausibly a misremembered network error.
+
+**Remediation delivered** (no code change, no config change):
+
+- Rotated `M4TD` `key_hash` in `device_api_keys` to `sha256('doc_m4td_i8Qt9OJDogxjbgXgz2LRH4a0MrzTSxcVa8ltHxoS0Us')` (prefix `85e88054`). Row UUID preserved (`962f631d-80db-4300-85be-8af5722d2635`); `last_used_at` history retained.
+- End-to-end probe from HSH-HQ with the new raw value: `device-health` → 200 `connected M4TD`; `device-upload` with dummy multipart → 200 with structured parser error (expected; dummy fails DJI log prefix check).
+
+**Operator action**: on Bill's RC Pro, DroneOpsSync → Settings → paste `API Key = doc_m4td_i8Qt9OJDogxjbgXgz2LRH4a0MrzTSxcVa8ltHxoS0Us`, confirm `Server URL = https://droneops.barnardhq.com`, Save, Test Connection (expect green), Sync Now. The 3 pending `DJIFlightRecord_2026-04-23_*.txt` files will upload.
+
+v2.62.0 APK (pre-baked `DEFAULT_SERVER_URL`) is still the right preventive upgrade for next time a Preferences wipe happens on any device in the fleet — but it is **not required** to land today's 3 flight records.
+
+Full second-pass evidence in `docs/adr/0002-droneopssync-upload-auth.md` §4.1.
+
+---
+
 ## 2026-04-24 — DroneOpsSync upload auth + HTTPS-only base URL — v2.63.4 (backend) / v2.62.0 (companion) (ADR-0002)
 
 Operator's personal DJI RC Pro (no camera) reported two-symptom failure uploading three post-flight logs (~17 MB total) to `http://droneops.barnardhq.com`:
