@@ -109,3 +109,29 @@ Migrated from droneops during the 2026-04-20 6-stack migration night. NOC config
 PG streaming: promoted standby (droneops-standby-db) is now primary. Compose override neutralizes duplicate 'db' service and routes backend/worker/flight-parser DATABASE_URL to droneops-standby-db:5432. CHAD-HQ is failback standby.
 
 Deployer: managed by NOC Master Control (`~/noc-master`) — all per-repo autopull scripts are disabled (`.deployer-disabled` marker in repo root).
+
+## Notifications (ADR-0036 + ADR-0006 addendum, 2026-04-26)
+
+**Transport:** self-hosted ntfy at `https://ntfy.barnardhq.com` (BOS-HQ).
+Migrated from Pushover. Same dedup + Redis suppression + `send_alert` /
+`send_alert_sync` signatures preserved verbatim — only the transport
+changed. See `docs/adr/0006-pushover-to-ntfy-migration-addendum.md`.
+
+**Module:** `backend/app/services/ntfy.py` (replaces `pushover.py`).
+Same public API consumed by `backend/app/auth/device.py:26` and
+`backend/app/routers/admin_device_rotation.py:35,175,177`.
+
+**Env var:** `NTFY_DRONEOPS_PUBLISHER_TOKEN` (replaces `PUSHOVER_TOKEN` +
+`PUSHOVER_USER_KEY`). Single token. Set in BOS-HQ `~/droneops/.env`.
+
+**Watchdog contract preserved:**
+- ADR-0002 §5 layers 3+4 still page on device silence > 48h and on
+  first-401 device-key auth failure.
+- Redis dedup key prefix kept verbatim (`doc:pushover:dedup:`) so
+  in-flight dedup entries continued working through cutover. Renaming
+  it later is a separate cosmetic decom.
+- Fail-soft: missing token → log only (no exception). Same as before.
+- Publisher fallback to `ntfy.sh` on per-service obscured topic when
+  the primary is unreachable; `[FALLBACK]` title prefix.
+
+**Click URL:** ntfy alerts include `https://noc-mastercontrol.barnardhq.com/status/droneops` as the click-fallback target (NOT `noc.barnardhq.com` — that's InfraWatch's dashboard).
