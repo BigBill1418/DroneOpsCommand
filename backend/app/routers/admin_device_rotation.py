@@ -32,7 +32,7 @@ from app.auth.jwt import get_current_user
 from app.database import get_db
 from app.models.device_api_key import DeviceApiKey
 from app.models.user import User
-from app.services.pushover import send_alert
+from app.services.ntfy import send_alert
 from app.services.rotation_hint import (
     set_rotation_hint,
     RotationHintBackendUnavailable,
@@ -172,9 +172,9 @@ async def rotate_device_key(
         )
     except Exception as exc:  # pragma: no cover — best-effort
         logger.warning(
-            "rotate_key_pushover_failed",
+            "rotate_key_alert_failed",
             extra={
-                "event": "rotate_key_pushover_failed",
+                "event": "rotate_key_alert_failed",
                 "device_id": str(device_id),
                 "error": str(exc),
             },

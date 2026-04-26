@@ -60,8 +60,9 @@ celery_app.conf.update(
 
 # ADR-0002 §5 layer 3 — silent-drift watchdog schedule.
 # Runs hourly via the `beat` sidecar service in docker-compose.yml.
-# No flag-gating: the check itself is cheap (one SELECT) and Pushover
-# is a no-op if PUSHOVER_TOKEN / PUSHOVER_USER_KEY are unset.
+# No flag-gating: the check itself is cheap (one SELECT) and the alert
+# transport (ADR-0036 ntfy) is a no-op if
+# NTFY_DRONEOPS_PUBLISHER_TOKEN is unset.
 celery_app.conf.beat_schedule = {
     "device-silence-watchdog": {
         "task": "check_device_silence",
@@ -271,17 +272,17 @@ def check_device_silence_task() -> dict:
         Pro silently stopped uploading after a Capacitor Preferences
         wipe.
 
-    Each matching key fires a Pushover alert, deduped by
+    Each matching key fires an ntfy alert (ADR-0036), deduped by
     `DEVICE_SILENCE_DEDUP_HOURS` (default 12) so a long outage does
     not spam Bill's phone. Emits a structured INFO log regardless of
-    whether Pushover is wired, so Loki/Grafana can surface the same
-    signal without Pushover.
+    whether the ntfy publisher token is wired, so Loki/Grafana can
+    surface the same signal without the alert transport.
     """
     from sqlalchemy import create_engine, select, and_
     from sqlalchemy.orm import Session
 
     from app.models.device_api_key import DeviceApiKey
-    from app.services.pushover import send_alert_sync
+    from app.services.ntfy import send_alert_sync
 
     now = datetime.utcnow()
     activity_cutoff = now - timedelta(days=settings.device_silence_activity_window_days)

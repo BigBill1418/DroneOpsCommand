@@ -4,6 +4,51 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## [2.63.12] — 2026-04-25 — feat: migrate Pushover module to ntfy (ADR-0036 + ADR-0006)
+
+Replaces the Pushover transport for the ADR-0002 §5 silent-drift
+watchdog and the ADR-0003 zero-touch key rotation FYI. Strategic frame
+in NOC-Master ADR-0036; this repo's local addendum is ADR-0006.
+
+- `backend/app/services/pushover.py` → `backend/app/services/ntfy.py`.
+  Same dedup + Redis suppression semantics; same `send_alert` /
+  `send_alert_sync` signatures (with optional `topic` / `click` /
+  `tags` keyword args added per the ADR-0036 notification standard).
+  Transport switched from `api.pushover.net` to self-hosted ntfy on
+  BOS-HQ (`ntfy.barnardhq.com`) with publisher-side fallback to
+  `ntfy.sh/<droneops-fallback-topic>` and `[FALLBACK]` title prefix
+  on the fallback path. 5 s primary timeout + 5 s fallback timeout.
+- Env: `PUSHOVER_APP_TOKEN` + `PUSHOVER_USER_KEY` →
+  `NTFY_DRONEOPS_PUBLISHER_TOKEN` (one token instead of two).
+  `docker-compose.yml` updated for backend, worker, beat services.
+- `backend/app/auth/device.py:26`,
+  `backend/app/routers/admin_device_rotation.py:35`, and
+  `backend/app/tasks/celery_tasks.py` updated to import from the new
+  module. Public function names preserved so call-site code is
+  unchanged beyond the import path. Pushover-specific log event name
+  `rotate_key_pushover_failed` renamed to transport-agnostic
+  `rotate_key_alert_failed`.
+- `backend/app/config.py` — `pushover_token` + `pushover_user_key`
+  fields removed; `ntfy_droneops_publisher_token` added (single).
+- `backend/tests/test_ntfy.py` — 13 new unit tests covering: primary
+  success, primary-fail-fallback-success-with-prefix, both-fail
+  returns False, unconfigured no-op, dedup suppression within TTL,
+  Redis-down fail-open behaviour, priority mapping, Bearer-on-primary
+  / no-Authorization-on-fallback, title prefix, default click URL.
+- `backend/tests/test_device_key_rotation.py` —
+  `test_rotate_pushover_dispatched` →
+  `test_rotate_alert_dispatched` and equivalent rename for the
+  failure-tolerance test. Mocks unchanged in shape; only the symbol
+  the rotation router imports moved from `pushover.send_alert` to
+  `ntfy.send_alert`.
+- Click URLs follow the ADR-0036 3-tier priority contract; default
+  fallback is `https://noc.barnardhq.com/status/droneops`.
+- Soak-pause set on this repo
+  (`~/noc-master/data/soak-pause/droneopscommand.pause`) — code lands
+  on `main`, but no redeploy until the operator clears the pause.
+- See ADR-0006 in this repo for the watchdog-contract preservation
+  analysis; ADR-0036 in `noc-master` for the strategic frame.
+
 ## [2.63.11] — 2026-04-24 — docs: ADR-0004/0005 finalized; perf-audit series complete (FIX-5)
 
 Fifth and final commit of the 2026-04-24 perf audit. Code-only this is

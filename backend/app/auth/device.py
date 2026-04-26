@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.database import get_db
 from app.models.device_api_key import DeviceApiKey
-from app.services.pushover import send_alert
+from app.services.ntfy import send_alert
 
 logger = logging.getLogger("doc.device_auth")
 

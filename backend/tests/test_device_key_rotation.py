@@ -6,7 +6,7 @@ Coverage map (each ⇒ at least one test below):
   - Rotation endpoint generates new raw key + Redis hint    (test_rotate_*)
   - Rotation endpoint 409s on overlapping rotation          (test_rotate_already_in_flight)
   - Rotation endpoint 503s if Redis is down                 (test_rotate_redis_unavailable)
-  - Rotation endpoint dispatches Pushover                   (test_rotate_pushover_dispatched)
+  - Rotation endpoint dispatches ntfy alert                 (test_rotate_alert_dispatched)
   - Device-health response includes hint for OLD-key auth   (test_device_health_hint_*)
   - Device-health response omits hint for NEW-key auth      (test_device_health_no_hint_for_new_key)
   - Celery finalizer promotes after grace expires           (test_finalize_promotes)
@@ -274,20 +274,20 @@ async def test_rotate_redis_unavailable_503s(make_device_row):
 
 
 @pytest.mark.asyncio
-async def test_rotate_pushover_dispatched(make_device_row):
-    """Successful rotation fires exactly one Pushover alert (best-effort)."""
+async def test_rotate_alert_dispatched(make_device_row):
+    """Successful rotation fires exactly one ntfy alert (best-effort)."""
     from app.routers.admin_device_rotation import rotate_device_key
 
     row = make_device_row()
     db = FakeAsyncSession(row=row)
 
-    pushover_mock = AsyncMock(return_value=True)
+    alert_mock = AsyncMock(return_value=True)
     with patch(
         "app.routers.admin_device_rotation.set_rotation_hint",
         new=AsyncMock(return_value=None),
     ), patch(
         "app.routers.admin_device_rotation.send_alert",
-        new=pushover_mock,
+        new=alert_mock,
     ):
         await rotate_device_key(
             device_id=row.id,
@@ -295,16 +295,16 @@ async def test_rotate_pushover_dispatched(make_device_row):
             db=db,
         )
 
-    assert pushover_mock.await_count == 1
-    args, kwargs = pushover_mock.await_args
+    assert alert_mock.await_count == 1
+    args, kwargs = alert_mock.await_args
     assert kwargs.get("title") == "DroneOps key rotated"
     assert "no action needed" in kwargs.get("message", "").lower()
 
 
 @pytest.mark.asyncio
-async def test_rotate_pushover_failure_does_not_fail_rotation(make_device_row):
-    """If Pushover throws, the rotation still succeeds and the response
-    still carries the new raw key."""
+async def test_rotate_alert_failure_does_not_fail_rotation(make_device_row):
+    """If the alert transport throws, the rotation still succeeds and
+    the response still carries the new raw key."""
     from app.routers.admin_device_rotation import rotate_device_key
 
     row = make_device_row()
@@ -315,7 +315,7 @@ async def test_rotate_pushover_failure_does_not_fail_rotation(make_device_row):
         new=AsyncMock(return_value=None),
     ), patch(
         "app.routers.admin_device_rotation.send_alert",
-        new=AsyncMock(side_effect=RuntimeError("pushover down")),
+        new=AsyncMock(side_effect=RuntimeError("ntfy down")),
     ):
         resp = await rotate_device_key(
             device_id=row.id,

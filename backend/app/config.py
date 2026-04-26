@@ -68,18 +68,20 @@ class Settings(BaseSettings):
     demo_mode: bool = False
     demo_reset_interval_hours: int = 24
 
-    # Pushover (ADR-0002 §5 — silent-drift watchdog alerts)
-    # Optional: if token + user_key are set, the device-silence watchdog
-    # and first-401 alerts will fire Pushover notifications. Unset =
-    # no-op (watchdog still logs to structured JSON, alerts just don't
-    # go out).
-    pushover_token: str = ""
-    pushover_user_key: str = ""
+    # ntfy (ADR-0036 — replaces Pushover transport for ADR-0002 §5
+    # silent-drift watchdog + ADR-0003 zero-touch key rotation alerts).
+    # Optional: if the publisher token is set, alerts publish to the
+    # self-hosted ntfy at ntfy.barnardhq.com (with publisher-side
+    # fallback to ntfy.sh on a per-service obscured topic). Unset =
+    # no-op (watchdog still logs to structured JSON, alerts just
+    # don't go out). Watchdog contract from ADR-0002 §5 + ADR-0003 is
+    # preserved unchanged — only the transport switched.
+    ntfy_droneops_publisher_token: str = ""
     # Silence threshold — a device key used inside activity_window_days
     # that has NOT been seen in silence_hours triggers an alert.
     device_silence_activity_window_days: int = 7
     device_silence_hours: int = 48
-    # Per-key dedup cooldown to avoid Pushover spam on a long outage.
+    # Per-key dedup cooldown to avoid alert spam on a long outage.
     device_silence_dedup_hours: int = 12
 
     @property

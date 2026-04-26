@@ -168,10 +168,9 @@ services:
       - TENANT=${TENANT:-shared}
       - ENV=${ENV:-prod}
       - APP_VERSION=2.63.5
-      # ADR-0002 §5 — Pushover alerts for device silence + first-401.
+      # ADR-0002 §5 + ADR-0003 alerts via ntfy (ADR-0036).
       # Unset = no-op (structured JSON logs still emit).
-      - PUSHOVER_TOKEN=${PUSHOVER_TOKEN:-}
-      - PUSHOVER_USER_KEY=${PUSHOVER_USER_KEY:-}
+      - NTFY_DRONEOPS_PUBLISHER_TOKEN=${NTFY_DRONEOPS_PUBLISHER_TOKEN:-}
       - DEVICE_SILENCE_ACTIVITY_WINDOW_DAYS=${DEVICE_SILENCE_ACTIVITY_WINDOW_DAYS:-7}
       - DEVICE_SILENCE_HOURS=${DEVICE_SILENCE_HOURS:-48}
       - DEVICE_SILENCE_DEDUP_HOURS=${DEVICE_SILENCE_DEDUP_HOURS:-12}
@@ -258,9 +257,9 @@ services:
       - TENANT=${TENANT:-shared}
       - ENV=${ENV:-prod}
       - APP_VERSION=2.63.5
-      # ADR-0002 §5 — Pushover alerts from silence watchdog task.
-      - PUSHOVER_TOKEN=${PUSHOVER_TOKEN:-}
-      - PUSHOVER_USER_KEY=${PUSHOVER_USER_KEY:-}
+      # ADR-0002 §5 + ADR-0003 alerts from silence watchdog task via
+      # ntfy (ADR-0036).
+      - NTFY_DRONEOPS_PUBLISHER_TOKEN=${NTFY_DRONEOPS_PUBLISHER_TOKEN:-}
       - DEVICE_SILENCE_ACTIVITY_WINDOW_DAYS=${DEVICE_SILENCE_ACTIVITY_WINDOW_DAYS:-7}
       - DEVICE_SILENCE_HOURS=${DEVICE_SILENCE_HOURS:-48}
       - DEVICE_SILENCE_DEDUP_HOURS=${DEVICE_SILENCE_DEDUP_HOURS:-12}
@@ -293,8 +292,9 @@ services:
       - TENANT=${TENANT:-shared}
       - ENV=${ENV:-prod}
       - APP_VERSION=2.63.5
-      - PUSHOVER_TOKEN=${PUSHOVER_TOKEN:-}
-      - PUSHOVER_USER_KEY=${PUSHOVER_USER_KEY:-}
+      # ADR-0036 — beat scheduler enqueues silence watchdog and rotation
+      # finalizer; the watchdog task itself emits the alert via ntfy.
+      - NTFY_DRONEOPS_PUBLISHER_TOKEN=${NTFY_DRONEOPS_PUBLISHER_TOKEN:-}
       - DEVICE_SILENCE_ACTIVITY_WINDOW_DAYS=${DEVICE_SILENCE_ACTIVITY_WINDOW_DAYS:-7}
       - DEVICE_SILENCE_HOURS=${DEVICE_SILENCE_HOURS:-48}
       - DEVICE_SILENCE_DEDUP_HOURS=${DEVICE_SILENCE_DEDUP_HOURS:-12}
