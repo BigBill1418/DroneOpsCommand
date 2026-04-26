@@ -66,10 +66,10 @@ Backend v2.63.5 / companion v2.62.1. Bill's uploads are recoverable per §4.1 (o
 3. Server silence watchdog — hourly Celery beat (`check_device_silence_task`). Recently-active keys silent > 48h fire a Pushover alert, deduped 12h. New `beat` compose service.
 4. First-401 Pushover alert — `validate_device_api_key` on any `/device-*` path, deduped 1h per `(key_prefix, ip)`.
 
-Pushover alerting is env-gated: `PUSHOVER_TOKEN` + `PUSHOVER_USER_KEY`. Unset = structured JSON log only (still observable via Loki). No flag-gating anywhere.
+Push alerting is env-gated: `NTFY_DRONEOPS_PUBLISHER_TOKEN`. Unset = structured JSON log only (still observable via Loki). No flag-gating anywhere. **Migrated from Pushover to ntfy on 2026-04-26 per ADR-0036 + ADR-0006 addendum** — same dedup, same Redis suppression, same `send_alert` signature; only the transport changed (now `https://ntfy.barnardhq.com/droneops-watchdog` with publisher-side fallback to `ntfy.sh`).
 
 **Open action for operator:**
-- Drop `PUSHOVER_TOKEN` + `PUSHOVER_USER_KEY` into BOS-HQ `/opt/droneops/.env` to turn on phone alerts. Without them, the watchdog still runs (visible in `droneops-beat` logs + Loki) but Bill's phone stays quiet.
+- Drop `NTFY_DRONEOPS_PUBLISHER_TOKEN` into BOS-HQ `~/droneops/.env` to turn on phone alerts (already populated by ADR-0036 Wave 2 bootstrap). Without it, the watchdog still runs (visible in `droneops-beat` logs + Loki) but Bill's phone stays quiet.
 - Next APK install will apply the landscape lock + banner. Pending: GitHub Actions on `main` will publish `DroneOpsSync-2.62.1.apk` via the self-hosted BOS-HQ runner (ADR-0029).
 
 ## 2026-04-24 — Awaiting operator action on Bill's 3 pending flight records (ADR-0002 §4.1)
