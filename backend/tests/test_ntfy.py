@@ -256,7 +256,7 @@ def test_default_click_url():
         publisher_token="tk",
         fallback=False,
     )
-    assert h["Click"] == "https://noc.barnardhq.com/status/droneops"
+    assert h["Click"] == "https://noc-mastercontrol.barnardhq.com/status/droneops"
 
 
 def test_explicit_click_overrides_default():

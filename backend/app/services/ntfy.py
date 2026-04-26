@@ -15,7 +15,7 @@ their parameter shapes. Only the transport changed:
 - Publisher-side fallback to ``ntfy.sh/<droneops-fallback-topic>`` on
   primary failure, with ``[FALLBACK]`` prepended to the title.
 - Click URL follows the ADR-0036 3-tier priority contract (record →
-  product section → ``noc.barnardhq.com/status/droneops``).
+  product section → ``noc-mastercontrol.barnardhq.com/status/droneops``).
 
 The watchdog contract from ADR-0002 §5 + ADR-0003 is preserved
 unchanged:
@@ -63,7 +63,7 @@ _FALLBACK_TOPIC = "barnardhq-fleet-droneops-81b49d71de0f3e9fcf166e57f3c9846b"
 
 # Click URL fallback when no record-specific or product-section URL is
 # in scope. ADR-0036 §Click URL priority tier 3.
-_DEFAULT_CLICK = "https://noc.barnardhq.com/status/droneops"
+_DEFAULT_CLICK = "https://noc-mastercontrol.barnardhq.com/status/droneops"
 
 # Title prefix per ADR-0036 §Notification standard.
 _TITLE_PREFIX = "[DroneOpsCommand]"
