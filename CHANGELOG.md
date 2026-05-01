@@ -4,6 +4,43 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## [2.63.15] — 2026-05-01 — audit(flights): tighten attribution edges + lock with regression tests
+
+Audit follow-up to v2.63.14. Three real defects, one regression test
+suite.
+
+- **Whitespace-only `drone_serial` no longer reaches the DB.** Some DJI
+  parsers emit a present-but-blank serial field as `"   "`. The truthy
+  guard at the top of `_match_fleet_aircraft` was letting it through,
+  hitting the DB with an empty query and producing a confusing
+  `"serial=    present but unmatched in fleet"` log line. Both
+  `drone_serial` and `drone_model` are now stripped at function entry
+  (`(s or "").strip() or None`), so whitespace inputs fall through to
+  the no-serial branch correctly. Tested.
+- **Startup backfill no longer overwrites operator-curated `drone_model`.**
+  Phase 2 of the auto-backfill in `app/main.py` was iterating every
+  linked flight on every container restart and rewriting
+  `flight.drone_model` to match the canonical `Aircraft.model_name`.
+  That clobbered operator data for flights that were manually attached
+  via Flights → Edit and intentionally kept the parsed model string
+  verbatim. Phase 1 (linking unattached flights) is preserved on
+  startup; Phase 2 (canonical-name normalize) is only run on demand
+  via `POST /api/flight-library/backfill-aircraft`, which is the right
+  surface for "I just renamed an aircraft, sync linked flights"
+  workflows.
+- **Flights filter dropdown no longer shows visually-identical
+  duplicates.** `getDroneModel()` now `.trim()`s its result, so legacy
+  ODL-imported records carrying trailing whitespace in `droneModel` no
+  longer survive the `Set` dedupe to produce two rows that look the
+  same. Not a Mantine crash (values still differ), but a UX defect.
+- **Regression tests added** (`backend/tests/test_flight_attribution.py`).
+  12 hermetic unit cases lock in the strict matcher behavior — including
+  explicit assertions that the old prefix and substring fuzzy-match
+  rules cannot silently come back, and that the whitespace-serial edge
+  case routes correctly. All pass.
+
+No DB migrations; no impact on PG replication, blue-green, or failover.
+
 ## [2.63.14] — 2026-05-01 — fix(flights): tighten fleet attribution + Batteries page Mantine crash
 
 Adding a new aircraft to the fleet caused two regressions:

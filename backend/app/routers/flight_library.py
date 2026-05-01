@@ -206,6 +206,13 @@ async def _match_fleet_aircraft(db: AsyncSession, drone_serial: str | None, dron
     record (e.g. "Mavic 3" → "DJI Mavic 3 Pro") to be attributed to that
     record, including batteries-by-flight in the UI.
     """
+    # Normalize inputs at the top — whitespace-only strings (which some DJI
+    # parsers emit when the field is present but blank) would otherwise pass
+    # the truthy guard, hit the DB with a useless `"   "` query, and produce
+    # a confusing "serial=    present but unmatched" log line. v2.63.15.
+    drone_serial = (drone_serial or "").strip() or None
+    drone_model = (drone_model or "").strip() or None
+
     # 1. Exact serial match — authoritative when serial is present.
     if drone_serial:
         result = await db.execute(

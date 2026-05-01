@@ -130,7 +130,10 @@ function getMaxSpeed(f: FlightRecord): number {
   return Number(f.max_speed || f.maxSpeed || 0);
 }
 function getDroneModel(f: FlightRecord): string {
-  return f.drone_model || f.droneModel || f.drone || f.model || '';
+  // Trim: legacy ODL-imported flights occasionally carry trailing whitespace
+  // in droneModel/drone, which would survive Set-based dedupe in the filter
+  // dropdown and produce visually-identical duplicate rows. (v2.63.15)
+  return (f.drone_model || f.droneModel || f.drone || f.model || '').trim();
 }
 function getDroneDisplay(f: FlightRecord): string {
   return getDroneModel(f) || '';
