@@ -85,7 +85,11 @@ export default function Batteries() {
   const loadDroneModels = async () => {
     try {
       const resp = await api.get('/aircraft');
-      const models = (resp.data as { model_name: string }[]).map((a) => a.model_name).filter(Boolean);
+      // Dedupe: a fleet can hold multiple aircraft of the same model_name; the
+      // model dropdowns expect unique values (Mantine v7 throws on duplicates).
+      const models = Array.from(new Set(
+        (resp.data as { model_name: string }[]).map((a) => a.model_name).filter(Boolean)
+      ));
       setDroneModels(models);
     } catch {
       setDroneModels([]);

@@ -4,6 +4,54 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## [2.63.14] — 2026-05-01 — fix(flights): tighten fleet attribution + Batteries page Mantine crash
+
+Adding a new aircraft to the fleet caused two regressions:
+
+1. **Every uploaded flight (and its batteries, by inheritance through
+   `BatteryLog → Flight.aircraft_id`) was being attributed to the new
+   drone**, even when the flight came from a different aircraft. Root
+   cause: `_match_fleet_aircraft()` in `backend/app/routers/flight_library.py`
+   ran a three-pass matcher: (1) exact serial, (2) symmetric prefix
+   model match, (3) symmetric substring model match. When a flight log's
+   serial wasn't present in the fleet, passes 2/3 were so loose that any
+   parsed model name sharing a prefix with a fleet record (e.g. parsed
+   "Mavic 3" against fleet "DJI Mavic 3 Pro" → `mavic3pro.startswith("mavic3")`)
+   would absorb the flight. Adding a new drone with a broader model name
+   immediately captured every previously-uploaded flight on the next
+   startup backfill.
+
+   **Fix (ADR-0007):** drop pass 2 and pass 3 entirely. Serial match is
+   now authoritative — if a serial is present in the flight log, it must
+   match a fleet aircraft exactly or the flight stays unattributed. With
+   no serial, only an exact normalized model match attributes the flight,
+   and only when exactly one fleet aircraft carries that model
+   (multiple = ambiguous → unattributed). Match decisions are now logged
+   at INFO under `doc.flights` so silently-unattributed flights are
+   diagnosable from logs.
+
+   The startup backfill in `main.py:308-346` already operates only on
+   `aircraft_id IS NULL` rows, so manual detachments via the Flights UI
+   stick across container restarts. Existing flights misattributed by
+   the old fuzzy matcher need to be detached manually from the Flights
+   page (Edit → Aircraft → clear) — the backfill won't undo prior writes.
+
+2. **Batteries page crash:** `[@mantine/core] Duplicate options are not
+   supported. Option with value "DJI Mavic 3 Pro" was provided more than
+   once`. `loadDroneModels()` in `frontend/src/pages/Batteries.tsx` pulled
+   `model_name` from every fleet aircraft without deduping. A fleet that
+   holds two units of the same model (normal once you add a second
+   Mavic 3 Pro) produced duplicate Select values, which Mantine v7 hard-rejects.
+   Wrapped in `Array.from(new Set(...))`.
+
+Files touched:
+- `backend/app/routers/flight_library.py` — `_match_fleet_aircraft` rewritten
+- `frontend/src/pages/Batteries.tsx` — dedupe model dropdown source
+- `docs/adr/0007-strict-fleet-attribution-matcher.md` — decision record
+
+No database migrations. No impact on PG replication, blue-green, or
+failover (FastAPI app code only).
+
 ## [2.63.13] — 2026-05-01 — fix(fleet): repair broken aircraft images + add DJI Mavic 4 Pro
 
 Fleet settings tab was rendering broken-image icons for every drone.

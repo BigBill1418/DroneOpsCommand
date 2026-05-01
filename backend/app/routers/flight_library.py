@@ -190,11 +190,23 @@ def _normalize_model(name: str) -> str:
 
 
 async def _match_fleet_aircraft(db: AsyncSession, drone_serial: str | None, drone_model: str | None) -> Aircraft | None:
-    """Match a parsed flight to a fleet aircraft by serial number or model name.
+    """Match a parsed flight to a fleet aircraft.
 
-    Priority: exact serial match → normalized fuzzy model name match.
+    Priority (strict — v2.63.14, ADR-0007):
+      1. Exact serial number match (case-insensitive). If serial is present,
+         this is the only acceptable identity — we never silently fall back
+         to model matching when a serial is provided but doesn't match a
+         fleet record (that's the bug ADR-0007 closes).
+      2. Exact normalized model match — only when the fleet has exactly ONE
+         aircraft of that model. If two or more share the model, attribution
+         is ambiguous without a serial → return None.
+
+    Prefix/substring fuzzy matching has been removed: it caused every
+    incoming flight whose parsed model shared any prefix with a fleet
+    record (e.g. "Mavic 3" → "DJI Mavic 3 Pro") to be attributed to that
+    record, including batteries-by-flight in the UI.
     """
-    # 1. Try exact serial number match
+    # 1. Exact serial match — authoritative when serial is present.
     if drone_serial:
         result = await db.execute(
             select(Aircraft).where(
@@ -204,33 +216,46 @@ async def _match_fleet_aircraft(db: AsyncSession, drone_serial: str | None, dron
         )
         match = result.scalar_one_or_none()
         if match:
+            logger.info(
+                "fleet-match: serial=%s → aircraft=%s (%s)",
+                drone_serial, match.id, match.model_name,
+            )
             return match
+        # Serial present but no fleet record — do NOT fall back to model match.
+        # Flight stays unattributed; user can attach manually from the UI.
+        logger.info(
+            "fleet-match: serial=%s present but unmatched in fleet; leaving unattributed",
+            drone_serial,
+        )
+        return None
 
-    # 2. Normalized fuzzy model name matching
+    # 2. No serial → exact normalized model match, but only if unambiguous.
     if drone_model:
         parsed_norm = _normalize_model(drone_model)
         if not parsed_norm:
             return None
 
         result = await db.execute(select(Aircraft))
-        all_aircraft = result.scalars().all()
+        candidates = [ac for ac in result.scalars().all()
+                      if _normalize_model(ac.model_name) == parsed_norm]
 
-        # Pass 1: exact normalized match (e.g. "Mavic3Pro" == "mavic3pro" from "DJI Mavic 3 Pro")
-        for ac in all_aircraft:
-            if _normalize_model(ac.model_name) == parsed_norm:
-                return ac
-
-        # Pass 2: one is a prefix of the other (e.g. "matrice30" startswith match on "matrice30t")
-        for ac in all_aircraft:
-            fleet_norm = _normalize_model(ac.model_name)
-            if fleet_norm.startswith(parsed_norm) or parsed_norm.startswith(fleet_norm):
-                return ac
-
-        # Pass 3: one contains the other
-        for ac in all_aircraft:
-            fleet_norm = _normalize_model(ac.model_name)
-            if parsed_norm in fleet_norm or fleet_norm in parsed_norm:
-                return ac
+        if len(candidates) == 1:
+            ac = candidates[0]
+            logger.info(
+                "fleet-match: model=%s (no serial) → aircraft=%s (%s) [unique]",
+                drone_model, ac.id, ac.model_name,
+            )
+            return ac
+        if len(candidates) > 1:
+            logger.info(
+                "fleet-match: model=%s (no serial) ambiguous — %d fleet aircraft share this model; leaving unattributed",
+                drone_model, len(candidates),
+            )
+            return None
+        logger.info(
+            "fleet-match: model=%s (no serial) — no fleet aircraft with exact normalized match; leaving unattributed",
+            drone_model,
+        )
 
     return None
 
