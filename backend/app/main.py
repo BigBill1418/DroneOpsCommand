@@ -284,20 +284,26 @@ async def lifespan(app: FastAPI):
     os.makedirs(settings.upload_dir, exist_ok=True)
     os.makedirs(settings.reports_dir, exist_ok=True)
 
-    # Copy bundled default aircraft images to uploads if not already present
+    # Copy bundled default aircraft images into uploads on every boot.
+    # v2.63.13: always overwrite so artwork updates ship with the image.
+    # User-uploaded images live under uploads/aircraft/<uuid>/ and are
+    # never touched here (we only iterate files at the top level of the
+    # bundled directory, never subdirectories).
     bundled_aircraft_dir = os.path.join(os.path.dirname(__file__), "static", "aircraft")
     if os.path.isdir(bundled_aircraft_dir):
         import shutil
         for fname in os.listdir(bundled_aircraft_dir):
+            src = os.path.join(bundled_aircraft_dir, fname)
+            if not os.path.isfile(src):
+                continue
             dest = os.path.join(settings.upload_dir, fname)
-            if not os.path.exists(dest):
-                try:
-                    shutil.copy2(os.path.join(bundled_aircraft_dir, fname), dest)
-                except (PermissionError, OSError) as e:
-                    logger.warning(
-                        "Could not copy default aircraft image %s to uploads: %s "
-                        "(will serve from /static/aircraft/ instead)", fname, e
-                    )
+            try:
+                shutil.copy2(src, dest)
+            except (PermissionError, OSError) as e:
+                logger.warning(
+                    "Could not copy default aircraft image %s to uploads: %s "
+                    "(will serve from /static/aircraft/ instead)", fname, e
+                )
 
     # Auto-backfill: link unmatched flights to fleet aircraft + normalize names
     try:
@@ -354,7 +360,7 @@ logger.info("MultiPartParser max_file_size set to 200 MB")
 app = FastAPI(
     title="D.O.C — Drone Operations Command",
     description="Self-hosted mission management, flight log analysis, AI report generation, invoicing, telemetry visualization, and real-time airspace monitoring for commercial drone operators.",
-    version="2.63.12",
+    version="2.63.13",
     lifespan=lifespan,
 )
 

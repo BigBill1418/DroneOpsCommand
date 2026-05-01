@@ -3,9 +3,16 @@
 v2.56.0: Admin user creation removed from seed — credentials are now set
 via the UI setup wizard on first visit. No env vars for passwords.
 Demo mode: auto-creates a demo admin from DEMO_ADMIN_USERNAME/PASSWORD env vars.
+
+v2.63.13: Fleet image heal pass — repairs broken `aircraft/<uuid>/...`
+upload paths (orphaned by the 2026-04-20 BOS migration) by falling back
+to the bundled default PNG that matches the aircraft model. Adds
+DJI Mavic 4 Pro to the seed and refreshes specs to match BarnardHQ
+public-site carousel (single source of truth for fleet specs).
 """
 
 import logging
+import os
 
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -63,16 +70,38 @@ AIRCRAFT_SEED = [
         },
     },
     {
+        "model_name": "DJI Mavic 4 Pro",
+        "manufacturer": "DJI",
+        "image_filename": "dji_mavic4pro_official.png",
+        "specs": {
+            "max_flight_time": "51 min",
+            "max_speed": "56 mph (25 m/s)",
+            "camera": "4/3\" Hasselblad Wide (28mm equiv, f/2.0) + 1/1.3\" Medium Tele (70mm, f/2.8) + 1/1.5\" Tele (168mm, f/2.8)",
+            "sensors": "Omnidirectional Obstacle Sensing + Forward LiDAR",
+            "weight": "2.4 lbs (1063g)",
+            "video": "6K/60 HDR, 4K/120fps, 10-bit D-Log / D-Log M / HLG",
+            "photo": "100 MP (Hasselblad Natural Colour Solution)",
+            "wind_resistance": "27 mph (12 m/s)",
+            "transmission": "O4+, 18.6 mi (30 km, FCC)",
+            "gimbal": "3-axis with infinity rotation (360° free yaw)",
+            "internal_storage": "64 GB",
+            "operating_temp": "-10°C to 40°C",
+            "controller": "DJI RC 2 (Creator Combo: DJI RC Pro 2)",
+            "highlights": "Flagship cinema platform — tri-camera Hasselblad + LiDAR obstacle sensing + 100 MP stills",
+        },
+    },
+    {
         "model_name": "DJI Mavic 3 Pro",
         "manufacturer": "DJI",
         "image_filename": "dji_mavic3pro_official.png",
         "specs": {
             "max_flight_time": "43 min",
             "max_speed": "47 mph",
-            "camera": "4/3 CMOS Hasselblad + 1/1.3\" Medium Tele + 1/2\" Tele",
+            "camera": "4/3\" Hasselblad (24mm) + 1/1.3\" Medium Tele (70mm) + 1/2\" Tele (166mm)",
             "sensors": "Omnidirectional Obstacle Sensing, APAS 5.0",
             "weight": "2.1 lbs",
-            "video": "5.1K/50fps, 4K/120fps, Apple ProRes",
+            "video": "5.1K/50fps HDR, 4K/120fps, Apple ProRes, 10-bit D-Log M / HLG",
+            "photo": "20 MP RAW",
             "wind_resistance": "27 mph",
             "transmission": "O3+, 9.3 mi range",
         },
@@ -112,14 +141,14 @@ AIRCRAFT_SEED = [
         "manufacturer": "DJI",
         "image_filename": "dji_mini5pro_official.png",
         "specs": {
-            "max_flight_time": "38 min",
+            "max_flight_time": "52 min",
             "max_speed": "36 mph",
-            "camera": "1/1.3\" CMOS, 50MP, 4K/120fps",
+            "camera": "1\" CMOS, 50MP, f/1.8, 4K/120fps",
             "sensors": "Omnidirectional Obstacle Sensing, APAS 6.0",
-            "weight": "8.8 oz (Sub-250g, no registration in many areas)",
-            "video": "4K HDR, D-Log M, HLG, 10-bit, SlowMo",
-            "wind_resistance": "24 mph",
-            "transmission": "O4+, 12.4 mi range",
+            "weight": "< 8.8 oz (Sub-250g, no registration in many areas)",
+            "video": "4K/120fps HDR, D-Log M, HLG, 10-bit, SlowMo",
+            "wind_resistance": "27 mph",
+            "transmission": "O4, 12.4 mi range",
         },
     },
 ]
@@ -280,5 +309,54 @@ async def seed_database(db: AsyncSession):
         else:
             aircraft = Aircraft(**aircraft_data)
             db.add(aircraft)
+
+    # ── Heal pass: repair broken aircraft/<uuid>/...jpg paths ──────
+    # Background: the 2026-04-20 BOS migration left several aircraft rows
+    # pointing at /data/uploads/aircraft/<uuid>/<file>.jpg files that no
+    # longer exist on disk. The /uploads/{filename} fallback only serves
+    # bundled defaults when the request path has no slash, so the Fleet
+    # tab renders broken-image icons for every affected drone.
+    #
+    # Heal: for each aircraft whose image_filename references a missing
+    # uploads file, fall back to the bundled default PNG that matches its
+    # model. Keep the old custom-upload behaviour for files that DO exist.
+    model_to_default = {
+        a["model_name"]: a["image_filename"]
+        for a in AIRCRAFT_SEED
+        if "image_filename" in a
+    }
+    bundled_dir = os.path.join(
+        os.path.dirname(__file__), "static", "aircraft"
+    )
+    healed = 0
+    result = await db.execute(select(Aircraft))
+    for ac in result.scalars().all():
+        fname = ac.image_filename
+        if not fname:
+            continue
+        # Bundled default (no slash) — always served by FastAPI fallback.
+        if "/" not in fname:
+            continue
+        # Reject path traversal before joining.
+        if ".." in fname:
+            continue
+        upload_path = os.path.join(settings.upload_dir, fname)
+        if os.path.isfile(upload_path):
+            continue  # User upload still on disk — leave it alone.
+        default = model_to_default.get(ac.model_name)
+        if not default:
+            continue  # No bundled default for this model — leave broken.
+        bundled_path = os.path.join(bundled_dir, default)
+        if not os.path.isfile(bundled_path):
+            continue  # Bundled file missing too — leave as-is, log next.
+        _seed_log.warning(
+            "SEED HEAL: aircraft %s (%s) image %s missing on disk — "
+            "falling back to bundled default %s",
+            ac.id, ac.model_name, fname, default,
+        )
+        ac.image_filename = default
+        healed += 1
+    if healed:
+        _seed_log.info("SEED HEAL: repaired %d broken aircraft image path(s)", healed)
 
     await db.commit()

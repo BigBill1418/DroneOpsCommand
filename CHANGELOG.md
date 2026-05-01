@@ -4,6 +4,47 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## [2.63.13] — 2026-05-01 — fix(fleet): repair broken aircraft images + add DJI Mavic 4 Pro
+
+Fleet settings tab was rendering broken-image icons for every drone.
+Root cause: the 2026-04-20 BOS migration left `aircraft.image_filename`
+rows pointing at `/data/uploads/aircraft/<uuid>/<file>.jpg` paths that
+no longer exist on disk. The `/uploads/{filename}` fallback only
+serves bundled defaults when the request path has no slash, so every
+slashed user-upload path 404'd silently.
+
+- **Bundled fleet PNGs replaced** with the canonical artwork from the
+  BarnardHQ public-site fleet carousel
+  (`barnardhq/site/images/{m30t,m4td,mavic4pro,mavic3pro,avata2,mini5pro,fpv}.png`).
+  All seven 1000×1000 RGBA — true transparent backgrounds, identical
+  bytes, no re-export. Added `dji_mavic4pro_official.png` (new — was
+  missing from the bundled set entirely).
+- **`backend/app/seed.py` heal pass** — at the end of `seed_database()`,
+  scan every `aircraft` row whose `image_filename` is a slashed
+  uploads-path that no longer exists on disk, and fall back to the
+  bundled default PNG that matches the model name. Logs each healed
+  row at WARN, plus a single INFO summary. Idempotent — only touches
+  rows whose path is genuinely missing.
+- **`backend/app/seed.py` AIRCRAFT_SEED** — added DJI Mavic 4 Pro
+  (Creator Combo) entry with the 14 spec fields drawn from the
+  BarnardHQ carousel + DJI's published Mavic 4 Pro spec sheet
+  (controller, internal storage, gimbal, operating temp). Refreshed
+  `DJI Mavic 3 Pro` and `DJI Mini 5 Pro` specs to match the carousel
+  (Mini 5 Pro flight time corrected to 52 min, sensor to 1", wind to
+  27 mph; Mavic 3 Pro camera string expanded to include focal lengths
+  and HDR).
+- **Source of truth:** `barnardhq/site/index.html` fleet carousel
+  (slides 1–7). Same images, same spec values — the carousel and the
+  Fleet tab now agree.
+
+Operator notes:
+- The duplicate empty `DJI Mavic 3 Pro` row (id `6e235b05…`, 0 flights,
+  empty specs) was left in place — likely Bill's incomplete add of the
+  Mavic 4 Pro under the wrong model name. Once this seed runs, a
+  proper `DJI Mavic 4 Pro` row will materialise; Bill can delete the
+  empty stub via the Settings UI.
+- The `M3P - DECOM` row was untouched (0 flights, decommissioned).
+
 ## [2.63.12] — 2026-04-25 — feat: migrate Pushover module to ntfy (ADR-0036 + ADR-0006)
 
 Replaces the Pushover transport for the ADR-0002 §5 silent-drift
