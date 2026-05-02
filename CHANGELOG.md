@@ -4,6 +4,81 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## [2.64.0] — 2026-05-02 — feat(client-portal): gate invoice visibility + Pay on mission completion (ADR-0008)
+
+The customer-facing client portal now refuses to surface the invoice
+or accept payment until the operator has marked the mission
+`COMPLETED` or `SENT`. The operator can still draft and edit the
+invoice during `PROCESSING` / `REVIEW`; only the public-facing
+release is gated. See `docs/adr/0008-customer-payment-gated-on-mission-completion.md`.
+
+- **`backend/app/routers/client_portal.py`** — added module-level
+  `INVOICE_VISIBLE_STATUSES = frozenset({COMPLETED, SENT})`.
+- `get_client_invoice` returns `None` (same shape as no-invoice-yet)
+  for missions in any other state; logs `[CLIENT-INVOICE] HIDDEN`
+  with mission/customer/status for audit.
+- `create_client_payment` returns `400` with the message
+  *"This invoice is not yet available for payment. Your operator
+  will mark the mission complete once the work is finished."*; logs
+  `[CLIENT-PAY] BLOCKED`.
+- **No operator-side endpoint changed.** `POST /api/missions/{id}/invoice`,
+  line-item edits, and rate-template applications continue to work on
+  every mission status — the gate is one-sided by design.
+- **No frontend change required** — the SPA already handles the
+  null-invoice path cleanly.
+
+This makes the TOS-aligned promise (no payment requested until
+delivery) machine-enforced rather than convention-enforced.
+
+## 2026-05-02 — Stripe activation (config-only, no version bump)
+
+Wired the existing Stripe Checkout / webhook code (shipped in v2.57.x
+client-portal milestone) to live BarnardHQ Stripe account so customer
+invoice payment now works end-to-end. **No code changed**, only
+configuration + Cloudflare Access policy.
+
+- **`system_settings` rows inserted** (DB on `droneops-standby-db` —
+  the promoted primary): `stripe_secret_key` (`sk_live_…kA7s`),
+  `stripe_publishable_key` (`pk_live_…hw38`), `stripe_webhook_secret`
+  (`whsec_…6Bkl`). Same Stripe account `acct_1TFQnxECLLZwgS9H`
+  (BarnardHQ, US, USD, charges + payouts enabled) that `~/marketing`
+  has used since 2026-04-21. The xkeysib/xsmtpsib distinction does
+  not apply — these are Stripe creds, all account-level except the
+  webhook secret which is endpoint-specific (see next bullet).
+- **New Stripe webhook endpoint registered:**
+  `we_1TSn0UECLLZwgS9Hz4IGv6ZQ` →
+  `https://droneops.barnardhq.com/api/webhooks/stripe`,
+  events: `checkout.session.completed` (the only event the
+  `stripe_webhook.py` handler dispatches on). Created via API; the
+  `whsec_…6Bkl` returned by the Create call is the value stored above
+  and is **endpoint-specific** — it is NOT interchangeable with the
+  marketing webhook's `whsec_Wx…GkAP`.
+- **CF Access bypass extended** (see `noc-master/CHANGELOG.md` for the
+  full edge change). Stripe POSTs and customer-portal traffic now
+  reach origin instead of being redirected to
+  `barnardhq.cloudflareaccess.com/cdn-cgi/access/login`.
+- **End-to-end verified 2026-05-02 23:30 UTC:**
+  1. Outside-IP probe of `POST /api/webhooks/stripe` with a real
+     HMAC-SHA256-signed `checkout.session.completed` event →
+     `200 {"status":"ok"}` (signature verification passes).
+  2. `stripe_service.create_checkout_session()` against an existing
+     $500 invoice with 3 line items → real `cs_live_…` URL; HEAD on
+     the hosted page → `200 text/html` (Bill's branded
+     `checkout.barnardhq.com`).
+  3. Operator-issued client-portal magic link (24h JWT) opened from
+     a non-Bill external IP → SPA shell loads (`D.O.C — Drone
+     Operations Command` title), `/api/client/missions/{id}` returns
+     200 with the JWT, returns 403 (auth required) without it. None
+     of these paths returned a CF Access redirect.
+
+**Forward-looking:** any new customer who completes a Checkout will
+trigger `stripe.WebhookEndpoint we_1TSn0U…` → POST our webhook →
+signature verified with `whsec_…6Bkl` → `Invoice.paid_in_full=true`,
+`paid_at`, `payment_method` (stripe_card or stripe_ach) +
+`stripe_payment_intent_id` recorded → `send_payment_received_email`
+fires through Brevo SMTP. Watch `doc.stripe` logger for
+`[STRIPE-WEBHOOK]` entries.
+
 ## [2.63.15] — 2026-05-01 — audit(flights): tighten attribution edges + lock with regression tests
 
 Audit follow-up to v2.63.14. Three real defects, one regression test

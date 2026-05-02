@@ -31,7 +31,7 @@ from app.config import settings
 from app.database import get_db
 from app.models.client_portal import ClientAccessToken
 from app.models.customer import Customer
-from app.models.mission import Mission
+from app.models.mission import Mission, MissionStatus
 from app.models.user import User
 from app.schemas.client_portal import (
     ClientInvoiceLineItem,
@@ -51,6 +51,16 @@ logger = logging.getLogger("doc.client_portal")
 
 router = APIRouter(tags=["client_portal"])
 limiter = Limiter(key_func=get_remote_address)
+
+
+# Mission states at which the customer is allowed to see the invoice
+# (`get_client_invoice`) and pay it (`create_client_payment`). The
+# operator can still create + edit invoices on missions in earlier
+# states — this gate only governs the customer-facing surface.
+INVOICE_VISIBLE_STATUSES: frozenset[MissionStatus] = frozenset({
+    MissionStatus.COMPLETED,
+    MissionStatus.SENT,
+})
 
 
 def _client_ip(request: Request) -> str:
@@ -458,6 +468,20 @@ async def get_client_invoice(
         logger.warning("[CLIENT-INVOICE] ACCESS DENIED — customer=%s cannot access mission=%s", client.customer_id, mission_id)
         raise HTTPException(status_code=403, detail="You do not have access to this mission")
 
+    # Hide the invoice (and the Pay button it powers) until the
+    # operator has marked the mission complete. Operator can still
+    # be drafting/editing the invoice on the back end; we just don't
+    # surface it on the client portal yet.
+    mission_row = await db.execute(select(Mission.status).where(Mission.id == mission_id))
+    mission_status = mission_row.scalar_one_or_none()
+    if mission_status is not None and mission_status not in INVOICE_VISIBLE_STATUSES:
+        elapsed = time.perf_counter() - start
+        logger.info(
+            "[CLIENT-INVOICE] HIDDEN — mission=%s status=%s not in %s (%.3fs)",
+            mission_id, mission_status.value, sorted(s.value for s in INVOICE_VISIBLE_STATUSES), elapsed,
+        )
+        return None
+
     result = await db.execute(
         select(Invoice).where(Invoice.mission_id == mission_id)
     )
@@ -510,6 +534,24 @@ async def create_client_payment(
     if not client.can_access_mission(str(mission_id)):
         logger.warning("[CLIENT-PAY] ACCESS DENIED — customer=%s cannot access mission=%s", client.customer_id, mission_id)
         raise HTTPException(status_code=403, detail="You do not have access to this mission")
+
+    # Same gate as `get_client_invoice` — payment is locked until the
+    # mission is marked complete. The Pay button shouldn't appear in
+    # the UI before then (the invoice GET returns None), but a client
+    # could still POST directly, so re-check here.
+    mission_row = await db.execute(select(Mission.status).where(Mission.id == mission_id))
+    mission_status = mission_row.scalar_one_or_none()
+    if mission_status is None:
+        raise HTTPException(status_code=404, detail="Mission not found")
+    if mission_status not in INVOICE_VISIBLE_STATUSES:
+        logger.warning(
+            "[CLIENT-PAY] BLOCKED — mission=%s status=%s not in %s",
+            mission_id, mission_status.value, sorted(s.value for s in INVOICE_VISIBLE_STATUSES),
+        )
+        raise HTTPException(
+            status_code=400,
+            detail="This invoice is not yet available for payment. Your operator will mark the mission complete once the work is finished.",
+        )
 
     result = await db.execute(
         select(Invoice).where(Invoice.mission_id == mission_id)
