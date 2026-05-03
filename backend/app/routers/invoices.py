@@ -1,8 +1,9 @@
 import logging
+from datetime import datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -10,6 +11,7 @@ from app.auth.jwt import get_current_user
 from app.database import get_db
 from app.models.invoice import Invoice, LineItem
 from app.models.mission import Mission
+from app.models.system_settings import SystemSetting
 from app.models.user import User
 from app.schemas.invoice import (
     InvoiceCreate,
@@ -23,6 +25,51 @@ from app.schemas.invoice import (
 logger = logging.getLogger("doc.invoices")
 
 router = APIRouter(prefix="/api/missions", tags=["invoices"])
+
+
+# ADR-0011 §2 (v2.66.0) — sequential invoice numbering.
+# Format: BARNARDHQ-YYYY-NNNN, 4-digit zero-padded counter, year prefix
+# resets every Jan 1. Counter row keys per year so a reset is just a new
+# row coming online; old years' counters persist for audit. The counter
+# itself is held atomically inside a single UPDATE …  RETURNING (PG
+# guarantees the read+increment is one statement so concurrent invoices
+# never collide on a number, no SELECT FOR UPDATE needed). The
+# `system_settings.value` column is TEXT so the integer is stored as
+# its decimal string.
+_INVOICE_COUNTER_KEY_PREFIX = "invoice_number_counter_"
+
+
+async def _next_invoice_number(db: AsyncSession) -> str:
+    """Atomic next sequence number per year.
+
+    Returns a string like `BARNARDHQ-2026-0001`. Safe under
+    concurrency because the UPDATE RETURNING is one PG statement.
+    First-use auto-creates the row at 1.
+    """
+    year = datetime.utcnow().year
+    key = f"{_INVOICE_COUNTER_KEY_PREFIX}{year}"
+
+    # Atomic upsert: if no row exists for this year, insert with value '1'.
+    # If it exists, atomically bump and return the new value. The `value`
+    # column is TEXT so we cast to bigint, increment, cast back. PG's
+    # ON CONFLICT DO UPDATE … RETURNING is the atomic primitive here.
+    sql = text(
+        """
+        INSERT INTO system_settings (key, value)
+        VALUES (:k, '1')
+        ON CONFLICT (key) DO UPDATE
+          SET value = (CAST(system_settings.value AS BIGINT) + 1)::TEXT
+        RETURNING value
+        """
+    )
+    result = await db.execute(sql, {"k": key})
+    row = result.fetchone()
+    next_int = int(row[0])
+    formatted = f"BARNARDHQ-{year}-{next_int:04d}"
+    logger.info(
+        "[INVOICE-NUMBER] Allocated %s (counter=%s)", formatted, key,
+    )
+    return formatted
 
 
 def _recalculate_invoice(invoice: Invoice):
@@ -119,6 +166,16 @@ async def create_invoice(
     payload = data.model_dump()
     deposit_required = bool(payload.pop("deposit_required", False))
     deposit_amount_input = payload.pop("deposit_amount", None)
+
+    # ADR-0011 §2 — allocate sequential invoice number IF the operator
+    # didn't supply one explicitly. Pre-existing rows with NULL
+    # invoice_number stay null (they were dev/test; ADR-0011 doesn't
+    # backfill).
+    incoming_number = payload.pop("invoice_number", None)
+    if not incoming_number:
+        payload["invoice_number"] = await _next_invoice_number(db)
+    else:
+        payload["invoice_number"] = incoming_number
 
     invoice = Invoice(mission_id=mission_id, **payload)
     # Total is 0 at creation (no line items yet); resolve deposit
