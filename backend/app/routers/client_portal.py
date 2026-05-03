@@ -19,6 +19,7 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.auth.client_auth import (
     ClientContext,
@@ -31,6 +32,7 @@ from app.config import settings
 from app.database import get_db
 from app.models.client_portal import ClientAccessToken
 from app.models.customer import Customer
+from app.models.invoice import Invoice
 from app.models.mission import Mission, MissionStatus
 from app.models.user import User
 from app.schemas.client_portal import (
@@ -483,7 +485,9 @@ async def get_client_invoice(
         return None
 
     result = await db.execute(
-        select(Invoice).where(Invoice.mission_id == mission_id)
+        select(Invoice)
+        .options(selectinload(Invoice.line_items))
+        .where(Invoice.mission_id == mission_id)
     )
     invoice = result.scalar_one_or_none()
 
@@ -554,7 +558,9 @@ async def create_client_payment(
         )
 
     result = await db.execute(
-        select(Invoice).where(Invoice.mission_id == mission_id)
+        select(Invoice)
+        .options(selectinload(Invoice.line_items))
+        .where(Invoice.mission_id == mission_id)
     )
     invoice = result.scalar_one_or_none()
 
