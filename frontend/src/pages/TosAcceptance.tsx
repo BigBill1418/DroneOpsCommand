@@ -8,10 +8,10 @@
  * acceptance row back to the customer profile created by the intake
  * flow.
  *
- * Themed in Mantine to match the rest of the client-facing surface
- * (dark navy/cyan; the design doc §5 promises a deeper theming pass
- * landed by the parallel theming agent — this page only covers the
- * functional shell).
+ * Customer-facing — wrapped in <CustomerLayout> with the BarnardHQ
+ * brand pass (v2.65.0). The TOS PDF iframe sits on a white surface
+ * inside the dark themed shell so the document itself remains
+ * legible while every chrome/affordance reads as BarnardHQ.
  *
  * ADR-0010.
  */
@@ -21,10 +21,8 @@ import {
   Anchor,
   Box,
   Button,
-  Center,
   Checkbox,
   Code,
-  Container,
   Group,
   Paper,
   Stack,
@@ -37,12 +35,8 @@ import {
   getTemplatePdfUrl,
   type TosAcceptanceResult,
 } from '../api/tosApi';
-
-const PANEL_BG = '#0e1117';
-const PANEL_BORDER = '#1a1f2e';
-const TEXT_DIM = '#5a6478';
-const TEXT = '#e8edf2';
-const ACCENT = '#189cc6';
+import CustomerLayout from '../components/CustomerLayout';
+import { customerBrand, customerStyles } from '../lib/customerTheme';
 
 export default function TosAcceptance() {
   const [params] = useSearchParams();
@@ -86,7 +80,6 @@ export default function TosAcceptance() {
       });
       setResult(data);
     } catch (err: unknown) {
-      // axios error shape — pull `detail` if present, else fall back.
       const e = err as {
         response?: { data?: { detail?: string } };
         message?: string;
@@ -100,203 +93,262 @@ export default function TosAcceptance() {
     }
   }
 
+  // ── Post-acceptance success view ─────────────────────────────
   if (result) {
     return (
-      <Center mih="100vh" p="md" style={{ background: '#050608' }}>
-        <Container size="md" w="100%">
-          <Paper
-            p="xl"
-            radius="md"
-            style={{ background: PANEL_BG, border: `1px solid ${PANEL_BORDER}` }}
-          >
-            <Stack gap="md">
-              <Title
-                order={1}
-                style={{
-                  fontFamily: "'Bebas Neue', sans-serif",
-                  letterSpacing: '4px',
-                  color: ACCENT,
-                }}
-              >
-                ACCEPTED
-              </Title>
-              <Text c={TEXT}>
-                Your acceptance is recorded. Audit reference:
-              </Text>
-              <Code
-                block
-                style={{
-                  background: '#050608',
-                  color: ACCENT,
-                  fontFamily: "'Share Tech Mono', monospace",
-                }}
-              >
-                {result.audit_id}
-              </Code>
-              <Text c={TEXT_DIM} size="sm">
-                A signed copy has been emailed to you. You can also download
-                it directly below. The document is locked and tamper-evident
-                via SHA-256.
-              </Text>
-              <Group>
-                <Anchor
-                  href={result.download_url}
-                  download
-                  underline="never"
-                >
-                  <Button color="cyan" variant="filled">
-                    Download signed copy
-                  </Button>
-                </Anchor>
-              </Group>
-              <Text c={TEXT_DIM} size="xs" mt="md" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
-                BarnardHQ LLC &middot; Eugene, Oregon &middot; FAA Part 107 Certified &middot;
-                barnardhq.com &middot; DOC-001
-              </Text>
-            </Stack>
-          </Paper>
-        </Container>
-      </Center>
-    );
-  }
-
-  return (
-    <Box mih="100vh" p="md" style={{ background: '#050608' }}>
-      <Container size="lg">
-        <Stack gap="lg">
-          <Box>
+      <CustomerLayout
+        maxWidth={720}
+        contextSlot={<span style={{ textTransform: 'uppercase' }}>Terms · Accepted</span>}
+      >
+        <Paper p="xl" radius="md" style={customerStyles.card}>
+          <Stack gap="md">
             <Title
               order={1}
               style={{
-                fontFamily: "'Bebas Neue', sans-serif",
-                letterSpacing: '4px',
-                color: ACCENT,
+                ...customerStyles.display,
+                color: customerBrand.success,
+                letterSpacing: customerBrand.trackWider,
+                fontSize: 'clamp(36px, 6vw, 56px)',
               }}
             >
-              BARNARDHQ LLC &mdash; TERMS OF SERVICE
+              ACCEPTED
             </Title>
-            <Text c={TEXT_DIM} mt={4}>
-              Review the agreement below, fill in your information, and accept to proceed.
+            <Text style={{ color: customerBrand.textBody, fontFamily: customerBrand.fontBody }}>
+              Your acceptance is recorded. Audit reference:
             </Text>
-          </Box>
-
-          <Paper
-            p={0}
-            radius="md"
-            style={{
-              background: '#ffffff',
-              border: `1px solid ${PANEL_BORDER}`,
-              overflow: 'hidden',
-            }}
-          >
-            <iframe
-              src={getTemplatePdfUrl()}
-              title="Terms of Service"
-              style={{ width: '100%', height: 700, border: 0, display: 'block' }}
-            />
-          </Paper>
-
-          <Paper
-            p="xl"
-            radius="md"
-            style={{ background: PANEL_BG, border: `1px solid ${PANEL_BORDER}` }}
-          >
-            <form onSubmit={onSubmit}>
-              <Stack gap="md">
-                <Group grow>
-                  <TextInput
-                    label="Full legal name"
-                    required
-                    value={fullName}
-                    onChange={(e) => setFullName(e.currentTarget.value)}
-                    autoComplete="name"
-                    maxLength={120}
-                    styles={{ label: { color: ACCENT, letterSpacing: '1px', textTransform: 'uppercase', fontSize: 11 } }}
-                  />
-                  <TextInput
-                    label="Email"
-                    type="email"
-                    required
-                    value={email}
-                    onChange={(e) => setEmail(e.currentTarget.value)}
-                    autoComplete="email"
-                    maxLength={254}
-                    styles={{ label: { color: ACCENT, letterSpacing: '1px', textTransform: 'uppercase', fontSize: 11 } }}
-                  />
-                </Group>
-                <Group grow>
-                  <TextInput
-                    label="Company / entity (optional)"
-                    value={company}
-                    onChange={(e) => setCompany(e.currentTarget.value)}
-                    autoComplete="organization"
-                    maxLength={120}
-                    styles={{ label: { color: ACCENT, letterSpacing: '1px', textTransform: 'uppercase', fontSize: 11 } }}
-                  />
-                  <TextInput
-                    label="Title (optional)"
-                    value={title}
-                    onChange={(e) => setTitle(e.currentTarget.value)}
-                    autoComplete="organization-title"
-                    maxLength={80}
-                    styles={{ label: { color: ACCENT, letterSpacing: '1px', textTransform: 'uppercase', fontSize: 11 } }}
-                  />
-                </Group>
-
-                <Paper
-                  p="md"
-                  radius="sm"
-                  style={{ background: '#050608', border: `1px solid ${PANEL_BORDER}` }}
+            <Code
+              block
+              style={{
+                background: customerBrand.bgDeep,
+                color: customerBrand.brandCyan,
+                fontFamily: customerBrand.fontMono,
+                fontSize: 13,
+                padding: '14px 16px',
+                border: `1px solid ${customerBrand.border}`,
+                borderLeft: `3px solid ${customerBrand.brandCyan}`,
+              }}
+            >
+              {result.audit_id}
+            </Code>
+            <Text
+              size="sm"
+              style={{
+                color: customerBrand.textMuted,
+                fontFamily: customerBrand.fontBody,
+                lineHeight: 1.6,
+              }}
+            >
+              A signed copy has been emailed to you. You can also download
+              it directly below. The document is locked and tamper-evident
+              via SHA-256.
+            </Text>
+            <Group>
+              <Anchor href={result.download_url} download underline="never">
+                <Button
+                  size="md"
+                  styles={{
+                    root: {
+                      background: customerBrand.brandCyan,
+                      color: customerBrand.brandNavyDeep,
+                      fontFamily: customerBrand.fontDisplay,
+                      letterSpacing: customerBrand.trackMid,
+                      fontWeight: 700,
+                    },
+                  }}
                 >
-                  <Checkbox
-                    color="cyan"
-                    checked={confirmed}
-                    onChange={(e) => setConfirmed(e.currentTarget.checked)}
-                    label={
-                      <Text c={TEXT} size="sm">
-                        I have read and agree to the BarnardHQ LLC Terms of
-                        Service. By checking this box and clicking{' '}
-                        <strong>Accept &amp; Sign</strong>, I am providing my
-                        electronic signature under the federal E-SIGN Act and
-                        Oregon&rsquo;s Uniform Electronic Transactions Act
-                        (ORS Ch. 84).
-                      </Text>
-                    }
-                  />
-                </Paper>
+                  DOWNLOAD SIGNED COPY
+                </Button>
+              </Anchor>
+            </Group>
+          </Stack>
+        </Paper>
+      </CustomerLayout>
+    );
+  }
 
-                {error && (
-                  <Text c="red.4" size="sm">
-                    {error}
-                  </Text>
-                )}
+  // ── Pre-acceptance form ──────────────────────────────────────
+  return (
+    <CustomerLayout
+      maxWidth={1040}
+      contextSlot={<span style={{ textTransform: 'uppercase' }}>Terms of Service · DOC-001</span>}
+    >
+      <Box>
+        <Title
+          order={1}
+          style={{
+            ...customerStyles.display,
+            color: customerBrand.brandCyan,
+            letterSpacing: customerBrand.trackWider,
+            fontSize: 'clamp(28px, 5vw, 40px)',
+          }}
+        >
+          BARNARDHQ LLC &mdash; TERMS OF SERVICE
+        </Title>
+        <Text
+          mt={6}
+          style={{
+            color: customerBrand.textMuted,
+            fontFamily: customerBrand.fontMono,
+            fontSize: 12,
+            letterSpacing: customerBrand.trackTight,
+          }}
+        >
+          Review the agreement below, fill in your information, and accept to proceed.
+        </Text>
+      </Box>
 
-                <Group>
-                  <Button
-                    type="submit"
-                    color="cyan"
-                    size="md"
-                    loading={submitting}
-                    disabled={submitting || !confirmed}
+      {/* TOS PDF — white surface inside the dark shell, framed by a navy
+          border + cyan accent bar to anchor it visually. */}
+      <Paper
+        radius="md"
+        style={{
+          background: '#ffffff',
+          border: `1px solid ${customerBrand.border}`,
+          borderTop: `3px solid ${customerBrand.brandCyan}`,
+          overflow: 'hidden',
+          padding: 0,
+        }}
+      >
+        <iframe
+          src={getTemplatePdfUrl()}
+          title="Terms of Service"
+          style={{
+            width: '100%',
+            height: 'min(70vh, 800px)',
+            border: 0,
+            display: 'block',
+          }}
+        />
+      </Paper>
+
+      <Paper p="xl" radius="md" style={customerStyles.card}>
+        <form onSubmit={onSubmit}>
+          <Stack gap="md">
+            <Title
+              order={3}
+              style={{
+                ...customerStyles.display,
+                fontSize: 22,
+              }}
+            >
+              YOUR INFORMATION
+            </Title>
+
+            <Group grow>
+              <TextInput
+                label="Full legal name"
+                required
+                value={fullName}
+                onChange={(e) => setFullName(e.currentTarget.value)}
+                autoComplete="name"
+                maxLength={120}
+                styles={{ input: customerStyles.input, label: customerStyles.inputLabel }}
+              />
+              <TextInput
+                label="Email"
+                type="email"
+                required
+                value={email}
+                onChange={(e) => setEmail(e.currentTarget.value)}
+                autoComplete="email"
+                maxLength={254}
+                styles={{ input: customerStyles.input, label: customerStyles.inputLabel }}
+              />
+            </Group>
+            <Group grow>
+              <TextInput
+                label="Company / entity (optional)"
+                value={company}
+                onChange={(e) => setCompany(e.currentTarget.value)}
+                autoComplete="organization"
+                maxLength={120}
+                styles={{ input: customerStyles.input, label: customerStyles.inputLabel }}
+              />
+              <TextInput
+                label="Title (optional)"
+                value={title}
+                onChange={(e) => setTitle(e.currentTarget.value)}
+                autoComplete="organization-title"
+                maxLength={80}
+                styles={{ input: customerStyles.input, label: customerStyles.inputLabel }}
+              />
+            </Group>
+
+            <Paper
+              p="md"
+              radius="sm"
+              style={{
+                background: customerBrand.bgDeep,
+                border: `1px solid ${customerBrand.border}`,
+                borderLeft: `3px solid ${customerBrand.brandCyan}`,
+              }}
+            >
+              <Checkbox
+                color="cyan"
+                checked={confirmed}
+                onChange={(e) => setConfirmed(e.currentTarget.checked)}
+                label={
+                  <Text
+                    size="sm"
+                    style={{
+                      color: customerBrand.textBody,
+                      fontFamily: customerBrand.fontBody,
+                      lineHeight: 1.6,
+                    }}
                   >
-                    {submitting ? 'Signing…' : 'Accept & Sign'}
-                  </Button>
-                </Group>
-              </Stack>
-            </form>
-          </Paper>
+                    I have read and agree to the BarnardHQ LLC Terms of
+                    Service. By checking this box and clicking{' '}
+                    <strong style={{ color: customerBrand.brandCyan }}>
+                      Accept &amp; Sign
+                    </strong>
+                    , I am providing my electronic signature under the
+                    federal E-SIGN Act and Oregon&rsquo;s Uniform
+                    Electronic Transactions Act (ORS Ch. 84).
+                  </Text>
+                }
+              />
+            </Paper>
 
-          <Text
-            c={TEXT_DIM}
-            size="xs"
-            ta="center"
-            style={{ fontFamily: "'Share Tech Mono', monospace" }}
-          >
-            BarnardHQ LLC &middot; Eugene, Oregon &middot; FAA Part 107 Certified
-            &middot; barnardhq.com &middot; DOC-001
-          </Text>
-        </Stack>
-      </Container>
-    </Box>
+            {error && (
+              <Text
+                size="sm"
+                style={{
+                  color: customerBrand.danger,
+                  fontFamily: customerBrand.fontMono,
+                  background: '#1a0d0f',
+                  border: `1px solid ${customerBrand.danger}`,
+                  borderRadius: 6,
+                  padding: '10px 14px',
+                }}
+              >
+                {error}
+              </Text>
+            )}
+
+            <Group>
+              <Button
+                type="submit"
+                size="md"
+                loading={submitting}
+                disabled={submitting || !confirmed}
+                styles={{
+                  root: {
+                    background: customerBrand.brandCyan,
+                    color: customerBrand.brandNavyDeep,
+                    fontFamily: customerBrand.fontDisplay,
+                    letterSpacing: customerBrand.trackMid,
+                    fontWeight: 700,
+                    fontSize: 16,
+                    paddingInline: 28,
+                  },
+                }}
+              >
+                {submitting ? 'SIGNING…' : 'ACCEPT & SIGN'}
+              </Button>
+            </Group>
+          </Stack>
+        </form>
+      </Paper>
+    </CustomerLayout>
   );
 }
