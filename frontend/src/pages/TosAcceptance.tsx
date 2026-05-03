@@ -15,7 +15,7 @@
  *
  * ADR-0010.
  */
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   Anchor,
@@ -51,6 +51,22 @@ export default function TosAcceptance() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<TosAcceptanceResult | null>(null);
+
+  // v2.66.0 Fix #7 — mobile-aware iframe height. The default
+  // max(70vh, 800px) is too tall on phones (forces awkward outer scroll
+  // with the PDF only partially visible) and too short on the iPad
+  // landscape end (clips the 5-page doc). matchMedia tracks live
+  // orientation flips without forcing a reload.
+  const [isMobile, setIsMobile] = useState(
+    typeof window !== 'undefined' && window.matchMedia('(max-width: 768px)').matches,
+  );
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const mql = window.matchMedia('(max-width: 768px)');
+    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
+    mql.addEventListener('change', handler);
+    return () => mql.removeEventListener('change', handler);
+  }, []);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -142,6 +158,49 @@ export default function TosAcceptance() {
               it directly below. The document is locked and tamper-evident
               via SHA-256.
             </Text>
+
+            {/* v2.66.0 Fix #2 — explicit "what happens next" so the customer
+                isn't left wondering after signing. Brand-cyan emphasis on
+                the inbound channel. */}
+            <Paper
+              p="md"
+              radius="sm"
+              style={{
+                background: customerBrand.bgDeep,
+                border: `1px solid ${customerBrand.border}`,
+                borderLeft: `3px solid ${customerBrand.brandCyan}`,
+              }}
+            >
+              <Text
+                size="xs"
+                mb={8}
+                style={{
+                  color: customerBrand.brandCyan,
+                  fontFamily: customerBrand.fontMono,
+                  letterSpacing: customerBrand.trackMid,
+                  textTransform: 'uppercase',
+                }}
+              >
+                What happens next
+              </Text>
+              <Text
+                size="sm"
+                style={{
+                  color: customerBrand.textBody,
+                  fontFamily: customerBrand.fontBody,
+                  lineHeight: 1.65,
+                }}
+              >
+                Your operator has been notified. They'll send you a{' '}
+                <strong style={{ color: customerBrand.brandCyan }}>
+                  secure portal link
+                </strong>{' '}
+                by email or text where you can review your mission, see your
+                invoice, and submit payment. If you don't hear back within a
+                few hours, contact your operator directly.
+              </Text>
+            </Paper>
+
             <Group>
               <Anchor href={result.download_url} download underline="never">
                 <Button
@@ -197,6 +256,25 @@ export default function TosAcceptance() {
         </Text>
       </Box>
 
+      {/* v2.66.0 Fix #7 — mobile caption: customers were missing that the
+          PDF scrolls *inside* the iframe (their thumb tried to scroll the
+          page). Caption + bigger iframe makes that obvious. */}
+      {isMobile && (
+        <Text
+          mt={4}
+          mb={6}
+          style={{
+            color: customerBrand.textMuted,
+            fontFamily: customerBrand.fontMono,
+            fontSize: 11,
+            letterSpacing: customerBrand.trackTight,
+            textAlign: 'center',
+          }}
+        >
+          Scroll inside the document to read all pages
+        </Text>
+      )}
+
       {/* TOS PDF — white surface inside the dark shell, framed by a navy
           border + cyan accent bar to anchor it visually. */}
       <Paper
@@ -214,7 +292,9 @@ export default function TosAcceptance() {
           title="Terms of Service"
           style={{
             width: '100%',
-            height: 'min(70vh, 800px)',
+            // v2.66.0 Fix #7 — phones get ~90vh (room to read);
+            // desktops keep the v2.65.0 max(70vh, 800px) cap.
+            height: isMobile ? 'max(500px, calc(90vh - 24px))' : 'min(70vh, 800px)',
             border: 0,
             display: 'block',
           }}
