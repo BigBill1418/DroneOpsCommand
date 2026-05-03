@@ -450,6 +450,121 @@ async def send_signed_tos_to_both_parties(
         raise
 
 
+async def send_deposit_received_email(
+    to_email: str,
+    customer_name: str | None,
+    mission_title: str,
+    deposit_amount: float,
+    balance_amount: float,
+    invoice_total: float,
+    payment_method: str,
+    paid_at: object,
+    db: AsyncSession | None = None,
+    bcc_email: str | None = None,
+) -> bool:
+    """ADR-0009 — Send the deposit-received receipt to the customer.
+
+    Mirrors `send_payment_received_email` signature so the webhook
+    handler can pivot between the two with minimal branching. Optional
+    BCC delivers an operator-side confirmation copy without needing a
+    second email path.
+
+    The deposit-specific template (`deposit_received_email.html`) is
+    intentionally functional and minimally themed — agent C performs
+    the brand pass after this lands. Same return contract as the sibling
+    helper: True on success or skipped-due-to-no-SMTP, raise on send
+    failure.
+    """
+    import time as _time
+    start = _time.perf_counter()
+
+    logger.info(
+        "[EMAIL-DEPOSIT] Preparing deposit receipt to=%s, customer=%s, mission='%s', deposit=%.2f, balance=%.2f",
+        to_email, customer_name, mission_title, deposit_amount, balance_amount,
+    )
+
+    if db:
+        smtp = await get_smtp_settings(db)
+    else:
+        smtp = {
+            "smtp_host": settings.smtp_host,
+            "smtp_port": str(settings.smtp_port),
+            "smtp_user": settings.smtp_user,
+            "smtp_password": settings.smtp_password,
+            "smtp_from_email": settings.smtp_from_email,
+            "smtp_from_name": settings.smtp_from_name,
+            "smtp_use_tls": settings.smtp_use_tls,
+        }
+
+    if not smtp["smtp_host"]:
+        logger.warning("[EMAIL-DEPOSIT] SMTP not configured — skipping deposit receipt to %s", to_email)
+        return False
+
+    branding = await _get_branding(db)
+
+    payment_method_label = {
+        "stripe_card": "Credit/Debit Card",
+        "stripe_ach": "Bank Transfer (ACH)",
+        "manual": "Manual Payment",
+    }.get(payment_method, payment_method)
+
+    template = jinja_env.get_template("deposit_received_email.html")
+    html_body = template.render(
+        customer_name=customer_name,
+        mission_title=mission_title,
+        deposit_amount=f"{deposit_amount:,.2f}",
+        balance_amount=f"{balance_amount:,.2f}",
+        invoice_total=f"{invoice_total:,.2f}",
+        payment_method=payment_method_label,
+        paid_at=paid_at.strftime("%B %d, %Y at %I:%M %p") if hasattr(paid_at, "strftime") else str(paid_at),
+        **branding,
+    )
+
+    msg = MIMEMultipart()
+    msg["From"] = f"{smtp['smtp_from_name']} <{smtp['smtp_from_email']}>"
+    msg["To"] = to_email
+    if bcc_email:
+        # Bcc header is intentionally not added (clients hide it from
+        # downstream); pass via the SMTP RCPT TO list below.
+        pass
+    cn = branding.get("company_name", "DroneOps")
+    msg["Subject"] = f"Deposit Received — {cn}"
+    msg.attach(MIMEText(html_body, "html"))
+
+    try:
+        smtp_port = int(smtp["smtp_port"])
+    except (ValueError, TypeError):
+        raise ValueError(f"Invalid SMTP port: {smtp['smtp_port']}")
+
+    tls_flag = smtp["smtp_use_tls"] if isinstance(smtp["smtp_use_tls"], bool) else _parse_bool(str(smtp["smtp_use_tls"]), True)
+    tls_kwargs = {"use_tls": True} if smtp_port == 465 else {"start_tls": tls_flag}
+
+    recipients = [to_email] + ([bcc_email] if bcc_email else [])
+    logger.info(
+        "[EMAIL-DEPOSIT] Sending via SMTP host=%s:%s to=%s bcc=%s",
+        smtp["smtp_host"], smtp_port, to_email, bcc_email,
+    )
+
+    try:
+        await aiosmtplib.send(
+            msg,
+            hostname=smtp["smtp_host"],
+            port=smtp_port,
+            username=smtp["smtp_user"] or None,
+            password=smtp["smtp_password"] or None,
+            recipients=recipients,
+            **tls_kwargs,
+        )
+        elapsed = _time.perf_counter() - start
+        logger.info("[EMAIL-DEPOSIT] SUCCESS — Sent to %s (bcc=%s) in %.3fs", to_email, bcc_email, elapsed)
+    except Exception as exc:
+        elapsed = _time.perf_counter() - start
+        logger.error("[EMAIL-DEPOSIT] FAILED — SMTP send to %s failed after %.3fs: %s", to_email, elapsed, exc, exc_info=True)
+        raise
+
+    return True
+
+
 async def send_payment_received_email(
     to_email: str,
     customer_name: str | None,
