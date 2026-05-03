@@ -4,6 +4,72 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## [2.66.2] — 2026-05-03 — fix: P0 hotfix — `POST /api/tos/accept` 422 on every customer submission
+
+A paying customer hit the TOS-acceptance form at 16:09 PT and got a
+generic "acceptance failed" toast on every one of six retries. The
+operator regenerated the intake link; the seventh attempt failed the
+same way. Backend logs showed all seven returning HTTP 422 in <2 ms,
+which is the classic Pydantic-422-before-handler signature.
+
+**Root cause:** `app/routers/tos.py` was the only `@limiter.limit`-
+decorated route in the repo whose body parameter was declared *before*
+`request: Request` AND whose module declared `from __future__ import
+annotations` (PEP 563). PEP 563 stringifies parameter annotations at
+decoration time, so when FastAPI introspected the route to decide
+"body or query?" it saw `payload: 'TosAcceptanceRequest'` (a forward
+ref string) instead of the actual `BaseModel` subclass, fell through
+to the `Query()` default, and every customer POST 422'd with
+`loc=['query','payload']`. The handler never ran — no acceptance row,
+no signed PDF, no email, no operator notification. The hermetic unit
+tests in `test_tos_customer_sync.py` did not catch this because they
+call the route function directly and bypass FastAPI's request-parsing
+pipeline.
+
+**Fix (3 surgical changes in `app/routers/tos.py`):**
+
+1. Remove `from __future__ import annotations` — Python 3.12 supports
+   the modern syntax (`str | None`) natively, the import was never
+   load-bearing here, and its side effect was the production bug.
+   A module-level NOTE comment locks the prohibition in place.
+2. Reorder `accept_terms(...)` to put `request: Request` first,
+   matching every other slowapi-decorated route in this repo
+   (`auth.py`, `intake.py`, `client_portal.py`).
+3. Wrap the payload as `Annotated[TosAcceptanceRequest, Body()]` so
+   the body intent is explicit and immune to future annotation-
+   inference quirks.
+
+**Frontend hardening (`frontend/src/pages/TosAcceptance.tsx`):**
+
+- The `onSubmit` catch block now parses Pydantic's array-of-detail
+  shape, joins the per-field `msg` strings into a user-actionable
+  message, falls back to the string detail or axios message, and
+  always appends the HTTP status. The full response (status, detail,
+  raw error) is `console.error`'d so a customer's browser console is
+  enough to triage the next class of failure without redeploying.
+
+**Regression test (`backend/tests/test_tos_accept_route_body.py`):**
+
+- `test_tos_accept_route_payload_is_body_not_query` walks
+  `app.openapi()` and asserts `requestBody` exists and no parameter
+  named `payload` was created — catches the inference regression at
+  the schema layer.
+- 3 integration tests POST the exact frontend payload shape through
+  `fastapi.testclient.TestClient` and assert 201, including the
+  cold-visitor `customer_id=null` case and the `confirm: false`
+  rejection path. All four tests fail without the fix and pass with
+  it. Verified.
+
+**Live verification:** post-deploy `POST /api/tos/accept` against
+`https://droneops.barnardhq.com` with a fresh intake token returned
+HTTP 201 with a real `audit_id`. Backend logs show the
+`[TOS-ACCEPT-POST] SUCCESS` line that v2.66.1 was missing.
+
+**Failover/replication impact:** none. Pure Python code-shape change;
+no schema migration, no env var, no port binding.
+
+A full post-incident analysis (ADR-0013) is forthcoming separately.
+
 ## [2.66.1] — 2026-05-03 — chore: secret hygiene + leak remediation (ADR-0012)
 
 GitGuardian flagged commit `5ec9392` (the same-day `.env.demo` un-track)

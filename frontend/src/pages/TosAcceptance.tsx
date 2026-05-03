@@ -96,14 +96,51 @@ export default function TosAcceptance() {
       });
       setResult(data);
     } catch (err: unknown) {
+      // v2.66.2 hotfix — surface FastAPI/Pydantic validation detail to the
+      // user instead of always showing the generic "Acceptance failed".
+      // The 2026-05-03 production incident burned six retries from one
+      // paying customer because the toast read "Acceptance failed" while
+      // the real error was a 422 from a route-binding bug. The customer
+      // had no way to know retrying would not help.
+      //
+      // Pydantic 422 detail is a list of {loc, msg, type, input}; we
+      // join the user-actionable msg fields when present, fall back to a
+      // single string detail (HTTPException), and finally to the axios
+      // message. The full error object is always console.error'd so the
+      // operator can pull it from the customer's browser if needed.
       const e = err as {
-        response?: { data?: { detail?: string } };
+        response?: {
+          status?: number;
+          data?: { detail?: string | Array<{ msg?: string; loc?: unknown[] }> };
+        };
         message?: string;
       };
-      const detail =
-        e.response?.data?.detail ?? e.message ?? 'Acceptance failed';
-      setError(typeof detail === 'string' ? detail : 'Acceptance failed');
-      console.error('[TOS] accept failed:', err);
+      console.error('[TOS] accept failed:', {
+        status: e.response?.status,
+        detail: e.response?.data?.detail,
+        raw: err,
+      });
+      const detail = e.response?.data?.detail;
+      let userMsg: string;
+      if (Array.isArray(detail)) {
+        const msgs = detail
+          .map((d) => (d && typeof d.msg === 'string' ? d.msg : ''))
+          .filter(Boolean);
+        userMsg = msgs.length
+          ? `Please check your input: ${msgs.join('; ')}`
+          : 'The form was rejected by the server. Please refresh the page and try again. If this keeps happening, contact your operator.';
+      } else if (typeof detail === 'string' && detail.trim()) {
+        userMsg = detail;
+      } else if (typeof e.message === 'string' && e.message.trim()) {
+        userMsg = e.message;
+      } else {
+        userMsg = 'Could not record your acceptance. Please refresh the page and try again. If this keeps happening, contact your operator.';
+      }
+      // Append HTTP status so the customer can quote it to support.
+      if (e.response?.status) {
+        userMsg = `${userMsg} (HTTP ${e.response.status})`;
+      }
+      setError(userMsg);
     } finally {
       setSubmitting(false);
     }
