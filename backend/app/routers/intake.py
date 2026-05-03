@@ -141,8 +141,15 @@ async def send_intake_email_endpoint(
     else:
         logger.info("[INTAKE-EMAIL] Using existing token for customer %s, expires=%s", customer.id, customer.intake_token_expires_at)
 
+    # ADR-0010: link the customer to the new /tos/accept page first
+    # (typed name + checkbox + AcroForm fill). The customer's intake
+    # token AND id are passed so the new TOS row can correlate back to
+    # the customer record on POST /api/tos/accept.
     frontend_url = settings.frontend_url.rstrip("/")
-    intake_url = f"{frontend_url}/intake/{customer.intake_token}"
+    intake_url = (
+        f"{frontend_url}/tos/accept"
+        f"?token={customer.intake_token}&customer_id={customer.id}"
+    )
 
     # Determine if this is a new customer or existing requesting TOS
     is_existing = customer.intake_completed_at is not None or (customer.name and customer.name != customer.email.split("@")[0])
@@ -192,6 +199,28 @@ async def upload_tos_pdf(
     if not content[:5].startswith(b"%PDF"):
         raise HTTPException(status_code=400, detail="Invalid PDF file")
 
+    # ADR-0010: any TOS uploaded for the new /tos/accept flow must
+    # carry the seven required AcroForm fields. Reject anything else
+    # at upload time so the operator gets immediate feedback rather
+    # than a runtime 503 the next time a customer tries to sign.
+    from app.services.tos_acceptance import (
+        REQUIRED_FIELDS,
+        template_has_required_fields,
+    )
+    if not template_has_required_fields(content):
+        logger.warning(
+            "[INTAKE-TOS-UPLOAD] Rejected customer %s upload — missing AcroForm fields",
+            customer.id,
+        )
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Uploaded PDF is missing required AcroForm fields. "
+                f"Required: {', '.join(REQUIRED_FIELDS)}. "
+                "Use the BarnardHQ ToS Rev 3 template."
+            ),
+        )
+
     # Save the file
     tos_dir = os.path.join(settings.upload_dir, "tos")
     os.makedirs(tos_dir, exist_ok=True)
@@ -222,6 +251,22 @@ async def upload_default_tos(
         raise HTTPException(status_code=413, detail="File too large (10MB max)")
     if not content[:5].startswith(b"%PDF"):
         raise HTTPException(status_code=400, detail="Invalid PDF file")
+
+    # ADR-0010 — same field-presence gate as customer-specific upload.
+    from app.services.tos_acceptance import (
+        REQUIRED_FIELDS,
+        template_has_required_fields,
+    )
+    if not template_has_required_fields(content):
+        logger.warning("[INTAKE-TOS-DEFAULT] Rejected default upload — missing AcroForm fields")
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Uploaded PDF is missing required AcroForm fields. "
+                f"Required: {', '.join(REQUIRED_FIELDS)}. "
+                "Use the BarnardHQ ToS Rev 3 template."
+            ),
+        )
 
     tos_dir = os.path.join(settings.upload_dir, "tos")
     os.makedirs(tos_dir, exist_ok=True)

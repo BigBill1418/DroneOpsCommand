@@ -326,6 +326,130 @@ async def send_client_portal_email(
     return True
 
 
+async def send_signed_tos_to_both_parties(
+    *,
+    client_email: str,
+    client_name: str,
+    audit_id: str,
+    signed_pdf: bytes,
+    db: AsyncSession | None = None,
+) -> bool:
+    """Email the signed TOS PDF to the customer and BCC the operator.
+
+    Adapted to this repo's ``aiosmtplib`` direct-send pattern. Failure
+    is logged + raised so the route layer can swallow it (the row +
+    PDF on disk are the source of truth; email is best-effort per
+    TOS-Rebuild §2.6).
+
+    The operator BCC defaults to ``smtp_from_email`` — the same
+    address every other notification uses. We do NOT introduce a new
+    settings key for this; it would just drift from the other email
+    flows.
+    """
+    import time as _time
+    start = _time.perf_counter()
+
+    logger.info(
+        "[EMAIL-TOS-SIGNED] Preparing signed-TOS email to=%s, audit_id=%s, pdf_size=%d",
+        client_email, audit_id, len(signed_pdf or b""),
+    )
+
+    if db:
+        smtp = await get_smtp_settings(db)
+    else:
+        smtp = {
+            "smtp_host": settings.smtp_host,
+            "smtp_port": str(settings.smtp_port),
+            "smtp_user": settings.smtp_user,
+            "smtp_password": settings.smtp_password,
+            "smtp_from_email": settings.smtp_from_email,
+            "smtp_from_name": settings.smtp_from_name,
+            "smtp_use_tls": settings.smtp_use_tls,
+        }
+
+    if not smtp["smtp_host"]:
+        logger.warning(
+            "[EMAIL-TOS-SIGNED] SMTP not configured — skipping signed-TOS email to %s",
+            client_email,
+        )
+        return False
+
+    branding = await _get_branding(db)
+    operator_email = smtp.get("smtp_from_email") or ""
+
+    template = jinja_env.get_template("signed_tos_email.html")
+    html_body = template.render(
+        client_name=client_name,
+        audit_id=audit_id,
+        **branding,
+    )
+
+    msg = MIMEMultipart()
+    msg["From"] = f"{smtp['smtp_from_name']} <{smtp['smtp_from_email']}>"
+    msg["To"] = client_email
+    if operator_email and operator_email.lower() != client_email.lower():
+        msg["Bcc"] = operator_email
+    cn = branding.get("company_name", "BarnardHQ")
+    msg["Subject"] = f"Signed Terms of Service — {audit_id} — {cn}"
+    msg.attach(MIMEText(html_body, "html"))
+
+    pdf_attachment = MIMEApplication(signed_pdf, _subtype="pdf")
+    pdf_attachment.add_header(
+        "Content-Disposition",
+        "attachment",
+        filename=f"BarnardHQ-ToS-{audit_id}.pdf",
+    )
+    msg.attach(pdf_attachment)
+
+    try:
+        smtp_port = int(smtp["smtp_port"])
+    except (ValueError, TypeError):
+        raise ValueError(f"Invalid SMTP port: {smtp['smtp_port']}")
+
+    tls_flag = (
+        smtp["smtp_use_tls"]
+        if isinstance(smtp["smtp_use_tls"], bool)
+        else _parse_bool(str(smtp["smtp_use_tls"]), True)
+    )
+    tls_kwargs = {"use_tls": True} if smtp_port == 465 else {"start_tls": tls_flag}
+
+    # aiosmtplib needs the BCC envelope recipient explicitly — message
+    # headers alone don't propagate to the SMTP RCPT TO list.
+    recipients = [client_email]
+    if operator_email and operator_email.lower() != client_email.lower():
+        recipients.append(operator_email)
+
+    logger.info(
+        "[EMAIL-TOS-SIGNED] Sending via SMTP host=%s:%s to=%s bcc=%s",
+        smtp["smtp_host"], smtp_port, client_email,
+        operator_email if len(recipients) > 1 else "(none)",
+    )
+
+    try:
+        await aiosmtplib.send(
+            msg,
+            hostname=smtp["smtp_host"],
+            port=smtp_port,
+            username=smtp["smtp_user"] or None,
+            password=smtp["smtp_password"] or None,
+            recipients=recipients,
+            **tls_kwargs,
+        )
+        elapsed = _time.perf_counter() - start
+        logger.info(
+            "[EMAIL-TOS-SIGNED] SUCCESS — Sent to %s (audit_id=%s) in %.3fs",
+            client_email, audit_id, elapsed,
+        )
+        return True
+    except Exception as exc:
+        elapsed = _time.perf_counter() - start
+        logger.error(
+            "[EMAIL-TOS-SIGNED] FAILED — SMTP send to %s failed after %.3fs: %s",
+            client_email, elapsed, exc, exc_info=True,
+        )
+        raise
+
+
 async def send_payment_received_email(
     to_email: str,
     customer_name: str | None,
