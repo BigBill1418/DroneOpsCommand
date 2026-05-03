@@ -6,6 +6,10 @@ Two audiences:
 
 Client endpoints NEVER expose operator internals (financials, flight logs,
 fleet info, internal notes). Only mission title, type, date, location, status.
+
+ADR-0011 (v2.66.0) — pay/deposit + pay/balance reuse a recent unpaid
+Stripe Checkout session if one already exists for this invoice. A
+customer double-clicking Pay no longer mints two sessions.
 """
 
 import logging
@@ -292,172 +296,10 @@ async def get_client_mission(
 
 # ═══════════════════════════════════════════════════════════════════════
 # OPERATOR ENDPOINTS — /api/missions/{id}/client-link
+# (Definitions appear AFTER the customer-pay endpoints below; the
+# duplicate first-set previously here was unreachable — FastAPI keeps
+# the LAST registered handler when two share a path. v2.66.0 cleanup.)
 # ═══════════════════════════════════════════════════════════════════════
-
-@router.post("/api/missions/{mission_id}/client-link", response_model=ClientLinkResponse)
-async def create_client_link(
-    mission_id: UUID,
-    data: ClientLinkCreate,
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
-):
-    """Operator auth: generate a client portal token/URL for a mission."""
-    start = time.perf_counter()
-    client_ip = _client_ip(request)
-
-    logger.info("[CLIENT-LINK-CREATE] Operator creating link for mission=%s, expires_days=%d from ip=%s", mission_id, data.expires_days, client_ip)
-
-    result = await db.execute(select(Mission).where(Mission.id == mission_id))
-    mission = result.scalar_one_or_none()
-    if not mission:
-        logger.warning("[CLIENT-LINK-CREATE] Mission not found: %s", mission_id)
-        raise HTTPException(status_code=404, detail="Mission not found")
-
-    if not mission.customer_id:
-        logger.warning("[CLIENT-LINK-CREATE] Mission %s has no customer assigned", mission_id)
-        raise HTTPException(status_code=400, detail="Mission must have a customer assigned")
-
-    # Create the JWT
-    mission_ids = [str(mission.id)]
-    client_jwt = create_client_token(mission.customer_id, mission_ids, data.expires_days)
-
-    # Store token record for tracking/revocation
-    token_record = ClientAccessToken(
-        customer_id=mission.customer_id,
-        token_hash=hash_token(client_jwt),
-        mission_scope=[str(mission.id)],
-        expires_at=datetime.utcnow() + timedelta(days=data.expires_days),
-        ip_address=client_ip,
-    )
-    db.add(token_record)
-    await db.flush()
-
-    frontend_url = settings.frontend_url.rstrip("/")
-    portal_url = f"{frontend_url}/client/{client_jwt}"
-
-    elapsed = time.perf_counter() - start
-    logger.info(
-        "[CLIENT-LINK-CREATE] Token created id=%s for mission=%s, customer=%s (%.3fs)",
-        token_record.id, mission_id, mission.customer_id, elapsed,
-    )
-
-    return ClientLinkResponse(
-        token_id=str(token_record.id),
-        portal_url=portal_url,
-        expires_at=token_record.expires_at,
-        customer_id=str(mission.customer_id),
-        mission_ids=mission_ids,
-    )
-
-
-@router.post("/api/missions/{mission_id}/client-link/send")
-async def send_client_link(
-    mission_id: UUID,
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
-):
-    """Operator auth: email the client portal link to the customer."""
-    start = time.perf_counter()
-    client_ip = _client_ip(request)
-
-    logger.info("[CLIENT-LINK-SEND] Sending portal link for mission=%s from ip=%s", mission_id, client_ip)
-
-    result = await db.execute(select(Mission).where(Mission.id == mission_id))
-    mission = result.scalar_one_or_none()
-    if not mission:
-        raise HTTPException(status_code=404, detail="Mission not found")
-    if not mission.customer_id:
-        raise HTTPException(status_code=400, detail="Mission has no customer assigned")
-
-    cust_result = await db.execute(select(Customer).where(Customer.id == mission.customer_id))
-    customer = cust_result.scalar_one_or_none()
-    if not customer or not customer.email:
-        raise HTTPException(status_code=400, detail="Customer has no email address")
-
-    # Generate a fresh token
-    mission_ids = [str(mission.id)]
-    client_jwt = create_client_token(customer.id, mission_ids, settings.client_token_expire_days)
-    expires_at = datetime.utcnow() + timedelta(days=settings.client_token_expire_days)
-
-    token_record = ClientAccessToken(
-        customer_id=customer.id,
-        token_hash=hash_token(client_jwt),
-        mission_scope=[str(mission.id)],
-        expires_at=expires_at,
-        ip_address=client_ip,
-    )
-    db.add(token_record)
-    await db.flush()
-
-    frontend_url = settings.frontend_url.rstrip("/")
-    portal_url = f"{frontend_url}/client/{client_jwt}"
-
-    # Send email
-    from app.services.email_service import send_client_portal_email
-
-    try:
-        await send_client_portal_email(
-            to_email=customer.email,
-            customer_name=customer.name,
-            mission_title=mission.title,
-            portal_url=portal_url,
-            expires_at=expires_at,
-            db=db,
-        )
-    except Exception as exc:
-        elapsed = time.perf_counter() - start
-        logger.error(
-            "[CLIENT-LINK-SEND] FAILED to send email to %s for mission=%s: %s (%.3fs)",
-            customer.email, mission_id, exc, elapsed, exc_info=True,
-        )
-        raise HTTPException(status_code=500, detail="Email delivery failed")
-
-    elapsed = time.perf_counter() - start
-    logger.info(
-        "[CLIENT-LINK-SEND] Email sent to %s for mission=%s, token_id=%s (%.3fs)",
-        customer.email, mission_id, token_record.id, elapsed,
-    )
-    return {"message": "Client portal link sent", "portal_url": portal_url}
-
-
-@router.delete("/api/missions/{mission_id}/client-link/{token_id}")
-async def revoke_client_link(
-    mission_id: UUID,
-    token_id: UUID,
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
-):
-    """Operator auth: revoke a client portal token."""
-    start = time.perf_counter()
-    client_ip = _client_ip(request)
-
-    logger.info("[CLIENT-LINK-REVOKE] Revoking token=%s for mission=%s from ip=%s", token_id, mission_id, client_ip)
-
-    result = await db.execute(
-        select(ClientAccessToken).where(
-            ClientAccessToken.id == token_id,
-            ClientAccessToken.mission_scope.contains([str(mission_id)]),
-        )
-    )
-    token_record = result.scalar_one_or_none()
-
-    if not token_record:
-        logger.warning("[CLIENT-LINK-REVOKE] Token not found: %s for mission=%s", token_id, mission_id)
-        raise HTTPException(status_code=404, detail="Token not found")
-
-    if token_record.revoked_at:
-        logger.info("[CLIENT-LINK-REVOKE] Token %s already revoked at %s", token_id, token_record.revoked_at)
-        return {"message": "Token already revoked"}
-
-    token_record.revoked_at = datetime.utcnow()
-    await db.flush()
-
-    elapsed = time.perf_counter() - start
-    logger.info("[CLIENT-LINK-REVOKE] Token %s revoked (%.3fs)", token_id, elapsed)
-    return {"message": "Token revoked"}
 
 
 @router.get("/api/client/missions/{mission_id}/invoice", response_model=ClientInvoiceResponse | None)
@@ -604,6 +446,73 @@ def _client_redirect_urls(mission_id: UUID) -> tuple[str, str]:
     )
 
 
+# ADR-0011 (v2.66.0) — Pay/deposit + pay/balance idempotency window.
+# A double-click within this window returns the existing Stripe session
+# URL instead of minting a new one. Stripe Checkout sessions are valid
+# for 24h by default; we use 30 min so that a customer who comes back
+# after a coffee gets a fresh session (preventing them paying with stale
+# pricing if the operator updated line items in between).
+_CHECKOUT_REUSE_WINDOW = timedelta(minutes=30)
+
+
+async def _reuse_existing_checkout_session(
+    *,
+    session_id: str | None,
+    db: AsyncSession,
+    log_prefix: str,
+) -> str | None:
+    """If `session_id` points at a recent, unpaid Stripe Checkout session,
+    return its URL so the caller can return that to the client without
+    creating a duplicate session. Returns None if no reuse possible.
+
+    Stripe is the authority on payment_status + created timestamp — we
+    don't trust local DB freshness signals because the webhook might
+    not have arrived yet. Network failure → None (caller mints new).
+    """
+    if not session_id:
+        return None
+    try:
+        from app.services.stripe_service import get_stripe_settings
+        import stripe as _stripe
+        cfg = await get_stripe_settings(db)
+        secret = cfg.get("stripe_secret_key")
+        if not secret:
+            return None
+        _stripe.api_key = secret
+        existing = _stripe.checkout.Session.retrieve(session_id)
+    except Exception as exc:
+        logger.warning(
+            "%s could not retrieve existing session=%s for reuse check: %s",
+            log_prefix, session_id, exc,
+        )
+        return None
+
+    payment_status = getattr(existing, "payment_status", None)
+    created_unix = getattr(existing, "created", None)
+    url = getattr(existing, "url", None)
+
+    if payment_status == "paid":
+        logger.info(
+            "%s existing session=%s already paid — not reusing (caller will see paid_in_full)",
+            log_prefix, session_id,
+        )
+        return None
+    if not created_unix or not url:
+        return None
+    age = datetime.utcnow() - datetime.utcfromtimestamp(created_unix)
+    if age > _CHECKOUT_REUSE_WINDOW:
+        logger.info(
+            "%s existing session=%s age=%s exceeds reuse window=%s — minting fresh",
+            log_prefix, session_id, age, _CHECKOUT_REUSE_WINDOW,
+        )
+        return None
+    logger.info(
+        "%s reusing existing checkout session=%s age=%s status=%s",
+        log_prefix, session_id, age, payment_status,
+    )
+    return url
+
+
 @router.post("/api/client/missions/{mission_id}/invoice/pay/deposit", response_model=ClientPaymentResponse)
 async def create_client_deposit_payment(
     mission_id: UUID,
@@ -631,6 +540,22 @@ async def create_client_deposit_payment(
         raise HTTPException(status_code=400, detail="Deposit has already been paid")
     if float(invoice.deposit_amount or 0) <= 0:
         raise HTTPException(status_code=400, detail="Deposit amount must be greater than zero")
+
+    # ADR-0011 (v2.66.0) — return existing recent unpaid session if the
+    # customer double-clicks Pay. Avoids minting two Stripe sessions
+    # against the same invoice (and the customer accidentally paying both).
+    reused = await _reuse_existing_checkout_session(
+        session_id=invoice.deposit_checkout_session_id,
+        db=db,
+        log_prefix="[CLIENT-PAY-DEPOSIT]",
+    )
+    if reused is not None:
+        elapsed = time.perf_counter() - start
+        logger.info(
+            "[CLIENT-PAY-DEPOSIT] Reused existing session mission=%s (%.3fs)",
+            mission_id, elapsed,
+        )
+        return ClientPaymentResponse(checkout_url=reused)
 
     success_url, cancel_url = _client_redirect_urls(mission_id)
 
@@ -707,6 +632,20 @@ async def create_client_balance_payment(
         # Defensive — if a deposit_amount somehow equals total, treat
         # the invoice as paid in full and refuse to spin up Stripe.
         raise HTTPException(status_code=400, detail="Nothing left to pay on this invoice")
+
+    # ADR-0011 (v2.66.0) — same idempotency window as deposit branch.
+    reused = await _reuse_existing_checkout_session(
+        session_id=invoice.stripe_checkout_session_id,
+        db=db,
+        log_prefix="[CLIENT-PAY-BALANCE]",
+    )
+    if reused is not None:
+        elapsed = time.perf_counter() - start
+        logger.info(
+            "[CLIENT-PAY-BALANCE] Reused existing session mission=%s (%.3fs)",
+            mission_id, elapsed,
+        )
+        return ClientPaymentResponse(checkout_url=reused)
 
     success_url, cancel_url = _client_redirect_urls(mission_id)
 
