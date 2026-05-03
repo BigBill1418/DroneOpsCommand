@@ -139,6 +139,12 @@ export default function MissionNew() {
   const [rateTemplates, setRateTemplates] = useState<RateTemplate[]>([]);
   const [paidInFull, setPaidInFull] = useState(false);
   const [invoiceExists, setInvoiceExists] = useState(false);
+  // ADR-0009 — deposit toggle defaults ON per TOS §6.2; operator can
+  // uncheck for §6.3 Emergent Services. depositAmount=null tells the
+  // backend to auto-fill 50% of total.
+  const [depositRequired, setDepositRequired] = useState(true);
+  const [depositAmount, setDepositAmount] = useState<number | null>(null);
+  const [depositPaid, setDepositPaid] = useState(false);
   const savingInvoiceRef = useRef(false);
 
   // UNAS Download Link
@@ -249,6 +255,12 @@ export default function MissionNew() {
           const inv: Invoice = invoiceResult.value.data;
           setInvoiceExists(true);
           setPaidInFull(inv.paid_in_full);
+          // ADR-0009 — preserve operator's prior deposit choice when
+          // editing; pre-v2.65.0 invoices come back with the fields
+          // absent (handled by the `??` fallback).
+          setDepositRequired(inv.deposit_required ?? false);
+          setDepositAmount(inv.deposit_amount ?? null);
+          setDepositPaid(inv.deposit_paid ?? false);
           if (inv.line_items.length > 0) {
             setLineItems(inv.line_items.map((li) => ({
               id: li.id,
@@ -689,15 +701,28 @@ export default function MissionNew() {
     if (savingInvoiceRef.current) return false;
     savingInvoiceRef.current = true;
     try {
+      // ADR-0009 — once deposit_paid the backend rejects deposit_*
+      // changes; only send those fields while still editable.
+      const depositPayload = depositPaid
+        ? {}
+        : { deposit_required: depositRequired, deposit_amount: depositAmount };
+
       // Determine invoice state from server to avoid stale React state race conditions
       let hasInvoice = false;
       try {
-        await api.put(`/missions/${missionId}/invoice`, { paid_in_full: paidInFull });
+        await api.put(`/missions/${missionId}/invoice`, {
+          paid_in_full: paidInFull,
+          ...depositPayload,
+        });
         hasInvoice = true;
       } catch (e: any) {
         if (e?.response?.status === 404) {
           // Invoice doesn't exist yet — create it
-          await api.post(`/missions/${missionId}/invoice`, { tax_rate: 0, paid_in_full: paidInFull });
+          await api.post(`/missions/${missionId}/invoice`, {
+            tax_rate: 0,
+            paid_in_full: paidInFull,
+            ...depositPayload,
+          });
         } else {
           throw e;
         }
@@ -723,6 +748,25 @@ export default function MissionNew() {
           });
         }
       }
+
+      // After items land, re-PUT to recompute deposit (auto-50%
+      // resolution depends on the new total). Only when deposit
+      // not yet collected and we asked for auto-fill.
+      if (!depositPaid && depositRequired && depositAmount === null) {
+        try {
+          await api.put(`/missions/${missionId}/invoice`, {
+            deposit_required: true,
+            deposit_amount: null,
+          });
+          // Pull back the resolved value so the UI reflects truth.
+          const refresh = await api.get(`/missions/${missionId}/invoice`);
+          setDepositAmount(refresh.data.deposit_amount ?? null);
+        } catch (e) {
+          // Non-fatal — operator can re-save manually.
+          console.warn('[MissionNew] deposit auto-fill refresh failed', e);
+        }
+      }
+
       notifications.show({ title: 'Invoice Saved', message: 'Line items saved', color: 'cyan' });
       return true;
     } catch (err: any) {
@@ -1291,6 +1335,57 @@ export default function MissionNew() {
                       TOTAL: ${lineItems.reduce((sum, item) => sum + (item.quantity || 0) * (item.unit_price || 0), 0).toFixed(2)}
                     </Text>
                   )}
+
+                  {/* ADR-0009 — deposit toggle (TOS §6.2 default-on). */}
+                  <Stack gap="xs" mt="xs" style={{ borderLeft: '2px solid #1a1f2e', paddingLeft: 12 }}>
+                    <Switch
+                      label="Require 50% deposit"
+                      color="cyan"
+                      checked={depositRequired}
+                      disabled={depositPaid}
+                      onChange={(e) => {
+                        const next = e.currentTarget.checked;
+                        setDepositRequired(next);
+                        // Clearing the toggle clears the amount; turning
+                        // on with no prior value triggers backend auto-fill.
+                        if (!next) setDepositAmount(0);
+                        else if (depositAmount === 0) setDepositAmount(null);
+                      }}
+                      styles={{ label: { color: '#e8edf2', fontFamily: "'Share Tech Mono', monospace" } }}
+                    />
+                    {depositRequired && (
+                      <NumberInput
+                        label="Deposit Amount"
+                        description={depositPaid
+                          ? 'Locked — deposit already collected.'
+                          : 'TOS §6.2 default. Leave blank to auto-fill 50% of total. Uncheck the switch above for Emergent Services per TOS §6.3.'}
+                        value={depositAmount ?? ''}
+                        onChange={(val) => {
+                          if (val === '' || val === null || val === undefined) {
+                            setDepositAmount(null);
+                          } else {
+                            const num = typeof val === 'number' ? val : parseFloat(String(val));
+                            setDepositAmount(Number.isFinite(num) ? num : null);
+                          }
+                        }}
+                        disabled={depositPaid}
+                        min={0}
+                        decimalScale={2}
+                        prefix="$"
+                        placeholder="auto-fill 50% of total"
+                        styles={{
+                          input: { background: '#050608', borderColor: '#1a1f2e', color: '#e8edf2', maxWidth: 220 },
+                          label: { color: '#e8edf2', fontFamily: "'Share Tech Mono', monospace" },
+                          description: { color: '#5a6478', fontStyle: 'italic' },
+                        }}
+                      />
+                    )}
+                    {depositPaid && (
+                      <Text size="xs" c="green" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+                        DEPOSIT PAID — balance flow active
+                      </Text>
+                    )}
+                  </Stack>
 
                   <Switch
                     label="Paid in Full"
