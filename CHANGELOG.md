@@ -4,6 +4,68 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## [2.65.0] — 2026-05-03 — feat: deposit-aware invoicing + AcroForm TOS + portal theming
+
+Three subsystems shipped together — production-ready for first paying
+customers under the BarnardHQ Rev 3 TOS. Implemented by three parallel
+agents in isolated git worktrees, sequenced merge B → A → C; one
+read-only background agent ran a privacy audit of the public repo
+in parallel.
+
+- **Deposit feature (ADR-0009).** `invoices` table extended with 7
+  deposit columns (`deposit_required`, `deposit_amount`,
+  `deposit_paid`, `deposit_paid_at`, `deposit_payment_intent_id`,
+  `deposit_checkout_session_id`, `deposit_payment_method`) via
+  `_add_missing_columns` (no Alembic in this repo). Default 50% per
+  TOS §6.2; operator can opt-out per mission for Emergent Services
+  per TOS §6.3. Two-phase customer payment via Stripe Checkout
+  (`POST /api/client/missions/{id}/invoice/pay/deposit` any time;
+  `POST .../pay/balance` gated on mission `COMPLETED|SENT` AND
+  deposit paid). Legacy `/pay` retained as back-compat alias. Webhook
+  branches on `metadata.payment_phase` (`deposit | balance`),
+  idempotent on each phase; ntfy push to operator on each phase paid.
+  53 new tests pass.
+
+- **TOS-acceptance rebuild (ADR-0010).** Replaces canvas-signature
+  widget with AcroForm-fill on the BarnardHQ Rev 3 fillable PDF
+  (already uploaded to prod 2026-05-03). Seven AcroForm fields filled
+  + `/Ff` ReadOnly bit locked, both pre/post bytes SHA-256-anchored
+  in new `tos_acceptances` audit table. Settings upload validates
+  required fields. Customer signs at `/tos/accept?token=…&customer_id=…`
+  (intake email link pivoted accordingly). Operator + customer both
+  emailed signed PDF. 12 new tests pass. Old `/intake/{token}` flow
+  + canvas widget intentionally preserved during cutover (Phase 4
+  cleanup deferred per TOS-Rebuild.md §1.2).
+
+- **Customer portal theming.** All `/client/*` and `/tos/accept`
+  pages + 5 transactional emails re-themed to BarnardHQ TOS PDF brand.
+  New shared `CustomerLayout` component (navy header strip + Bebas
+  wordmark + Share Tech Mono footer line `BarnardHQ LLC · Eugene,
+  Oregon · FAA Part 107 Certified · barnardhq.com · DOC-001`). Brand
+  cyan `#189cc6` (TOS palette) replaces operator `#00d4ff` in customer
+  surfaces. Wordmark + footer line everywhere. `?payment=cancel` now
+  first-class (was silently ignored). TypeScript clean, Vite build
+  succeeds, Jinja smoke render of all 5 emails confirms wordmark +
+  footer + brand cyan present. Operator UI deliberately untouched.
+
+- **Cloudflare Access** bypass app `e2d36c3f-…` extended with
+  `/tos/*` and `/api/tos/*` destinations (now 5/5 — at the per-app
+  cap, but exactly where we need to be). Customer can now reach
+  the TOS-acceptance page from any external IP without CF login.
+
+- **Privacy audit** of the public repo: 0 PII, 0 Stripe/Brevo/CF API
+  token/Anthropic/GH PAT secrets in history. **CRITICAL findings**
+  separately surfaced for operator action: pre-existing leaked
+  Cloudflare Tunnel token + DB passwords in `.env.demo` since
+  v2.53.0 (`f6f66ff`); prod replication password as fallback default
+  in 6 files. These are pre-existing leaks, NOT introduced by
+  v2.65.0; remediation tracked separately as the next workstream.
+
+- **GitHub push protection** caught a Cloudflare Account API token I
+  inadvertently pasted into the orchestration plan during v2.65.0
+  prep — scrubbed before push (commit `c0dd70d`). Validates that the
+  protection works.
+
 ## [2.64.0] — 2026-05-02 — feat(client-portal): gate invoice visibility + Pay on mission completion (ADR-0008)
 
 **Also includes two latent-bug fixes** discovered during ADR-0008
