@@ -260,8 +260,17 @@ async def accept_terms(
             # tos_signed flip — the new AcroForm flow's source of truth
             # for the per-customer "did they sign" boolean. Always set on
             # accept; idempotent because the row is the latest acceptance.
+            #
+            # v2.66.4 — STRIP TZ. `ctx.accepted_at` is timezone-aware
+            # (UTC) but `customers.tos_signed_at` is mapped as `DateTime`
+            # (naive `TIMESTAMP WITHOUT TIME ZONE`). Assigning aware to
+            # a naive column makes SQLAlchemy crash on the dirty-tracking
+            # comparison ("can't subtract offset-naive and offset-aware
+            # datetimes"). Same UTC value, just stripped of tzinfo so the
+            # column write succeeds. tos_acceptances.accepted_at remains
+            # tz-aware — that column IS tz-aware in its model.
             customer.tos_signed = True
-            customer.tos_signed_at = ctx.accepted_at
+            customer.tos_signed_at = ctx.accepted_at.replace(tzinfo=None)
             await db.commit()
             logger.info(
                 "[CLIENT-PORTAL] Synced customer name/email from TOS acceptance "

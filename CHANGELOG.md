@@ -4,6 +4,28 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## [2.66.4] — 2026-05-03 — fix(tos): strip tzinfo when syncing customers.tos_signed_at (P0 hotfix)
+
+**P0 hotfix for the v2.66.3 sync code.** `customer.tos_signed_at = ctx.accepted_at`
+crashed because `ctx.accepted_at` is timezone-aware UTC but the
+`customers.tos_signed_at` column is mapped naive (`DateTime` /
+`TIMESTAMP WITHOUT TIME ZONE`). SQLAlchemy's dirty-tracking comparison
+raised `can't subtract offset-naive and offset-aware datetimes` AFTER
+the audit row had already been persisted — customer saw HTTP 500 and
+the signed PDF was orphaned on disk.
+
+Fix: `ctx.accepted_at.replace(tzinfo=None)`. Same UTC moment, naive
+form. `tos_acceptances.accepted_at` (the audit table) stays tz-aware
+because its column IS tz-aware in its model.
+
+Why W2's tests passed: the existing `test_tos_customer_sync.py`
+fixtures used `_mk_payload(SimpleNamespace(...))` which bypassed the
+real ORM column write — the exact anti-pattern ADR-0013 forbids for
+HTTP routes. Per ADR-0013, these fixtures should be retroactively
+replaced with real `httpx.AsyncClient` contract tests; this hotfix
+adds a real-ORM-path regression test
+(`test_tos_customer_tz_naive_sync.py`) as a down payment.
+
 ## [2.66.3] — 2026-05-03 — fix: Customers page reflects new AcroForm TOS flow
 
 After v2.65.0 + v2.66.0 (ADR-0010 AcroForm pipeline + customer
