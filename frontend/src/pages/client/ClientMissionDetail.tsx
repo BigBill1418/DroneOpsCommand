@@ -35,6 +35,7 @@ import {
   IconMapPin,
   IconPackage,
   IconReceipt,
+  IconRefresh,
 } from '@tabler/icons-react';
 import { useClientAuth } from '../../hooks/useClientAuth';
 import clientApi from '../../api/clientPortalApi';
@@ -158,6 +159,16 @@ const cardTitleStyle = {
   fontSize: 20,
 } as const;
 
+// v2.66.0 Fix #6 — sessionStorage key for "I just paid" context. Survives
+// a hard refresh during the polling window so the customer who hits F5
+// still sees the confirming-state UI instead of the bare invoice.
+const PAYMENT_CTX_KEY = (missionId: string) => `doc.payCtx.${missionId}`;
+
+interface PaymentCtx {
+  startedPhase: ClientInvoiceData['payment_phase'] | null;
+  startedAt: number; // epoch ms
+}
+
 export default function ClientMissionDetail() {
   const { missionId } = useParams<{ missionId: string }>();
   const navigate = useNavigate();
@@ -169,6 +180,16 @@ export default function ClientMissionDetail() {
   const [loading, setLoading] = useState(true);
   const [paying, setPaying] = useState<null | 'deposit' | 'balance'>(null);
   const lastPhaseRef = useRef<ClientInvoiceData['payment_phase'] | null>(null);
+
+  // v2.66.0 Fix #6 — payment polling state lifted to component scope so
+  // the Refresh button can reset it and the post-redirect effect can
+  // share it. `pollKey` is bumped to (re-)kick off polling.
+  const [pollKey, setPollKey] = useState(0);
+  const [polling, setPolling] = useState(false);
+  // True from the moment we detect ?payment=success (or recover the
+  // sessionStorage context across a refresh) until the phase advances.
+  // Drives the Refresh button visibility.
+  const [postPayContext, setPostPayContext] = useState<PaymentCtx | null>(null);
 
   // Pull invoice — separate from mission so polling can re-pull just this.
   const fetchInvoice = async (): Promise<ClientInvoiceData | null> => {
@@ -222,14 +243,15 @@ export default function ClientMissionDetail() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [missionId, navigate]);
 
-  // ADR-0009 — post-Stripe-redirect polling. After ?payment=success
-  // we hit the invoice every 3s for up to 30s, stopping early when
-  // payment_phase changes. No SSE/WS — polling is sufficient at
-  // human-payment cadence and avoids a stateful CF Access connection.
+  // v2.66.0 Fix #6 — establish the post-pay context as soon as we land
+  // on the page with ?payment=success, OR recover it from sessionStorage
+  // if the customer hard-refreshed mid-poll. This drives the Refresh
+  // button visibility independently of the polling lifecycle below.
   useEffect(() => {
     if (!missionId) return;
     const paymentParam = searchParams.get('payment');
     if (paymentParam === 'cancel') {
+      // Clean cancel — no context needed, just tell them.
       customerNotify({
         title: 'Payment Canceled',
         message: 'Your payment was canceled. You can retry whenever you are ready.',
@@ -239,36 +261,101 @@ export default function ClientMissionDetail() {
       setSearchParams(searchParams, { replace: true });
       return;
     }
-    if (paymentParam !== 'success') return;
-    const startedPhase = lastPhaseRef.current;
+    if (paymentParam === 'success') {
+      const ctx: PaymentCtx = {
+        startedPhase: lastPhaseRef.current,
+        startedAt: Date.now(),
+      };
+      try {
+        sessionStorage.setItem(PAYMENT_CTX_KEY(missionId), JSON.stringify(ctx));
+      } catch {
+        // sessionStorage may be unavailable (private mode on iOS quota).
+        // The polling still works — we just lose hard-refresh recovery.
+      }
+      setPostPayContext(ctx);
+      // Kick off the first polling pass.
+      setPollKey((k) => k + 1);
+      // Strip ?payment from the URL immediately so a refresh doesn't
+      // re-fire this branch (sessionStorage carries the state instead).
+      searchParams.delete('payment');
+      setSearchParams(searchParams, { replace: true });
+      return;
+    }
+    // Hard-refresh recovery path: no ?payment in URL but sessionStorage
+    // says we were mid-confirmation. Honor it for up to 10 minutes (the
+    // Stripe webhook is normally <30s; 10 min covers exotic backlog).
+    try {
+      const raw = sessionStorage.getItem(PAYMENT_CTX_KEY(missionId));
+      if (raw) {
+        const ctx = JSON.parse(raw) as PaymentCtx;
+        if (Date.now() - ctx.startedAt < 10 * 60 * 1000) {
+          setPostPayContext(ctx);
+          setPollKey((k) => k + 1);
+        } else {
+          sessionStorage.removeItem(PAYMENT_CTX_KEY(missionId));
+        }
+      }
+    } catch {
+      /* sessionStorage unavailable — silently skip recovery. */
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [missionId, searchParams.get('payment')]);
+
+  // v2.66.0 Fix #6 — the actual polling loop. Lives in its own effect
+  // keyed on `pollKey` so the Refresh button can re-trigger it without
+  // duplicating the search-param branch above. Each kick polls every
+  // 3s for up to 30s, stops early on phase change, and shows the
+  // upgraded confirming/confirmed/timeout toasts.
+  useEffect(() => {
+    if (!missionId || pollKey === 0 || !postPayContext) return;
     let stopped = false;
     let attempts = 0;
     const maxAttempts = 10; // 10 * 3s = 30s
+
+    setPolling(true);
+    customerNotify({
+      title: 'Confirming Payment',
+      message: 'Confirming payment with Stripe…',
+      kind: 'info',
+      autoClose: 4000,
+    });
+
+    const finish = (kind: 'success' | 'warning', title: string, message: string) => {
+      stopped = true;
+      setPolling(false);
+      customerNotify({ title, message, kind });
+    };
+
     const tick = async () => {
       if (stopped) return;
       attempts += 1;
       const inv = await fetchInvoice();
       const newPhase = inv?.payment_phase ?? null;
-      if (newPhase && newPhase !== startedPhase) {
-        customerNotify({
-          title: 'Payment Confirmed',
-          message: `Status updated to: ${PAYMENT_PHASE_LABELS[newPhase]}`,
-          kind: 'success',
-        });
+      if (newPhase && newPhase !== postPayContext.startedPhase) {
+        // Phase advanced — payment is confirmed. Clear context.
         lastPhaseRef.current = newPhase;
-        searchParams.delete('payment');
-        setSearchParams(searchParams, { replace: true });
-        stopped = true;
+        try {
+          sessionStorage.removeItem(PAYMENT_CTX_KEY(missionId));
+        } catch {
+          /* ignore */
+        }
+        setPostPayContext(null);
+        finish(
+          'success',
+          'Payment Confirmed',
+          `Status updated to: ${PAYMENT_PHASE_LABELS[newPhase]}`,
+        );
         return;
       }
       if (attempts >= maxAttempts) {
-        stopped = true;
-        customerNotify({
-          title: 'Still Processing',
-          message:
-            'Your payment is taking a moment to confirm. Refresh in a few seconds if the status does not update.',
-          kind: 'warning',
-        });
+        // 30s elapsed without phase advance. Keep the post-pay context
+        // alive so the Refresh button stays visible — webhook may still
+        // be in flight.
+        finish(
+          'warning',
+          'Still Processing',
+          'Still processing — try Refresh in a moment.',
+        );
         return;
       }
       setTimeout(tick, 3000);
@@ -276,9 +363,36 @@ export default function ClientMissionDetail() {
     setTimeout(tick, 3000);
     return () => {
       stopped = true;
+      setPolling(false);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [missionId, searchParams.get('payment')]);
+  }, [missionId, pollKey]);
+
+  // v2.66.0 Fix #6 — manual Refresh action: re-fetch invoice immediately
+  // and reset the polling clock for another 30s. Phase-advance check on
+  // the immediate fetch keeps a no-op press from looking broken.
+  const handleManualRefresh = async () => {
+    if (!missionId || polling) return;
+    const inv = await fetchInvoice();
+    const newPhase = inv?.payment_phase ?? null;
+    if (newPhase && postPayContext && newPhase !== postPayContext.startedPhase) {
+      lastPhaseRef.current = newPhase;
+      try {
+        sessionStorage.removeItem(PAYMENT_CTX_KEY(missionId));
+      } catch {
+        /* ignore */
+      }
+      setPostPayContext(null);
+      customerNotify({
+        title: 'Payment Confirmed',
+        message: `Status updated to: ${PAYMENT_PHASE_LABELS[newPhase]}`,
+        kind: 'success',
+      });
+      return;
+    }
+    // No change — re-arm polling for another 30s window.
+    setPollKey((k) => k + 1);
+  };
 
   const handlePay = async (phase: 'deposit' | 'balance') => {
     if (!missionId) return;
@@ -620,6 +734,56 @@ export default function ClientMissionDetail() {
                 />
               ))}
             </Stepper>
+
+            {/* v2.66.0 Fix #6 — persistent Refresh affordance during the
+                post-Stripe-redirect window. Visible from the moment of
+                redirect (or hard-refresh recovery) until the phase
+                actually advances. Removes itself once the webhook lands. */}
+            {postPayContext && (
+              <Paper
+                p="sm"
+                radius="sm"
+                style={{
+                  background: customerBrand.bgDeep,
+                  border: `1px solid ${customerBrand.border}`,
+                  borderLeft: `3px solid ${customerBrand.brandCyan}`,
+                }}
+              >
+                <Group justify="space-between" wrap="wrap" gap="sm">
+                  <Text
+                    size="xs"
+                    style={{
+                      color: customerBrand.textBody,
+                      fontFamily: customerBrand.fontMono,
+                      letterSpacing: customerBrand.trackTight,
+                    }}
+                  >
+                    {polling
+                      ? 'Confirming payment with Stripe…'
+                      : 'Payment submitted. If the status above hasn’t updated, tap Refresh.'}
+                  </Text>
+                  <Button
+                    size="xs"
+                    leftSection={<IconRefresh size={14} />}
+                    loading={polling}
+                    onClick={handleManualRefresh}
+                    disabled={polling}
+                    styles={{
+                      root: {
+                        background: customerBrand.brandCyan,
+                        color: customerBrand.brandNavyDeep,
+                        fontFamily: customerBrand.fontDisplay,
+                        letterSpacing: customerBrand.trackMid,
+                        fontWeight: 700,
+                        minHeight: 30,
+                      },
+                    }}
+                  >
+                    REFRESH
+                  </Button>
+                </Group>
+              </Paper>
+            )}
 
             {/* Two-row payment table: deposit row + balance row. */}
             <Paper
