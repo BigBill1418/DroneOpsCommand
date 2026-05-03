@@ -95,6 +95,61 @@ required; no operator action required at deploy time.
   `test_pay_idempotency.py`, `test_invoice_numbering.py`,
   `test_health_check.py`.
 
+**Frontend polish addendum (v2.66.0 same-release)**
+
+UI / UX gaps closed alongside the backend hardening above. No version
+bump (same release as the backend bundle); references the same
+ADR-0011 where applicable. All changes preserve every existing feature
+on the touched pages.
+
+- **Operator MissionDetail — deposit-paid indicator (Fix #1).** Above
+  the line items, a clearly-styled status block now shows whether the
+  ADR-0009 deposit cleared. Green checkmark + ISO date when paid;
+  yellow warning when due; grey "not required (Emergent Services)"
+  when off. Closes the gap where an operator could mark a mission
+  COMPLETED without knowing whether the deposit hit Stripe.
+- **Operator MissionDetail — `Mark as SENT` button (Fix #5).** Mission
+  status enum has had `SENT` since v2.0; the only path to flip there
+  was direct DB. Button now appears on the header when status =
+  `completed`, behind a Mantine confirm modal so a misclick can't
+  permanently advance state. PUTs `{status: 'sent'}` to
+  `/missions/{id}` and refreshes the local state.
+- **Operator MissionDetail / new standalone Edit Invoice page (Fix #4).**
+  New route `/missions/:id/invoice/edit` mounts a focused invoice form
+  for an existing mission — line items, deposit toggle, deposit
+  amount, tax, paid-in-full, notes — sharing the same backend
+  endpoints (`GET/PUT/POST/DELETE /missions/{id}/invoice + /items`)
+  as the wizard. New cyan-outline `EDIT INVOICE` button on the
+  MissionDetail header. Pre-v2.66 the only path to fix a typo in the
+  invoice was re-walking the 5-step `MissionNew` wizard.
+- **TOS success view — "what happens next" copy (Fix #2).** After
+  `/tos/accept` flips to ACCEPTED, the customer now sees a brand-cyan-
+  bordered panel explaining that their operator has been notified and
+  will send a secure portal link by email or text. Removes the
+  "I signed it, now what?" gap.
+- **TOS-signed email — same "what happens next" copy (Fix #3).**
+  `signed_tos_email.html` mirrors the post-acceptance copy, so the
+  customer gets the same expectation in their inbox alongside the
+  attached signed PDF. Email-client safe (table-based, inline
+  styles).
+- **Customer portal — persistent payment polling refresh (Fix #6).**
+  ClientMissionDetail's post-Stripe-redirect polling no longer ends
+  silently after 30s. (1) A brand-cyan `Refresh` button now sits
+  inside the payment-phase strip from the moment of redirect until
+  the phase advances, re-arming the 30s polling clock on press.
+  (2) The "I just paid" context is mirrored to `sessionStorage` so a
+  hard refresh during polling preserves the confirming-state UI for
+  up to 10 minutes. (3) Toast copy upgraded to the customerNotify
+  helper: "Confirming payment with Stripe…" (info), "Payment
+  Confirmed" (success), "Still processing — try Refresh in a moment"
+  (warning).
+- **TOS PDF iframe — mobile sizing (Fix #7).** The 5-page TOS PDF
+  used to render in a ~467px-tall iframe on phones, leaving customers
+  trying to scroll the page instead of the document. Mobile (≤768px)
+  now gets `max(500px, 90vh - 24px)` plus a brand-mono caption
+  ("Scroll inside the document to read all pages"). Desktop keeps
+  the v2.65.0 `max(70vh, 800px)` cap.
+
 ## [2.65.1] — 2026-05-03 — feat(intake): email-optional Initiate Services + prominent Copy Link
 
 Operator-facing UX tweak so Bill can generate an intake link without an
