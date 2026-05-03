@@ -32,11 +32,13 @@ import {
 } from '@tabler/icons-react';
 import { useParams, useNavigate } from 'react-router-dom';
 import api from '../api/client';
-import { Mission, Report, Aircraft, CoverageData } from '../api/types';
+import { Mission, Report, Aircraft, CoverageData, Invoice } from '../api/types';
 import FlightMap from '../components/FlightMap/FlightMap';
 import AircraftCard from '../components/AircraftCard/AircraftCard';
 import RichTextEditor from '../components/RichTextEditor/RichTextEditor';
 import { inputStyles, statusColors } from '../components/shared/styles';
+import { IconAlertTriangle, IconCircleCheck, IconCircleMinus, IconReceipt2, IconFlagFilled } from '@tabler/icons-react';
+import { Modal } from '@mantine/core';
 
 export default function MissionDetail() {
   const { id } = useParams<{ id: string }>();
@@ -56,6 +58,10 @@ export default function MissionDetail() {
   const [portalSentTo, setPortalSentTo] = useState<string | null>(null);
   const [clientNotes, setClientNotes] = useState('');
   const [clientNotesDirty, setClientNotesDirty] = useState(false);
+  // v2.66.0 frontend polish — Fix #1 (deposit indicator) + Fix #5 (Mark SENT)
+  const [invoice, setInvoice] = useState<Invoice | null>(null);
+  const [markSentOpen, setMarkSentOpen] = useState(false);
+  const [markingSent, setMarkingSent] = useState(false);
   const navigate = useNavigate();
 
   // Polling for Celery report generation
@@ -86,6 +92,9 @@ export default function MissionDetail() {
       setCoverage(r.data.coverage);
     }).catch(() => {});
     api.get('/aircraft').then((r) => setAircraftList(r.data)).catch(() => {});
+    // v2.66.0 — invoice fetch for deposit-paid indicator (Fix #1).
+    // 404 is expected for non-billable / pre-invoice missions; swallowed silently.
+    api.get(`/missions/${id}/invoice`).then((r) => setInvoice(r.data)).catch(() => setInvoice(null));
     return () => {
       stopPolling();
       if (pdfBlobUrl) URL.revokeObjectURL(pdfBlobUrl);
@@ -219,6 +228,30 @@ export default function MissionDetail() {
     }
   };
 
+  // v2.66.0 — Fix #5: flip mission status COMPLETED → SENT.
+  const handleMarkSent = async () => {
+    setMarkingSent(true);
+    try {
+      const resp = await api.put(`/missions/${id}`, { status: 'sent' });
+      setMission(resp.data);
+      setMarkSentOpen(false);
+      notifications.show({
+        title: 'Mission marked SENT',
+        message: 'Final state recorded. The customer portal will reflect this immediately.',
+        color: 'cyan',
+      });
+    } catch (err: unknown) {
+      const axiosErr = err as { response?: { data?: { detail?: string } } };
+      notifications.show({
+        title: 'Error',
+        message: axiosErr.response?.data?.detail || 'Failed to mark SENT',
+        color: 'red',
+      });
+    } finally {
+      setMarkingSent(false);
+    }
+  };
+
   const handleSaveClientNotes = async () => {
     try {
       await api.put(`/missions/${id}`, { client_notes: clientNotes || null });
@@ -258,6 +291,29 @@ export default function MissionDetail() {
           >
             EDIT MISSION
           </Button>
+          {invoice && (
+            <Button
+              leftSection={<IconReceipt2 size={16} />}
+              color="cyan"
+              variant="outline"
+              onClick={() => navigate(`/missions/${id}/invoice/edit`)}
+              styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}
+            >
+              EDIT INVOICE
+            </Button>
+          )}
+          {/* v2.66.0 Fix #5 — final-state flip COMPLETED → SENT (UI gap closed). */}
+          {mission.status === 'completed' && (
+            <Button
+              leftSection={<IconFlagFilled size={16} />}
+              color="teal"
+              variant="filled"
+              onClick={() => setMarkSentOpen(true)}
+              styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}
+            >
+              MARK AS SENT
+            </Button>
+          )}
           <Button
             leftSection={<IconTrash size={16} />}
             color="red"
@@ -278,6 +334,61 @@ export default function MissionDetail() {
           </Button>
         </Group>
       </Group>
+
+      {/* v2.66.0 Fix #1 — deposit-paid indicator above invoice details. */}
+      {invoice && (
+        <Card padding="lg" radius="md" style={cardStyle}>
+          <Group justify="space-between" wrap="wrap" gap="md">
+            <Stack gap={4}>
+              <Text c="#5a6478" size="xs" style={{ fontFamily: "'Share Tech Mono', monospace", letterSpacing: '1px' }}>
+                INVOICE {invoice.invoice_number ?? '(no number)'}
+              </Text>
+              {invoice.deposit_required && invoice.deposit_paid && (
+                <Badge
+                  size="lg"
+                  color="green"
+                  variant="light"
+                  leftSection={<IconCircleCheck size={16} />}
+                  styles={{ root: { fontFamily: "'Share Tech Mono', monospace", letterSpacing: '1px', textTransform: 'none' } }}
+                >
+                  Deposit ${invoice.deposit_amount?.toFixed(2)} paid
+                  {invoice.deposit_paid_at ? ` ${invoice.deposit_paid_at.slice(0, 10)}` : ''}
+                </Badge>
+              )}
+              {invoice.deposit_required && !invoice.deposit_paid && (
+                <Badge
+                  size="lg"
+                  color="yellow"
+                  variant="light"
+                  leftSection={<IconAlertTriangle size={16} />}
+                  styles={{ root: { fontFamily: "'Share Tech Mono', monospace", letterSpacing: '1px', textTransform: 'none' } }}
+                >
+                  Deposit ${(invoice.deposit_amount ?? 0).toFixed(2)} DUE
+                </Badge>
+              )}
+              {!invoice.deposit_required && (
+                <Badge
+                  size="lg"
+                  color="gray"
+                  variant="light"
+                  leftSection={<IconCircleMinus size={16} />}
+                  styles={{ root: { fontFamily: "'Share Tech Mono', monospace", letterSpacing: '1px', textTransform: 'none' } }}
+                >
+                  Deposit: not required (Emergent Services)
+                </Badge>
+              )}
+            </Stack>
+            <Stack gap={2} align="flex-end">
+              <Text c="#5a6478" size="xs" style={{ fontFamily: "'Share Tech Mono', monospace", letterSpacing: '1px' }}>
+                {invoice.paid_in_full ? 'PAID IN FULL' : 'BALANCE'}
+              </Text>
+              <Text c="#189cc6" size="xl" fw={700} style={{ fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' }}>
+                ${invoice.total.toFixed(2)}
+              </Text>
+            </Stack>
+          </Group>
+        </Card>
+      )}
 
       {/* Aircraft */}
       {usedAircraft.length > 0 && (
@@ -502,6 +613,46 @@ export default function MissionDetail() {
           <PdfViewer url={pdfBlobUrl} height={700} downloadFilename={`Report_${mission.title.replace(/\s+/g, '_')}.pdf`} />
         </Card>
       )}
+
+      {/* v2.66.0 Fix #5 — Mark SENT confirmation modal. */}
+      <Modal
+        opened={markSentOpen}
+        onClose={() => !markingSent && setMarkSentOpen(false)}
+        title="Mark this mission as SENT?"
+        centered
+        styles={{
+          title: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '2px', color: '#e8edf2' },
+          content: { background: '#0e1117', border: '1px solid #1a1f2e' },
+          header: { background: '#0e1117', borderBottom: '1px solid #1a1f2e' },
+          body: { color: '#c0c8d4' },
+        }}
+      >
+        <Stack gap="md">
+          <Text c="#c0c8d4" size="sm">
+            SENT is the final lifecycle state. Use it after the deliverables are
+            transmitted to the customer. This does not undo by itself — you can
+            still edit the mission record afterward.
+          </Text>
+          <Group justify="flex-end">
+            <Button
+              variant="subtle"
+              color="gray"
+              onClick={() => setMarkSentOpen(false)}
+              disabled={markingSent}
+            >
+              Cancel
+            </Button>
+            <Button
+              color="teal"
+              onClick={handleMarkSent}
+              loading={markingSent}
+              styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}
+            >
+              CONFIRM — MARK SENT
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
     </Stack>
   );
 }

@@ -21,6 +21,8 @@ const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Missions = lazy(() => import('./pages/Missions'));
 const MissionNew = lazy(() => import('./pages/MissionNew'));
 const MissionDetail = lazy(() => import('./pages/MissionDetail'));
+// v2.66.0 Fix #4 — standalone invoice editor for an existing mission.
+const MissionInvoiceEdit = lazy(() => import('./pages/MissionInvoiceEdit'));
 const Customers = lazy(() => import('./pages/Customers'));
 const Flights = lazy(() => import('./pages/Flights'));
 const Batteries = lazy(() => import('./pages/Batteries'));
@@ -83,6 +85,7 @@ export default function App() {
                   <Route path="/missions" element={<Missions />} />
                   <Route path="/missions/new" element={<MissionNew />} />
                   <Route path="/missions/:id/edit" element={<MissionNew />} />
+                  <Route path="/missions/:id/invoice/edit" element={<MissionInvoiceEdit />} />
                   <Route path="/missions/:id" element={<MissionDetail />} />
                   <Route path="/customers" element={<Customers />} />
                   <Route path="/batteries" element={<Batteries />} />
