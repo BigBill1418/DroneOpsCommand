@@ -154,7 +154,7 @@ async def test_tos_accept_syncs_email_when_customer_email_null(tmp_path):
          patch.object(tos_module, "signed_pdf_dir", return_value=tmp_path), \
          patch.object(tos_module, "send_signed_tos_to_both_parties",
                       new=AsyncMock(return_value=None)):
-        resp = await tos_module.accept_terms(payload, _mk_request(), db)
+        resp = await tos_module.accept_terms(_mk_request(), payload, db)
 
     # Customer was synced
     assert customer.email == "casey@example.com"
@@ -188,7 +188,7 @@ async def test_tos_accept_does_not_overwrite_existing_email(tmp_path):
          patch.object(tos_module, "signed_pdf_dir", return_value=tmp_path), \
          patch.object(tos_module, "send_signed_tos_to_both_parties",
                       new=AsyncMock(return_value=None)):
-        await tos_module.accept_terms(payload, _mk_request(), db)
+        await tos_module.accept_terms(_mk_request(), payload, db)
 
     # Email NOT overwritten, name NOT overwritten.
     assert customer.email == "prior@example.com"
@@ -222,7 +222,7 @@ async def test_tos_accept_replaces_pending_intake_name_only(tmp_path):
          patch.object(tos_module, "signed_pdf_dir", return_value=tmp_path), \
          patch.object(tos_module, "send_signed_tos_to_both_parties",
                       new=AsyncMock(return_value=None)):
-        await tos_module.accept_terms(payload, _mk_request(), db)
+        await tos_module.accept_terms(_mk_request(), payload, db)
 
     assert customer.name == "Real Customer Name"
     assert customer.email == "prior@example.com"  # email left alone
@@ -244,7 +244,7 @@ async def test_tos_accept_no_customer_id_skips_sync(tmp_path):
          patch.object(tos_module, "signed_pdf_dir", return_value=tmp_path), \
          patch.object(tos_module, "send_signed_tos_to_both_parties",
                       new=AsyncMock(return_value=None)):
-        await tos_module.accept_terms(payload, _mk_request(), db)
+        await tos_module.accept_terms(_mk_request(), payload, db)
 
     assert db.commits == 1  # only the tos row commit
 

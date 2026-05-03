@@ -20,18 +20,25 @@ Three failure modes worth knowing:
 
 Every log line is namespaced ``doc.tos`` so post-incident grep /
 Loki query is straightforward.
-"""
 
-from __future__ import annotations
+NOTE: this module deliberately does NOT use
+``from __future__ import annotations``. PEP 563 stringifies
+parameter annotations at decoration time, which defeats FastAPI's
+body-vs-query inference for Pydantic ``BaseModel`` parameters and
+caused the v2.66.1 production 422 incident on
+``POST /api/tos/accept``. Python 3.12 natively supports the modern
+syntax (``str | None``, etc.) so the ``__future__`` import was never
+load-bearing here. v2.66.2 hotfix: do not re-introduce it.
+"""
 
 import logging
 import re
 import time
-from datetime import datetime, timezone
-
 import uuid as _uuid
+from datetime import datetime, timezone
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse, Response
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -120,11 +127,40 @@ async def download_unsigned_template(request: Request) -> Response:
 )
 @limiter.limit("5/minute")
 async def accept_terms(
-    payload: TosAcceptanceRequest,
     request: Request,
+    payload: Annotated[TosAcceptanceRequest, Body()],
     db: AsyncSession = Depends(get_db),
 ) -> TosAcceptanceResponse:
-    """Fill the AcroForm, lock the fields, hash both sides, persist, email."""
+    """Fill the AcroForm, lock the fields, hash both sides, persist, email.
+
+    v2.66.2 hotfix:
+
+    * ``request: Request`` is the FIRST positional arg — every other
+      ``@limiter.limit``-decorated route in this repo follows the same
+      convention (auth.py, intake.py, client_portal.py).
+    * ``payload`` is wrapped in ``Annotated[..., Body()]`` rather than
+      a plain ``payload: TosAcceptanceRequest`` annotation.
+
+    Both pieces are needed because this module declares
+    ``from __future__ import annotations`` (PEP 563): every annotation
+    becomes a forward-reference string at decoration time. FastAPI's
+    body-vs-query inference walks the annotation looking for a
+    ``BaseModel`` subclass; against a string it falls through to the
+    ``Query`` default. ``Annotated[T, Body()]`` keeps ``T`` (the real
+    class) directly in the metadata tuple, where Pydantic + FastAPI
+    can read it without resolving the forward ref.
+
+    Production incident on 2026-05-03: every customer POST 422'd in
+    <2 ms with ``loc=['query','payload']``; the handler never ran;
+    no acceptance row, no PDF, no email. Six retries from one
+    paying customer before the operator regenerated the link, with
+    no improvement. The hermetic unit tests in
+    ``test_tos_customer_sync.py`` had not caught this because they
+    bypass the ASGI pipeline. The new
+    ``test_tos_accept_route_body.py`` suite walks the full FastAPI
+    request-parsing path via ``TestClient`` so the failure mode is
+    locked in.
+    """
     start = time.perf_counter()
     ip = _client_ip(request)
     ua = request.headers.get("user-agent", "")[:1000]
