@@ -573,8 +573,13 @@ async def create_client_payment(
     if float(invoice.total) <= 0:
         raise HTTPException(status_code=400, detail="Invoice total must be greater than zero")
 
-    # Load customer for email
-    cust_result = await db.execute(select(Customer).where(Customer.id == UUID(client.customer_id)))
+    # Load customer for email. `client.customer_id` may be either a
+    # UUID object (when minted via create_client_token, which the
+    # operator-side endpoint does) or a str (legacy paths). Coerce
+    # safely by going through str(); SQLAlchemy will accept either
+    # form against the UUID column, but `UUID(uuid_object)` itself
+    # raises AttributeError.
+    cust_result = await db.execute(select(Customer).where(Customer.id == client.customer_id))
     customer = cust_result.scalar_one_or_none()
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
