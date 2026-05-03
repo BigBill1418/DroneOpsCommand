@@ -4,7 +4,11 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
-## [Unreleased — Agent A slice for v2.67.0] — 2026-05-03 — Mission Hub + slim create + status transitions
+## [Unreleased — v2.67.0 Mission Hub orchestration (in flight)]
+
+Three parallel agents per `docs/superpowers/specs/2026-05-03-mission-hub-redesign-design.md` and `docs/superpowers/plans/2026-05-03-v2.67.0-mission-hub-orchestration-plan.md`. Version bump + ADR-0014 + CHANGELOG consolidation land in Agent D's final merge.
+
+### Agent A — Mission Hub + slim create + status transitions
 
 Agent A of the v2.67.0 Mission Hub redesign (per
 `docs/superpowers/specs/2026-05-03-mission-hub-redesign-design.md` §2,
@@ -66,6 +70,40 @@ the suite.
 
 **Failover/resilience guard:** PATCH endpoint is purely additive; no
 schema changes; no replication impact.
+
+### Agent C — Mission Report facet editor (`feat/mission-facet-report`)
+
+- New `frontend/src/pages/MissionReportEdit.tsx` (mounted by Agent D
+  at `/missions/:id/report/edit`). Extracted verbatim from
+  `MissionNew.tsx` Step 4 (narrative + AI generate/poll + draft save)
+  plus Step 6's Generate PDF + Send-to-Customer actions which
+  logically belong with the report.
+- API surface preserved exactly: `GET /missions/{id}`,
+  `GET/PUT /missions/{id}/report`,
+  `POST /missions/{id}/report/generate`,
+  `GET /missions/{id}/report/status/{task_id}`,
+  `POST /missions/{id}/report/pdf` (blob, 120s timeout),
+  `POST /missions/{id}/report/send`.
+- AI-generation polling logic is preserved verbatim (3s cadence,
+  task-id status loop, finished-fetch + notification cascade).
+- Same `RichTextEditor` (Mantine Tiptap) and `PdfViewer` components
+  as the legacy wizard — no library swap.
+- Inline `Last saved {N min ago}` / `Last sent {N min ago}` /
+  `AI generated {N min ago}` indicators derived from response
+  timestamps.
+- Cancel routes back to `/missions/:id` (the Hub).
+- **Hard contract per ADR-0013 / spec §2:** zero `POST /missions`
+  in this file — verified by `MissionReportEdit.test.tsx`'s
+  load-bearing call-count = 0 assertion exercised across save,
+  generate, PDF, and send paths.
+
+**Tests (Vitest + msw):**
+
+- New `frontend/src/pages/__tests__/MissionReportEdit.test.tsx`
+  (7 tests, all green): initial GET hydration, Save Draft body,
+  Generate AI fire, Generate PDF fire, Send fire, Cancel
+  navigation, and the cross-action `POST /api/missions = 0`
+  contract.
 
 ## [2.66.4] — 2026-05-03 — fix(tos): strip tzinfo when syncing customers.tos_signed_at (P0 hotfix)
 
