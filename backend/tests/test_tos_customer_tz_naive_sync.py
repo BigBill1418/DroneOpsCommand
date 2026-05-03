@@ -20,9 +20,7 @@ import uuid
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from app.database import Base
 from app.models.customer import Customer
-from app.models.tos_acceptance import TosAcceptance
 
 
 @pytest.fixture
@@ -32,10 +30,16 @@ async def db():
     value is assigned to a tz-naive column. SQLite's date adapters are
     lenient enough that the column-type mismatch goes through, but the
     Python-side comparison ("did the value change?") still fires the
-    same offset-naive-vs-aware error."""
+    same offset-naive-vs-aware error.
+
+    NOTE: only the `customers` table is created — `Base.metadata.create_all`
+    would also try to materialize `tos_acceptances`, which uses the
+    PG-only `INET` type for `client_ip` and crashes the SQLite dialect
+    compiler. This test only writes/reads through the Customer model, so
+    a per-table create is both correct and faster."""
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(Customer.__table__.create)
     Session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     async with Session() as session:
         yield session
@@ -60,12 +64,22 @@ async def test_customer_tos_signed_at_accepts_naive_datetime(db: AsyncSession):
     assert refreshed.tos_signed_at.tzinfo is None  # column round-trips as naive
 
 
+@pytest.mark.skip(
+    reason="Postgres-only contract: asyncpg's bind layer raises DataError "
+    "on tz-aware → naive column; SQLite's date adapter accepts the cast "
+    "silently and round-trips a stripped naive value, so this assertion "
+    "cannot be proved against the in-memory hermetic engine. Replacing "
+    "the SQLite fixture with a real Postgres testcontainer (or moving "
+    "the contract proof up to a backend integration test) is tracked as "
+    "a follow-up; the v2.66.4 fix itself is still verified by "
+    "test_v2664_fix_strip_tzinfo_works below."
+)
 @pytest.mark.asyncio
 async def test_customer_tos_signed_at_must_be_tz_naive(db: AsyncSession):
     """The v2.66.3 bug: assigning a tz-AWARE datetime to the naive column
-    crashes when SQLAlchemy compares old vs new (or when asyncpg binds it).
-    The fix in v2.66.4 strips tzinfo before assignment. This test pins the
-    contract: the assignment site MUST be tz-naive."""
+    crashes on Postgres+asyncpg. This test was authored under the false
+    assumption that SQLite would also raise; it does not. Skipped pending
+    a Postgres-backed replacement (see the skip reason)."""
     # Pre-populate with a naive value so SQLAlchemy's dirty tracking has
     # something to compare against
     c = Customer(name="Test User", email="aware@example.com")
@@ -73,19 +87,12 @@ async def test_customer_tos_signed_at_must_be_tz_naive(db: AsyncSession):
     db.add(c)
     await db.commit()
 
-    # Now simulate the v2.66.3 buggy assignment — tz-AWARE datetime
+    # Simulate the v2.66.3 buggy assignment — tz-AWARE datetime.
     aware = datetime.now(timezone.utc)
     c.tos_signed_at = aware
 
-    # On Postgres + asyncpg this raises asyncpg.exceptions.DataError.
-    # On SQLite the underlying dialect is permissive but the Python-side
-    # naive-vs-aware comparison in SQLAlchemy's `_assert_no_pending_changes`
-    # / "did the value change?" path is the actual failure point. Either
-    # way: the assignment that survives a `commit()` MUST have its tzinfo
-    # stripped first, which is what v2.66.4 does.
     with pytest.raises((TypeError, Exception)) as excinfo:
         await db.commit()
-    # Guard against the exact regression text — defense in depth
     assert ("offset-naive" in str(excinfo.value).lower()
             or "offset-aware" in str(excinfo.value).lower()
             or "can't compare" in str(excinfo.value).lower()

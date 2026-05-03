@@ -316,10 +316,15 @@ async def test_tos_accept_flips_tos_signed_to_true(tmp_path):
 
     assert customer.tos_signed is True
     assert customer.tos_signed_at is not None
-    # tos_signed_at is set to the AcceptanceContext.accepted_at instant
-    # (which the route built from datetime.now(timezone.utc)) — assert
-    # it is timezone-aware UTC, the contract expected downstream.
-    assert customer.tos_signed_at.tzinfo is not None
+    # v2.66.4 P0 hotfix corrected the contract: customers.tos_signed_at
+    # is mapped to a NAIVE TIMESTAMP column, so the route MUST strip
+    # tzinfo before assignment (otherwise SQLAlchemy's dirty-tracking
+    # comparison crashes on offset-naive vs offset-aware). The route
+    # uses ctx.accepted_at.replace(tzinfo=None) — same UTC moment, naive
+    # form. The pre-v2.66.4 assertion (`tzinfo is not None`) directly
+    # contradicted the v2.66.4 fix and was a stale test contract.
+    # See ADR-0013 for the broader testing standard this addresses.
+    assert customer.tos_signed_at.tzinfo is None
 
 
 @pytest.mark.asyncio
