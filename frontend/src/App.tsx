@@ -38,6 +38,9 @@ const ClientPortal = lazy(() => import('./pages/client/ClientPortal'));
 const ClientLogin = lazy(() => import('./pages/client/ClientLogin'));
 const ClientMissionDetail = lazy(() => import('./pages/client/ClientMissionDetail'));
 
+// TOS-acceptance page (ADR-0010) — public, no auth.
+const TosAcceptance = lazy(() => import('./pages/TosAcceptance'));
+
 // Shared Suspense fallback — same dark theme + cyan loader the auth
 // loader already uses, so route transitions don't visually flash.
 const PageFallback = (
@@ -61,6 +64,7 @@ export default function App() {
     <ErrorBoundary>
       <Routes>
         {/* Public routes — no auth required */}
+        <Route path="/tos/accept" element={<Suspense fallback={PageFallback}><TosAcceptance /></Suspense>} />
         <Route path="/intake/:token" element={<Suspense fallback={PageFallback}><CustomerIntake /></Suspense>} />
         <Route path="/client/mission/:missionId" element={<Suspense fallback={PageFallback}><ClientMissionDetail /></Suspense>} />
         <Route path="/client/login" element={<Suspense fallback={PageFallback}><ClientLogin /></Suspense>} />

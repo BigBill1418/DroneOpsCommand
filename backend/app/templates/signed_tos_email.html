@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="margin: 0; padding: 0; font-family: Arial, Helvetica, sans-serif; background: #f0f2f5;">
+
+<table width="100%" cellpadding="0" cellspacing="0" style="max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 24px rgba(0,0,0,0.08);">
+  <!-- Hero Header -->
+  <tr>
+    <td style="background: linear-gradient(135deg, {{ brand_primary_color | default('#050608') }} 0%, #1a1f2e 50%, {{ brand_primary_color | default('#050608') }} 100%); padding: 0; position: relative;">
+      <table width="100%" cellpadding="0" cellspacing="0">
+        <tr>
+          <td style="height: 4px; background: linear-gradient(90deg, {{ brand_accent_color | default('#00d4ff') }}, {{ brand_accent_color | default('#00d4ff') }}66, {{ brand_accent_color | default('#00d4ff') }});"></td>
+        </tr>
+      </table>
+      <table width="100%" cellpadding="0" cellspacing="0">
+        <tr>
+          <td style="padding: 40px 30px 20px 30px; text-align: center;">
+            {% if company_logo_url %}
+            <img src="{{ company_logo_url }}" alt="{{ company_name }}" style="max-height: 60px; max-width: 200px; margin-bottom: 12px;" />
+            <br>
+            {% endif %}
+            <div style="font-family: 'Arial Black', Arial, sans-serif; font-size: 32px; letter-spacing: 4px; color: #ffffff; text-shadow: 0 2px 8px rgba(0,0,0,0.3);">
+              {{ company_name | upper | default('BARNARDHQ') }}
+            </div>
+            <div style="font-size: 11px; color: {{ brand_accent_color | default('#00d4ff') }}; letter-spacing: 4px; margin-top: 6px; text-transform: uppercase;">
+              {{ company_tagline | upper | default('TERMS OF SERVICE') }}
+            </div>
+          </td>
+        </tr>
+      </table>
+      <table width="100%" cellpadding="0" cellspacing="0">
+        <tr>
+          <td style="text-align: center; padding: 8px 0 24px 0;">
+            <span style="display: inline-block; width: 8px; height: 8px; background: {{ brand_accent_color | default('#00d4ff') }}; transform: rotate(45deg); margin: 0 4px;"></span>
+            <span style="display: inline-block; width: 40px; height: 2px; background: {{ brand_accent_color | default('#00d4ff') }}44; vertical-align: middle;"></span>
+            <span style="display: inline-block; width: 8px; height: 8px; background: {{ brand_accent_color | default('#00d4ff') }}; transform: rotate(45deg); margin: 0 4px;"></span>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+
+  <!-- Body -->
+  <tr>
+    <td style="padding: 36px 32px 20px 32px;">
+      <p style="font-size: 20px; color: #1a1a2e; margin: 0 0 8px 0; font-weight: 700;">
+        Signed Terms of Service
+      </p>
+
+      <p style="font-size: 14px; color: #555; line-height: 1.7; margin: 0 0 20px 0;">
+        Hello {{ client_name or 'there' }},
+      </p>
+
+      <p style="font-size: 14px; color: #555; line-height: 1.7; margin: 0 0 20px 0;">
+        Attached is your signed copy of the BarnardHQ LLC Terms of Service.
+        Please keep this PDF for your records.
+      </p>
+
+      <!-- Audit details card -->
+      <table width="100%" cellpadding="0" cellspacing="0" style="margin: 0 0 24px 0;">
+        <tr>
+          <td style="background: linear-gradient(135deg, #0e1117, #141922); border-radius: 8px; padding: 20px 24px;">
+            <div style="font-size: 11px; color: {{ brand_accent_color | default('#00d4ff') }}; letter-spacing: 2px; margin-bottom: 14px; font-weight: 700;">
+              ACCEPTANCE RECORD
+            </div>
+            <table width="100%" cellpadding="0" cellspacing="0">
+              <tr>
+                <td style="padding: 8px 0; border-bottom: 1px solid #1a1f2e;">
+                  <span style="color: #5a6478; font-size: 12px; letter-spacing: 1px;">AUDIT ID</span>
+                </td>
+                <td style="padding: 8px 0; border-bottom: 1px solid #1a1f2e; text-align: right;">
+                  <span style="font-family: 'Courier New', monospace; color: #e8edf2; font-size: 13px;">{{ audit_id }}</span>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+
+      <!-- Confirmation badge -->
+      <table width="100%" cellpadding="0" cellspacing="0" style="margin: 0 0 24px 0;">
+        <tr>
+          <td style="text-align: center; padding: 12px; background: #f0fdf4; border-radius: 6px; border: 1px solid #bbf7d0;">
+            <span style="font-size: 14px; color: #22c55e;">&#10003;</span>
+            <span style="font-size: 12px; color: #166534; margin-left: 6px; font-weight: 600;">
+              Acceptance recorded &mdash; tamper-evident copy attached
+            </span>
+          </td>
+        </tr>
+      </table>
+
+      <p style="font-size: 13px; color: #555; line-height: 1.7; margin: 16px 0 8px 0;">
+        Your acceptance is legally valid under the federal E-SIGN Act and
+        Oregon&rsquo;s Uniform Electronic Transactions Act (ORS Ch. 84).
+        The attached PDF carries your name, email, and the moment of
+        acceptance, locked into the document and anchored by SHA-256.
+      </p>
+
+      <p style="font-size: 14px; color: #333; margin: 16px 0 8px 0;">
+        &mdash; {{ company_name | default('BarnardHQ LLC') }}
+      </p>
+    </td>
+  </tr>
+
+  <!-- Footer -->
+  <tr>
+    <td style="background: #050608; padding: 24px 30px; text-align: center;">
+      <div style="font-family: 'Arial Black', Arial, sans-serif; font-size: 16px; letter-spacing: 3px; color: #e8edf2; margin-bottom: 8px;">
+        {{ company_name | upper | default('BARNARDHQ') }}
+      </div>
+      {% if company_website %}
+      <div style="margin: 10px 0;">
+        <a href="{{ company_website }}" style="color: {{ brand_accent_color | default('#00d4ff') }}; text-decoration: none; font-size: 12px;">{{ company_website | replace('https://', '') | replace('http://', '') }}</a>
+      </div>
+      {% endif %}
+      <div style="color: #5a6478; font-size: 10px; margin-top: 10px; letter-spacing: 1px;">
+        FAA Part 107 Certified &bull; {{ company_tagline | default('Drone Operations') }}
+      </div>
+    </td>
+  </tr>
+</table>
+
+</body>
+</html>

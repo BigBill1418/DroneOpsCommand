@@ -19,7 +19,7 @@ from starlette.formparsers import MultiPartParser
 from app.config import settings
 from app.database import Base, async_session, engine, get_db
 import app.models  # noqa: F401 — ensure all models registered with Base before create_all
-from app.routers import auth, customers, aircraft, missions, flights, maps, reports, invoices, rate_templates, llm, system_settings, financials, weather, intake, flight_library, batteries, maintenance, backup, device_keys, pilots, client_portal, stripe_webhook, business_signals, admin_device_rotation
+from app.routers import auth, customers, aircraft, missions, flights, maps, reports, invoices, rate_templates, llm, system_settings, financials, weather, intake, flight_library, batteries, maintenance, backup, device_keys, pilots, client_portal, stripe_webhook, business_signals, admin_device_rotation, tos
 
 
 def _setup_json_logging() -> None:
@@ -438,6 +438,7 @@ app.include_router(client_portal.router)
 app.include_router(stripe_webhook.router)
 app.include_router(business_signals.router)
 app.include_router(admin_device_rotation.router)
+app.include_router(tos.router)
 
 
 # ── Demo status endpoint (no auth required) ───────────────────────────

@@ -11,6 +11,7 @@ from app.models.maintenance import MaintenanceRecord, MaintenanceSchedule
 from app.models.pilot import Pilot
 from app.models.device_api_key import DeviceApiKey
 from app.models.client_portal import ClientAccessToken
+from app.models.tos_acceptance import TosAcceptance
 
 __all__ = [
     "Customer",
@@ -36,4 +37,5 @@ __all__ = [
     "Pilot",
     "DeviceApiKey",
     "ClientAccessToken",
+    "TosAcceptance",
 ]

@@ -39,6 +39,10 @@ httpx==0.28.1
 
 # Email
 aiosmtplib==3.0.2
+# Required by Pydantic v2 EmailStr — used by the TOS-acceptance request
+# schema (backend/app/schemas/tos_acceptance.py). Without it Pydantic
+# raises ImportError at first request to /api/tos/accept. ADR-0010.
+email-validator>=2.0,<3.0
 
 # Rate Limiting
 slowapi==0.1.9
