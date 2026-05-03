@@ -308,13 +308,12 @@ export default function Dashboard() {
   const hasAlerts = maintenanceAlerts.length > 0 || batteryAlerts.length > 0;
 
   const handleInitiateServices = async () => {
-    if (!initiateEmail.trim()) {
-      notifications.show({ title: 'Required', message: 'Enter an email address', color: 'red' });
-      return;
-    }
     setInitiateLoading(true);
     try {
-      const r = await api.post('/intake/initiate', { email: initiateEmail.trim() });
+      // Email is optional — empty string => stub customer with no email,
+      // operator copies the link for SMS/text instead of emailing it.
+      const email = initiateEmail.trim();
+      const r = await api.post('/intake/initiate', email ? { email } : {});
       setIntakeResult(r.data);
       notifications.show({ title: 'Link Generated', message: 'Intake form link ready', color: 'cyan' });
     } catch (err: unknown) {
@@ -1118,11 +1117,11 @@ export default function Dashboard() {
         {!intakeResult ? (
           <Stack gap="md">
             <Text c="#5a6478" size="sm" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
-              Enter the customer's email to send them an onboarding form with TOS.
+              Enter the customer's email to send the onboarding link, or leave blank to generate a copyable link you can text.
             </Text>
             <TextInput
-              label="Customer Email"
-              placeholder="customer@example.com"
+              label="Customer Email (optional)"
+              placeholder="customer@example.com — or leave blank"
               value={initiateEmail}
               onChange={(e) => setInitiateEmail(e.target.value)}
               styles={inputStyles}
@@ -1154,22 +1153,33 @@ export default function Dashboard() {
                 style={{ flex: 1 }}
                 styles={inputStyles}
               />
-              <Tooltip label={linkCopied ? 'Copied!' : 'Copy'}>
-                <ActionIcon color={linkCopied ? 'green' : 'cyan'} variant="light" onClick={copyIntakeLink}>
+              <Tooltip label={linkCopied ? 'Copied!' : 'Copy to clipboard'}>
+                <ActionIcon color={linkCopied ? 'green' : 'cyan'} variant="light" onClick={copyIntakeLink} aria-label="Copy link">
                   {linkCopied ? <IconCheck size={16} /> : <IconCopy size={16} />}
                 </ActionIcon>
               </Tooltip>
             </Group>
             <Button
-              leftSection={<IconMail size={16} />}
-              color="cyan"
-              variant="light"
+              leftSection={linkCopied ? <IconCheck size={16} /> : <IconCopy size={16} />}
+              color={linkCopied ? 'green' : 'cyan'}
               fullWidth
-              onClick={handleSendIntakeEmail}
+              onClick={copyIntakeLink}
               styles={{ root: { ...bebasFont, letterSpacing: '1px' } }}
             >
-              SEND VIA EMAIL
+              {linkCopied ? 'COPIED — PASTE INTO TEXT MESSAGE' : 'COPY LINK'}
             </Button>
+            {initiateEmail.trim() && (
+              <Button
+                leftSection={<IconMail size={16} />}
+                color="cyan"
+                variant="light"
+                fullWidth
+                onClick={handleSendIntakeEmail}
+                styles={{ root: { ...bebasFont, letterSpacing: '1px' } }}
+              >
+                SEND VIA EMAIL
+              </Button>
+            )}
             <Text c="#5a6478" size="xs" ta="center" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
               Link expires in 7 days
             </Text>

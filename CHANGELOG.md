@@ -4,6 +4,28 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## [2.65.1] — 2026-05-03 — feat(intake): email-optional Initiate Services + prominent Copy Link
+
+Operator-facing UX tweak so Bill can generate an intake link without an
+email on file (for cases where the customer prefers SMS/text or the
+email address isn't known yet).
+
+- **`POST /api/intake/initiate`** now accepts an empty/missing `email`
+  field. When omitted: customer stub is created with `email=null` and
+  name `"Pending Intake YYYY-MM-DD"` (operator updates from the
+  TOS-acceptance row once the customer follows the link).
+- **Operator-copyable URL pivoted from `/intake/{token}` to
+  `/tos/accept?token=…&customer_id=…`** — same target the email flow
+  has used since v2.65.0 (ADR-0010). Whether the operator emails or
+  texts the link, the customer lands on the new AcroForm TOS page.
+- **Initiate Services modal (Dashboard + Customers pages):** email
+  input labeled "Customer Email (optional)"; help text now reads
+  *"Enter the customer's email to send the onboarding link, or leave
+  blank to generate a copyable link you can text."*; result view shows
+  a prominent full-width **"COPY LINK"** button (green confirmation
+  state once clicked); "SEND VIA EMAIL" button is conditional —
+  rendered only when an email was provided.
+
 ## [2.65.0] — 2026-05-03 — feat: deposit-aware invoicing + AcroForm TOS + portal theming
 
 Three subsystems shipped together — production-ready for first paying

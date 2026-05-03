@@ -43,30 +43,36 @@ async def initiate_services(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
-    """Create a new customer stub with just an email and generate an intake token."""
+    """Create a customer stub + intake token. Email is optional — when omitted the
+    operator gets a copy-and-text-able link instead of an email-send flow."""
     start = time.perf_counter()
     client_ip = _client_ip(request)
-    email = data.get("email", "").strip()
+    email = data.get("email", "").strip() or None
 
-    logger.info("[INTAKE-INIT] Admin initiated services for email=%s from ip=%s", email, client_ip)
+    logger.info("[INTAKE-INIT] Admin initiated services for email=%s from ip=%s", email or "<none>", client_ip)
 
-    if not email:
-        logger.warning("[INTAKE-INIT] Rejected — empty email from ip=%s", client_ip)
-        raise HTTPException(status_code=400, detail="Email address is required")
-
-    # Check if customer with this email already exists
-    result = await db.execute(select(Customer).where(Customer.email == email))
-    customer = result.scalar_one_or_none()
+    customer = None
+    if email:
+        # Reuse an existing customer record when the email matches one
+        result = await db.execute(select(Customer).where(Customer.email == email))
+        customer = result.scalar_one_or_none()
 
     if customer:
         logger.info("[INTAKE-INIT] Found existing customer id=%s for email=%s", customer.id, email)
         if customer.intake_completed_at:
             logger.info("[INTAKE-INIT] Customer %s already completed intake on %s — generating new token anyway", customer.id, customer.intake_completed_at)
     else:
-        customer = Customer(name=email.split("@")[0], email=email)
+        # No-email path: stub name is "Pending Intake YYYY-MM-DD". Operator
+        # fills in real name + email from the customer's TOS-acceptance row
+        # once the link is followed.
+        if email:
+            stub_name = email.split("@")[0]
+        else:
+            stub_name = f"Pending Intake {datetime.utcnow().strftime('%Y-%m-%d')}"
+        customer = Customer(name=stub_name, email=email)
         db.add(customer)
         await db.flush()
-        logger.info("[INTAKE-INIT] Created new customer stub id=%s for email=%s", customer.id, email)
+        logger.info("[INTAKE-INIT] Created new customer stub id=%s name=%s email=%s", customer.id, stub_name, email or "<none>")
 
     # Reuse existing valid token if present and not expired
     if (
@@ -88,9 +94,11 @@ async def initiate_services(
         await db.flush()
         logger.info("[INTAKE-INIT] New token generated for customer %s, expires=%s", customer.id, expires_at)
 
-    # Build the intake URL
+    # Build the intake URL — same `/tos/accept` target the email flow uses
+    # (ADR-0010). Whether the operator emails or texts the link, the customer
+    # lands on the AcroForm TOS page first.
     frontend_url = settings.frontend_url.rstrip("/")
-    intake_url = f"{frontend_url}/intake/{token}"
+    intake_url = f"{frontend_url}/tos/accept?token={token}&customer_id={customer.id}"
 
     elapsed = time.perf_counter() - start
     logger.info("[INTAKE-INIT] Token ready for customer %s, url=%s (%.3fs)", customer.id, intake_url, elapsed)
