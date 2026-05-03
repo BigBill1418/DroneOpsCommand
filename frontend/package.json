@@ -34,7 +34,9 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@mantine/core": "^7.14.0",
@@ -44,6 +46,7 @@
     "@mantine/hooks": "^7.14.0",
     "@mantine/notifications": "^7.14.0",
     "@mantine/tiptap": "^7.14.0",
+    "@sentry/react": "^8.40.0",
     "@tabler/icons-react": "^3.24.0",
     "@tiptap/extension-highlight": "^2.10.0",
     "@tiptap/extension-link": "^2.10.0",
@@ -51,7 +54,6 @@
     "@tiptap/extension-underline": "^2.10.0",
     "@tiptap/react": "^2.10.0",
     "@tiptap/starter-kit": "^2.10.0",
-    "@sentry/react": "^8.40.0",
     "axios": "^1.7.9",
     "dayjs": "^1.11.13",
     "leaflet": "^1.9.4",
@@ -64,15 +66,22 @@
     "react-signature-canvas": "^1.1.0-alpha.2"
   },
   "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
     "@types/leaflet": "^1.9.15",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@types/react-signature-canvas": "^1.0.7",
     "@vitejs/plugin-react": "^4.3.4",
+    "@vitest/ui": "^2.1.9",
+    "jsdom": "^25.0.1",
+    "msw": "^2.14.2",
     "postcss": "^8.4.49",
     "postcss-preset-mantine": "^1.17.0",
     "postcss-simple-vars": "^7.0.1",
     "typescript": "^5.7.2",
-    "vite": "^6.0.3"
+    "vite": "^6.0.3",
+    "vitest": "^2.1.9"
   }
 }

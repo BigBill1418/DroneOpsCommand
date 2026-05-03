@@ -1,3 +1,12 @@
+/**
+ * Missions list — v2.67.0 (Mission Hub).
+ *
+ * Per spec §3 the "+ NEW MISSION" button now opens
+ * `MissionCreateModal` inline instead of routing to `/missions/new`.
+ * The slim modal posts a single mission row and navigates to
+ * `/missions/{id}` (the Hub) where editing happens via per-facet
+ * editors. List rows still link directly to the Hub.
+ */
 import { useEffect, useState } from 'react';
 import {
   ActionIcon,
@@ -12,16 +21,18 @@ import {
   TextInput,
   Title,
 } from '@mantine/core';
-import { IconEdit, IconPlus, IconSearch, IconTrash } from '@tabler/icons-react';
+import { IconPlus, IconSearch, IconTrash } from '@tabler/icons-react';
 import { notifications } from '@mantine/notifications';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
 import { Mission } from '../api/types';
 import { statusColors } from '../components/shared/styles';
+import MissionCreateModal from '../components/MissionCreateModal';
 
 export default function Missions() {
   const [missions, setMissions] = useState<Mission[]>([]);
   const [search, setSearch] = useState('');
+  const [createOpen, setCreateOpen] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -53,7 +64,8 @@ export default function Missions() {
         <Button
           leftSection={<IconPlus size={16} />}
           color="cyan"
-          onClick={() => navigate('/missions/new')}
+          onClick={() => setCreateOpen(true)}
+          data-testid="new-mission-btn"
           styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}
         >
           NEW MISSION
@@ -101,17 +113,7 @@ export default function Missions() {
                   <Table.Td><Badge color={statusColors[m.status]} variant="light" size="sm">{m.status}</Badge></Table.Td>
                   <Table.Td className="hide-mobile">{m.is_billable ? <Badge color="orange" variant="light" size="sm">$</Badge> : '—'}</Table.Td>
                   <Table.Td>
-                    <Group gap={4} wrap="nowrap">
-                      <ActionIcon
-                        variant="subtle"
-                        color="cyan"
-                        size="sm"
-                        onClick={(e) => { e.stopPropagation(); navigate(`/missions/${m.id}/edit`); }}
-                        title="Edit mission"
-                        aria-label={`Edit mission: ${m.title}`}
-                      >
-                        <IconEdit size={14} />
-                      </ActionIcon>
+                    <Group gap={4} wrap="nowrap" justify="flex-end">
                       <ActionIcon
                         variant="subtle"
                         color="red"
@@ -131,6 +133,8 @@ export default function Missions() {
           </ScrollArea>
         )}
       </Card>
+
+      <MissionCreateModal opened={createOpen} onClose={() => setCreateOpen(false)} />
     </Stack>
   );
 }
