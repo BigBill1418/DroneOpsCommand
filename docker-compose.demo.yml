@@ -27,7 +27,10 @@ services:
     env_file:
       - .env.demo
     environment:
-      - DATABASE_URL=postgresql+asyncpg://doc_demo:DemoDb2026!SecureRandom@db:5432/doc_demo
+      # ADR-0012: required, no default. The previous literal embedded the demo
+      # POSTGRES password directly in the public compose file. Provide via
+      # `DATABASE_URL` in `.env.demo` on the demo host (e.g. CHAD-HQ).
+      - DATABASE_URL=${DATABASE_URL:?DATABASE_URL must be set in .env.demo (no default — see ADR-0012)}
       - DEMO_MODE=true
       - DEMO_RESET_INTERVAL_HOURS=24
       - ADMIN_USERNAME=demo

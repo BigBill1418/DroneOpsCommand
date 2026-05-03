@@ -1,0 +1,60 @@
+# Gitleaks config for DroneOpsCommand — extends the default ruleset.
+# (ADR-0012)
+#
+# Default rules cover AWS, GCP, Stripe, GitHub PATs, Slack, JWT secrets,
+# generic API keys, etc. We extend with two repo-specific rules:
+#   1. Block the historically-leaked credentials by exact value so a
+#      paste-from-history can't slip back in.
+#   2. Block any compose `:-<long-literal>` fallback for password-shaped vars.
+#
+# Allowlist covers known-safe locations: tests, fixtures, docs that
+# explicitly demonstrate the leak history.
+
+title = "DroneOpsCommand gitleaks config (ADR-0012)"
+
+# Inherit upstream default rules.
+[extend]
+useDefault = true
+
+# ── Repo-specific rules ─────────────────────────────────────────────
+
+[[rules]]
+id = "droneops-historical-leaked-credentials"
+description = "Block any reintroduction of the v2.66.x leaked literals (rotated 2026-05-03)"
+regex = '''(?i)(SecureDroneRepl2026|DemoDb2026!SecureRandom|SecureDemoRepl2026|SecureDroneDB)'''
+tags = ["password", "droneops", "ADR-0012"]
+
+[[rules]]
+id = "droneops-compose-default-password"
+description = "Compose `${VAR:-<literal>}` fallback for any *PASSWORD/SECRET/TOKEN/KEY var (use `:?required` per ADR-0012)"
+regex = '''\$\{[A-Z_]*(PASSWORD|SECRET|TOKEN|KEY)[A-Z_]*:-[A-Za-z0-9!@#$%^&*_-]{6,}\}'''
+tags = ["password", "config", "ADR-0012"]
+# Only enforce on infra files where the pattern is meaningful.
+[rules.allowlist]
+paths = [
+    '''^backend/.*''',
+    '''^frontend/.*''',
+    '''^flight-parser/.*''',
+    '''^docs/.*''',
+]
+
+# ── Global allowlist ────────────────────────────────────────────────
+
+[allowlist]
+description = "Known-safe locations + the ADR that documents the leak"
+paths = [
+    '''(?i)docs/adr/0012-secret-hygiene-and-leak-remediation\.md''',
+    '''(?i)\.gitleaks\.toml''',
+    '''(?i)CHANGELOG\.md''',
+    '''(?i).*test.*fixtures?/''',
+    '''(?i).*__tests__/''',
+    '''(?i).*\.lock$''',
+    '''(?i)pnpm-lock\.yaml''',
+    '''(?i)package-lock\.json''',
+]
+# Common false-positive patterns
+regexes = [
+    '''changeme_[a-z_]+''',                      # placeholder defaults in .env.example
+    '''(?i)example[._-]?key''',
+    '''(?i)dummy[._-]?(secret|key|password)''',
+]

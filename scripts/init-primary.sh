@@ -9,7 +9,9 @@
 set -euo pipefail
 
 REPLICATION_USER="replicator"
-REPLICATION_PASSWORD="${REPLICATION_PASSWORD:-SecureDroneRepl2026}"
+# ADR-0012: required, no default. Previous fallback embedded a literal credential
+# in repo history. Fail fast if unset rather than silently using a leaked value.
+: "${REPLICATION_PASSWORD:?REPLICATION_PASSWORD must be set (no default — see ADR-0012)}"
 WIREGUARD_SUBNET="10.99.0.0/24"
 
 # Create replicator role if it doesn't exist

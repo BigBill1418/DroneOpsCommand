@@ -4,6 +4,66 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## [2.66.1] — 2026-05-03 — chore: secret hygiene + leak remediation (ADR-0012)
+
+GitGuardian flagged commit `5ec9392` (the same-day `.env.demo` un-track)
+as exposing a Generic Password. The actual exposure was historical: the
+PG replication password and demo POSTGRES password had been baked into
+the public repo since v2.53.0 — both as `${VAR:-<literal>}` compose
+fallbacks and as hard-coded literals inside two standby `primary_conninfo`
+strings and three init scripts. This release rotates everything that's
+still live and removes every plaintext fallback so the leaked values
+cannot be re-introduced silently.
+
+**Rotated (live, BOS-HQ):**
+
+- `droneops-demo-db` POSTGRES password (`doc_demo` role).
+- Demo replication role password.
+- Prod replication role password (`droneops-standby-db` BOS-HQ →
+  `droneops-db-standby` CHAD-HQ). Atomic rotation on both sides;
+  streaming verified post-cutover via `pg_stat_replication`.
+
+No new credential value lands in this commit or in any commit. Values
+live only in the per-host `.env` files (`~/droneops/.env` on BOS-HQ,
+`~/droneops-demo/.env` + `~/droneops-demo/.env.demo` on BOS-HQ,
+`~/droneops/.env` on CHAD-HQ).
+
+**Repo changes — `:?required` is the new pattern:**
+
+- `docker-compose.yml` — `POSTGRES_PASSWORD`, `REPLICATION_PASSWORD`,
+  `JWT_SECRET_KEY`, `DATABASE_URL` now fail fast if unset.
+- `docker-compose.standby.yml`, `docker-compose.demo-standby.yml` —
+  `primary_conninfo` interpolates `${REPLICATION_PASSWORD:?…}` instead
+  of carrying a literal.
+- `docker-compose.demo.yml` — demo `DATABASE_URL` literal removed; now
+  requires the value from `.env.demo`.
+- `scripts/init-primary.sh`, `scripts/init-standby.sh`,
+  `scripts/init-demo-standby.sh` — `: "${REPLICATION_PASSWORD:?…}"`
+  guard at top, no fallback default.
+- `README.md` — replication-password table cell shows
+  *(no default — required)*.
+- `.env.example` — required vars are blank with a REQUIRED comment.
+
+**Prevention:**
+
+- `.pre-commit-config.yaml` — gitleaks (`protect --staged`) +
+  `detect-private-key` + baseline file hygiene. Run
+  `pre-commit install` once per clone.
+- `.gitleaks.toml` — extends upstream defaults with two repo-specific
+  rules: (1) block reintroduction of the rotated literals by exact
+  value; (2) block compose `${VAR:-<long_literal>}` fallback for any
+  `*PASSWORD/SECRET/TOKEN/KEY` env var.
+- `.github/workflows/secret-scan.yml` — gitleaks v8.21.2 runs on every
+  push and PR on the BOS-HQ self-hosted runner; PR fails on detection.
+- `.gitignore` — `.env.*` (with `!.env.example` allow), `*.pem`,
+  `*.key`, `*.p12`, `*.pfx`, `*.crt`, `.secrets/`, `secrets.{yaml,yml}`,
+  `.netrc`, `.pgpass`, `google-credentials.json`,
+  `service-account*.json`.
+
+**Documentation:** ADR-0012 (full context, trade-offs, operator
+follow-ups). History rewrite intentionally NOT performed — see ADR §
+"Trade-offs" for the why.
+
 ## [2.66.0] — 2026-05-03 — feat: backend hardening — payment idempotency, invoice numbering, webhook alerting
 
 Bundle of backend fixes + verified dead-code cuts that close the last
