@@ -2,7 +2,7 @@
 
 **Self-hosted mission management, flight log analysis, GPS flight replay with video export, AI report generation, invoicing, and real-time airspace monitoring for commercial drone operators.**
 
-**Version 2.66.0** | [Quick Start](#quick-start) | [Features](#features) | [Configuration](#configuration) | [Contributing](CONTRIBUTING.md) | [License](LICENSE)
+**Version 2.66.1** | [Quick Start](#quick-start) | [Features](#features) | [Configuration](#configuration) | [Contributing](CONTRIBUTING.md) | [License](LICENSE)
 
 **Live Demo:** [command-demo.barnardhq.com](https://command-demo.barnardhq.com) (login: `demo` / `demo123`)
 
@@ -486,7 +486,7 @@ SMTP settings can also be configured from the Settings page in the web UI (store
 ### Replication
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `REPLICATION_PASSWORD` | `SecureDroneRepl2026` | Password for the PostgreSQL replication user |
+| `REPLICATION_PASSWORD` | *(no default — required)* | Password for the PostgreSQL replication user. Set in your `.env`; per ADR-0012 there is no fallback default and containers will refuse to start if this is unset. |
 
 ### Storage
 | Variable | Default | Description |
