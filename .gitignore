@@ -41,3 +41,4 @@ docker-compose.override.yml
 .autopull.lock
 autopull.log
 .claude/worktrees/
+.env.demo
