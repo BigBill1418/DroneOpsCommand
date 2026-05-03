@@ -39,6 +39,11 @@ class InvoiceCreate(BaseModel):
     tax_rate: float = 0
     paid_in_full: bool = False
     notes: str | None = None
+    # ADR-0009 — TOS §6.2 default-on. Operator can uncheck for §6.3
+    # Emergent Services. `deposit_amount=None` triggers server-side
+    # 50%-of-total auto-fill in `routers/invoices.py:create_invoice`.
+    deposit_required: bool = True
+    deposit_amount: float | None = None
 
 
 class InvoiceUpdate(BaseModel):
@@ -46,6 +51,11 @@ class InvoiceUpdate(BaseModel):
     tax_rate: float | None = None
     paid_in_full: bool | None = None
     notes: str | None = None
+    # ADR-0009 — operator may toggle deposit policy or override the
+    # amount any time before deposit_paid is true. After deposit_paid,
+    # routers/invoices.py:update_invoice rejects deposit_* changes.
+    deposit_required: bool | None = None
+    deposit_amount: float | None = None
 
 
 class InvoiceResponse(BaseModel):
@@ -60,6 +70,12 @@ class InvoiceResponse(BaseModel):
     notes: str | None
     created_at: datetime
     line_items: list[LineItemResponse] = []
+    # ADR-0009 — surface deposit state to the operator UI.
+    deposit_required: bool = False
+    deposit_amount: float = 0
+    deposit_paid: bool = False
+    deposit_paid_at: datetime | None = None
+    deposit_payment_method: str | None = None
 
     model_config = {"from_attributes": True}
 

@@ -87,12 +87,31 @@ class ClientInvoiceLineItem(BaseModel):
 
 
 class ClientInvoiceResponse(BaseModel):
+    """Customer-facing invoice payload — ADR-0008 + ADR-0009.
+
+    Adds the deposit columns and the computed `payment_phase` so the
+    client portal can render the 4-step phase strip + the two-row
+    deposit/balance table without duplicating the truth-table logic
+    in TypeScript.
+    """
     id: str
     total: float
     paid_in_full: bool
     paid_at: datetime | None = None
     payment_method: str | None = None
     line_items: list[ClientInvoiceLineItem] = []
+
+    # ADR-0009 deposit fields.
+    deposit_required: bool = False
+    deposit_amount: float = 0
+    deposit_paid: bool = False
+    deposit_paid_at: datetime | None = None
+    deposit_payment_method: str | None = None
+    balance_amount: float = 0
+    # One of: "deposit_due", "awaiting_completion", "balance_due",
+    # "paid_in_full". See app/models/invoice.py:compute_payment_phase
+    # for the truth table.
+    payment_phase: str
 
 
 class ClientPaymentResponse(BaseModel):
