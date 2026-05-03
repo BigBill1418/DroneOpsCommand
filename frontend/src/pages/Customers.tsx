@@ -20,7 +20,7 @@ import {
 } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
-import { IconPlus, IconEdit, IconTrash, IconSearch, IconMapPin, IconSend, IconCheck, IconCopy, IconSignature, IconMail } from '@tabler/icons-react';
+import { IconPlus, IconEdit, IconTrash, IconSearch, IconMapPin, IconSend, IconCheck, IconCopy, IconSignature, IconMail, IconHistory } from '@tabler/icons-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
 import { Customer, NominatimResult } from '../api/types';
@@ -229,33 +229,71 @@ export default function Customers() {
     }
   };
 
+  // v2.66.3 — open the signed-TOS viewer modal. Two code paths:
+  //   • new AcroForm flow → fetch /api/tos/signed/{audit_id} (operator JWT)
+  //   • legacy canvas flow → fetch /api/intake/{id}/signed-tos (composites
+  //     PNG signature onto template; existing endpoint, unchanged)
+  // Choice is driven entirely by the presence of latest_tos_audit_id;
+  // the legacy path is automatically taken for customers signed before
+  // ADR-0010 shipped the AcroForm pipeline.
+  const openSignedTosViewer = (c: Customer) => {
+    setViewingCustomer(c);
+    setSignedTosBlobUrl(null);
+    setSignedTosLoading(true);
+    setSignatureModal(true);
+
+    const url = c.latest_tos_audit_id
+      ? `/tos/signed/${encodeURIComponent(c.latest_tos_audit_id)}`
+      : `/intake/${c.id}/signed-tos`;
+
+    api.get(url, { responseType: 'blob' })
+      .then((r) => {
+        const blob = new Blob([r.data], { type: 'application/pdf' });
+        setSignedTosBlobUrl(URL.createObjectURL(blob));
+      })
+      .catch((err) => {
+        // Surface useful diagnostics to console for next-class-of-failure
+        // triage without redeploy (per CLAUDE.md logging standard).
+        // eslint-disable-next-line no-console
+        console.error('[CUSTOMER-TOS-VIEW] Failed to load signed PDF', {
+          customerId: c.id,
+          source: c.latest_tos_audit_id ? 'acroform' : 'legacy-canvas',
+          status: err?.response?.status,
+        });
+        notifications.show({
+          title: 'Error',
+          message: 'Could not load signed TOS document.',
+          color: 'red',
+        });
+      })
+      .finally(() => setSignedTosLoading(false));
+  };
+
   const renderTosStatus = (c: Customer) => {
     if (c.tos_signed) {
+      // v2.66.3 — for AcroForm-flow customers, the badge tooltip shows
+      // the template version (e.g. DOC-001/TOS/REV3) so the operator
+      // can confirm at a glance which TOS revision the customer agreed
+      // to. Legacy customers keep the existing date-only tooltip.
+      const tooltipLabel = c.latest_tos_template_version
+        ? `Signed ${c.tos_signed_at ? new Date(c.tos_signed_at).toLocaleDateString() : ''} · ${c.latest_tos_template_version}`
+        : `Signed ${c.tos_signed_at ? new Date(c.tos_signed_at).toLocaleDateString() : ''}`;
       return (
-        <Tooltip label={`Signed ${c.tos_signed_at ? new Date(c.tos_signed_at).toLocaleDateString() : ''}`}>
+        <Tooltip label={tooltipLabel}>
           <Badge
             color="green"
             variant="light"
             size="sm"
             leftSection={<IconCheck size={10} />}
-            style={{ cursor: 'pointer' }}
-            onClick={() => {
-              setViewingCustomer(c);
-              setSignedTosBlobUrl(null);
-              setSignedTosLoading(true);
-              setSignatureModal(true);
-              api.get(`/intake/${c.id}/signed-tos`, { responseType: 'blob' })
-                .then((r) => {
-                  const blob = new Blob([r.data], { type: 'application/pdf' });
-                  setSignedTosBlobUrl(URL.createObjectURL(blob));
-                })
-                .catch(() => {
-                  notifications.show({ title: 'Error', message: 'Could not load signed TOS document.', color: 'red' });
-                })
-                .finally(() => setSignedTosLoading(false));
+            style={{
+              cursor: 'pointer',
+              fontFamily: c.latest_tos_template_version ? "'Share Tech Mono', monospace" : undefined,
             }}
+            onClick={() => openSignedTosViewer(c)}
           >
-            TOS SIGNED
+            {c.latest_tos_template_version
+              ? `TOS SIGNED · ${c.latest_tos_template_version}`
+              : 'TOS SIGNED'}
           </Badge>
         </Tooltip>
       );
@@ -340,6 +378,18 @@ export default function Customers() {
                         <Tooltip label="Send TOS Form">
                           <ActionIcon variant="subtle" color="orange" onClick={() => handleSendTos(c)} aria-label={`Send TOS form to ${c.name}`}>
                             <IconSignature size={16} />
+                          </ActionIcon>
+                        </Tooltip>
+                      )}
+                      {c.tos_signed && (
+                        <Tooltip label="View TOS audit history">
+                          <ActionIcon
+                            variant="subtle"
+                            color="cyan"
+                            onClick={() => navigate(`/tos-acceptances?customer_id=${encodeURIComponent(c.id)}`)}
+                            aria-label={`View TOS audit history for ${c.name}`}
+                          >
+                            <IconHistory size={16} />
                           </ActionIcon>
                         </Tooltip>
                       )}
@@ -527,14 +577,36 @@ export default function Customers() {
         {viewingCustomer && (
           <Stack gap="md">
             <Group justify="space-between">
-              <Group>
+              <Group gap="xs" wrap="wrap">
                 <Badge color="green" variant="light" leftSection={<IconCheck size={10} />}>TOS SIGNED</Badge>
                 {viewingCustomer.tos_signed_at && (
                   <Text c="#5a6478" size="sm" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
                     {new Date(viewingCustomer.tos_signed_at).toLocaleString()}
                   </Text>
                 )}
+                {viewingCustomer.latest_tos_template_version && (
+                  <Badge color="cyan" variant="outline" size="sm" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
+                    {viewingCustomer.latest_tos_template_version}
+                  </Badge>
+                )}
+                {viewingCustomer.latest_tos_signed_sha && (
+                  <Tooltip label={viewingCustomer.latest_tos_signed_sha}>
+                    <Text c="#5a6478" size="xs" style={{ fontFamily: "'Share Tech Mono', monospace", letterSpacing: '1px' }}>
+                      sha:{viewingCustomer.latest_tos_signed_sha.slice(0, 12)}
+                    </Text>
+                  </Tooltip>
+                )}
               </Group>
+              <Button
+                size="xs"
+                variant="subtle"
+                color="cyan"
+                leftSection={<IconHistory size={14} />}
+                onClick={() => navigate(`/tos-acceptances?customer_id=${encodeURIComponent(viewingCustomer.id)}`)}
+                styles={{ root: { fontFamily: "'Share Tech Mono', monospace", letterSpacing: '1px' } }}
+              >
+                AUDIT HISTORY
+              </Button>
             </Group>
 
             {signedTosLoading ? (
