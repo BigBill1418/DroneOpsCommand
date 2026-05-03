@@ -212,6 +212,116 @@ After all four merge: version bump to **2.67.0** (MAJOR feature, structural UX r
 
 ---
 
+## 8.5 "Finaled" definition + lock-down semantics
+
+Operator's word "finaled" maps to **`MissionStatus.SENT`**. That state means: the
+operator has reviewed the work, delivered the report to the client, and either
+issued the final invoice or completed the engagement. After SENT, the
+mission is treated as a closed legal/financial record:
+
+| Hub element | When status `< SENT` | When status `= SENT` |
+|---|---|---|
+| Mark COMPLETED button | enabled if status `< COMPLETED` | hidden |
+| Mark SENT button | enabled if status `= COMPLETED` AND invoice `paid_in_full` (or `deposit_required=false AND paid_in_full=false` operator-override allowed with confirm) | hidden |
+| Details Edit | enabled | **disabled, tooltip "Mission sent — locked"** |
+| Flights Edit | enabled | disabled, same tooltip |
+| Images Edit | enabled | disabled, same tooltip |
+| Report Edit | enabled | disabled, same tooltip |
+| Invoice Edit | enabled (per ADR-0008 visibility rules) | disabled, same tooltip |
+| Client portal link | issuable + revocable | revocable only (cannot mint new) |
+| Status pill | colored per state | gray "SENT" badge with lock icon |
+
+The lock is **soft** — there is no DB-level constraint preventing status reversion
+(operators may need to legitimately reopen for billing corrections). What ships:
+each Edit button checks `mission.status === 'sent'` and renders disabled. To
+reopen, operator clicks **"Reopen Mission"** (small destructive-style button on
+the Hub when status === SENT) which `PATCH /api/missions/{id}` with
+`{"status": "completed"}` and a confirmation modal warning that this should
+only be used to correct a billing error or replace a delivered artifact.
+Reopens are logged as `[MISSION-REOPEN]` audit entries with operator id +
+mission id + previous status. (This satisfies the "edit until finaled"
+operator requirement while preserving the Hub's lock semantics.)
+
+## 8.6 Deposit-billing-to-client workflow on the Hub
+
+The deposit feature (ADR-0009, v2.65.0) is the bridge between a mission
+existing and a customer paying. The Hub MUST expose this workflow as a
+first-class action, not bury it inside the Invoice editor:
+
+### 8.6.1 Hub Invoice card additions
+
+The existing **Invoice facet card** (per §2) shows the v2.66.0
+deposit-paid indicator. Extend it with:
+
+- **`Deposit Required` badge** — yellow when `deposit_required=true AND deposit_paid=false`, green when `deposit_paid=true`, grey when `deposit_required=false`.
+- **`Deposit: $X / Balance: $Y / Total: $Z` line** in Share Tech Mono.
+- **Inline action: "Issue Portal Link"** — primary cyan button. When clicked:
+  - If a non-revoked, non-expired client-portal token exists for this mission → show modal with: existing magic link (read-only field with Copy button), Resend Email button, Send via Text instructions (operator copies link, pastes into their SMS app), Revoke + reissue button.
+  - If no token exists → mints one via `POST /api/missions/{id}/client-link` (already exists, ADR-0009 era), shows the same modal.
+- **Inline action: "Send Email"** — only enabled when customer has an email. Calls `POST /api/missions/{id}/client-link/send` (already exists). On success, fires Mantine notification "Portal link emailed to {customer.email}".
+- **Status line:** "Last portal link sent {timestamp} to {channel}" if available; else "No portal link issued yet."
+
+### 8.6.2 Operator workflow this enables (the canonical happy path)
+
+```
+Operator                            Customer / System
+========                            =================
+1. Click "+ New Mission"
+2. Fill slim create modal → POST    → Mission row created
+3. Land on Hub
+4. Edit Invoice → set
+   deposit_required=true,
+   deposit_amount=$X (default 50%
+   of total, ADR-0009)
+   → PUT /invoice
+5. Click "Issue Portal Link"
+   on Invoice card
+6. (a) Click "Send Email"           → Brevo SMTP via send-client-portal-email
+   OR                               OR
+   (b) Click "Copy Link" → text     → operator pastes into native SMS app
+                                    → Customer receives link
+                                    → Customer clicks link
+                                    → Lands on /tos/accept (if first time) or
+                                      /client/<jwt> (if already TOS-signed)
+                                    → AcroForm TOS sign (per ADR-0010)
+                                    → Customer routed to portal mission detail
+                                    → Sees deposit-due payment phase strip
+                                    → Clicks "Pay Deposit ($X)"
+                                    → Stripe Checkout (ADR-0011 idempotent)
+                                    → Pays
+                                    → Stripe webhook fires
+                                    → ntfy push to operator
+                                    → Hub Invoice card auto-refreshes
+                                      next time operator views the mission
+                                      (or a polling refresh, future)
+7. Operator does the actual work
+   (flights, images, report)
+8. Marks mission COMPLETED
+9. Customer's portal flips to
+   "Balance Due" (per ADR-0008)
+10. Customer pays balance
+11. Hub Invoice card shows
+    paid_in_full=true
+12. Operator clicks Mark SENT
+    → mission locked
+```
+
+This sequence is the canonical first-responder-grade workflow. The Hub MUST
+make every step in column-1 a single click. No drilling through three menus
+to find "Send portal link" — it's right on the Invoice card.
+
+### 8.6.3 Resilience
+
+- The Hub Invoice card SHOWS the deposit + portal-link state but does NOT
+  block the operator from advancing mission status. If a customer hasn't
+  paid the deposit and the operator chooses to do the work anyway (legitimate
+  for trust-based or established-relationship missions), nothing prevents it.
+  The deposit gate is opt-in per-mission via `deposit_required`.
+- "Issue Portal Link" has the v2.66.0 idempotency: clicking twice doesn't
+  mint two tokens — it returns the existing valid one.
+- Token revocation (operator changes their mind, customer lost the link, etc.)
+  uses the existing `DELETE /api/missions/{mission_id}/client-link/{token_id}`.
+
 ## 9. Out of scope (explicitly NOT in this redesign)
 
 - **Refund / audit flow for SENT missions.** Edit buttons disabled; refund-via-Stripe-dashboard remains manual.
@@ -223,6 +333,39 @@ After all four merge: version bump to **2.67.0** (MAJOR feature, structural UX r
 - **Schema changes of any kind.** Strictly additive frontend reorg + 2 small backend defensive guards.
 
 ---
+
+## 9.5 Integration audit — every feature shipped 2026-05-02 / 2026-05-03 must work through the Hub
+
+This is first-responder-grade gear. **Every feature shipped in the last 48 hours
+must be reachable, working, and tested through the new Hub.** The redesign is
+not allowed to lose any of it.
+
+| Shipped | Where it must surface in the Hub | How verified |
+|---|---|---|
+| **ADR-0008** — invoice gated on mission status (`COMPLETED`/`SENT`) | Customer-portal logic (unchanged); Hub Invoice card shows current visibility status to operator | Customer portal regression test (existing) + Hub manual smoke |
+| **ADR-0009** — deposit feature (7 invoice columns, payment_phase, pay/deposit + pay/balance endpoints) | Hub Invoice card §8.6 | Existing 53 deposit tests + new contract test that the Hub Issue-Portal-Link → Customer-pays-deposit → Webhook-flips-deposit_paid round-trip works end-to-end |
+| **ADR-0010** — AcroForm TOS rebuild | Hub does NOT host TOS sign — that's customer-portal `/tos/accept`. Hub's Invoice card "Issue Portal Link" routes the customer through the existing TOS gate before they reach the invoice. | Existing 12 TOS tests + Hub manual smoke walks the new-customer happy path |
+| **ADR-0011** — payment idempotency + sequential invoice numbering (BARNARDHQ-YYYY-NNNN) | Hub Invoice card displays `invoice_number` prominently as the operator's reference; Issue-Portal-Link is idempotent; double-click on Pay button doesn't double-charge | Existing 6 idempotency tests + new test that double-click "Issue Portal Link" returns the same token |
+| **ADR-0012** — secret hygiene (no `${VAR:-default}` for credentials, gitleaks pre-commit + CI) | No new secrets introduced. Pre-commit blocks any literal sk_*/whsec_*/cfat_*/tk_* in commits. | gitleaks pre-commit + CI gate |
+| **ADR-0013** — contract tests + 4xx burst alerting | EVERY new Hub backend route gets an `httpx.AsyncClient` contract test. NO `_mk_payload(SimpleNamespace)` bypass tests. The 4xx-burst alert (queued for v2.66.x) catches any new Hub endpoint that goes 422 on real customer payloads. | New contract tests for `/missions/new` modal, all 5 facet editors, `PATCH /missions/{id}` status transition, `POST /missions/{id}/client-link` Issue-Portal-Link |
+| **v2.65.1** — email-optional Initiate Services + Copy Link | The "Initiate Services" flow on Dashboard + Customers page is unchanged. The Hub does NOT replace it; the Hub is for **post-customer-onboarded** mission management. The Initiate flow is for new customer onboarding. | Existing flow regression test + manual smoke that the Initiate→TOS→Customer-record-exists path works AND the operator can then create a Mission for that customer that lands on the Hub |
+| **v2.65.0 portal theming** — `CustomerLayout`, brand cyan `#189cc6`, footer line | Customer-portal pages unchanged. Hub is operator-side, uses operator brand cyan `#00d4ff` per existing operator UI conventions. The two brands stay distinct. | Visual smoke |
+| **v2.66.0 Stripe activation** — webhook + secret in `system_settings` | Hub does NOT touch Stripe directly. Only the customer pays via portal; webhook fires; ntfy pushes to operator. Hub Invoice card auto-refreshes when operator next views it. | Existing webhook signature tests + manual smoke through full pay flow |
+| **v2.66.0 Stripe webhook signature alert** | Unchanged — fires on signature failure. Hub does NOT need to surface this; it's an operator ntfy push. | Existing test |
+| **v2.66.0 CF Access bypass for `/api/webhooks/stripe`, `/api/client/*`, `/client/*`, `/tos/*`, `/api/tos/*`, `/api/health`** | Unchanged — operator-only Hub routes (`/missions/*`) stay behind CF Access. | External probe (covered by existing tests) |
+| **v2.66.0 nightly DB backup** (`scripts/snapshot.sh`) | Unchanged — DB schema is stable; backups continue. | Cron continues to run |
+| **v2.66.0 CF Healthcheck** (`/api/health`) | Unchanged | Existing healthcheck continues |
+| **v2.66.0 CHANGELOG: 5-agent ship summary** | Hub redesign cited as v2.67.0 — references all yesterday's ADRs | New CHANGELOG entry |
+| **v2.66.0 Operator TOS Audit page** (`/tos-acceptances`) | Unchanged — operator nav still has "TOS Audit" entry. The Hub provides per-mission TOS context via the Customer card linking back to `/tos-acceptances?customer_id=…`. | Existing 8 list-endpoint tests + manual nav |
+| **v2.66.0 frontend polish** (Mark SENT button, deposit indicator on MissionDetail, Edit Invoice link, post-Stripe-redirect polling refresh) | **Mark SENT button** moves from old MissionDetail to new Hub. **Deposit indicator** moves from old MissionDetail to new Hub Invoice card. **Edit Invoice link** moves from old MissionDetail to new Hub Invoice card. **Polling refresh** is a customer-portal concern — unchanged. | New Hub manual smoke verifies each |
+| **v2.66.1 secret rotation** (demo POSTGRES + REPLICATION; prod REPLICATION) | Unchanged | Replication monitor (NOC) verifies streaming continues |
+| **v2.66.2 PEP 563 hotfix** for `/api/tos/accept` | Unchanged — the Hub does not duplicate this code path. | Existing 4 tests + ADR-0013 forbids regression |
+| **v2.66.3 Customers page TOS audit integration** | Customer card on the Hub links to `/tos-acceptances?customer_id=…` (per ADR-0010). When the customer has signed, the card shows a green "TOS SIGNED" badge with template version (matching the Customers page pattern shipped in v2.66.3). | New Hub manual smoke + screenshot |
+| **v2.66.4 timezone-naive sync hotfix** for `customers.tos_signed_at` | Unchanged backend behavior; Hub reads `customer.tos_signed` boolean (now correctly maintained by v2.66.4) for the TOS-SIGNED badge | Existing 3 tz-naive sync tests + Hub regression |
+
+If the Hub redesign breaks ANY of the above integrations, the merge does
+NOT ship. Every entry in this table maps to a manual smoke step in §11
+Done definition + a contract test in §7 Testing strategy.
 
 ## 10. ADR target
 
@@ -244,5 +387,8 @@ This redesign warrants its own ADR: **`docs/adr/0014-mission-hub-redesign.md`** 
 - [ ] ADR-0014 written + committed
 - [ ] Live deploy verified: `app.version` reads `2.67.0`
 - [ ] External smoke probes return expected status codes
+- [ ] **§8.5 lock-down semantics verified**: opened a SENT mission, all 5 Edit buttons disabled with tooltip, Reopen Mission button visible, Reopen click flips status to COMPLETED + logs `[MISSION-REOPEN]`
+- [ ] **§8.6 deposit-billing flow verified end-to-end**: created mission → set deposit_required → clicked Issue Portal Link → got URL → texted to test phone → opened in private browser → signed TOS → reached portal mission detail → paid deposit with Stripe test card `4242 4242 4242 4242` → ntfy push received on operator phone → Hub Invoice card refreshed showing deposit_paid=true with timestamp
+- [ ] **§9.5 integration audit table verified**: every row has either an automated test passing OR a documented manual-smoke step run + result captured. No row left as "TBD"
 
 If ANY of these is false, the answer is "in progress" not "done". The operator's direction was explicit: **"DO NOT tell me things are done or tested if they are not actually tested and green across the board."**
