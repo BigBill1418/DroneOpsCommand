@@ -26,6 +26,16 @@ export default defineConfig({
     globals: true,
     setupFiles: ['./src/test/setup.ts'],
     css: false,
+    // v2.67.0 Agent D — disable file-level parallelism. Several facet
+    // tests use `vi.mock('react-router-dom', ...)` to stub useParams /
+    // useNavigate; Vitest's worker-pool runs files concurrently and
+    // these module-scope mocks bleed across files, causing intermittent
+    // 5s timeouts on Save tests (most reliably reproduced on
+    // MissionDetailsEdit.test.tsx). Sequential execution is ~2x slower
+    // (~70s vs ~35s on the worktree machine) but eliminates the flake.
+    // If/when the facet tests are refactored to colocate their mocks
+    // in beforeEach blocks, this can be removed.
+    fileParallelism: false,
     server: {
       deps: {
         // Mantine ships ESM-only; Vitest needs to inline it for jsdom.

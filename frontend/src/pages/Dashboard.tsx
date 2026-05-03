@@ -55,6 +55,7 @@ import { useApiCache, invalidate as invalidateCache } from '../hooks/useApiCache
 import { Mission, Customer } from '../api/types';
 import StatCard from '../components/shared/StatCard';
 import { statusColors, inputStyles } from '../components/shared/styles';
+import MissionCreateModal from '../components/MissionCreateModal';
 
 interface WeatherData {
   temperature_f: number | null;
@@ -247,6 +248,11 @@ export default function Dashboard() {
   const [initiateLoading, setInitiateLoading] = useState(false);
   const [intakeResult, setIntakeResult] = useState<{ intake_url: string; customer_id?: string } | null>(null);
   const [linkCopied, setLinkCopied] = useState(false);
+  // v2.67.0 — Dashboard's "+ NEW MISSION" button now opens the same
+  // slim MissionCreateModal that the Missions list page uses, so the
+  // operator gets one-click create without ever touching the legacy
+  // wizard URL. Per spec §3 + ADR-0014.
+  const [createMissionOpen, setCreateMissionOpen] = useState(false);
   const navigate = useNavigate();
 
   const fetchWeather = useCallback((isRefresh = false) => {
@@ -384,7 +390,8 @@ export default function Dashboard() {
             leftSection={<IconPlus size={16} />}
             color="cyan"
             size="sm"
-            onClick={() => navigate('/missions/new')}
+            onClick={() => setCreateMissionOpen(true)}
+            data-testid="dashboard-new-mission-btn"
             styles={{ root: { ...bebasFont, letterSpacing: '1px' } }}
           >
             NEW MISSION
@@ -1186,6 +1193,14 @@ export default function Dashboard() {
           </Stack>
         )}
       </Modal>
+
+      {/* v2.67.0 — Mission Hub slim create modal (ADR-0014). Wired here
+          so the Dashboard "+ NEW MISSION" button creates inline; on
+          success the modal navigates to /missions/{id} (the new Hub). */}
+      <MissionCreateModal
+        opened={createMissionOpen}
+        onClose={() => setCreateMissionOpen(false)}
+      />
     </div>
   );
 }
