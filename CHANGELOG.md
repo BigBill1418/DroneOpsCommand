@@ -6,6 +6,24 @@ Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
 ## [2.66.2] — 2026-05-03 — fix: P0 hotfix — `POST /api/tos/accept` 422 on every customer submission
 
+**Addendum (copy-only, no version bump):** TOS success view + signed-TOS
+email — drop premature payment mention + "if you don't hear back" line;
+lead with welcome.
+
+- `frontend/src/pages/TosAcceptance.tsx` — replace the "ACCEPTED" badge
+  + "What happens next" framing card with a warmer two-sentence welcome
+  ("Thank you. Welcome to BarnardHQ." heading + portal-link follow-up
+  body). Brand cyan + Bebas-Neue display heading; Rajdhani body.
+- `backend/app/templates/signed_tos_email.html` — same copy swap inside
+  the existing brand-cyan accent card. Heading rendered Bebas Neue →
+  Arial Black → Arial; body keeps Rajdhani fallback chain. Inline
+  styles preserved for email-client safety.
+- Operator's portal-link delivery channel is no longer named in the
+  customer copy (was "by email or text") since the customer doesn't
+  need to predict it. Audit record + Download Signed Copy button +
+  legal/E-SIGN paragraph + brand footer all unchanged.
+
+
 A paying customer hit the TOS-acceptance form at 16:09 PT and got a
 generic "acceptance failed" toast on every one of six retries. The
 operator regenerated the intake link; the seventh attempt failed the

@@ -155,17 +155,36 @@ export default function TosAcceptance() {
       >
         <Paper p="xl" radius="md" style={customerStyles.card}>
           <Stack gap="md">
+            {/* v2.66.2 copy update — drop the "ACCEPTED" badge in favor of
+                a warmer welcome heading. Two-sentence body replaces the
+                "What happens next" framing card (no premature payment
+                mention, no defensive "if you don't hear back" line). */}
             <Title
               order={1}
               style={{
                 ...customerStyles.display,
-                color: customerBrand.success,
+                color: customerBrand.brandCyan,
                 letterSpacing: customerBrand.trackWider,
-                fontSize: 'clamp(36px, 6vw, 56px)',
+                fontSize: 'clamp(32px, 5.5vw, 48px)',
               }}
             >
-              ACCEPTED
+              THANK YOU. WELCOME TO BARNARDHQ.
             </Title>
+            <Text
+              style={{
+                color: customerBrand.textBody,
+                fontFamily: customerBrand.fontBody,
+                lineHeight: 1.65,
+              }}
+            >
+              Your operator will follow up shortly with a{' '}
+              <strong style={{ color: customerBrand.brandCyan }}>
+                secure portal link
+              </strong>{' '}
+              where you can review your mission and stay updated on its
+              progress.
+            </Text>
+
             <Text style={{ color: customerBrand.textBody, fontFamily: customerBrand.fontBody }}>
               Your acceptance is recorded. Audit reference:
             </Text>
@@ -195,48 +214,6 @@ export default function TosAcceptance() {
               it directly below. The document is locked and tamper-evident
               via SHA-256.
             </Text>
-
-            {/* v2.66.0 Fix #2 — explicit "what happens next" so the customer
-                isn't left wondering after signing. Brand-cyan emphasis on
-                the inbound channel. */}
-            <Paper
-              p="md"
-              radius="sm"
-              style={{
-                background: customerBrand.bgDeep,
-                border: `1px solid ${customerBrand.border}`,
-                borderLeft: `3px solid ${customerBrand.brandCyan}`,
-              }}
-            >
-              <Text
-                size="xs"
-                mb={8}
-                style={{
-                  color: customerBrand.brandCyan,
-                  fontFamily: customerBrand.fontMono,
-                  letterSpacing: customerBrand.trackMid,
-                  textTransform: 'uppercase',
-                }}
-              >
-                What happens next
-              </Text>
-              <Text
-                size="sm"
-                style={{
-                  color: customerBrand.textBody,
-                  fontFamily: customerBrand.fontBody,
-                  lineHeight: 1.65,
-                }}
-              >
-                Your operator has been notified. They'll send you a{' '}
-                <strong style={{ color: customerBrand.brandCyan }}>
-                  secure portal link
-                </strong>{' '}
-                by email or text where you can review your mission, see your
-                invoice, and submit payment. If you don't hear back within a
-                few hours, contact your operator directly.
-              </Text>
-            </Paper>
 
             <Group>
               <Anchor href={result.download_url} download underline="never">
