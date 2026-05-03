@@ -1,3 +1,4 @@
+/// <reference types="vitest" />
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
@@ -17,6 +18,20 @@ export default defineConfig({
   },
   optimizeDeps: {
     include: ['react-pdf'],
+  },
+  // v2.67.0 — Vitest config for Mission Hub redesign contract tests
+  // (per ADR-0013: real route coverage, msw-mocked API).
+  test: {
+    environment: 'jsdom',
+    globals: true,
+    setupFiles: ['./src/test/setup.ts'],
+    css: false,
+    server: {
+      deps: {
+        // Mantine ships ESM-only; Vitest needs to inline it for jsdom.
+        inline: [/@mantine\//, /@tabler\//],
+      },
+    },
   },
   // FIX-3 (v2.63.9): split the 1.9 MB single index-*.js chunk into a small
   // router shell plus vendor chunks that can be cached across deploys
