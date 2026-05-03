@@ -4,6 +4,69 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## [Unreleased — Agent A slice for v2.67.0] — 2026-05-03 — Mission Hub + slim create + status transitions
+
+Agent A of the v2.67.0 Mission Hub redesign (per
+`docs/superpowers/specs/2026-05-03-mission-hub-redesign-design.md` §2,
+§3, §4, §5, §8.5, §8.6). NO version bump — Agent D handles the
+consolidated v2.67.0 bump + ADR-0014 after Agents B/C/D merge.
+
+**Backend (`backend/app/routers/missions.py`):**
+- `POST /api/missions` rejects bodies that include an `id` field with
+  HTTP 400 (defensive guard from spec §4 — makes the
+  duplicate-mission class physically impossible).
+- `POST /api/missions` logs `[MISSION-POST-DUP]` WARNING when the same
+  `(customer_id, title, mission_date)` triple was POST'd in the last
+  5 minutes (operator override allowed — log only, no reject).
+- `PATCH /api/missions/{id}` (NEW) accepts `{status: <enum>}` for
+  Mission Hub Mark COMPLETED / Mark SENT / Reopen Mission buttons.
+  Logs `[MISSION-STATUS] from=X to=Y mission_id=Z user=U` on every
+  transition. Per spec §8.5 lockdown, SENT→anything-other-than-COMPLETED
+  is rejected (400) unless caller passes `?reopen=true`, in which case
+  the call additionally emits `[MISSION-REOPEN]` WARNING with
+  previous_status + operator id for the audit trail.
+
+**Frontend (3 new components + 2 page refactors):**
+- `frontend/src/components/MissionStatusBadge.tsx` — shared status pill
+  component, lock icon when status is SENT.
+- `frontend/src/components/MissionFacetCard.tsx` — shared "card with
+  title + summary + Edit button (+ optional `extraActions`)" used on
+  the Hub.
+- `frontend/src/components/MissionCreateModal.tsx` — slim create modal
+  (title + customer + type + optional date) replacing the legacy
+  `/missions/new` 5-step wizard for creation. Submit POSTs without
+  `id` and navigates to `/missions/{id}` (the Hub).
+- `frontend/src/pages/MissionDetail.tsx` — heavily refactored to be
+  the Hub: header row with status badge + lifecycle controls, 5
+  facet cards (Details, Flights, Images, Report, Invoice), all Edit
+  buttons disabled with "Mission sent — locked" tooltip when status
+  is SENT, Reopen button visible in SENT state. Invoice card surfaces
+  Issue Portal Link + Email actions (spec §8.6) as `extraActions`.
+- `frontend/src/pages/Missions.tsx` — the "+ NEW MISSION" button now
+  opens `MissionCreateModal` inline instead of routing to the legacy
+  wizard. List rows still navigate to `/missions/{id}`.
+
+**Tests (per ADR-0013 — real `httpx.AsyncClient` / `TestClient`, no
+`SimpleNamespace` bypass on routes):**
+- `backend/tests/test_missions_post_rejects_id_in_body.py` (5 tests)
+- `backend/tests/test_missions_post_logs_dup_warning.py` (2 tests)
+- `backend/tests/test_missions_patch_status.py` (7 tests)
+- `backend/tests/test_mission_reopen_logs_audit.py` (2 tests)
+- `frontend/src/components/__tests__/MissionCreateModal.test.tsx`
+  (2 tests, msw-mocked) — proves POST body NEVER includes `id` and
+  navigates to `/missions/{id}` on 201.
+- `frontend/src/pages/__tests__/MissionDetail.hub.test.tsx`
+  (7 tests, msw-mocked) — verifies all 5 facet cards render, lockdown
+  semantics per §8.5, Invoice card extraActions per §8.6.
+
+**Infrastructure note:** added Vitest + @testing-library/react + msw +
+jsdom devDependencies to `frontend/package.json` (the repo had no
+frontend test runner configured before). `pnpm test` / `npm test` runs
+the suite.
+
+**Failover/resilience guard:** PATCH endpoint is purely additive; no
+schema changes; no replication impact.
+
 ## [2.66.4] — 2026-05-03 — fix(tos): strip tzinfo when syncing customers.tos_signed_at (P0 hotfix)
 
 **P0 hotfix for the v2.66.3 sync code.** `customer.tos_signed_at = ctx.accepted_at`
