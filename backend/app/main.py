@@ -152,6 +152,16 @@ def _add_missing_columns(conn):
                 ("stripe_checkout_session_id", "ALTER TABLE invoices ADD COLUMN stripe_checkout_session_id VARCHAR(255)"),
                 ("payment_method", "ALTER TABLE invoices ADD COLUMN payment_method VARCHAR(50)"),
                 ("paid_at", "ALTER TABLE invoices ADD COLUMN paid_at TIMESTAMP"),
+                # ADR-0009 — two-phase deposit + balance billing.
+                # All additive with safe defaults; failover-safe (no PK/FK
+                # changes; standby promotion runs the same idempotent ALTERs).
+                ("deposit_required",            "ALTER TABLE invoices ADD COLUMN deposit_required BOOLEAN NOT NULL DEFAULT FALSE"),
+                ("deposit_amount",              "ALTER TABLE invoices ADD COLUMN deposit_amount NUMERIC(10,2) NOT NULL DEFAULT 0"),
+                ("deposit_paid",                "ALTER TABLE invoices ADD COLUMN deposit_paid BOOLEAN NOT NULL DEFAULT FALSE"),
+                ("deposit_paid_at",             "ALTER TABLE invoices ADD COLUMN deposit_paid_at TIMESTAMP"),
+                ("deposit_payment_intent_id",   "ALTER TABLE invoices ADD COLUMN deposit_payment_intent_id VARCHAR(255)"),
+                ("deposit_checkout_session_id", "ALTER TABLE invoices ADD COLUMN deposit_checkout_session_id VARCHAR(255)"),
+                ("deposit_payment_method",      "ALTER TABLE invoices ADD COLUMN deposit_payment_method VARCHAR(50)"),
             ],
             "maintenance_records": [
                 ("images", "ALTER TABLE maintenance_records ADD COLUMN images JSONB DEFAULT '[]'"),
@@ -190,6 +200,32 @@ def _add_missing_columns(conn):
                     if col["name"] == "maintenance_type" and hasattr(col["type"], "length") and col["type"].length:
                         logger.info("Widening %s.maintenance_type to TEXT", table)
                         conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN maintenance_type TYPE TEXT"))
+
+        # ADR-0009 — invoice deposit CHECK constraints (idempotent).
+        # Wrapped in DO/EXCEPTION so a re-run on a DB that already has
+        # the constraint is a no-op. The application also enforces these
+        # in `app/routers/invoices.py:create_invoice` so the DB layer is
+        # belt-and-suspenders.
+        if inspector.has_table("invoices"):
+            invoice_cols = {c["name"] for c in inspector.get_columns("invoices")}
+            if {"deposit_amount", "deposit_required"}.issubset(invoice_cols):
+                deposit_constraints = (
+                    ("deposit_amount_nonneg",
+                     "ALTER TABLE invoices ADD CONSTRAINT deposit_amount_nonneg "
+                     "CHECK (deposit_amount >= 0)"),
+                    ("deposit_amount_le_total",
+                     "ALTER TABLE invoices ADD CONSTRAINT deposit_amount_le_total "
+                     "CHECK (deposit_amount <= total)"),
+                    ("deposit_required_consistent",
+                     "ALTER TABLE invoices ADD CONSTRAINT deposit_required_consistent "
+                     "CHECK (deposit_required = false OR deposit_amount > 0)"),
+                )
+                for name, alter in deposit_constraints:
+                    conn.execute(text(
+                        f"DO $$ BEGIN {alter}; "
+                        f"EXCEPTION WHEN duplicate_object THEN NULL; END $$;"
+                    ))
+                    logger.debug("Ensured CHECK constraint %s on invoices", name)
 
         logger.info("Column migration check complete")
     except Exception as exc:

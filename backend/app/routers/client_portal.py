@@ -32,7 +32,12 @@ from app.config import settings
 from app.database import get_db
 from app.models.client_portal import ClientAccessToken
 from app.models.customer import Customer
-from app.models.invoice import Invoice
+from app.models.invoice import (
+    Invoice,
+    PAYMENT_PHASE_DEPOSIT_DUE,
+    PAYMENT_PHASE_BALANCE_DUE,
+    PAYMENT_PHASE_PAID_IN_FULL,
+)
 from app.models.mission import Mission, MissionStatus
 from app.models.user import User
 from app.schemas.client_portal import (
@@ -462,7 +467,20 @@ async def get_client_invoice(
     client: ClientContext = Depends(get_current_client),
     db: AsyncSession = Depends(get_db),
 ):
-    """Client auth: get invoice for a mission (filtered — no operator notes)."""
+    """Client auth: get invoice for a mission (filtered — no operator notes).
+
+    ADR-0008 + ADR-0009 visibility rule:
+        invoice is shown when EITHER
+          (1) deposit_required AND NOT deposit_paid (deposit phase),
+          OR
+          (2) mission.status in {COMPLETED, SENT}    (post-delivery).
+        hidden only when:
+          deposit_required = False AND mission not yet COMPLETED|SENT.
+
+    The invoice payload always carries `payment_phase` so the customer
+    UI can render the 4-step phase strip without re-deriving the truth
+    table client-side.
+    """
     start = time.perf_counter()
     client_ip = _client_ip(request)
 
@@ -470,19 +488,8 @@ async def get_client_invoice(
         logger.warning("[CLIENT-INVOICE] ACCESS DENIED — customer=%s cannot access mission=%s", client.customer_id, mission_id)
         raise HTTPException(status_code=403, detail="You do not have access to this mission")
 
-    # Hide the invoice (and the Pay button it powers) until the
-    # operator has marked the mission complete. Operator can still
-    # be drafting/editing the invoice on the back end; we just don't
-    # surface it on the client portal yet.
     mission_row = await db.execute(select(Mission.status).where(Mission.id == mission_id))
     mission_status = mission_row.scalar_one_or_none()
-    if mission_status is not None and mission_status not in INVOICE_VISIBLE_STATUSES:
-        elapsed = time.perf_counter() - start
-        logger.info(
-            "[CLIENT-INVOICE] HIDDEN — mission=%s status=%s not in %s (%.3fs)",
-            mission_id, mission_status.value, sorted(s.value for s in INVOICE_VISIBLE_STATUSES), elapsed,
-        )
-        return None
 
     result = await db.execute(
         select(Invoice)
@@ -496,6 +503,23 @@ async def get_client_invoice(
         logger.info("[CLIENT-INVOICE] No invoice for mission=%s (%.3fs)", mission_id, elapsed)
         return None
 
+    deposit_phase_active = bool(invoice.deposit_required) and not bool(invoice.deposit_paid)
+    mission_delivered = (
+        mission_status is not None and mission_status in INVOICE_VISIBLE_STATUSES
+    )
+
+    if not (deposit_phase_active or mission_delivered):
+        elapsed = time.perf_counter() - start
+        logger.info(
+            "[CLIENT-INVOICE] HIDDEN — mission=%s status=%s deposit_required=%s deposit_paid=%s (%.3fs)",
+            mission_id,
+            mission_status.value if mission_status else "unknown",
+            invoice.deposit_required,
+            invoice.deposit_paid,
+            elapsed,
+        )
+        return None
+
     line_items = [
         ClientInvoiceLineItem(
             description=item.description,
@@ -506,10 +530,12 @@ async def get_client_invoice(
         for item in (invoice.line_items or [])
     ]
 
+    payment_phase = invoice.payment_phase_for(mission_status)
+
     elapsed = time.perf_counter() - start
     logger.info(
-        "[CLIENT-INVOICE] Served invoice=%s for mission=%s, paid=%s (%.3fs)",
-        invoice.id, mission_id, invoice.paid_in_full, elapsed,
+        "[CLIENT-INVOICE] Served invoice=%s for mission=%s, phase=%s, paid=%s, deposit_paid=%s (%.3fs)",
+        invoice.id, mission_id, payment_phase, invoice.paid_in_full, invoice.deposit_paid, elapsed,
     )
 
     return ClientInvoiceResponse(
@@ -519,7 +545,197 @@ async def get_client_invoice(
         paid_at=invoice.paid_at,
         payment_method=invoice.payment_method,
         line_items=line_items,
+        deposit_required=bool(invoice.deposit_required),
+        deposit_amount=float(invoice.deposit_amount or 0),
+        deposit_paid=bool(invoice.deposit_paid),
+        deposit_paid_at=invoice.deposit_paid_at,
+        deposit_payment_method=invoice.deposit_payment_method,
+        balance_amount=invoice.balance_amount,
+        payment_phase=payment_phase,
     )
+
+
+async def _load_pay_context(
+    *,
+    mission_id: UUID,
+    client: ClientContext,
+    db: AsyncSession,
+) -> tuple[Mission, Invoice, Customer]:
+    """Common preflight for every /pay/* endpoint.
+
+    Returns (mission, invoice, customer) on success; raises
+    HTTPException with the appropriate status otherwise. Centralizing
+    this means each pay endpoint contains only the phase-specific gate.
+    """
+    if not client.can_access_mission(str(mission_id)):
+        logger.warning("[CLIENT-PAY] ACCESS DENIED — customer=%s cannot access mission=%s", client.customer_id, mission_id)
+        raise HTTPException(status_code=403, detail="You do not have access to this mission")
+
+    mission_result = await db.execute(select(Mission).where(Mission.id == mission_id))
+    mission = mission_result.scalar_one_or_none()
+    if mission is None:
+        raise HTTPException(status_code=404, detail="Mission not found")
+
+    inv_result = await db.execute(
+        select(Invoice)
+        .options(selectinload(Invoice.line_items))
+        .where(Invoice.mission_id == mission_id)
+    )
+    invoice = inv_result.scalar_one_or_none()
+    if not invoice:
+        raise HTTPException(status_code=404, detail="No invoice found for this mission")
+
+    if float(invoice.total) <= 0:
+        raise HTTPException(status_code=400, detail="Invoice total must be greater than zero")
+
+    cust_result = await db.execute(select(Customer).where(Customer.id == client.customer_id))
+    customer = cust_result.scalar_one_or_none()
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+
+    return mission, invoice, customer
+
+
+def _client_redirect_urls(mission_id: UUID) -> tuple[str, str]:
+    frontend_url = settings.frontend_url.rstrip("/")
+    return (
+        f"{frontend_url}/client/missions/{mission_id}?payment=success",
+        f"{frontend_url}/client/missions/{mission_id}?payment=cancelled",
+    )
+
+
+@router.post("/api/client/missions/{mission_id}/invoice/pay/deposit", response_model=ClientPaymentResponse)
+async def create_client_deposit_payment(
+    mission_id: UUID,
+    request: Request,
+    client: ClientContext = Depends(get_current_client),
+    db: AsyncSession = Depends(get_db),
+):
+    """Client auth: pay the deposit (ADR-0009 §3.4). Open any time
+    the deposit is required and not yet collected — does not require
+    the mission to be completed."""
+    start = time.perf_counter()
+    client_ip = _client_ip(request)
+    logger.info(
+        "[CLIENT-PAY-DEPOSIT] Requested mission=%s customer=%s ip=%s",
+        mission_id, client.customer_id, client_ip,
+    )
+
+    mission, invoice, customer = await _load_pay_context(
+        mission_id=mission_id, client=client, db=db,
+    )
+
+    if not invoice.deposit_required:
+        raise HTTPException(status_code=400, detail="This invoice does not require a deposit")
+    if invoice.deposit_paid:
+        raise HTTPException(status_code=400, detail="Deposit has already been paid")
+    if float(invoice.deposit_amount or 0) <= 0:
+        raise HTTPException(status_code=400, detail="Deposit amount must be greater than zero")
+
+    success_url, cancel_url = _client_redirect_urls(mission_id)
+
+    from app.services.stripe_service import create_checkout_session
+    try:
+        checkout_url = await create_checkout_session(
+            invoice=invoice,
+            customer=customer,
+            success_url=success_url,
+            cancel_url=cancel_url,
+            db=db,
+            payment_phase="deposit",
+            amount_override=float(invoice.deposit_amount),
+            description_override=f"Deposit — {mission.title}"[:200],
+        )
+    except ValueError as exc:
+        logger.error("[CLIENT-PAY-DEPOSIT] Stripe not configured: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+    except Exception as exc:
+        logger.error("[CLIENT-PAY-DEPOSIT] Stripe error mission=%s: %s", mission_id, exc)
+        raise HTTPException(status_code=500, detail="Failed to create payment session")
+
+    await db.commit()
+    elapsed = time.perf_counter() - start
+    logger.info(
+        "[CLIENT-PAY-DEPOSIT] Checkout created mission=%s amount=%.2f (%.3fs)",
+        mission_id, float(invoice.deposit_amount), elapsed,
+    )
+    return ClientPaymentResponse(checkout_url=checkout_url)
+
+
+@router.post("/api/client/missions/{mission_id}/invoice/pay/balance", response_model=ClientPaymentResponse)
+async def create_client_balance_payment(
+    mission_id: UUID,
+    request: Request,
+    client: ClientContext = Depends(get_current_client),
+    db: AsyncSession = Depends(get_db),
+):
+    """Client auth: pay the balance (ADR-0009 §3.4).
+
+    Gated: mission must be COMPLETED|SENT, deposit must be paid (or
+    not required), and invoice must not already be paid in full.
+    """
+    start = time.perf_counter()
+    client_ip = _client_ip(request)
+    logger.info(
+        "[CLIENT-PAY-BALANCE] Requested mission=%s customer=%s ip=%s",
+        mission_id, client.customer_id, client_ip,
+    )
+
+    mission, invoice, customer = await _load_pay_context(
+        mission_id=mission_id, client=client, db=db,
+    )
+
+    if invoice.paid_in_full:
+        raise HTTPException(status_code=400, detail="Invoice is already paid")
+    if mission.status not in INVOICE_VISIBLE_STATUSES:
+        logger.warning(
+            "[CLIENT-PAY-BALANCE] BLOCKED — mission=%s status=%s not in %s",
+            mission_id, mission.status.value, sorted(s.value for s in INVOICE_VISIBLE_STATUSES),
+        )
+        raise HTTPException(
+            status_code=400,
+            detail="The balance can only be paid after your operator marks the mission complete.",
+        )
+    if invoice.deposit_required and not invoice.deposit_paid:
+        raise HTTPException(
+            status_code=400,
+            detail="The deposit must be paid before the balance can be charged.",
+        )
+
+    balance = invoice.balance_amount
+    if balance <= 0:
+        # Defensive — if a deposit_amount somehow equals total, treat
+        # the invoice as paid in full and refuse to spin up Stripe.
+        raise HTTPException(status_code=400, detail="Nothing left to pay on this invoice")
+
+    success_url, cancel_url = _client_redirect_urls(mission_id)
+
+    from app.services.stripe_service import create_checkout_session
+    try:
+        checkout_url = await create_checkout_session(
+            invoice=invoice,
+            customer=customer,
+            success_url=success_url,
+            cancel_url=cancel_url,
+            db=db,
+            payment_phase="balance",
+            amount_override=balance,
+            description_override=f"Balance — {mission.title}"[:200],
+        )
+    except ValueError as exc:
+        logger.error("[CLIENT-PAY-BALANCE] Stripe not configured: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+    except Exception as exc:
+        logger.error("[CLIENT-PAY-BALANCE] Stripe error mission=%s: %s", mission_id, exc)
+        raise HTTPException(status_code=500, detail="Failed to create payment session")
+
+    await db.commit()
+    elapsed = time.perf_counter() - start
+    logger.info(
+        "[CLIENT-PAY-BALANCE] Checkout created mission=%s amount=%.2f (%.3fs)",
+        mission_id, balance, elapsed,
+    )
+    return ClientPaymentResponse(checkout_url=checkout_url)
 
 
 @router.post("/api/client/missions/{mission_id}/invoice/pay", response_model=ClientPaymentResponse)
@@ -529,89 +745,52 @@ async def create_client_payment(
     client: ClientContext = Depends(get_current_client),
     db: AsyncSession = Depends(get_db),
 ):
-    """Client auth: create a Stripe Checkout session to pay the invoice."""
+    """Client auth: legacy alias retained for back-compat (ADR-0009 §3.4).
+
+    Infers the appropriate payment phase from current invoice state and
+    delegates to the deposit or balance handler. Pre-deposit-feature
+    bookmarks and the customer-facing UI from before the cutover keep
+    working through this endpoint.
+    """
     start = time.perf_counter()
     client_ip = _client_ip(request)
-
-    logger.info("[CLIENT-PAY] Payment requested for mission=%s by customer=%s from ip=%s", mission_id, client.customer_id, client_ip)
-
-    if not client.can_access_mission(str(mission_id)):
-        logger.warning("[CLIENT-PAY] ACCESS DENIED — customer=%s cannot access mission=%s", client.customer_id, mission_id)
-        raise HTTPException(status_code=403, detail="You do not have access to this mission")
-
-    # Same gate as `get_client_invoice` — payment is locked until the
-    # mission is marked complete. The Pay button shouldn't appear in
-    # the UI before then (the invoice GET returns None), but a client
-    # could still POST directly, so re-check here.
-    mission_row = await db.execute(select(Mission.status).where(Mission.id == mission_id))
-    mission_status = mission_row.scalar_one_or_none()
-    if mission_status is None:
-        raise HTTPException(status_code=404, detail="Mission not found")
-    if mission_status not in INVOICE_VISIBLE_STATUSES:
-        logger.warning(
-            "[CLIENT-PAY] BLOCKED — mission=%s status=%s not in %s",
-            mission_id, mission_status.value, sorted(s.value for s in INVOICE_VISIBLE_STATUSES),
-        )
-        raise HTTPException(
-            status_code=400,
-            detail="This invoice is not yet available for payment. Your operator will mark the mission complete once the work is finished.",
-        )
-
-    result = await db.execute(
-        select(Invoice)
-        .options(selectinload(Invoice.line_items))
-        .where(Invoice.mission_id == mission_id)
+    logger.info(
+        "[CLIENT-PAY] Legacy alias hit for mission=%s customer=%s ip=%s",
+        mission_id, client.customer_id, client_ip,
     )
-    invoice = result.scalar_one_or_none()
 
-    if not invoice:
-        raise HTTPException(status_code=404, detail="No invoice found for this mission")
+    mission, invoice, _customer = await _load_pay_context(
+        mission_id=mission_id, client=client, db=db,
+    )
 
     if invoice.paid_in_full:
         raise HTTPException(status_code=400, detail="Invoice is already paid")
 
-    if float(invoice.total) <= 0:
-        raise HTTPException(status_code=400, detail="Invoice total must be greater than zero")
-
-    # Load customer for email. `client.customer_id` may be either a
-    # UUID object (when minted via create_client_token, which the
-    # operator-side endpoint does) or a str (legacy paths). Coerce
-    # safely by going through str(); SQLAlchemy will accept either
-    # form against the UUID column, but `UUID(uuid_object)` itself
-    # raises AttributeError.
-    cust_result = await db.execute(select(Customer).where(Customer.id == client.customer_id))
-    customer = cust_result.scalar_one_or_none()
-    if not customer:
-        raise HTTPException(status_code=404, detail="Customer not found")
-
-    # Build success/cancel URLs pointing back to client portal
-    frontend_url = settings.frontend_url.rstrip("/")
-    success_url = f"{frontend_url}/client/missions/{mission_id}?payment=success"
-    cancel_url = f"{frontend_url}/client/missions/{mission_id}?payment=cancelled"
-
-    from app.services.stripe_service import create_checkout_session
-
-    try:
-        checkout_url = await create_checkout_session(
-            invoice=invoice,
-            customer=customer,
-            success_url=success_url,
-            cancel_url=cancel_url,
-            db=db,
-        )
-    except ValueError as exc:
-        logger.error("[CLIENT-PAY] Stripe not configured: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
-    except Exception as exc:
-        logger.error("[CLIENT-PAY] Failed to create checkout session for mission=%s: %s", mission_id, exc)
-        raise HTTPException(status_code=500, detail="Failed to create payment session")
-
-    await db.commit()
-
+    # Phase inference matches compute_payment_phase but with the alias
+    # restriction: we reject "awaiting_completion" because there's
+    # nothing to charge yet.
+    phase = invoice.payment_phase_for(mission.status)
     elapsed = time.perf_counter() - start
-    logger.info("[CLIENT-PAY] Checkout session created for mission=%s, customer=%s (%.3fs)", mission_id, client.customer_id, elapsed)
+    logger.info(
+        "[CLIENT-PAY] Inferred phase=%s mission=%s (%.3fs)",
+        phase, mission_id, elapsed,
+    )
 
-    return ClientPaymentResponse(checkout_url=checkout_url)
+    if phase == PAYMENT_PHASE_DEPOSIT_DUE:
+        return await create_client_deposit_payment(
+            mission_id=mission_id, request=request, client=client, db=db,
+        )
+    if phase == PAYMENT_PHASE_BALANCE_DUE:
+        return await create_client_balance_payment(
+            mission_id=mission_id, request=request, client=client, db=db,
+        )
+    if phase == PAYMENT_PHASE_PAID_IN_FULL:
+        raise HTTPException(status_code=400, detail="Invoice is already paid")
+    # awaiting_completion
+    raise HTTPException(
+        status_code=400,
+        detail="This invoice is not yet available for payment. Your operator will mark the mission complete once the work is finished.",
+    )
 
 
 # ═══════════════════════════════════════════════════════════════════════

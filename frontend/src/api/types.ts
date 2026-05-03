@@ -102,6 +102,14 @@ export interface Invoice {
   notes: string | null;
   created_at: string;
   line_items: LineItem[];
+  // ADR-0009 — operator-side deposit fields. Defaults from
+  // schemas/invoice.py:InvoiceResponse so older payloads (read from a
+  // pre-v2.65.0 row) deserialize fine.
+  deposit_required?: boolean;
+  deposit_amount?: number;
+  deposit_paid?: boolean;
+  deposit_paid_at?: string | null;
+  deposit_payment_method?: string | null;
 }
 
 export interface RateTemplate {
