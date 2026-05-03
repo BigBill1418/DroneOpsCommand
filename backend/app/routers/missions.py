@@ -6,7 +6,8 @@ import uuid as uuid_mod
 from datetime import datetime, timedelta
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, File, Form, status
+from pydantic import BaseModel, ValidationError
 from PIL import Image as PILImage
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,7 +19,7 @@ from app.config import settings
 from app.database import get_db
 from app.models.client_portal import ClientAccessToken
 from app.models.customer import Customer
-from app.models.mission import Mission, MissionFlight, MissionImage
+from app.models.mission import Mission, MissionFlight, MissionImage, MissionStatus
 from app.models.user import User
 from app.schemas.mission import (
     MissionCreate,
@@ -99,10 +100,79 @@ async def list_missions(
 
 @router.post("", response_model=MissionResponse, status_code=status.HTTP_201_CREATED)
 async def create_mission(
-    data: MissionCreate,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
+    """Create a new mission.
+
+    v2.67.0 (Mission Hub redesign, spec §4) — TWO defensive guards make
+    the duplicate-mission class physically impossible:
+
+    1. Reject any request whose body smuggles an ``id`` field. The Hub's
+       MissionCreateModal NEVER sends ``id`` on POST; per-facet editors
+       use PUT against ``/api/missions/{id}`` for updates. A future
+       stale-bundle or hand-rolled client that POSTs an ``id`` is now
+       blocked with 400 instead of silently creating a duplicate row.
+    2. Log a WARNING when the same ``(customer_id, title, mission_date)``
+       triple was already created in the last 5 minutes. Operators may
+       legitimately want two missions for the same customer/title on the
+       same day, so we don't reject — but we surface the signal so the
+       ADR-0013 4xx-burst alert can graduate it later if needed.
+    """
+    # ── Parse raw body so we can inspect for forbidden `id` field ──
+    try:
+        raw = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+
+    if not isinstance(raw, dict):
+        raise HTTPException(status_code=400, detail="Body must be a JSON object")
+
+    # Defensive guard #1 — POST must NEVER carry `id`.
+    if "id" in raw:
+        logger.warning(
+            "[MISSION-POST-REJECTED] body contained 'id'=%r (user=%s) — "
+            "client must use PUT /api/missions/{id} for updates",
+            raw.get("id"), getattr(_user, "username", "unknown"),
+        )
+        raise HTTPException(
+            status_code=400,
+            detail="POST /api/missions must not include 'id' in body — use PUT /api/missions/{id} for updates",
+        )
+
+    # Validate against the Pydantic schema (preserves prior 422 behaviour
+    # for malformed bodies).
+    try:
+        data = MissionCreate.model_validate(raw)
+    except ValidationError as ve:
+        # Mirror FastAPI's default 422 envelope so frontend error
+        # handling stays unchanged.
+        raise HTTPException(status_code=422, detail=ve.errors())
+
+    # Defensive guard #2 — soft duplicate detection (log only, don't reject).
+    try:
+        if data.title and data.customer_id is not None:
+            cutoff = datetime.utcnow() - timedelta(minutes=5)
+            dup_q = select(func.count()).select_from(Mission).where(
+                Mission.customer_id == data.customer_id,
+                Mission.title == data.title,
+                Mission.mission_date == data.mission_date,
+                Mission.created_at >= cutoff,
+            )
+            dup_result = await db.execute(dup_q)
+            dup_count = dup_result.scalar() or 0
+            if dup_count > 0:
+                logger.warning(
+                    "[MISSION-POST-DUP] possible duplicate POST: "
+                    "customer_id=%s title=%r mission_date=%s already created %d time(s) "
+                    "in last 5min (user=%s) — allowed (operator override intentional)",
+                    data.customer_id, data.title, data.mission_date,
+                    dup_count, getattr(_user, "username", "unknown"),
+                )
+    except Exception as dup_exc:  # pragma: no cover — purely diagnostic
+        logger.warning("[MISSION-POST-DUP] dup-check skipped: %s", dup_exc)
+
     try:
         fields = data.model_dump(exclude_none=True)
         # Strip timezone from expires_at — DB column is TIMESTAMP WITHOUT TIME ZONE
@@ -111,6 +181,11 @@ async def create_mission(
         mission = Mission(**fields)
         db.add(mission)
         await db.flush()
+        logger.info(
+            "[MISSION-CREATED] id=%s title=%r customer_id=%s user=%s",
+            mission.id, mission.title, mission.customer_id,
+            getattr(_user, "username", "unknown"),
+        )
         # Re-query with explicit eager loads so relationships are populated for response
         result = await db.execute(
             select(Mission).where(Mission.id == mission.id).options(
@@ -126,6 +201,8 @@ async def create_mission(
             await _send_portal_email_for_mission(mission.id, mission.customer_id, db)
 
         return mission
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.exception("Failed to create mission: %s", exc)
         raise HTTPException(status_code=500, detail="An internal error occurred")
@@ -192,6 +269,98 @@ async def update_mission(
     except Exception as exc:
         logger.exception("Failed to update mission: %s", exc)
         raise HTTPException(status_code=500, detail="An internal error occurred")
+
+
+class MissionStatusPatch(BaseModel):
+    """v2.67.0 — body schema for PATCH /api/missions/{id} status transitions.
+
+    Validated against the ``MissionStatus`` enum (Pydantic returns 422
+    on invalid values, preserving FastAPI's standard error envelope).
+    """
+
+    status: MissionStatus
+
+
+@router.patch("/{mission_id}", response_model=MissionResponse)
+async def patch_mission_status(
+    mission_id: UUID,
+    data: MissionStatusPatch,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+    reopen: bool = Query(
+        default=False,
+        description=(
+            "When true, allows reverting a SENT mission to COMPLETED. "
+            "Logs an audit event ([MISSION-REOPEN]) per spec §8.5. "
+            "Required by the Hub's Reopen Mission flow."
+        ),
+    ),
+):
+    """Status-only transition for a mission (Mark COMPLETED, Mark SENT,
+    Reopen). Used by the Mission Hub header buttons.
+
+    Per spec §8.5 lockdown semantics:
+      * Status SENT is treated as a final state. Reverting from SENT to
+        anything other than COMPLETED is rejected with 400 — only the
+        explicit Reopen flow (``?reopen=true``) is allowed to flip
+        SENT back to COMPLETED, and that emits a ``[MISSION-REOPEN]``
+        audit log line.
+      * All other transitions are accepted (no DB-level state machine —
+        the Hub UI is the source of truth for "what's a sane next
+        state"; the backend just records the transition + logs it).
+    """
+    result = await db.execute(select(Mission).where(Mission.id == mission_id))
+    mission = result.scalar_one_or_none()
+    if not mission:
+        raise HTTPException(status_code=404, detail="Mission not found")
+
+    previous_status = mission.status
+    new_status = data.status
+
+    # Spec §8.5 lockdown: SENT → anything-else only via reopen flow.
+    if previous_status == MissionStatus.SENT and new_status != MissionStatus.SENT:
+        if new_status != MissionStatus.COMPLETED or not reopen:
+            logger.warning(
+                "[MISSION-STATUS-REJECTED] SENT→%s without reopen=true "
+                "mission_id=%s user=%s",
+                new_status.value, mission_id,
+                getattr(_user, "username", "unknown"),
+            )
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Cannot revert a SENT mission. Use the Reopen Mission "
+                    "flow (PATCH ?reopen=true with status=completed) to "
+                    "correct billing or replace a delivered artifact."
+                ),
+            )
+
+    mission.status = new_status
+
+    if reopen and previous_status == MissionStatus.SENT and new_status == MissionStatus.COMPLETED:
+        logger.warning(
+            "[MISSION-REOPEN] mission_id=%s previous_status=%s new_status=%s "
+            "user=%s",
+            mission_id, previous_status.value, new_status.value,
+            getattr(_user, "username", "unknown"),
+        )
+    else:
+        logger.info(
+            "[MISSION-STATUS] from=%s to=%s mission_id=%s user=%s",
+            previous_status.value, new_status.value, mission_id,
+            getattr(_user, "username", "unknown"),
+        )
+
+    await db.flush()
+    # Re-query with eager loads so the response is consistent with PUT.
+    result = await db.execute(
+        select(Mission).where(Mission.id == mission_id).options(
+            selectinload(Mission.flights),
+            selectinload(Mission.images),
+            selectinload(Mission.customer),
+        )
+    )
+    return result.scalar_one()
 
 
 @router.delete("/{mission_id}", status_code=status.HTTP_204_NO_CONTENT)
