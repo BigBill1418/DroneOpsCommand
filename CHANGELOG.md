@@ -4,6 +4,97 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## [2.66.0] — 2026-05-03 — feat: backend hardening — payment idempotency, invoice numbering, webhook alerting
+
+Bundle of backend fixes + verified dead-code cuts that close the last
+known gaps in the v2.65.x payment surface. No schema migrations
+required; no operator action required at deploy time.
+
+**P0 fixes**
+
+- **Customer email/name sync on TOS acceptance** — when an operator
+  starts the no-email intake path, the customer row is stubbed with
+  `email IS NULL` and `name = "Pending Intake YYYY-MM-DD"`. After the
+  customer types their name + email into the AcroForm TOS page, both
+  fields are now synced back onto the customer row, so the operator
+  can immediately email them a portal link. Logged as
+  `[CLIENT-PORTAL] Synced customer name/email from TOS acceptance`.
+- **Stripe webhook signature failure → urgent ntfy alert.** A
+  `SignatureVerificationError` now fires an `urgent` ntfy alert
+  (priority=2) on `droneops-deposits` BEFORE the 400 is raised. Redis-
+  backed dedup with 5-minute cooldown prevents flood spam. Webhook-
+  secret rotations that the System Settings table falls behind on
+  are now visible immediately instead of silently dropping every
+  paid customer event. (See ADR-0011 §3.)
+- **Public TOS endpoints rate-limited.** `GET /api/tos/template` is
+  now 10/minute per IP; `POST /api/tos/accept` is 5/minute per IP.
+  Mirrors the cadence on `intake.get_intake_form` /
+  `intake.submit_intake_form`.
+- **Pay/deposit + pay/balance idempotency.** A customer who double-
+  clicks Pay no longer mints two Stripe Checkout sessions. If the
+  invoice already has a recent (≤30 min), unpaid session, the
+  existing URL is returned. Network failure on the freshness probe
+  falls through to the previous mint-fresh path. (See ADR-0011 §1.)
+- **Sequential invoice numbering.** New invoices receive a stable
+  `BARNARDHQ-YYYY-NNNN` identifier (4-digit zero-padded counter, year
+  prefix resets every Jan 1). Atomic via a single PG `INSERT … ON
+  CONFLICT DO UPDATE … RETURNING` against `system_settings`. Existing
+  pre-v2.66.0 invoices keep `invoice_number = NULL` (no backfill —
+  they were dev/test). (See ADR-0011 §2.)
+
+**P1 fixes**
+
+- **`TosAcceptanceRequest.email`** — confirmed as Pydantic `EmailStr`
+  (was already in source); explicit unit tests added so a future
+  loosening can't regress silently.
+- **Real `/api/health` probe.** Replaces the trivial process-up
+  response with a real DB `SELECT 1` + Redis `PING` + cached (30s TTL)
+  Stripe `Account.retrieve`. Returns 503 + `{"status":"degraded", ...}`
+  on any probe failure so Docker / NOC / Watchtower see an explicit
+  unhealthy signal. `/health` alias preserved for stale-APK clients.
+- **Webhook fallback for legacy invoices.** Pre-v2.65.0 invoices have
+  `deposit_checkout_session_id = NULL`. The deposit branch of the
+  Stripe webhook handler now falls back to looking up by
+  `stripe_checkout_session_id` before logging "no invoice found",
+  which prevents silent drop on legacy invoice + deposit payment_phase.
+
+**Verified cuts (Cut 1 — duplicate routes)**
+
+- **Removed unreachable duplicate operator routes** in
+  `routers/client_portal.py` (lines ~297-460 in v2.65.1). FastAPI
+  uses the LAST registered handler when two share a path; the first
+  set was dead code. Tests already exercised the second set, so no
+  test changes were needed.
+
+**Verified KEPT — audit was wrong**
+
+- **`managed_instance` config flag + auto-provision block.** Used in
+  5 places (`auth.py`, `system_settings.py` ×2, `llm_provider.py`,
+  `main.py`). Load-bearing for managed-tenant routing. Kept.
+- **Ollama integration** (`services/ollama.py`,
+  `services/llm_provider.py`, settings UI provider toggle). Kept —
+  `droneops-ollama-1` container is up and healthy on BOS-HQ;
+  `OLLAMA_BASE_URL` set in prod `.env`; `claude_llm.py` imports
+  `SYSTEM_PROMPT_TEMPLATE` from `ollama.py`.
+- **Demo middleware + `useDemoMode` hook + Login auto-fill + AppShell
+  banner.** Kept — the `droneops-demo-*` stack is running on BOS-HQ
+  and serving traffic at command-demo.barnardhq.com. The middleware
+  blocks destructive ops in that environment.
+- **`/api/branding` endpoint.** Kept — `frontend/src/hooks/useBranding.ts`
+  consumes it on every page load. The 5 customer-facing email
+  templates use the same DB system_settings rows the endpoint
+  surfaces; the public endpoint exists so the SPA can theme without
+  needing an auth token.
+
+**Documentation**
+
+- New ADR `docs/adr/0011-payment-idempotency-and-invoice-numbering.md`.
+- Test additions: `test_tos_customer_sync.py`,
+  `test_stripe_webhook_signature_alert.py`,
+  `test_stripe_webhook_legacy_fallback.py`,
+  `test_pay_idempotency.py`, `test_invoice_numbering.py`,
+  `test_health_check.py`.
+
 ## [2.65.1] — 2026-05-03 — feat(intake): email-optional Initiate Services + prominent Copy Link
 
 Operator-facing UX tweak so Bill can generate an intake link without an
