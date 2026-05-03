@@ -29,11 +29,13 @@ import re
 import time
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+import uuid as _uuid
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse, Response
 from slowapi import Limiter
 from slowapi.util import get_remote_address
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.jwt import get_current_user
@@ -41,7 +43,12 @@ from app.database import get_db
 from app.models.customer import Customer
 from app.models.tos_acceptance import TosAcceptance
 from app.models.user import User
-from app.schemas.tos_acceptance import TosAcceptanceRequest, TosAcceptanceResponse
+from app.schemas.tos_acceptance import (
+    TosAcceptanceListItem,
+    TosAcceptanceListResponse,
+    TosAcceptanceRequest,
+    TosAcceptanceResponse,
+)
 from app.services.email_service import send_signed_tos_to_both_parties
 from app.services.tos_acceptance import (
     AcceptanceContext,
@@ -291,6 +298,104 @@ async def download_signed_by_token(
 
 
 # ── Operator-only routes ─────────────────────────────────────────────
+
+
+@router.get("/acceptances", response_model=TosAcceptanceListResponse)
+async def list_acceptances(
+    q: str | None = Query(
+        default=None,
+        max_length=200,
+        description="Free-text: matches client_email, audit_id, or client_name (ILIKE).",
+    ),
+    customer_id: _uuid.UUID | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> TosAcceptanceListResponse:
+    """Operator audit-browse over ``tos_acceptances``.
+
+    The customer-portal team needs to answer "did this customer sign?",
+    "when?", "give me their PDF" without dropping to ``psql``. This
+    endpoint returns the same row shape as the model — minus
+    ``signed_pdf_path`` (filesystem-internal, leaks deployment layout)
+    and plus a ``download_url`` pointing back at the existing
+    operator-gated ``/api/tos/signed/{audit_id}`` route.
+
+    The free-text search runs three OR'd ``ILIKE %q%`` predicates on
+    the indexed columns ``client_email`` / ``audit_id`` plus the
+    non-indexed ``client_name`` (table is a few-thousand rows max for
+    the foreseeable future; a seq scan is fine and avoids a trigram
+    index dependency).
+
+    Default ordering is ``accepted_at DESC`` so the freshest rows
+    appear first.
+    """
+    logger.info(
+        "[TOS-LIST-GET] operator=%s q=%r customer_id=%s limit=%d offset=%d",
+        getattr(user, "username", "?"), q, customer_id, limit, offset,
+    )
+
+    # Build the WHERE clause once and reuse for both the count and the
+    # page query so they cannot drift out of sync.
+    stmt = select(TosAcceptance)
+    count_stmt = select(func.count()).select_from(TosAcceptance)
+
+    if customer_id is not None:
+        stmt = stmt.where(TosAcceptance.customer_id == customer_id)
+        count_stmt = count_stmt.where(TosAcceptance.customer_id == customer_id)
+
+    if q:
+        like = f"%{q.strip()}%"
+        predicate = or_(
+            TosAcceptance.client_email.ilike(like),
+            TosAcceptance.audit_id.ilike(like),
+            TosAcceptance.client_name.ilike(like),
+        )
+        stmt = stmt.where(predicate)
+        count_stmt = count_stmt.where(predicate)
+
+    total_result = await db.execute(count_stmt)
+    total = int(total_result.scalar_one())
+
+    page_stmt = (
+        stmt.order_by(TosAcceptance.accepted_at.desc())
+        .limit(limit)
+        .offset(offset)
+    )
+    rows_result = await db.execute(page_stmt)
+    rows = rows_result.scalars().all()
+
+    items = [
+        TosAcceptanceListItem(
+            id=row.id,
+            audit_id=row.audit_id,
+            customer_id=row.customer_id,
+            intake_token=row.intake_token,
+            client_name=row.client_name,
+            client_email=row.client_email,
+            client_company=row.client_company,
+            client_title=row.client_title,
+            client_ip=str(row.client_ip),
+            user_agent=row.user_agent,
+            accepted_at=row.accepted_at,
+            template_version=row.template_version,
+            template_sha256=row.template_sha256,
+            signed_sha256=row.signed_sha256,
+            signed_pdf_size=row.signed_pdf_size,
+            created_at=row.created_at,
+            download_url=f"/api/tos/signed/{row.audit_id}",
+        )
+        for row in rows
+    ]
+
+    logger.info(
+        "[TOS-LIST-GET] returned %d/%d (limit=%d offset=%d)",
+        len(items), total, limit, offset,
+    )
+    return TosAcceptanceListResponse(
+        items=items, total=total, limit=limit, offset=offset,
+    )
 
 
 @router.get("/signed/{audit_id}")

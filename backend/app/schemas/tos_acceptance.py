@@ -57,3 +57,50 @@ class TosAcceptanceResponse(BaseModel):
     template_sha256: str
     signed_sha256: str
     download_url: str
+
+
+# ── Operator browse-list schemas (v2.66.0 audit UI) ──────────────────
+
+
+class TosAcceptanceListItem(BaseModel):
+    """One row in the operator audit-browse list.
+
+    Excludes ``signed_pdf_path`` (filesystem-internal — operators don't
+    need to know the on-disk path) and instead surfaces a relative
+    ``download_url`` the UI can hand to <a href> / FileSaver. The
+    download URL is the existing operator-gated
+    ``GET /api/tos/signed/{audit_id}`` endpoint.
+
+    All hash fields stay full-length so the operator can copy-paste
+    them into ``sha256sum`` for tamper verification; the UI is in
+    charge of truncating for display.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    audit_id: str
+    customer_id: uuid.UUID | None
+    intake_token: str | None
+    client_name: str
+    client_email: str
+    client_company: str
+    client_title: str
+    client_ip: str
+    user_agent: str
+    accepted_at: datetime
+    template_version: str
+    template_sha256: str
+    signed_sha256: str
+    signed_pdf_size: int
+    created_at: datetime
+    download_url: str
+
+
+class TosAcceptanceListResponse(BaseModel):
+    """Paginated envelope for ``GET /api/tos/acceptances``."""
+
+    items: list[TosAcceptanceListItem]
+    total: int
+    limit: int
+    offset: int

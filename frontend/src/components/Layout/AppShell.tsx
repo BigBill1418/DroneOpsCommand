@@ -18,6 +18,7 @@ import {
   IconChartBar,
   IconDashboard,
   IconDrone,
+  IconFileCertificate,
   IconTool,
   IconUsers,
   IconSettings,
@@ -46,6 +47,7 @@ const navItems = [
   { icon: IconTimeline, label: 'Telemetry', path: '/telemetry' },
   { icon: IconRadar2, label: 'Airspace', path: '/airspace' },
   { icon: IconCloudUpload, label: 'Upload Logs', path: '/upload-logs' },
+  { icon: IconFileCertificate, label: 'TOS Audit', path: '/tos-acceptances' },
   { icon: IconSettings, label: 'Settings', path: '/settings' },
 ];
 
