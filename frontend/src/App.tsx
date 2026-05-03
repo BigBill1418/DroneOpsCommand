@@ -32,6 +32,7 @@ const UploadLogs = lazy(() => import('./pages/UploadLogs'));
 const Telemetry = lazy(() => import('./pages/Telemetry'));
 const Airspace = lazy(() => import('./pages/Airspace'));
 const FlightReplay = lazy(() => import('./pages/FlightReplay'));
+const TosAcceptancesAdmin = lazy(() => import('./pages/TosAcceptancesAdmin'));
 
 // Client portal — code-split for separate bundle (already lazy).
 const ClientPortal = lazy(() => import('./pages/client/ClientPortal'));
@@ -91,6 +92,7 @@ export default function App() {
                   <Route path="/telemetry" element={<Telemetry />} />
                   <Route path="/airspace" element={<Airspace />} />
                   <Route path="/upload-logs" element={<UploadLogs />} />
+                  <Route path="/tos-acceptances" element={<TosAcceptancesAdmin />} />
                   <Route path="/settings" element={<Settings />} />
                   <Route path="*" element={<Navigate to="/" />} />
                 </Route>

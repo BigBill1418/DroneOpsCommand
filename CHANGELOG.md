@@ -58,6 +58,33 @@ required; no operator action required at deploy time.
   `stripe_checkout_session_id` before logging "no invoice found",
   which prevents silent drop on legacy invoice + deposit payment_phase.
 
+**Operator audit-browse UI (TOS acceptances)**
+
+- New `GET /api/tos/acceptances` operator-only endpoint
+  (`Depends(get_current_user)`). Free-text `q` (ILIKE on
+  `client_email` / `audit_id` / `client_name`), optional
+  `customer_id` UUID filter, `limit` (1–200, default 50), `offset`
+  pagination, ordered `accepted_at DESC`. Returns full audit row
+  detail minus `signed_pdf_path` (filesystem-internal) plus a
+  `download_url` pointing back at the existing operator-gated
+  `/api/tos/signed/{audit_id}`.
+- New schemas `TosAcceptanceListItem` + `TosAcceptanceListResponse`
+  alongside the existing `TosAcceptanceResponse`.
+- New `frontend/src/pages/TosAcceptancesAdmin.tsx` mounted at
+  `/tos-acceptances`. Search input (300 ms debounce), table with
+  click-to-copy audit IDs + truncated SHA hashes (full hash on hover
+  tooltip), download / view-customer / by-token-link actions per row,
+  Mantine Pagination. Operator dark theme + cyan accents (NOT the
+  customer-portal brand). Lazy-loaded chunk (~6.9 kB gzipped).
+- Nav entry "TOS Audit" added to AppShell sidebar (mobile drawer +
+  desktop sidebar both pull from the shared `navItems` array).
+- Tests: `test_tos_acceptances_list.py` — 8 hermetic cases covering
+  empty list, populated list + download_url synthesis, ILIKE
+  search by email / audit-id fragment, customer_id filter,
+  pagination passthrough, default ordering, and auth-dep wiring.
+  No new ADR — this exposes existing data (ADR-0010) under existing
+  auth (`get_current_user`); failover-neutral, no schema change.
+
 **Verified cuts (Cut 1 — duplicate routes)**
 
 - **Removed unreachable duplicate operator routes** in
@@ -93,7 +120,7 @@ required; no operator action required at deploy time.
   `test_stripe_webhook_signature_alert.py`,
   `test_stripe_webhook_legacy_fallback.py`,
   `test_pay_idempotency.py`, `test_invoice_numbering.py`,
-  `test_health_check.py`.
+  `test_health_check.py`, `test_tos_acceptances_list.py`.
 
 ## [2.65.1] — 2026-05-03 — feat(intake): email-optional Initiate Services + prominent Copy Link
 
