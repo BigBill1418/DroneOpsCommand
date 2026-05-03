@@ -44,6 +44,13 @@ class CustomerResponse(BaseModel):
     intake_completed_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
+    # v2.66.3 — pointer to the LATEST tos_acceptances row for this
+    # customer. Null for legacy canvas-signed customers (the legacy
+    # ``tos_signed_at`` + ``tos_pdf_path`` columns remain the source of
+    # truth for those — operator UI falls back accordingly).
+    latest_tos_audit_id: str | None = None
+    latest_tos_signed_sha: str | None = None
+    latest_tos_template_version: str | None = None
 
     model_config = {"from_attributes": True}
 
