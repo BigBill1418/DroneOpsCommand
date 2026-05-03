@@ -6,6 +6,24 @@ Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
 ## [2.64.0] — 2026-05-02 — feat(client-portal): gate invoice visibility + Pay on mission completion (ADR-0008)
 
+**Also includes two latent-bug fixes** discovered during ADR-0008
+end-to-end testing — neither had ever been tripped because no
+customer had ever exercised the portal Pay path until today:
+
+- **`Invoice` model was never imported** in `client_portal.py`,
+  even though `select(Invoice)...` had been there since v2.57.x.
+  Fixed via `from app.models.invoice import Invoice` +
+  `selectinload(Invoice.line_items)` on both queries (async
+  lazy-load would have crashed serialization).
+- **`UUID(client.customer_id)` raised `AttributeError: 'UUID'
+  object has no attribute 'replace'`** because the JWT decode
+  yields a `UUID` object, not a str, and `UUID(uuid_obj)` calls
+  `.replace('-','')` on its arg internally. Fixed by passing
+  `client.customer_id` straight through — SQLAlchemy accepts
+  either form against a UUID column.
+
+
+
 The customer-facing client portal now refuses to surface the invoice
 or accept payment until the operator has marked the mission
 `COMPLETED` or `SENT`. The operator can still draft and edit the
