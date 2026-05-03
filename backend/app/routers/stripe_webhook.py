@@ -9,6 +9,12 @@ session's `metadata.payment_phase` selects the destination columns
 shape (deposit-received email vs balance-paid email). Sessions without
 the metadata key fall through to the legacy single-payment path so any
 checkout session in flight at the v2.65.0 cutover continues to work.
+
+v2.66.0 (Fix 2) — A SignatureVerificationError now fires an `urgent`
+ntfy alert (5-minute Redis-backed cooldown to avoid floods) before the
+HTTP 400 is raised. Without this, a webhook-secret rotation that the
+DB falls behind on would silently drop every paid customer event with
+no operator visibility.
 """
 
 import logging
@@ -62,7 +68,45 @@ async def stripe_webhook(
         logger.warning("[STRIPE-WEBHOOK] Invalid payload received")
         raise HTTPException(status_code=400, detail="Invalid payload")
     except stripe.SignatureVerificationError:
-        logger.warning("[STRIPE-WEBHOOK] Signature verification failed — sig=%s", sig_header[:20] if sig_header else "none")
+        truncated_sig = (sig_header[:20] + "…") if sig_header else "none"
+        logger.error(
+            "[STRIPE-WEBHOOK] Signature verification failed — sig=%s payload_bytes=%d",
+            truncated_sig, len(payload),
+        )
+        # Fix 2 (v2.66.0) — urgent operator alert. Customers may be
+        # paying right now and Stripe is silently dropping the events.
+        # Redis-backed dedup (5-minute cooldown) keeps a flood of bad
+        # webhooks from spamming. Reuses the ADR-0036 `doc:pushover:dedup:`
+        # prefix so the cooldown survives the helper's transport swap.
+        try:
+            from app.services.ntfy import send_alert
+            await send_alert(
+                title=(
+                    "STRIPE WEBHOOK SIGNATURE FAILED — "
+                    "payments may be silently dropping"
+                ),
+                message=(
+                    f"Stripe-Signature header rejected by stripe.Webhook."
+                    f"construct_event. truncated_sig={truncated_sig}. "
+                    "Likely cause: webhook secret rotated in Stripe dashboard "
+                    "but not synced to System Settings. Investigate and rotate "
+                    "the secret immediately or paid invoices will not be "
+                    "marked deposit_paid / paid_in_full."
+                ),
+                priority=2,  # ntfy "urgent" — wake operator
+                topic="droneops-deposits",
+                click="https://noc-mastercontrol.barnardhq.com/status/droneops",
+                tags=("rotating_light", "stripe", "webhook"),
+                dedup_key="stripe-webhook-sig-failed",
+                dedup_ttl_seconds=300,  # 5 min — don't spam on flood
+            )
+        except Exception as alert_exc:
+            # Fail-soft on alert path: never let alerting break the
+            # 400 response Stripe is waiting for. Log only.
+            logger.error(
+                "[STRIPE-WEBHOOK] ntfy alert failed for signature failure: %s",
+                alert_exc,
+            )
         raise HTTPException(status_code=400, detail="Invalid signature")
 
     event_type = event["type"]
@@ -151,7 +195,16 @@ async def _handle_deposit_completed(
     payment_method_types: list,
     db: AsyncSession,
 ):
-    """Mark an invoice's deposit as paid + fire deposit notifications."""
+    """Mark an invoice's deposit as paid + fire deposit notifications.
+
+    Fix 8 (v2.66.0) — pre-v2.65.0 invoices have a NULL
+    `deposit_checkout_session_id`. If a checkout session was created
+    against the legacy `stripe_checkout_session_id` column with
+    metadata.payment_phase=='deposit' (mid-cutover edge), fall back to
+    that column before logging "no invoice found" — otherwise paid
+    customer events are silently dropped.
+    """
+    matched_via = "deposit_checkout_session_id"
     result = await db.execute(
         select(Invoice)
         .options(selectinload(Invoice.line_items))
@@ -160,8 +213,34 @@ async def _handle_deposit_completed(
     invoice = result.scalar_one_or_none()
 
     if not invoice:
-        logger.warning("[STRIPE-WEBHOOK] DEPOSIT — no invoice found for deposit session_id=%s", session_id)
+        # Legacy fallback — same session_id may live on the
+        # pre-deposit-feature column.
+        fallback_result = await db.execute(
+            select(Invoice)
+            .options(selectinload(Invoice.line_items))
+            .where(Invoice.stripe_checkout_session_id == session_id)
+        )
+        invoice = fallback_result.scalar_one_or_none()
+        if invoice:
+            matched_via = "stripe_checkout_session_id (legacy fallback)"
+            logger.info(
+                "[STRIPE-WEBHOOK] DEPOSIT — matched invoice=%s via legacy "
+                "stripe_checkout_session_id fallback (session_id=%s)",
+                invoice.id, session_id,
+            )
+
+    if not invoice:
+        logger.warning(
+            "[STRIPE-WEBHOOK] DEPOSIT — no invoice found for deposit session_id=%s "
+            "(checked deposit_checkout_session_id and legacy stripe_checkout_session_id)",
+            session_id,
+        )
         return
+
+    logger.info(
+        "[STRIPE-WEBHOOK] DEPOSIT lookup matched via %s for invoice=%s",
+        matched_via, invoice.id,
+    )
 
     # Idempotency — duplicate webhook delivery is a no-op.
     if invoice.deposit_paid:
