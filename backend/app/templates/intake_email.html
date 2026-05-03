@@ -3,85 +3,63 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!--[if !mso]><!-->
+<style type="text/css">
+  /* Custom-font hint for clients that respect <link>/<style> (Apple
+     Mail, iOS Mail). Outlook/Windows Mail ignore — that's why every
+     inline rule below carries an Arial/Courier fallback. */
+  @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Share+Tech+Mono&display=swap');
+</style>
+<!--<![endif]-->
 </head>
-<body style="margin: 0; padding: 0; font-family: Arial, Helvetica, sans-serif; background: #f0f2f5;">
+<body style="margin: 0; padding: 0; font-family: 'Rajdhani', Arial, Helvetica, sans-serif; background: #0e1117;">
 
-<table width="100%" cellpadding="0" cellspacing="0" style="max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 24px rgba(0,0,0,0.08);">
-  <!-- Hero Header -->
-  <tr>
-    <td style="background: linear-gradient(135deg, {{ brand_primary_color | default('#050608') }} 0%, #1a1f2e 50%, {{ brand_primary_color | default('#050608') }} 100%); padding: 0; position: relative;">
-      <!-- Geometric accent bar -->
-      <table width="100%" cellpadding="0" cellspacing="0">
-        <tr>
-          <td style="height: 4px; background: linear-gradient(90deg, {{ brand_accent_color | default('#00d4ff') }}, {{ brand_accent_color | default('#00d4ff') }}66, {{ brand_accent_color | default('#00d4ff') }});"></td>
-        </tr>
-      </table>
-      <table width="100%" cellpadding="0" cellspacing="0">
-        <tr>
-          <td style="padding: 40px 30px 20px 30px; text-align: center;">
-            {% if company_logo_url %}
-            <img src="{{ company_logo_url }}" alt="{{ company_name }}" style="max-height: 60px; max-width: 200px; margin-bottom: 12px;" />
-            <br>
-            {% endif %}
-            <div style="font-family: 'Arial Black', Arial, sans-serif; font-size: 32px; letter-spacing: 4px; color: #ffffff; text-shadow: 0 2px 8px rgba(0,0,0,0.3);">
-              {{ company_name | upper }}
-            </div>
-            <div style="font-size: 11px; color: {{ brand_accent_color | default('#00d4ff') }}; letter-spacing: 4px; margin-top: 6px; text-transform: uppercase;">
-              {{ company_tagline | upper }}
-            </div>
-          </td>
-        </tr>
-      </table>
-      <!-- Accent diamond divider -->
-      <table width="100%" cellpadding="0" cellspacing="0">
-        <tr>
-          <td style="text-align: center; padding: 8px 0 24px 0;">
-            <span style="display: inline-block; width: 8px; height: 8px; background: {{ brand_accent_color | default('#00d4ff') }}; transform: rotate(45deg); margin: 0 4px;"></span>
-            <span style="display: inline-block; width: 40px; height: 2px; background: {{ brand_accent_color | default('#00d4ff') }}44; vertical-align: middle;"></span>
-            <span style="display: inline-block; width: 8px; height: 8px; background: {{ brand_accent_color | default('#00d4ff') }}; transform: rotate(45deg); margin: 0 4px;"></span>
-          </td>
-        </tr>
-      </table>
-    </td>
-  </tr>
+<!--
+  v2.65.0 — BarnardHQ TOS-PDF brand pass.
+  Header & footer pulled in from shared partials so all 5 customer
+  transactional emails stay visually identical.
+-->
+
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width: 600px; margin: 0 auto; background: #161b22; border-radius: 10px; overflow: hidden; box-shadow: 0 8px 32px rgba(0,0,0,0.45); border: 1px solid #1f2937;">
+  {% include '_brand_header.html' %}
 
   <!-- Body -->
   <tr>
-    <td style="padding: 36px 32px 20px 32px;">
+    <td style="padding: 36px 32px 24px 32px; background: #161b22;">
       {% if is_existing_customer %}
-      <p style="font-size: 20px; color: #1a1a2e; margin: 0 0 8px 0; font-weight: 700;">
-        Welcome back, {{ customer_name or 'Valued Customer' }}
-      </p>
-      <p style="font-size: 14px; color: #555; line-height: 1.7; margin: 0 0 20px 0;">
-        As part of our ongoing commitment to exceptional service,
-        we are updating our customer records. Please take a moment to
-        review and complete your profile, including signing our
-        updated Terms of Service agreement.
+      <div style="font-family: 'Bebas Neue', 'Arial Black', Arial, sans-serif; font-size: 28px; letter-spacing: 3px; color: #189cc6; margin: 0 0 10px 0;">
+        WELCOME BACK
+      </div>
+      <p style="font-size: 14px; color: #c0c8d4; line-height: 1.7; margin: 0 0 20px 0;">
+        {{ customer_name or 'Valued Customer' }}, as part of our ongoing
+        commitment to exceptional service we&rsquo;re updating our
+        customer records. Please take a moment to review and complete
+        your profile, including signing our updated Terms of Service.
       </p>
       {% else %}
-      <p style="font-size: 20px; color: #1a1a2e; margin: 0 0 8px 0; font-weight: 700;">
-        Welcome aboard!
-      </p>
-      <p style="font-size: 14px; color: #555; line-height: 1.7; margin: 0 0 20px 0;">
-        Thank you for choosing <strong>{{ company_name }}</strong>.
-        To get started, please complete your customer onboarding by filling in
-        your information and signing our Terms of Service agreement.
+      <div style="font-family: 'Bebas Neue', 'Arial Black', Arial, sans-serif; font-size: 28px; letter-spacing: 3px; color: #189cc6; margin: 0 0 10px 0;">
+        WELCOME ABOARD
+      </div>
+      <p style="font-size: 14px; color: #c0c8d4; line-height: 1.7; margin: 0 0 20px 0;">
+        Thank you for choosing <strong style="color: #e8edf2;">{{ company_name | default('BarnardHQ') }}</strong>.
+        To get started, please complete your customer onboarding by
+        filling in your information and signing our Terms of Service.
       </p>
       {% endif %}
 
-      <p style="font-size: 14px; color: #555; line-height: 1.7; margin: 0 0 28px 0;">
+      <p style="font-size: 14px; color: #c0c8d4; line-height: 1.7; margin: 0 0 28px 0;">
         Click below to access your secure form &mdash; it only takes a few minutes:
       </p>
 
       <!-- CTA Button -->
-      <table width="100%" cellpadding="0" cellspacing="0">
+      <table width="100%" cellpadding="0" cellspacing="0" border="0">
         <tr>
           <td style="text-align: center; padding: 0 0 32px 0;">
-            <table cellpadding="0" cellspacing="0" style="margin: 0 auto;">
+            <table cellpadding="0" cellspacing="0" border="0" style="margin: 0 auto;">
               <tr>
-                <td style="border-radius: 6px; background: linear-gradient(135deg, {{ brand_accent_color | default('#00d4ff') }}, {{ brand_accent_color | default('#00d4ff') }}cc);">
-                  <a href="{{ intake_url }}" style="display: inline-block; padding: 16px 48px; color: {{ brand_primary_color | default('#050608') }}; font-family: 'Arial Black', Arial, sans-serif; font-size: 16px; letter-spacing: 3px; text-decoration: none; font-weight: 700;">
-                    {% if is_existing_customer %}&#10003; COMPLETE PROFILE{% else %}&#9889; GET STARTED{% endif %}
+                <td style="border-radius: 6px; background: #189cc6;">
+                  <a href="{{ intake_url }}" style="display: inline-block; padding: 16px 40px; color: #011d2f; font-family: 'Bebas Neue', 'Arial Black', Arial, sans-serif; font-size: 18px; letter-spacing: 3px; text-decoration: none; font-weight: 700;">
+                    {% if is_existing_customer %}COMPLETE PROFILE{% else %}GET STARTED{% endif %}
                   </a>
                 </td>
               </tr>
@@ -90,36 +68,36 @@
         </tr>
       </table>
 
-      <!-- What You'll Need Cards -->
-      <table width="100%" cellpadding="0" cellspacing="0" style="margin: 0 0 24px 0;">
+      <!-- What You'll Need -->
+      <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin: 0 0 24px 0;">
         <tr>
-          <td style="background: linear-gradient(135deg, #0e1117, #141922); border-radius: 8px; padding: 20px 24px;">
-            <div style="font-size: 11px; color: {{ brand_accent_color | default('#00d4ff') }}; letter-spacing: 2px; margin-bottom: 14px; font-weight: 700;">
-              &#128203; WHAT YOU'LL NEED
+          <td style="background: #0e1117; border-radius: 8px; padding: 22px 24px; border: 1px solid #1f2937; border-left: 3px solid #189cc6;">
+            <div style="font-family: 'Share Tech Mono', 'Courier New', monospace; font-size: 11px; color: #189cc6; letter-spacing: 3px; margin-bottom: 14px; text-transform: uppercase;">
+              WHAT YOU&rsquo;LL NEED
             </div>
-            <table width="100%" cellpadding="0" cellspacing="0">
+            <table width="100%" cellpadding="0" cellspacing="0" border="0">
               <tr>
-                <td style="padding: 8px 0; border-bottom: 1px solid #1a1f2e;">
-                  <span style="color: {{ brand_accent_color | default('#00d4ff') }}; font-size: 16px; vertical-align: middle;">&#10003;</span>
-                  <span style="color: #e8edf2; font-size: 13px; margin-left: 10px; vertical-align: middle;">Full name and contact information</span>
+                <td style="padding: 8px 0; border-bottom: 1px solid #1f2937;">
+                  <span style="color: #189cc6; font-size: 16px;">&#10003;</span>
+                  <span style="color: #e8edf2; font-size: 13px; margin-left: 10px;">Full name and contact information</span>
                 </td>
               </tr>
               <tr>
-                <td style="padding: 8px 0; border-bottom: 1px solid #1a1f2e;">
-                  <span style="color: {{ brand_accent_color | default('#00d4ff') }}; font-size: 16px; vertical-align: middle;">&#10003;</span>
-                  <span style="color: #e8edf2; font-size: 13px; margin-left: 10px; vertical-align: middle;">Company name (if applicable)</span>
+                <td style="padding: 8px 0; border-bottom: 1px solid #1f2937;">
+                  <span style="color: #189cc6; font-size: 16px;">&#10003;</span>
+                  <span style="color: #e8edf2; font-size: 13px; margin-left: 10px;">Company name (if applicable)</span>
                 </td>
               </tr>
               <tr>
-                <td style="padding: 8px 0; border-bottom: 1px solid #1a1f2e;">
-                  <span style="color: {{ brand_accent_color | default('#00d4ff') }}; font-size: 16px; vertical-align: middle;">&#10003;</span>
-                  <span style="color: #e8edf2; font-size: 13px; margin-left: 10px; vertical-align: middle;">Complete mailing address</span>
+                <td style="padding: 8px 0; border-bottom: 1px solid #1f2937;">
+                  <span style="color: #189cc6; font-size: 16px;">&#10003;</span>
+                  <span style="color: #e8edf2; font-size: 13px; margin-left: 10px;">Complete mailing address</span>
                 </td>
               </tr>
               <tr>
                 <td style="padding: 8px 0;">
-                  <span style="color: {{ brand_accent_color | default('#00d4ff') }}; font-size: 16px; vertical-align: middle;">&#9997;</span>
-                  <span style="color: #e8edf2; font-size: 13px; margin-left: 10px; vertical-align: middle;">Digital signature on Terms of Service</span>
+                  <span style="color: #189cc6; font-size: 16px;">&#9997;</span>
+                  <span style="color: #e8edf2; font-size: 13px; margin-left: 10px;">Digital signature on Terms of Service</span>
                 </td>
               </tr>
             </table>
@@ -128,32 +106,31 @@
       </table>
 
       <!-- Expiry notice -->
-      <table width="100%" cellpadding="0" cellspacing="0" style="margin: 0 0 24px 0;">
+      <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin: 0 0 24px 0;">
         <tr>
-          <td style="text-align: center; padding: 12px; background: #fff8f0; border-radius: 6px; border: 1px solid #ffe0c0;">
-            <span style="font-size: 14px; color: #ff6b1a;">&#9200;</span>
-            <span style="font-size: 12px; color: #cc5500; margin-left: 6px; font-weight: 600;">
-              This link expires on {{ expires_at }}
+          <td style="text-align: center; padding: 12px; background: #1a1408; border-radius: 6px; border: 1px solid #f0a13a;">
+            <span style="font-family: 'Share Tech Mono', 'Courier New', monospace; font-size: 12px; color: #f0a13a; letter-spacing: 1px;">
+              LINK EXPIRES {{ expires_at }}
             </span>
           </td>
         </tr>
       </table>
 
-      <p style="font-size: 14px; color: #555; line-height: 1.7; margin: 16px 0 8px 0;">
-        If you have any questions, don't hesitate to reach out. We're here to help.
+      <p style="font-size: 14px; color: #c0c8d4; line-height: 1.7; margin: 16px 0 8px 0;">
+        If you have any questions, don&rsquo;t hesitate to reach out. We&rsquo;re here to help.
       </p>
 
-      <p style="font-size: 14px; color: #333; margin: 16px 0 8px 0;">
+      <p style="font-size: 14px; color: #e8edf2; margin: 16px 0 8px 0;">
         Best regards,<br>
-        <strong style="color: #1a1a2e;">{{ company_name }} {{ company_tagline }}</strong>
+        <strong>{{ company_name | default('BarnardHQ') }} {{ company_tagline | default('') }}</strong>
       </p>
 
       <!-- Security note -->
-      <table width="100%" cellpadding="0" cellspacing="0" style="margin: 24px 0 0 0;">
+      <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin: 24px 0 0 0;">
         <tr>
-          <td style="padding: 14px 18px; background: #f8f9fb; border-left: 3px solid {{ brand_accent_color | default('#00d4ff') }}; border-radius: 0 6px 6px 0;">
-            <p style="font-size: 11px; color: #777; line-height: 1.6; margin: 0;">
-              <strong style="color: #555;">&#128274; SECURE LINK</strong><br>
+          <td style="padding: 14px 18px; background: #0e1117; border-left: 3px solid #189cc6; border-radius: 0 6px 6px 0;">
+            <p style="font-family: 'Share Tech Mono', 'Courier New', monospace; font-size: 11px; color: #5a6478; line-height: 1.6; margin: 0; letter-spacing: 1px;">
+              <strong style="color: #c0c8d4;">SECURE LINK</strong><br>
               This is a unique link for your use only. Please do not share it.
               If you did not expect this email, you may safely ignore it.
             </p>
@@ -163,30 +140,7 @@
     </td>
   </tr>
 
-  <!-- Footer -->
-  <tr>
-    <td style="background: #050608; padding: 24px 30px; text-align: center;">
-      <div style="font-family: 'Arial Black', Arial, sans-serif; font-size: 16px; letter-spacing: 3px; color: #e8edf2; margin-bottom: 8px;">
-        {{ company_name | upper }}
-      </div>
-      {% if company_website or company_social_url %}
-      <div style="margin: 10px 0;">
-        {% if company_website %}
-        <a href="{{ company_website }}" style="color: {{ brand_accent_color | default('#00d4ff') }}; text-decoration: none; font-size: 12px;">{{ company_website | replace('https://', '') | replace('http://', '') }}</a>
-        {% endif %}
-        {% if company_website and company_social_url %}
-        <span style="color: #333; margin: 0 8px;">&bull;</span>
-        {% endif %}
-        {% if company_social_url %}
-        <a href="{{ company_social_url }}" style="color: {{ brand_accent_color | default('#00d4ff') }}; text-decoration: none; font-size: 12px;">{{ company_social_url | replace('https://', '') | replace('http://', '') }}</a>
-        {% endif %}
-      </div>
-      {% endif %}
-      <div style="color: #5a6478; font-size: 10px; margin-top: 10px; letter-spacing: 1px;">
-        FAA Part 107 Certified &bull; {{ company_tagline }}
-      </div>
-    </td>
-  </tr>
+  {% include '_brand_footer.html' %}
 </table>
 
 </body>

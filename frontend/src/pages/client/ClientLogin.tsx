@@ -1,17 +1,25 @@
+/**
+ * Client portal — email/password login.
+ *
+ * Customer-facing — wrapped in <CustomerLayout> with the BarnardHQ
+ * brand pass (v2.65.0).
+ */
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Center,
+  Button,
+  Loader,
   Paper,
+  PasswordInput,
   Stack,
   Text,
   TextInput,
-  PasswordInput,
-  Button,
-  Loader,
+  Title,
 } from '@mantine/core';
-import { notifications } from '@mantine/notifications';
 import { useClientAuth } from '../../hooks/useClientAuth';
+import CustomerLayout from '../../components/CustomerLayout';
+import { customerBrand, customerStyles } from '../../lib/customerTheme';
+import { customerNotify } from '../../lib/customerNotify';
 
 export default function ClientLogin() {
   const navigate = useNavigate();
@@ -22,7 +30,6 @@ export default function ClientLogin() {
 
   // If already authenticated via stored token, redirect to portal
   if (auth.isAuthenticated && !auth.loading) {
-    // Build a minimal portal URL — the dashboard reads from localStorage
     navigate('/client/_session');
     return null;
   }
@@ -36,47 +43,56 @@ export default function ClientLogin() {
     setSubmitting(false);
 
     if (ok) {
-      notifications.show({
+      customerNotify({
         title: 'Welcome back',
         message: 'You are now logged in to the client portal.',
-        color: 'cyan',
+        kind: 'success',
       });
       navigate('/client/_session');
     } else {
-      notifications.show({
+      customerNotify({
         title: 'Login Failed',
         message: auth.error || 'Invalid email or password. Please try again.',
-        color: 'red',
+        kind: 'danger',
       });
     }
   };
 
   return (
-    <Center h="100vh" style={{ background: '#050608' }}>
-      <Paper
-        p="xl"
-        radius="md"
-        style={{
-          background: '#0e1117',
-          border: '1px solid #1a1f2e',
-          maxWidth: 420,
-          width: '100%',
-        }}
-      >
-        <form onSubmit={handleSubmit}>
+    <CustomerLayout
+      maxWidth={460}
+      contextSlot={
+        <span style={{ textTransform: 'uppercase' }}>Client Portal · Sign In</span>
+      }
+    >
+      <Paper p="xl" radius="md" style={customerStyles.card}>
+        <form onSubmit={handleSubmit} noValidate>
           <Stack gap="md">
-            <Text
-              size="xl"
-              fw={700}
-              ta="center"
-              style={{ fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '3px' }}
-              c="#e8edf2"
-            >
-              CLIENT PORTAL LOGIN
-            </Text>
-            <Text c="#5a6478" size="sm" ta="center">
-              Sign in with your email and portal password.
-            </Text>
+            <div>
+              <Title
+                order={2}
+                ta="center"
+                style={{
+                  ...customerStyles.display,
+                  color: customerBrand.brandCyan,
+                  fontSize: 28,
+                  marginBottom: 4,
+                }}
+              >
+                CLIENT PORTAL LOGIN
+              </Title>
+              <Text
+                ta="center"
+                style={{
+                  color: customerBrand.textMuted,
+                  fontFamily: customerBrand.fontMono,
+                  fontSize: 12,
+                  letterSpacing: customerBrand.trackTight,
+                }}
+              >
+                Sign in with your email and portal password.
+              </Text>
+            </div>
 
             <TextInput
               label="Email"
@@ -85,9 +101,11 @@ export default function ClientLogin() {
               onChange={(e) => setEmail(e.currentTarget.value)}
               required
               autoComplete="email"
+              type="email"
+              size="md"
               styles={{
-                input: { background: '#050608', color: '#e8edf2', borderColor: '#1a1f2e' },
-                label: { color: '#5a6478', fontFamily: "'Share Tech Mono', monospace" },
+                input: customerStyles.input,
+                label: customerStyles.inputLabel,
               }}
             />
 
@@ -98,9 +116,10 @@ export default function ClientLogin() {
               onChange={(e) => setPassword(e.currentTarget.value)}
               required
               autoComplete="current-password"
+              size="md"
               styles={{
-                input: { background: '#050608', color: '#e8edf2', borderColor: '#1a1f2e' },
-                label: { color: '#5a6478', fontFamily: "'Share Tech Mono', monospace" },
+                input: customerStyles.input,
+                label: customerStyles.inputLabel,
               }}
             />
 
@@ -108,14 +127,23 @@ export default function ClientLogin() {
               type="submit"
               fullWidth
               loading={submitting}
-              color="cyan"
-              style={{ fontFamily: "'Share Tech Mono', monospace", letterSpacing: '1px' }}
+              size="md"
+              styles={{
+                root: {
+                  background: customerBrand.brandCyan,
+                  color: customerBrand.brandNavyDeep,
+                  fontFamily: customerBrand.fontDisplay,
+                  letterSpacing: customerBrand.trackMid,
+                  fontWeight: 700,
+                  fontSize: 16,
+                },
+              }}
             >
               {submitting ? <Loader size="xs" color="dark" /> : 'SIGN IN'}
             </Button>
           </Stack>
         </form>
       </Paper>
-    </Center>
+    </CustomerLayout>
   );
 }

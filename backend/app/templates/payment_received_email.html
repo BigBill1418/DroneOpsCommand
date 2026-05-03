@@ -3,90 +3,62 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!--[if !mso]><!-->
+<style type="text/css">
+  @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Share+Tech+Mono&display=swap');
+</style>
+<!--<![endif]-->
 </head>
-<body style="margin: 0; padding: 0; font-family: Arial, Helvetica, sans-serif; background: #f0f2f5;">
+<body style="margin: 0; padding: 0; font-family: 'Rajdhani', Arial, Helvetica, sans-serif; background: #0e1117;">
 
-<table width="100%" cellpadding="0" cellspacing="0" style="max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 24px rgba(0,0,0,0.08);">
-  <!-- Hero Header -->
-  <tr>
-    <td style="background: linear-gradient(135deg, {{ brand_primary_color | default('#050608') }} 0%, #1a1f2e 50%, {{ brand_primary_color | default('#050608') }} 100%); padding: 0; position: relative;">
-      <!-- Geometric accent bar -->
-      <table width="100%" cellpadding="0" cellspacing="0">
-        <tr>
-          <td style="height: 4px; background: linear-gradient(90deg, {{ brand_accent_color | default('#00d4ff') }}, {{ brand_accent_color | default('#00d4ff') }}66, {{ brand_accent_color | default('#00d4ff') }});"></td>
-        </tr>
-      </table>
-      <table width="100%" cellpadding="0" cellspacing="0">
-        <tr>
-          <td style="padding: 40px 30px 20px 30px; text-align: center;">
-            {% if company_logo_url %}
-            <img src="{{ company_logo_url }}" alt="{{ company_name }}" style="max-height: 60px; max-width: 200px; margin-bottom: 12px;" />
-            <br>
-            {% endif %}
-            <div style="font-family: 'Arial Black', Arial, sans-serif; font-size: 32px; letter-spacing: 4px; color: #ffffff; text-shadow: 0 2px 8px rgba(0,0,0,0.3);">
-              {{ company_name | upper }}
-            </div>
-            <div style="font-size: 11px; color: {{ brand_accent_color | default('#00d4ff') }}; letter-spacing: 4px; margin-top: 6px; text-transform: uppercase;">
-              {{ company_tagline | upper }}
-            </div>
-          </td>
-        </tr>
-      </table>
-      <!-- Accent diamond divider -->
-      <table width="100%" cellpadding="0" cellspacing="0">
-        <tr>
-          <td style="text-align: center; padding: 8px 0 24px 0;">
-            <span style="display: inline-block; width: 8px; height: 8px; background: {{ brand_accent_color | default('#00d4ff') }}; transform: rotate(45deg); margin: 0 4px;"></span>
-            <span style="display: inline-block; width: 40px; height: 2px; background: {{ brand_accent_color | default('#00d4ff') }}44; vertical-align: middle;"></span>
-            <span style="display: inline-block; width: 8px; height: 8px; background: {{ brand_accent_color | default('#00d4ff') }}; transform: rotate(45deg); margin: 0 4px;"></span>
-          </td>
-        </tr>
-      </table>
-    </td>
-  </tr>
+<!-- v2.65.0 — BarnardHQ TOS-PDF brand pass. -->
+
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width: 600px; margin: 0 auto; background: #161b22; border-radius: 10px; overflow: hidden; box-shadow: 0 8px 32px rgba(0,0,0,0.45); border: 1px solid #1f2937;">
+  {% include '_brand_header.html' %}
 
   <!-- Body -->
   <tr>
-    <td style="padding: 36px 32px 20px 32px;">
-      <p style="font-size: 20px; color: #1a1a2e; margin: 0 0 8px 0; font-weight: 700;">
-        Payment Received
-      </p>
+    <td style="padding: 36px 32px 24px 32px; background: #161b22;">
+      <div style="font-family: 'Bebas Neue', 'Arial Black', Arial, sans-serif; font-size: 28px; letter-spacing: 3px; color: #28a850; margin: 0 0 10px 0;">
+        PAYMENT RECEIVED
+      </div>
 
-      <p style="font-size: 14px; color: #555; line-height: 1.7; margin: 0 0 20px 0;">
+      <p style="font-size: 14px; color: #c0c8d4; line-height: 1.7; margin: 0 0 20px 0;">
         {{ customer_name or 'Valued Customer' }}, thank you for your payment.
-        We've received your payment for <strong style="color: #1a1a2e;">{{ mission_title }}</strong>.
+        We have received your payment in full for
+        <strong style="color: #e8edf2;">{{ mission_title }}</strong>.
       </p>
 
       <!-- Payment Details Card -->
-      <table width="100%" cellpadding="0" cellspacing="0" style="margin: 0 0 24px 0;">
+      <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin: 0 0 24px 0;">
         <tr>
-          <td style="background: linear-gradient(135deg, #0e1117, #141922); border-radius: 8px; padding: 20px 24px;">
-            <div style="font-size: 11px; color: {{ brand_accent_color | default('#00d4ff') }}; letter-spacing: 2px; margin-bottom: 14px; font-weight: 700;">
+          <td style="background: #0e1117; border-radius: 8px; padding: 22px 24px; border: 1px solid #1f2937; border-left: 3px solid #189cc6;">
+            <div style="font-family: 'Share Tech Mono', 'Courier New', monospace; font-size: 11px; color: #189cc6; letter-spacing: 3px; margin-bottom: 14px; text-transform: uppercase;">
               PAYMENT DETAILS
             </div>
-            <table width="100%" cellpadding="0" cellspacing="0">
+            <table width="100%" cellpadding="0" cellspacing="0" border="0">
               <tr>
-                <td style="padding: 8px 0; border-bottom: 1px solid #1a1f2e;">
-                  <span style="color: #5a6478; font-size: 12px; letter-spacing: 1px;">AMOUNT</span>
+                <td style="padding: 10px 0; border-bottom: 1px solid #1f2937;">
+                  <span style="font-family: 'Share Tech Mono', 'Courier New', monospace; color: #5a6478; font-size: 11px; letter-spacing: 2px;">AMOUNT</span>
                 </td>
-                <td style="padding: 8px 0; border-bottom: 1px solid #1a1f2e; text-align: right;">
-                  <span style="color: #22c55e; font-size: 18px; font-weight: 700;">${{ invoice_total }}</span>
+                <td style="padding: 10px 0; border-bottom: 1px solid #1f2937; text-align: right;">
+                  <span style="font-family: 'Share Tech Mono', 'Courier New', monospace; color: #28a850; font-size: 20px; font-weight: 700;">${{ invoice_total }}</span>
                 </td>
               </tr>
               <tr>
-                <td style="padding: 8px 0; border-bottom: 1px solid #1a1f2e;">
-                  <span style="color: #5a6478; font-size: 12px; letter-spacing: 1px;">METHOD</span>
+                <td style="padding: 10px 0; border-bottom: 1px solid #1f2937;">
+                  <span style="font-family: 'Share Tech Mono', 'Courier New', monospace; color: #5a6478; font-size: 11px; letter-spacing: 2px;">METHOD</span>
                 </td>
-                <td style="padding: 8px 0; border-bottom: 1px solid #1a1f2e; text-align: right;">
-                  <span style="color: #e8edf2; font-size: 13px;">{{ payment_method }}</span>
+                <td style="padding: 10px 0; border-bottom: 1px solid #1f2937; text-align: right;">
+                  <span style="font-family: 'Share Tech Mono', 'Courier New', monospace; color: #e8edf2; font-size: 13px;">{{ payment_method }}</span>
                 </td>
               </tr>
               <tr>
-                <td style="padding: 8px 0;">
-                  <span style="color: #5a6478; font-size: 12px; letter-spacing: 1px;">DATE</span>
+                <td style="padding: 10px 0;">
+                  <span style="font-family: 'Share Tech Mono', 'Courier New', monospace; color: #5a6478; font-size: 11px; letter-spacing: 2px;">DATE</span>
                 </td>
-                <td style="padding: 8px 0; text-align: right;">
-                  <span style="color: #e8edf2; font-size: 13px;">{{ paid_at }}</span>
+                <td style="padding: 10px 0; text-align: right;">
+                  <span style="font-family: 'Share Tech Mono', 'Courier New', monospace; color: #e8edf2; font-size: 13px;">{{ paid_at }}</span>
                 </td>
               </tr>
             </table>
@@ -95,52 +67,28 @@
       </table>
 
       <!-- Success badge -->
-      <table width="100%" cellpadding="0" cellspacing="0" style="margin: 0 0 24px 0;">
+      <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin: 0 0 24px 0;">
         <tr>
-          <td style="text-align: center; padding: 12px; background: #f0fdf4; border-radius: 6px; border: 1px solid #bbf7d0;">
-            <span style="font-size: 14px; color: #22c55e;">&#10003;</span>
-            <span style="font-size: 12px; color: #166534; margin-left: 6px; font-weight: 600;">
-              Payment confirmed — your invoice is marked as paid
+          <td style="text-align: center; padding: 14px; background: #0e1a13; border-radius: 6px; border: 1px solid #28a850;">
+            <span style="font-family: 'Share Tech Mono', 'Courier New', monospace; font-size: 12px; color: #28a850; letter-spacing: 2px;">
+              &#10003; INVOICE PAID IN FULL
             </span>
           </td>
         </tr>
       </table>
 
-      <p style="font-size: 14px; color: #555; line-height: 1.7; margin: 16px 0 8px 0;">
-        If you have any questions about your mission or payment, don't hesitate to reach out.
+      <p style="font-size: 14px; color: #c0c8d4; line-height: 1.7; margin: 16px 0 8px 0;">
+        If you have any questions about your mission or payment, don&rsquo;t hesitate to reach out.
       </p>
 
-      <p style="font-size: 14px; color: #333; margin: 16px 0 8px 0;">
+      <p style="font-size: 14px; color: #e8edf2; margin: 16px 0 8px 0;">
         Best regards,<br>
-        <strong style="color: #1a1a2e;">{{ company_name }} {{ company_tagline }}</strong>
+        <strong>{{ company_name | default('BarnardHQ') }} {{ company_tagline | default('') }}</strong>
       </p>
     </td>
   </tr>
 
-  <!-- Footer -->
-  <tr>
-    <td style="background: #050608; padding: 24px 30px; text-align: center;">
-      <div style="font-family: 'Arial Black', Arial, sans-serif; font-size: 16px; letter-spacing: 3px; color: #e8edf2; margin-bottom: 8px;">
-        {{ company_name | upper }}
-      </div>
-      {% if company_website or company_social_url %}
-      <div style="margin: 10px 0;">
-        {% if company_website %}
-        <a href="{{ company_website }}" style="color: {{ brand_accent_color | default('#00d4ff') }}; text-decoration: none; font-size: 12px;">{{ company_website | replace('https://', '') | replace('http://', '') }}</a>
-        {% endif %}
-        {% if company_website and company_social_url %}
-        <span style="color: #333; margin: 0 8px;">&bull;</span>
-        {% endif %}
-        {% if company_social_url %}
-        <a href="{{ company_social_url }}" style="color: {{ brand_accent_color | default('#00d4ff') }}; text-decoration: none; font-size: 12px;">{{ company_social_url | replace('https://', '') | replace('http://', '') }}</a>
-        {% endif %}
-      </div>
-      {% endif %}
-      <div style="color: #5a6478; font-size: 10px; margin-top: 10px; letter-spacing: 1px;">
-        FAA Part 107 Certified &bull; {{ company_tagline }}
-      </div>
-    </td>
-  </tr>
+  {% include '_brand_footer.html' %}
 </table>
 
 </body>

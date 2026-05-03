@@ -1,13 +1,37 @@
+/**
+ * Client portal — JWT validation wrapper + inline mission-list dashboard.
+ *
+ * Route: /client/:token
+ *   1. Validates the JWT in the URL against /client/validate.
+ *   2. On valid: renders the dashboard (mission list).
+ *   3. On invalid: renders the access-denied panel with optional
+ *      password-login fallback.
+ *
+ * Customer-facing — wrapped in <CustomerLayout> with the BarnardHQ
+ * brand pass (v2.65.0 — TOS-PDF cyan #189cc6, Bebas Neue display,
+ * Share Tech Mono mono).
+ */
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Center, Loader, Stack, Text, Paper, Button } from '@mantine/core';
-import { notifications } from '@mantine/notifications';
+import {
+  Badge,
+  Button,
+  Center,
+  Group,
+  Loader,
+  Paper,
+  SimpleGrid,
+  Stack,
+  Text,
+  Title,
+} from '@mantine/core';
+import { IconDrone } from '@tabler/icons-react';
 import { useClientAuth } from '../../hooks/useClientAuth';
+import clientApi from '../../api/clientPortalApi';
+import CustomerLayout from '../../components/CustomerLayout';
+import { customerBrand, customerStyles } from '../../lib/customerTheme';
+import { customerNotify } from '../../lib/customerNotify';
 
-/**
- * Route wrapper for /client/:token
- * Validates the token from URL, stores JWT, then renders the dashboard.
- */
 export default function ClientPortal() {
   const { token } = useParams<{ token: string }>();
   const navigate = useNavigate();
@@ -28,10 +52,10 @@ export default function ClientPortal() {
 
     auth.initFromToken(token).then((valid) => {
       if (!valid) {
-        notifications.show({
+        customerNotify({
           title: 'Access Denied',
           message: 'This link is invalid or has expired. Please contact your operator for a new one.',
-          color: 'red',
+          kind: 'danger',
         });
       }
       setInitializing(false);
@@ -39,72 +63,102 @@ export default function ClientPortal() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
+  // ── Loading shell ─────────────────────────────────────────
   if (initializing || auth.loading) {
     return (
-      <Center h="100vh" style={{ background: '#050608' }}>
-        <Stack align="center" gap="md">
-          <Loader color="cyan" size="lg" />
-          <Text c="#5a6478" size="sm" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
-            VALIDATING ACCESS...
-          </Text>
-        </Stack>
-      </Center>
+      <CustomerLayout
+        contextSlot={<span style={{ textTransform: 'uppercase' }}>Validating Access</span>}
+      >
+        <Center py="xl" style={{ minHeight: '40vh' }}>
+          <Stack align="center" gap="md">
+            <Loader color="cyan" size="lg" />
+            <Text
+              style={{
+                color: customerBrand.textMuted,
+                fontFamily: customerBrand.fontMono,
+                fontSize: 13,
+                letterSpacing: customerBrand.trackMid,
+                textTransform: 'uppercase',
+              }}
+            >
+              Validating Access...
+            </Text>
+          </Stack>
+        </Center>
+      </CustomerLayout>
     );
   }
 
+  // ── Access denied ─────────────────────────────────────────
   if (!auth.isAuthenticated) {
     return (
-      <Center h="100vh" style={{ background: '#050608' }}>
-        <Paper
-          p="xl"
-          radius="md"
-          style={{
-            background: '#0e1117',
-            border: '1px solid #1a1f2e',
-            maxWidth: 480,
-            width: '100%',
-          }}
-        >
+      <CustomerLayout
+        maxWidth={520}
+        contextSlot={<span style={{ textTransform: 'uppercase' }}>Access Denied</span>}
+      >
+        <Paper p="xl" radius="md" style={customerStyles.card}>
           <Stack align="center" gap="md">
-            <Text
-              size="xl"
-              fw={700}
-              style={{ fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '3px' }}
-              c="#e8edf2"
+            <Title
+              order={2}
+              style={{
+                ...customerStyles.display,
+                color: customerBrand.danger,
+                fontSize: 32,
+                textAlign: 'center',
+              }}
             >
               ACCESS DENIED
-            </Text>
-            <Text c="#5a6478" size="sm" ta="center">
+            </Title>
+            <Text
+              style={{
+                color: customerBrand.textBody,
+                fontFamily: customerBrand.fontBody,
+                fontSize: 14,
+                textAlign: 'center',
+                lineHeight: 1.6,
+              }}
+            >
               {auth.error || 'This link is invalid or has expired.'}
             </Text>
-            <Text c="#5a6478" size="xs" ta="center">
+            <Text
+              style={{
+                color: customerBrand.textMuted,
+                fontFamily: customerBrand.fontMono,
+                fontSize: 11,
+                letterSpacing: customerBrand.trackTight,
+                textAlign: 'center',
+              }}
+            >
               Please contact your operator for a new portal link.
             </Text>
             {auth.hasPassword && (
               <Button
                 variant="outline"
-                color="cyan"
                 onClick={() => navigate('/client/login')}
-                style={{ fontFamily: "'Share Tech Mono', monospace" }}
+                styles={{
+                  root: {
+                    fontFamily: customerBrand.fontDisplay,
+                    letterSpacing: customerBrand.trackMid,
+                    color: customerBrand.brandCyan,
+                    borderColor: customerBrand.brandCyan,
+                  },
+                }}
               >
                 LOGIN WITH PASSWORD
               </Button>
             )}
           </Stack>
         </Paper>
-      </Center>
+      </CustomerLayout>
     );
   }
 
-  // Lazy-loaded dashboard will be rendered here via the route tree
-  // For now, inline the dashboard component
   return <ClientDashboardInline auth={auth} />;
 }
 
-/* Inline dashboard — will be extracted to ClientDashboard.tsx via lazy loading in App.tsx */
-import { Badge, Group, SimpleGrid, Title } from '@mantine/core';
-import { IconDrone } from '@tabler/icons-react';
-import clientApi from '../../api/clientPortalApi';
+// ─────────────────────────────────────────────────────────────
+//  Inline dashboard
+// ─────────────────────────────────────────────────────────────
 
 interface ClientMission {
   id: string;
@@ -114,6 +168,29 @@ interface ClientMission {
   location_name: string | null;
   status: string;
 }
+
+const STATUS_COLOR: Record<string, string> = {
+  draft: 'gray',
+  scheduled: 'blue',
+  in_progress: 'yellow',
+  processing: 'orange',
+  review: 'cyan',
+  delivered: 'green',
+  completed: 'green',
+  sent: 'teal',
+};
+
+const TYPE_LABEL: Record<string, string> = {
+  sar: 'Search & Rescue',
+  videography: 'Videography',
+  lost_pet: 'Lost Pet',
+  inspection: 'Inspection',
+  mapping: 'Mapping',
+  photography: 'Photography',
+  survey: 'Survey',
+  security_investigations: 'Security',
+  other: 'Other',
+};
 
 function ClientDashboardInline({ auth }: { auth: ReturnType<typeof useClientAuth> }) {
   const [missions, setMissions] = useState<ClientMission[]>([]);
@@ -125,151 +202,201 @@ function ClientDashboardInline({ auth }: { auth: ReturnType<typeof useClientAuth
       .then((resp) => setMissions(resp.data))
       .catch((err) => {
         console.error('[ClientPortal] Failed to load missions:', err);
-        notifications.show({
+        customerNotify({
           title: 'Error',
           message: 'Failed to load missions. Please try refreshing.',
-          color: 'red',
+          kind: 'danger',
         });
       })
       .finally(() => setLoadingMissions(false));
   }, []);
 
-  const statusColor: Record<string, string> = {
-    draft: 'gray',
-    scheduled: 'blue',
-    in_progress: 'yellow',
-    processing: 'orange',
-    review: 'cyan',
-    delivered: 'green',
-    completed: 'green',
-    sent: 'teal',
-  };
-
-  const typeLabel: Record<string, string> = {
-    sar: 'Search & Rescue',
-    videography: 'Videography',
-    lost_pet: 'Lost Pet',
-    inspection: 'Inspection',
-    mapping: 'Mapping',
-    photography: 'Photography',
-    survey: 'Survey',
-    security_investigations: 'Security',
-    other: 'Other',
-  };
-
   return (
-    <div style={{ minHeight: '100vh', background: '#050608', padding: '24px' }}>
-      <Stack gap="lg" style={{ maxWidth: 960, margin: '0 auto' }}>
-        {/* Header */}
-        <Group justify="space-between" align="center">
-          <div>
-            <Title
-              order={2}
-              style={{ fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '3px' }}
-              c="#e8edf2"
+    <CustomerLayout
+      contextSlot={
+        <Group gap="md" wrap="nowrap" justify="flex-end">
+          {auth.customerName && (
+            <Text
+              component="span"
+              visibleFrom="sm"
+              style={{
+                color: customerBrand.brandCyan,
+                fontFamily: customerBrand.fontMono,
+                fontSize: 12,
+                letterSpacing: customerBrand.trackTight,
+              }}
             >
-              CLIENT PORTAL
-            </Title>
-            <Text c="#5a6478" size="sm" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
-              {auth.customerName ? `Welcome, ${auth.customerName}` : 'Welcome'}
+              {auth.customerName.toUpperCase()}
             </Text>
-          </div>
+          )}
           <Button
             variant="subtle"
-            color="gray"
             size="xs"
             onClick={auth.logout}
-            style={{ fontFamily: "'Share Tech Mono', monospace" }}
+            styles={{
+              root: {
+                color: customerBrand.textOnBrand,
+                background: 'rgba(255,255,255,0.06)',
+                fontFamily: customerBrand.fontMono,
+                letterSpacing: customerBrand.trackTight,
+                minHeight: 32,
+              },
+            }}
           >
             SIGN OUT
           </Button>
         </Group>
-
-        {/* Mission list */}
+      }
+    >
+      <div>
         <Title
-          order={4}
-          style={{ fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '2px' }}
-          c="#e8edf2"
+          order={1}
+          style={{
+            ...customerStyles.display,
+            color: customerBrand.textPrimary,
+            fontSize: 'clamp(28px, 5vw, 40px)',
+            marginBottom: 4,
+          }}
         >
-          YOUR MISSIONS
+          CLIENT PORTAL
         </Title>
+        <Text
+          style={{
+            color: customerBrand.textMuted,
+            fontFamily: customerBrand.fontMono,
+            fontSize: 13,
+            letterSpacing: customerBrand.trackTight,
+          }}
+        >
+          {auth.customerName ? `Welcome, ${auth.customerName}` : 'Welcome'}
+        </Text>
+      </div>
 
-        {loadingMissions ? (
-          <Center py="xl">
-            <Loader color="cyan" size="md" />
+      <Title
+        order={3}
+        style={{
+          ...customerStyles.display,
+          color: customerBrand.brandCyan,
+          fontSize: 22,
+          letterSpacing: customerBrand.trackMid,
+          marginTop: 8,
+        }}
+      >
+        YOUR MISSIONS
+      </Title>
+
+      {loadingMissions ? (
+        <Center py="xl">
+          <Loader color="cyan" size="md" />
+        </Center>
+      ) : missions.length === 0 ? (
+        <Paper p="xl" radius="md" style={customerStyles.card}>
+          <Center>
+            <Text
+              style={{
+                color: customerBrand.textMuted,
+                fontFamily: customerBrand.fontMono,
+                fontSize: 13,
+              }}
+            >
+              No missions available yet.
+            </Text>
           </Center>
-        ) : missions.length === 0 ? (
-          <Paper
-            p="xl"
-            radius="md"
-            style={{ background: '#0e1117', border: '1px solid #1a1f2e' }}
-          >
-            <Center>
-              <Text c="#5a6478">No missions available yet.</Text>
-            </Center>
-          </Paper>
-        ) : (
-          <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md">
-            {missions.map((m) => (
-              <Paper
-                key={m.id}
-                p="md"
-                radius="md"
-                style={{
-                  background: '#0e1117',
-                  border: '1px solid #1a1f2e',
-                  cursor: 'pointer',
-                  transition: 'border-color 0.2s',
-                }}
-                onMouseEnter={(e) => {
-                  (e.currentTarget as HTMLElement).style.borderColor = '#00d4ff44';
-                }}
-                onMouseLeave={(e) => {
-                  (e.currentTarget as HTMLElement).style.borderColor = '#1a1f2e';
-                }}
-                onClick={() => window.location.href = `/client/mission/${m.id}`}
-              >
-                <Group justify="space-between" mb="xs">
-                  <Group gap="xs">
-                    <IconDrone size={18} color="#00d4ff" />
-                    <Text
-                      fw={600}
-                      c="#e8edf2"
-                      style={{ fontFamily: "'Rajdhani', sans-serif" }}
-                    >
-                      {m.title}
-                    </Text>
-                  </Group>
-                  <Badge
-                    color={statusColor[m.status] || 'gray'}
-                    variant="light"
-                    size="sm"
-                    style={{ fontFamily: "'Share Tech Mono', monospace" }}
-                  >
-                    {m.status.toUpperCase()}
-                  </Badge>
-                </Group>
+        </Paper>
+      ) : (
+        <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md">
+          {missions.map((m) => (
+            <MissionCard key={m.id} mission={m} />
+          ))}
+        </SimpleGrid>
+      )}
+    </CustomerLayout>
+  );
+}
 
-                <Stack gap={4}>
-                  <Text size="xs" c="#5a6478" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
-                    {typeLabel[m.mission_type] || m.mission_type}
-                  </Text>
-                  {m.mission_date && (
-                    <Text size="xs" c="#5a6478" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
-                      {m.mission_date}
-                    </Text>
-                  )}
-                  {m.location_name && (
-                    <Text size="xs" c="#5a6478" style={{ fontFamily: "'Share Tech Mono', monospace" }}>
-                      {m.location_name}
-                    </Text>
-                  )}
-                </Stack>
-              </Paper>
-            ))}
-          </SimpleGrid>
+function MissionCard({ mission }: { mission: ClientMission }) {
+  return (
+    <Paper
+      p="md"
+      radius="md"
+      style={{
+        ...customerStyles.card,
+        cursor: 'pointer',
+        transition: 'border-color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease',
+      }}
+      onMouseEnter={(e) => {
+        const el = e.currentTarget as HTMLElement;
+        el.style.borderColor = customerBrand.brandCyan;
+        el.style.boxShadow = `0 0 0 3px ${customerBrand.brandCyanSoft}, ${customerBrand.shadowCard}`;
+      }}
+      onMouseLeave={(e) => {
+        const el = e.currentTarget as HTMLElement;
+        el.style.borderColor = customerBrand.border;
+        el.style.boxShadow = customerBrand.shadowCard;
+      }}
+      onClick={() => (window.location.href = `/client/mission/${mission.id}`)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          window.location.href = `/client/mission/${mission.id}`;
+        }
+      }}
+      role="link"
+      tabIndex={0}
+      aria-label={`Open mission ${mission.title}`}
+    >
+      <Group justify="space-between" mb="xs" wrap="nowrap">
+        <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
+          <IconDrone size={18} color={customerBrand.brandCyan} style={{ flexShrink: 0 }} />
+          <Text
+            fw={600}
+            style={{
+              color: customerBrand.textPrimary,
+              fontFamily: customerBrand.fontDisplay,
+              fontSize: 18,
+              letterSpacing: customerBrand.trackTight,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {mission.title}
+          </Text>
+        </Group>
+        <Badge
+          color={STATUS_COLOR[mission.status] || 'gray'}
+          variant="light"
+          size="sm"
+          style={{ fontFamily: customerBrand.fontMono, flexShrink: 0 }}
+        >
+          {mission.status.toUpperCase()}
+        </Badge>
+      </Group>
+
+      <Stack gap={4}>
+        <Text
+          size="xs"
+          style={{ color: customerBrand.textMuted, fontFamily: customerBrand.fontMono }}
+        >
+          {TYPE_LABEL[mission.mission_type] || mission.mission_type}
+        </Text>
+        {mission.mission_date && (
+          <Text
+            size="xs"
+            style={{ color: customerBrand.textMuted, fontFamily: customerBrand.fontMono }}
+          >
+            {mission.mission_date}
+          </Text>
+        )}
+        {mission.location_name && (
+          <Text
+            size="xs"
+            style={{ color: customerBrand.textMuted, fontFamily: customerBrand.fontMono }}
+          >
+            {mission.location_name}
+          </Text>
         )}
       </Stack>
-    </div>
+    </Paper>
   );
 }
