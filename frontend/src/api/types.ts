@@ -14,6 +14,12 @@ export interface Customer {
   signature_data: string | null;
   intake_completed_at: string | null;
   intake_token: string | null;
+  // v2.66.3 — pointer to the latest tos_acceptances row (new AcroForm
+  // flow). All three are null for legacy canvas-signed customers; UI
+  // falls back to the existing tos_pdf_path-based viewer for those.
+  latest_tos_audit_id: string | null;
+  latest_tos_signed_sha: string | null;
+  latest_tos_template_version: string | null;
   created_at: string;
   updated_at: string;
 }

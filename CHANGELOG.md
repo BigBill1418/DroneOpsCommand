@@ -4,6 +4,66 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## [2.66.3] — 2026-05-03 — fix: Customers page reflects new AcroForm TOS flow
+
+After v2.65.0 + v2.66.0 (ADR-0010 AcroForm pipeline + customer
+name/email sync), every TOS submission via `/tos/accept` wrote a
+`tos_acceptances` audit row but never flipped the per-customer
+`customers.tos_signed` boolean. Result: the operator Customers page
+kept showing newly-signed customers as "TOS not signed" forever, and
+the in-row "Signed TOS Viewer" modal could not find the PDF
+(legacy `tos_pdf_path` was null for these customers).
+
+**Backend (3 changes):**
+
+1. `app/routers/tos.py:accept_terms` — also sets
+   `customer.tos_signed=True` + `customer.tos_signed_at` to the
+   `AcceptanceContext.accepted_at` timestamp on every customer-bound
+   accept. The legacy `tos_pdf_path` column is left untouched (the
+   new flow's PDF lives at `tos_acceptances.signed_pdf_path` and is
+   served via the existing operator-JWT-gated `/api/tos/signed/{id}`
+   route).
+2. `app/schemas/customer.py` — `CustomerResponse` now exposes
+   `latest_tos_audit_id`, `latest_tos_signed_sha`,
+   `latest_tos_template_version`. All three are null for legacy
+   canvas-signed customers.
+3. `app/routers/customers.py` — list/get/update endpoints populate
+   the new fields by joining the most-recent `tos_acceptances` row
+   per customer. List endpoint uses `DISTINCT ON (customer_id)`
+   ordered by `accepted_at DESC` for one-query bulk fetch (no N+1);
+   detail/update endpoints use a simple `LIMIT 1` subselect.
+
+**Frontend (`frontend/src/pages/Customers.tsx`):**
+
+- Badge label is now `TOS SIGNED · DOC-001/TOS/REV3` (Share Tech Mono,
+  dimmed) for AcroForm-signed customers; legacy customers keep the
+  bare `TOS SIGNED` badge.
+- Signed-TOS viewer modal switches its fetch URL based on
+  `latest_tos_audit_id`: present → `/api/tos/signed/{audit_id}` (new
+  AcroForm PDF), null → `/api/intake/{id}/signed-tos` (legacy canvas
+  composite). Failure path now `console.error`s the source path +
+  HTTP status for next-class-of-failure triage.
+- Modal header carries the template-version chip, first-12-char
+  truncated SHA (full hash on hover) and an `AUDIT HISTORY` button
+  linking to `/tos-acceptances?customer_id=…`.
+- New per-row `IconHistory` ActionIcon next to the badge — direct
+  link to per-customer audit history.
+
+**Tests:**
+
+- 6 new test cases in `test_tos_customer_sync.py` /
+  `test_customer_response_tos_audit.py` /
+  `test_customers_router_tos_audit.py`. All 166 backend tests pass.
+- Existing `test_tos_customer_sync.py` updated: `tos_signed` flip
+  now fires on every customer-bound accept, so the previously
+  "single-commit no-op" branch now commits twice.
+- Slowapi rate-limit cap (5/minute keyed on client IP) was hitting
+  the 6th hermetic test in the file — added a per-test IP counter
+  in the request-stub helper to keep tests independent.
+
+**Schema/migration impact:** none. The three new fields are computed
+from JOIN — no new columns. Failover/replication unaffected.
+
 ## [2.66.2] — 2026-05-03 — fix: P0 hotfix — `POST /api/tos/accept` 422 on every customer submission
 
 A paying customer hit the TOS-acceptance form at 16:09 PT and got a
