@@ -237,6 +237,12 @@ async def accept_terms(
     # (email IS NULL, name == "Pending Intake YYYY-MM-DD"). Without this,
     # the operator can never email the customer a portal link afterwards
     # because customers.email is still null.
+    #
+    # v2.66.3 (Fix 1) — Also flip ``customer.tos_signed=True`` +
+    # ``customer.tos_signed_at`` so the operator Customers page reflects
+    # reality. The legacy ``tos_pdf_path`` column stays untouched: the
+    # new flow keeps the signed PDF under ``tos_acceptances.signed_pdf_path``
+    # and the operator UI looks it up via the latest acceptance row.
     if payload.customer_id is not None:
         cust_result = await db.execute(
             select(Customer).where(Customer.id == payload.customer_id)
@@ -251,13 +257,18 @@ async def accept_terms(
             if customer.name and _PENDING_INTAKE_NAME_RE.match(customer.name):
                 customer.name = payload.full_name
                 name_synced = True
-            if email_synced or name_synced:
-                await db.commit()
-                logger.info(
-                    "[CLIENT-PORTAL] Synced customer name/email from TOS acceptance "
-                    "customer_id=%s audit_id=%s email_synced=%s name_synced=%s",
-                    payload.customer_id, row.audit_id, email_synced, name_synced,
-                )
+            # tos_signed flip — the new AcroForm flow's source of truth
+            # for the per-customer "did they sign" boolean. Always set on
+            # accept; idempotent because the row is the latest acceptance.
+            customer.tos_signed = True
+            customer.tos_signed_at = ctx.accepted_at
+            await db.commit()
+            logger.info(
+                "[CLIENT-PORTAL] Synced customer name/email from TOS acceptance "
+                "customer_id=%s audit_id=%s email_synced=%s name_synced=%s "
+                "tos_signed=True",
+                payload.customer_id, row.audit_id, email_synced, name_synced,
+            )
         else:
             logger.warning(
                 "[TOS-ACCEPT-POST] customer_id=%s referenced but not found "

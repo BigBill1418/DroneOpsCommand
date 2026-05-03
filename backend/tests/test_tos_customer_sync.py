@@ -79,12 +79,27 @@ def _mk_payload(*, customer_id, email, full_name="Casey Operator"):
     )
 
 
+# Per-test request counter so each test gets a unique client IP. slowapi
+# keys its 5/minute rate limit on `request.client.host` (no
+# X-Forwarded-For unwrapping in the limiter), and the in-memory limiter
+# state persists across tests in a single pytest run. Without per-test
+# IP variation, the 6th-and-on test in the same module would 429 with
+# `RateLimitExceeded: 5 per 1 minute`.
+_REQ_COUNTER = [0]
+
+
 def _mk_request():
     """Construct a real Starlette Request — slowapi's limiter rejects
     SimpleNamespace stubs at runtime (`isinstance(request, Request)`
     check). Minimal ASGI scope is all that's needed for our route, which
     only reads request.client + request.headers."""
     from starlette.requests import Request
+
+    _REQ_COUNTER[0] += 1
+    # /16 to give us 65k unique IPs — well above any conceivable test count.
+    octet_a = (_REQ_COUNTER[0] >> 8) & 0xFF
+    octet_b = _REQ_COUNTER[0] & 0xFF
+    client_ip = f"127.{octet_a}.{octet_b}.1"
 
     scope = {
         "type": "http",
@@ -94,7 +109,7 @@ def _mk_request():
             (b"x-forwarded-for", b"203.0.113.1"),
             (b"user-agent", b"pytest"),
         ],
-        "client": ("127.0.0.1", 0),
+        "client": (client_ip, 0),
         "query_string": b"",
         "server": ("testserver", 80),
         "scheme": "http",
@@ -141,6 +156,8 @@ async def test_tos_accept_syncs_email_when_customer_email_null(tmp_path):
         id=cust_id,
         email=None,
         name="Pending Intake 2026-05-03",
+        tos_signed=False,
+        tos_signed_at=None,
     )
 
     db = FakeQueueAsyncSession(results=[customer])
@@ -159,6 +176,9 @@ async def test_tos_accept_syncs_email_when_customer_email_null(tmp_path):
     # Customer was synced
     assert customer.email == "casey@example.com"
     assert customer.name == "Casey Operator"
+    # v2.66.3: tos_signed/tos_signed_at flipped on accept.
+    assert customer.tos_signed is True
+    assert customer.tos_signed_at is not None
     # commit() was called twice: once for tos row, once for the sync.
     assert db.commits == 2
     # Response surfaces the audit_id.
@@ -169,7 +189,12 @@ async def test_tos_accept_syncs_email_when_customer_email_null(tmp_path):
 async def test_tos_accept_does_not_overwrite_existing_email(tmp_path):
     """If customer.email is already set, do NOT overwrite it from the
     TOS payload. Only the 'Pending Intake …' name placeholder is
-    replaced. Email stays as-is."""
+    replaced. Email stays as-is.
+
+    v2.66.3: tos_signed/tos_signed_at MUST still be flipped, so this
+    branch now commits twice (tos row + customer sync) even when no
+    name/email change is needed.
+    """
     from app.routers import tos as tos_module
 
     cust_id = uuid.uuid4()
@@ -177,6 +202,8 @@ async def test_tos_accept_does_not_overwrite_existing_email(tmp_path):
         id=cust_id,
         email="prior@example.com",  # already populated
         name="Real Name",            # not the placeholder
+        tos_signed=False,
+        tos_signed_at=None,
     )
 
     db = FakeQueueAsyncSession(results=[customer])
@@ -193,8 +220,11 @@ async def test_tos_accept_does_not_overwrite_existing_email(tmp_path):
     # Email NOT overwritten, name NOT overwritten.
     assert customer.email == "prior@example.com"
     assert customer.name == "Real Name"
-    # Single commit (tos row only — no sync needed).
-    assert db.commits == 1
+    # tos_signed flipped (v2.66.3 Fix 1).
+    assert customer.tos_signed is True
+    assert customer.tos_signed_at is not None
+    # 2 commits: tos row + customer sync (always commits to flip tos_signed).
+    assert db.commits == 2
 
 
 @pytest.mark.asyncio
@@ -208,6 +238,8 @@ async def test_tos_accept_replaces_pending_intake_name_only(tmp_path):
         id=cust_id,
         email="prior@example.com",
         name="Pending Intake 2026-05-03",
+        tos_signed=False,
+        tos_signed_at=None,
     )
 
     db = FakeQueueAsyncSession(results=[customer])
@@ -226,6 +258,8 @@ async def test_tos_accept_replaces_pending_intake_name_only(tmp_path):
 
     assert customer.name == "Real Customer Name"
     assert customer.email == "prior@example.com"  # email left alone
+    assert customer.tos_signed is True
+    assert customer.tos_signed_at is not None
     assert db.commits == 2
 
 
@@ -247,6 +281,83 @@ async def test_tos_accept_no_customer_id_skips_sync(tmp_path):
         await tos_module.accept_terms(_mk_request(), payload, db)
 
     assert db.commits == 1  # only the tos row commit
+
+
+# ── v2.66.3 Fix 1: tos_signed flip on every customer-bound accept ─────
+@pytest.mark.asyncio
+async def test_tos_accept_flips_tos_signed_to_true(tmp_path):
+    """v2.66.3 — the per-customer tos_signed boolean is the source of
+    truth the operator Customers page reads. Every accept that has a
+    customer_id MUST flip it on, and tos_signed_at MUST equal the
+    AcceptanceContext timestamp written into the audit row."""
+    from app.routers import tos as tos_module
+
+    cust_id = uuid.uuid4()
+    customer = SimpleNamespace(
+        id=cust_id,
+        email="prior@example.com",
+        name="Existing Customer",
+        tos_signed=False,
+        tos_signed_at=None,
+    )
+
+    db = FakeQueueAsyncSession(results=[customer])
+    payload = _mk_payload(customer_id=cust_id, email="prior@example.com",
+                          full_name="Existing Customer")
+
+    record = _mk_record()
+
+    with patch.object(tos_module, "get_active_tos_template", return_value=_mk_template()), \
+         patch.object(tos_module, "accept_tos", return_value=(b"x", record)), \
+         patch.object(tos_module, "signed_pdf_dir", return_value=tmp_path), \
+         patch.object(tos_module, "send_signed_tos_to_both_parties",
+                      new=AsyncMock(return_value=None)):
+        await tos_module.accept_terms(_mk_request(), payload, db)
+
+    assert customer.tos_signed is True
+    assert customer.tos_signed_at is not None
+    # tos_signed_at is set to the AcceptanceContext.accepted_at instant
+    # (which the route built from datetime.now(timezone.utc)) — assert
+    # it is timezone-aware UTC, the contract expected downstream.
+    assert customer.tos_signed_at.tzinfo is not None
+
+
+@pytest.mark.asyncio
+async def test_tos_accept_idempotent_on_already_signed_customer(tmp_path):
+    """A customer who already has tos_signed=True (from a prior accept
+    or from the legacy canvas-signed flow) MUST stay signed — and the
+    timestamp MUST advance to the latest acceptance instant. tos_pdf_path
+    is left untouched (the new flow uses the audit row, not this column)."""
+    from app.routers import tos as tos_module
+
+    cust_id = uuid.uuid4()
+    old_ts = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    customer = SimpleNamespace(
+        id=cust_id,
+        email="prior@example.com",
+        name="Existing Customer",
+        tos_signed=True,
+        tos_signed_at=old_ts,
+        tos_pdf_path="/legacy/canvas/path.pdf",
+    )
+
+    db = FakeQueueAsyncSession(results=[customer])
+    payload = _mk_payload(customer_id=cust_id, email="prior@example.com",
+                          full_name="Existing Customer")
+
+    record = _mk_record()
+    with patch.object(tos_module, "get_active_tos_template", return_value=_mk_template()), \
+         patch.object(tos_module, "accept_tos", return_value=(b"x", record)), \
+         patch.object(tos_module, "signed_pdf_dir", return_value=tmp_path), \
+         patch.object(tos_module, "send_signed_tos_to_both_parties",
+                      new=AsyncMock(return_value=None)):
+        await tos_module.accept_terms(_mk_request(), payload, db)
+
+    assert customer.tos_signed is True
+    assert customer.tos_signed_at != old_ts  # timestamp advanced
+    # legacy column NOT touched — operator UI falls back to it for
+    # legacy customers and the new flow's audit row covers new ones.
+    assert customer.tos_pdf_path == "/legacy/canvas/path.pdf"
 
 
 # ── Fix 6: EmailStr is enforced ───────────────────────────────────────
