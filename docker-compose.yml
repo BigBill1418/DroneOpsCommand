@@ -24,9 +24,12 @@ services:
     command: ["postgres"]
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-doc}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme_in_production}
+      # ADR-0012: required, no default. Container will refuse to start if unset.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env (no default — see ADR-0012)}
       POSTGRES_DB: ${POSTGRES_DB:-doc}
-      REPLICATION_PASSWORD: ${REPLICATION_PASSWORD:-SecureDroneRepl2026}
+      # ADR-0012: required, no default. Previously defaulted to a literal string
+      # that ended up in the public docker-compose.yml history.
+      REPLICATION_PASSWORD: ${REPLICATION_PASSWORD:?REPLICATION_PASSWORD must be set in .env (no default — see ADR-0012)}
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./scripts/primary-entrypoint.sh:/scripts/primary-entrypoint.sh:ro
@@ -138,12 +141,15 @@ services:
       - 1.1.1.1
       - 8.8.8.8
     environment:
-      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://doc:changeme_in_production@db:5432/doc}
+      # ADR-0012: required, no default. The previous default contained a placeholder
+      # password ("changeme_in_production") — a real .env was always expected.
+      - DATABASE_URL=${DATABASE_URL:?DATABASE_URL must be set in .env (no default — see ADR-0012)}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://ollama:11434}
       - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.1:8b-instruct-q4_K_M}
       - OPENDRONELOG_URL=${OPENDRONELOG_URL:-}
-      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-changeme_generate_a_random_secret}
+      # ADR-0012: required, no default. JWT signing key cannot fall back to a literal.
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:?JWT_SECRET_KEY must be set in .env (no default — see ADR-0012)}
       - JWT_ALGORITHM=${JWT_ALGORITHM:-HS256}
       - JWT_ACCESS_TOKEN_EXPIRE_MINUTES=${JWT_ACCESS_TOKEN_EXPIRE_MINUTES:-30}
       - JWT_REFRESH_TOKEN_EXPIRE_DAYS=${JWT_REFRESH_TOKEN_EXPIRE_DAYS:-30}
@@ -235,7 +241,9 @@ services:
       retries: 3
       start_period: 30s
     environment:
-      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://doc:changeme_in_production@db:5432/doc}
+      # ADR-0012: required, no default. The previous default contained a placeholder
+      # password ("changeme_in_production") — a real .env was always expected.
+      - DATABASE_URL=${DATABASE_URL:?DATABASE_URL must be set in .env (no default — see ADR-0012)}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://ollama:11434}
       - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.1:8b-instruct-q4_K_M}
@@ -287,7 +295,9 @@ services:
     init: true
     command: celery -A app.tasks.celery_tasks beat --loglevel=info --schedule=/data/celerybeat-schedule
     environment:
-      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://doc:changeme_in_production@db:5432/doc}
+      # ADR-0012: required, no default. The previous default contained a placeholder
+      # password ("changeme_in_production") — a real .env was always expected.
+      - DATABASE_URL=${DATABASE_URL:?DATABASE_URL must be set in .env (no default — see ADR-0012)}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - TENANT=${TENANT:-shared}
       - ENV=${ENV:-prod}

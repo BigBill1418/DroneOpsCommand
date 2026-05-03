@@ -13,7 +13,11 @@ set -euo pipefail
 PRIMARY_HOST="10.99.0.2"
 PRIMARY_PORT="5434"
 REPL_USER="replicator"
-REPL_PASSWORD="SecureDroneRepl2026"
+# ADR-0012: required, no default. Previous hard-coded literal was the actual
+# fleet replication password and ended up in repo history. Operator must
+# export REPLICATION_PASSWORD (or set it in .env and source it before running).
+: "${REPLICATION_PASSWORD:?REPLICATION_PASSWORD must be set in env before running this script (no default — see ADR-0012)}"
+REPL_PASSWORD="${REPLICATION_PASSWORD}"
 # Explicit volume name set in docker-compose.standby.yml (no project prefix)
 VOLUME_NAME="droneops_standby_pgdata"
 COMPOSE_FILE="docker-compose.standby.yml"

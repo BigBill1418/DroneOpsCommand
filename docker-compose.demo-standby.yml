@@ -20,15 +20,19 @@ services:
     restart: unless-stopped
     environment:
       PGDATA: /var/lib/postgresql/data
+      # ADR-0012: required, no default. Substituted into primary_conninfo below.
+      REPLICATION_PASSWORD: ${REPLICATION_PASSWORD:?REPLICATION_PASSWORD must be set in .env (no default — see ADR-0012)}
     volumes:
       - droneops_demo_standby_pgdata:/var/lib/postgresql/data
     ports:
       - "127.0.0.1:5437:5432"
       - "10.99.0.1:5437:5432"
+    # primary_conninfo is interpolated by docker compose at start time. The
+    # password literal that used to live here was removed in ADR-0012.
     command: >
       postgres
         -c hot_standby=on
-        -c primary_conninfo='host=10.99.0.2 port=5435 user=replicator password=SecureDroneRepl2026 application_name=hsh_hq_demo_standby'
+        -c primary_conninfo='host=10.99.0.2 port=5435 user=replicator password=${REPLICATION_PASSWORD:?REPLICATION_PASSWORD must be set} application_name=hsh_hq_demo_standby'
         -c primary_slot_name='hsh_hq_demo_standby'
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U doc -d doc || exit 1"]

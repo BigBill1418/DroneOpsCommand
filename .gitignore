@@ -10,10 +10,27 @@ frontend/dist/
 *.egg-info/
 flight-parser/target/
 
-# Environment
+# Environment / secrets (ADR-0012 — comprehensive)
 .env
+.env.*
+!.env.example
 *.env.local
 .env.demo.local
+.env.bak.*
+# private keys / certs
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+.secrets/
+secrets.yaml
+secrets.yml
+# misc local secret stores
+.netrc
+.pgpass
+google-credentials.json
+service-account*.json
 
 # IDE
 .vscode/
@@ -41,4 +58,5 @@ docker-compose.override.yml
 .autopull.lock
 autopull.log
 .claude/worktrees/
-.env.demo
+# (.env.demo already covered by `.env.*` above — kept here as a comment so
+# operators searching for it know the rule lives in the secrets section.)
