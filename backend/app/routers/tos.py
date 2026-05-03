@@ -25,16 +25,20 @@ Loki query is straightforward.
 from __future__ import annotations
 
 import logging
+import re
 import time
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import FileResponse, Response
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.jwt import get_current_user
 from app.database import get_db
+from app.models.customer import Customer
 from app.models.tos_acceptance import TosAcceptance
 from app.models.user import User
 from app.schemas.tos_acceptance import TosAcceptanceRequest, TosAcceptanceResponse
@@ -49,6 +53,13 @@ from app.services.tos_template import get_active_tos_template, signed_pdf_dir
 logger = logging.getLogger("doc.tos")
 
 router = APIRouter(prefix="/api/tos", tags=["tos"])
+limiter = Limiter(key_func=get_remote_address)
+
+# v2.66.0 — match `Pending Intake YYYY-MM-DD` placeholder name set by
+# `intake.initiate_services` on the no-email path. When the customer
+# completes TOS, we replace this stub with their real typed name so the
+# operator can email them a portal link afterwards.
+_PENDING_INTAKE_NAME_RE = re.compile(r"^Pending Intake \d{4}-\d{2}-\d{2}$")
 
 
 def _client_ip(request: Request) -> str:
@@ -68,12 +79,18 @@ def _client_ip(request: Request) -> str:
 
 
 @router.get("/template")
-async def download_unsigned_template() -> Response:
+@limiter.limit("10/minute")
+async def download_unsigned_template(request: Request) -> Response:
     """Serve the active unsigned TOS so the customer can read it in-browser.
 
     No auth: this is the public landing page's PDF iframe source. Cache
     is disabled so a re-uploaded template is picked up immediately
     (the route's hot path is one disk read, no DB call).
+
+    v2.66.0 — rate limit (10/minute per IP). Public + unauthenticated; without
+    a limit a single client could spin up a download loop and saturate the
+    disk read path. Mirrors `intake.get_intake_form` (30/minute) / the
+    intake submit (5/minute) cadence.
     """
     tpl = get_active_tos_template()
     if tpl is None:
@@ -94,6 +111,7 @@ async def download_unsigned_template() -> Response:
     response_model=TosAcceptanceResponse,
     status_code=status.HTTP_201_CREATED,
 )
+@limiter.limit("5/minute")
 async def accept_terms(
     payload: TosAcceptanceRequest,
     request: Request,
@@ -170,6 +188,39 @@ async def accept_terms(
         row.id, row.audit_id,
         row.template_sha256[:12], row.signed_sha256[:12],
     )
+
+    # v2.66.0 (Fix 1) — Sync the customer's typed name + email back onto
+    # the customer row when the no-email intake path created a stub
+    # (email IS NULL, name == "Pending Intake YYYY-MM-DD"). Without this,
+    # the operator can never email the customer a portal link afterwards
+    # because customers.email is still null.
+    if payload.customer_id is not None:
+        cust_result = await db.execute(
+            select(Customer).where(Customer.id == payload.customer_id)
+        )
+        customer = cust_result.scalar_one_or_none()
+        if customer is not None:
+            email_synced = False
+            name_synced = False
+            if customer.email is None and payload.email:
+                customer.email = payload.email
+                email_synced = True
+            if customer.name and _PENDING_INTAKE_NAME_RE.match(customer.name):
+                customer.name = payload.full_name
+                name_synced = True
+            if email_synced or name_synced:
+                await db.commit()
+                logger.info(
+                    "[CLIENT-PORTAL] Synced customer name/email from TOS acceptance "
+                    "customer_id=%s audit_id=%s email_synced=%s name_synced=%s",
+                    payload.customer_id, row.audit_id, email_synced, name_synced,
+                )
+        else:
+            logger.warning(
+                "[TOS-ACCEPT-POST] customer_id=%s referenced but not found "
+                "(audit row preserved)",
+                payload.customer_id,
+            )
 
     # Best-effort email; never roll back the audit row if SMTP fails.
     try:

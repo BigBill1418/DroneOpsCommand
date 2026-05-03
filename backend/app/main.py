@@ -390,7 +390,7 @@ logger.info("MultiPartParser max_file_size set to 200 MB")
 app = FastAPI(
     title="D.O.C — Drone Operations Command",
     description="Self-hosted mission management, flight log analysis, AI report generation, invoicing, telemetry visualization, and real-time airspace monitoring for commercial drone operators.",
-    version="2.65.1",
+    version="2.66.0",
     lifespan=lifespan,
 )
 
@@ -507,19 +507,117 @@ async def log_requests(request: Request, call_next):
         raise
 
 
+_HEALTH_CACHE: dict = {"checked_at": 0.0, "stripe_status": None, "stripe_error": None}
+_HEALTH_STRIPE_TTL_SECONDS = 30.0
+
+
+async def _probe_stripe_cached() -> tuple[str, str | None]:
+    """Probe Stripe connectivity with a 30s TTL.
+
+    Stripe rate-limits API calls; healthchecks fire every 10s in
+    docker-compose.yml. Without a cache we'd burn 6 API calls/min.
+    Returns (status, error_or_none). status ∈ {"ok", "unconfigured", "error"}.
+    """
+    now = time.monotonic()
+    if now - _HEALTH_CACHE["checked_at"] < _HEALTH_STRIPE_TTL_SECONDS \
+            and _HEALTH_CACHE["stripe_status"] is not None:
+        return _HEALTH_CACHE["stripe_status"], _HEALTH_CACHE["stripe_error"]
+
+    if not settings.stripe_secret_key:
+        _HEALTH_CACHE.update({
+            "checked_at": now,
+            "stripe_status": "unconfigured",
+            "stripe_error": None,
+        })
+        return "unconfigured", None
+
+    try:
+        import stripe as _stripe
+        _stripe.api_key = settings.stripe_secret_key
+        # Account.retrieve is the cheapest authoritative ping.
+        await asyncio.to_thread(_stripe.Account.retrieve)
+        _HEALTH_CACHE.update({
+            "checked_at": now,
+            "stripe_status": "ok",
+            "stripe_error": None,
+        })
+        return "ok", None
+    except Exception as exc:
+        err = type(exc).__name__
+        _HEALTH_CACHE.update({
+            "checked_at": now,
+            "stripe_status": "error",
+            "stripe_error": err,
+        })
+        return "error", err
+
+
 @app.get("/api/health")
-async def health_check():
-    """Lightweight health check for Docker healthcheck — just confirms the process is up."""
-    resp = {"status": "healthy", "service": "D.O.C — Drone Operations Command"}
+async def health_check(db: AsyncSession = Depends(get_db)):
+    """Real liveness + dependency probe (Fix 7, v2.66.0).
+
+    Probes:
+      - DB: `SELECT 1` against the configured PostgreSQL.
+      - Redis: `PING`.
+      - Stripe: cached `Account.retrieve` (30s TTL) IF a key is configured.
+
+    Returns 200 + `{"status":"healthy", ...}` when everything is reachable.
+    Returns 503 + `{"status":"degraded", ...}` on any probe failure so
+    Docker / NOC / Watchtower see an explicit unhealthy signal (see
+    `docker-compose.yml` healthcheck — `curl -sf` treats 5xx as fail).
+    """
+    from sqlalchemy import text as sa_text
+    import redis.asyncio as aioredis
+    from fastapi.responses import JSONResponse
+
+    body: dict[str, object] = {
+        "status": "healthy",
+        "service": "D.O.C — Drone Operations Command",
+    }
     if settings.managed_instance:
-        resp["managed"] = True
+        body["managed"] = True
         if settings.client_id:
-            resp["client_id"] = settings.client_id
-    return resp
+            body["client_id"] = settings.client_id
+
+    degraded = False
+
+    # DB
+    try:
+        await db.execute(sa_text("SELECT 1"))
+        body["db"] = "ok"
+    except Exception as exc:
+        body["db"] = "error"
+        body["db_error"] = type(exc).__name__
+        degraded = True
+        logger.error("[HEALTH] DB probe failed: %s", exc)
+
+    # Redis
+    try:
+        r = aioredis.from_url(settings.redis_url, socket_timeout=2)
+        await r.ping()
+        await r.aclose()
+        body["redis"] = "ok"
+    except Exception as exc:
+        body["redis"] = "error"
+        body["redis_error"] = type(exc).__name__
+        degraded = True
+        logger.error("[HEALTH] Redis probe failed: %s", exc)
+
+    # Stripe (cached, only if configured)
+    stripe_status, stripe_err = await _probe_stripe_cached()
+    body["stripe"] = stripe_status
+    if stripe_status == "error":
+        body["stripe_error"] = stripe_err
+        degraded = True
+
+    if degraded:
+        body["status"] = "degraded"
+        return JSONResponse(status_code=503, content=body)
+    return body
 
 
 @app.get("/health")
-async def health_check_root():
+async def health_check_root(db: AsyncSession = Depends(get_db)):
     """Top-level /health alias.
 
     Publicly tunneled clients (stale DroneOpsSync APKs, CF tunnel health probes,
@@ -532,7 +630,7 @@ async def health_check_root():
 
     Returns the same payload as ``/api/health`` so the alias is safe to rely on.
     """
-    return await health_check()
+    return await health_check(db=db)
 
 
 @app.get("/api/branding")

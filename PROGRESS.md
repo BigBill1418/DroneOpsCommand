@@ -4,6 +4,29 @@ Maintained alongside `CHANGELOG.md` and `docs/adr/`. `CHANGELOG.md` is
 the ledger of shipped changes; this file tracks what's in-flight or
 blocked.
 
+## 2026-05-03 — v2.66.0 backend hardening (Agent A — IN-FLIGHT, awaiting orchestrator merge)
+
+Branch: `feat/v266-backend-hardening`. All 8 P0/P1 fixes implemented;
+27 new tests pass; full suite 143/143 green. ADR-0011 written; CHANGELOG
+entry added; version bumped in all 4 files (README, package.json,
+backend/main.py, AppShell.tsx).
+
+Cuts decided:
+
+- **Cut 1 (duplicate operator routes):** DONE. ~165 lines of dead code
+  removed from `routers/client_portal.py`. Route registry now shows
+  exactly 3 client-link routes.
+- **Cut 2 (managed_instance auto-provision):** KEEP. Used in 5 places.
+- **Cut 3 (Ollama):** KEEP. `droneops-ollama-1` healthy on BOS-HQ.
+- **Cut 4 (Demo middleware):** KEEP. `droneops-demo-*` running.
+- **Cut 5 (/api/branding):** KEEP. `useBranding.ts` consumes it.
+
+Coordination notes for orchestrator:
+
+- Agent B will also touch `frontend/src/components/Layout/AppShell.tsx`
+  (frontend P0/P1). I bumped the v2.65.1 → v2.66.0 footer string in
+  both occurrences. Merge mine first; Agent B rebases.
+
 ## 2026-04-24 LATE — COMPLETE: Performance audit fix series (ADR-0004/0005)
 
 Executed the 5-fix plan from `docs/plans/2026-04-24-perf-audit.md`.
