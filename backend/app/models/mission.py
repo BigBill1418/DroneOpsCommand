@@ -48,7 +48,19 @@ class Mission(Base):
     location_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     area_coordinates: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     status: Mapped[MissionStatus] = mapped_column(
-        Enum(MissionStatus), default=MissionStatus.DRAFT
+        # v2.67.1 — `values_callable` makes SA write the enum *value*
+        # (lowercase per `MissionStatus(str, enum.Enum)` definitions)
+        # instead of the enum NAME (uppercase). The legacy PG enum has
+        # both cases as labels for DRAFT/COMPLETED/SENT but ONLY the
+        # lowercase form for scheduled/in_progress/processing/review/
+        # delivered, so writes of those uppercase NAMEs were 500ing.
+        # All existing rows were normalized to lowercase via the
+        # 2026-05-04 migration (see CHANGELOG v2.67.1).
+        Enum(
+            MissionStatus,
+            values_callable=lambda enum: [e.value for e in enum],
+        ),
+        default=MissionStatus.DRAFT,
     )
     is_billable: Mapped[bool] = mapped_column(Boolean, default=False)
     unas_folder_path: Mapped[str | None] = mapped_column(String(500), nullable=True)

@@ -4,6 +4,24 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## [2.67.1] — 2026-05-04 — fix(missions): legacy missionstatus enum mixed-case + Hub auto-refresh + Refresh button
+
+Closes Tier 1 punch list from v2.67.0 ship report.
+
+**Backend — `missionstatus` enum mixed-case fix.** Legacy PG `missionstatus` enum has uppercase labels for `DRAFT`/`COMPLETED`/`SENT` and lowercase for the other 5 values. SA was writing the Python enum NAME (uppercase), so PATCH to `in_progress`/`scheduled`/`processing`/`review`/`delivered` would 500 with `invalid input value for enum missionstatus: "IN_PROGRESS"`.
+
+Two-part fix:
+1. **Data migration on prod (idempotent):** `UPDATE missions SET status = lower(status::text)::missionstatus WHERE status::text IN ('DRAFT','COMPLETED','SENT')` — normalized 4 mission rows. Cast works because both cases are valid PG enum labels. Dry-run inside a rolled-back transaction first.
+2. **Code change:** `Mission.status` mapping gains `Enum(MissionStatus, values_callable=lambda enum: [e.value for e in enum])` so SA writes the lowercase VALUE instead of the uppercase NAME.
+
+**Backend — new contract test.** `test_missions_patch_status_all_values.py` parametrized over all 8 `MissionStatus` values; every PATCH must return 200 and round-trip the requested value. Plus 422 for invalid status strings AND for uppercase-NAME-as-value (fail-fast).
+
+**Frontend — Hub auto-refresh + manual Refresh button.** v2.67.0 left the Hub stale after deposit payment. v2.67.1 adds:
+- Auto-poll every 30s while Hub is rendered AND tab visible AND status `<` SENT. Stops on SENT. Pauses when tab hidden.
+- Manual `IconRefresh` button in Hub header for force-refresh.
+
+**Safety:** zero schema changes; existing mission data preserved (4 rows pre = 4 rows post, IDs identical); legacy `MissionWizardLegacy.tsx` still mounts at `/missions/:id/edit-legacy`.
+
 ## [2.67.0] — 2026-05-03 — feat: Mission Hub redesign (ADR-0014)
 
 Replaces the linear `MissionNew/Edit` 5-step wizard with a **Mission

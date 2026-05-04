@@ -26,6 +26,7 @@
  */
 import { useEffect, useState, useCallback } from 'react';
 import {
+  ActionIcon,
   Badge,
   Button,
   Card,
@@ -49,6 +50,7 @@ import {
   IconHistory,
   IconLink,
   IconMail,
+  IconRefresh,
   IconTrash,
 } from '@tabler/icons-react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
@@ -109,6 +111,28 @@ export default function MissionDetail() {
   useEffect(() => {
     reload();
   }, [reload]);
+
+  // v2.67.1 — Hub auto-refresh.
+  // Until status flips to SENT, poll the mission every 30s so the
+  // operator sees deposit-paid / balance-paid updates without a
+  // manual refresh. Pauses when the tab is hidden (no battery drain
+  // when the operator's on another tab) and stops entirely once
+  // status === SENT (no further state changes expected on a
+  // sent mission until Reopen is clicked, which fires its own reload).
+  useEffect(() => {
+    if (!mission || mission.status === 'sent') return;
+    let cancelled = false;
+    const tick = () => {
+      if (cancelled) return;
+      if (document.visibilityState !== 'visible') return;
+      reload().catch(() => {/* swallow — we'll retry next tick */});
+    };
+    const id = window.setInterval(tick, 30_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [mission?.status, reload]);
 
   if (!mission) {
     return (
@@ -393,6 +417,21 @@ export default function MissionDetail() {
             </Group>
           </Stack>
           <Group gap="xs" wrap="wrap">
+            {/* v2.67.1 — manual Refresh button. Hub auto-polls every 30s
+                while tab is visible + status < SENT, but operator can
+                force-refresh anytime (e.g., they just heard the ntfy
+                push and want to see the deposit-paid update NOW). */}
+            <Tooltip label="Refresh" withArrow>
+              <ActionIcon
+                color="cyan"
+                variant="subtle"
+                size="lg"
+                aria-label="Refresh mission"
+                onClick={() => reload()}
+              >
+                <IconRefresh size={18} />
+              </ActionIcon>
+            </Tooltip>
             {/* Mark COMPLETED — visible while status < COMPLETED, hidden when SENT (per §8.5). */}
             {!isSent &&
               mission.status !== 'completed' &&
