@@ -33,6 +33,8 @@ import { useNavigate, useParams } from 'react-router-dom';
 import api from '../api/client';
 import type { Customer, Mission, NominatimResult } from '../api/types';
 import { inputStyles, cardStyle } from '../components/shared/styles';
+import UnsavedChangesModal from '../components/shared/UnsavedChangesModal';
+import { useDirtyGuard } from '../hooks/useDirtyGuard';
 
 const missionTypes = [
   { value: 'sar', label: 'Search & Rescue' },
@@ -66,6 +68,16 @@ export default function MissionDetailsEdit() {
   const [unasFolderPath, setUnasFolderPath] = useState('');
   const [downloadLinkUrl, setDownloadLinkUrl] = useState('');
   const [downloadLinkExpiresAt, setDownloadLinkExpiresAt] = useState<Date | null>(null);
+
+  // Baseline snapshot for fields outside Mantine's form (UNAS trio).
+  // Mantine `form.isDirty()` only tracks fields registered in
+  // initialValues; the 3 UNAS fields are plain useState. Snapshot the
+  // loaded values so the dirty-guard knows when they've drifted.
+  const [unasBaseline, setUnasBaseline] = useState({
+    folderPath: '',
+    linkUrl: '',
+    linkExpiresAtIso: '',
+  });
 
   // Nominatim address autosuggest (lifted from Customers.tsx pattern).
   const [addressSuggestions, setAddressSuggestions] = useState<NominatimResult[]>([]);
@@ -101,7 +113,7 @@ export default function MissionDetailsEdit() {
         if (cancelled) return;
         const m = missionResp.data;
 
-        form.setValues({
+        const loaded = {
           customer_id: m.customer_id || '',
           title: m.title,
           mission_type: m.mission_type,
@@ -109,12 +121,25 @@ export default function MissionDetailsEdit() {
           mission_date: m.mission_date ? new Date(m.mission_date + 'T00:00:00') : null,
           location_name: m.location_name || '',
           is_billable: m.is_billable,
+        };
+        form.setValues(loaded);
+        // Mantine's isDirty() compares against initialValues, which were
+        // the empty defaults. Re-baseline so a freshly loaded form is
+        // NOT considered dirty by the unsaved-changes guard.
+        form.resetDirty(loaded);
+        const initialUnasPath = m.unas_folder_path || '';
+        const initialLinkUrl = m.download_link_url || '';
+        const initialExpiresAt = m.download_link_expires_at
+          ? new Date(m.download_link_expires_at)
+          : null;
+        setUnasFolderPath(initialUnasPath);
+        setDownloadLinkUrl(initialLinkUrl);
+        setDownloadLinkExpiresAt(initialExpiresAt);
+        setUnasBaseline({
+          folderPath: initialUnasPath,
+          linkUrl: initialLinkUrl,
+          linkExpiresAtIso: initialExpiresAt ? initialExpiresAt.toISOString() : '',
         });
-        setUnasFolderPath(m.unas_folder_path || '');
-        setDownloadLinkUrl(m.download_link_url || '');
-        setDownloadLinkExpiresAt(
-          m.download_link_expires_at ? new Date(m.download_link_expires_at) : null,
-        );
         setCustomers(customersResp.data);
       } catch (err) {
         console.error('[MissionDetailsEdit] load failed', err);
@@ -205,6 +230,18 @@ export default function MissionDetailsEdit() {
       }
 
       await api.put(`/missions/${id}`, payload);
+      // Reset dirty state so a subsequent Cancel doesn't re-prompt.
+      // Mantine: re-baseline initialValues to current values.
+      // UNAS trio: snapshot what we just persisted.
+      form.resetDirty(form.values);
+      setUnasBaseline({
+        folderPath: trimmedPath,
+        linkUrl: trimmedUrl,
+        linkExpiresAtIso:
+          trimmedUrl && downloadLinkExpiresAt
+            ? downloadLinkExpiresAt.toISOString()
+            : '',
+      });
       notifications.show({
         title: 'Mission Updated',
         message: v.title,
@@ -226,8 +263,22 @@ export default function MissionDetailsEdit() {
     }
   };
 
+  // Dirty calc: either the Mantine-tracked form changed OR one of the
+  // UNAS fields drifted from its loaded baseline. While `loading`,
+  // form.isDirty() can be true mid-setValues — gate to false.
+  const unasDirty =
+    !loading &&
+    (unasFolderPath !== unasBaseline.folderPath ||
+      downloadLinkUrl !== unasBaseline.linkUrl ||
+      (downloadLinkExpiresAt ? downloadLinkExpiresAt.toISOString() : '') !==
+        unasBaseline.linkExpiresAtIso);
+  const isDirty = !loading && (form.isDirty() || unasDirty);
+
+  const { showConfirm, setShowConfirm, guardedNavigate, confirmAndNavigate } =
+    useDirtyGuard({ isDirty, navigate });
+
   const handleCancel = () => {
-    navigate(`/missions/${id}`);
+    guardedNavigate(`/missions/${id}`);
   };
 
   if (loading) {
@@ -416,6 +467,12 @@ export default function MissionDetailsEdit() {
           SAVE CHANGES
         </Button>
       </Group>
+
+      <UnsavedChangesModal
+        opened={showConfirm}
+        onKeepEditing={() => setShowConfirm(false)}
+        onDiscard={confirmAndNavigate}
+      />
     </Stack>
   );
 }
