@@ -4,6 +4,22 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## [2.67.2] — 2026-05-04 — fix(spa): graceful handling of stale-bundle errors after deploy
+
+After v2.67.1 deployed, operator's already-loaded browser tab (still holding the v2.67.0 `index.html` in memory) tried to dynamic-import `Settings-FvnyORN8.js` — a chunk hash that no longer existed on the new build. Vite emits new content-hashed filenames every build; the old hash 404s. The pre-existing `ErrorBoundary` showed the generic "Something went wrong" message, leaving the operator confused about what happened or how to recover.
+
+`index.html` cache headers ARE correct (`no-cache, no-store, must-revalidate`) — the issue is long-lived browser tabs that hold the old HTML in memory and never re-fetch it on navigation, only on a full reload.
+
+**Fix:** `frontend/src/components/ErrorBoundary.tsx` now:
+1. Detects stale-bundle errors via 4 regex patterns (Chrome / Vite / Safari / Firefox phrasing for "dynamic import failed" / "loading chunk failed" / "module script failed").
+2. Listens to `window.unhandledrejection` and `window.error` so async dynamic-import rejections that bypass React's boundary are still caught.
+3. **Auto-reloads** with a 250ms delay on first detection — operator tab silently picks up the new version.
+4. Uses `sessionStorage` flag with 60s window to **prevent infinite reload loops**: if a stale-bundle error fires again within 60s of the first auto-reload, falls through to the manual fallback UI (so a genuinely-broken deploy doesn't ping-pong).
+5. Stale-bundle fallback UI shows a different message than generic errors: "NEW VERSION AVAILABLE — A new version of D.O.C was deployed. Reload to pick it up — your work isn't lost." with a primary "RELOAD NOW" button + keyboard hint "or press Cmd/Ctrl + Shift + R".
+6. Hard reload uses `window.location.href = '/?_=${Date.now()}'` to bust any intermediary HTTP cache that doesn't honor the no-cache headers.
+
+Generic-error path unchanged — only stale-bundle errors get the new treatment.
+
 ## [2.67.1] — 2026-05-04 — fix(missions): legacy missionstatus enum mixed-case + Hub auto-refresh + Refresh button
 
 Closes Tier 1 punch list from v2.67.0 ship report.
