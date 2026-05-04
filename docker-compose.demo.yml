@@ -81,7 +81,7 @@ services:
       args:
         VITE_SENTRY_DSN: ${VITE_SENTRY_DSN:-}
         VITE_SENTRY_ENVIRONMENT: demo
-        VITE_APP_VERSION: "2.63.5"
+        VITE_APP_VERSION: "${APP_VERSION:-2.67.3}"
     ports:
       - "3081:8080"
     labels:

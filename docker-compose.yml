@@ -173,7 +173,7 @@ services:
       - OTEL_SERVICE_NAME=droneops-api
       - TENANT=${TENANT:-shared}
       - ENV=${ENV:-prod}
-      - APP_VERSION=2.63.5
+      - APP_VERSION=${APP_VERSION:-2.67.3}
       # ADR-0002 §5 + ADR-0003 alerts via ntfy (ADR-0036).
       # Unset = no-op (structured JSON logs still emit).
       - NTFY_DRONEOPS_PUBLISHER_TOKEN=${NTFY_DRONEOPS_PUBLISHER_TOKEN:-}
@@ -264,7 +264,7 @@ services:
       - OTEL_SERVICE_NAME=droneops-worker
       - TENANT=${TENANT:-shared}
       - ENV=${ENV:-prod}
-      - APP_VERSION=2.63.5
+      - APP_VERSION=${APP_VERSION:-2.67.3}
       # ADR-0002 §5 + ADR-0003 alerts from silence watchdog task via
       # ntfy (ADR-0036).
       - NTFY_DRONEOPS_PUBLISHER_TOKEN=${NTFY_DRONEOPS_PUBLISHER_TOKEN:-}
@@ -301,7 +301,7 @@ services:
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - TENANT=${TENANT:-shared}
       - ENV=${ENV:-prod}
-      - APP_VERSION=2.63.5
+      - APP_VERSION=${APP_VERSION:-2.67.3}
       # ADR-0036 — beat scheduler enqueues silence watchdog and rotation
       # finalizer; the watchdog task itself emits the alert via ntfy.
       - NTFY_DRONEOPS_PUBLISHER_TOKEN=${NTFY_DRONEOPS_PUBLISHER_TOKEN:-}
@@ -349,7 +349,7 @@ services:
         # any `VITE_*` var that's in scope when `npm run build` runs.
         VITE_SENTRY_DSN: ${VITE_SENTRY_DSN:-}
         VITE_SENTRY_ENVIRONMENT: ${VITE_SENTRY_ENVIRONMENT:-production}
-        VITE_APP_VERSION: "2.63.5"
+        VITE_APP_VERSION: "${APP_VERSION:-2.67.3}"
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8080/ || exit 1"]

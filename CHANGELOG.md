@@ -4,6 +4,52 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## [2.67.4] — 2026-05-04 — fix: ops hygiene cluster (Tier 2 A5/A6/A7/A8)
+
+Four small Tier-2 items shipped as one consolidated release. Operator
+explicitly held A2 (host-side superuser password rotation) and A4
+(Guardian Graph mailer env vars on CHAD-HQ) for another day.
+
+**A5 — `droneops-deposits` ntfy topic registered in NOC fallback.**
+`~/noc-master/data/ntfy-fallback-topics.yml` gains an explicit dedicated
+fallback `barnardhq-fleet-droneops-deposits-7d14048450682062899dddfad10bd1fa`
+for the publisher-side helper to fall through to if `ntfy.barnardhq.com`
+is unreachable. The `droneops` prefix in `service-registry.json`
+already covered `droneops-deposits` server-side ACL — this just gives
+it its own fallback row for traceability.
+
+**A6 — stale `APP_VERSION=2.63.5` in compose replaced with env-overridable defaults.**
+`docker-compose.yml` (3 backend places + 1 frontend build arg) and
+`docker-compose.demo.yml` (1 frontend build arg) all now read
+`${APP_VERSION:-2.67.3}` (default tracks the at-time-of-edit current
+release). Operator's BOS-HQ `~/droneops/.env` `APP_VERSION` value
+also bumped to `2.67.4`. The proper long-term fix (NOC deployer
+auto-bumping `APP_VERSION` env from `backend/app/main.py`'s FastAPI
+`version=` on each deploy) is queued as Tier 3.
+
+**A7 — `/api/health` Stripe probe now reads from `system_settings` first, env as fallback.**
+`backend/app/main.py:_probe_stripe_cached` previously checked only
+`settings.stripe_secret_key` (env-only). Since the Stripe key is
+actually stored in the `system_settings` DB table (set live via the
+Settings UI / direct `INSERT`), the probe was reporting
+`"stripe": "unconfigured"` even on instances with a working live
+Stripe integration — actively misleading anyone debugging. The probe
+now: 1. tries `get_stripe_settings(db)` first (canonical DB source);
+2. falls back to env if the DB row is empty; 3. falls back to env if
+the DB lookup itself raises (defensive). 4 hermetic tests in
+`test_health_stripe_db_lookup.py` pin the DB-first contract +
+env-fallback + DB-failure-fallback + neither-configured paths.
+
+**A8 — frontend Sentry release tag now propagates correctly.**
+`frontend/src/lib/sentry.ts:33` already read `VITE_APP_VERSION` at
+init and used it as Sentry's `release` field — but the value was
+hardcoded `"2.63.5"` in `docker-compose.yml:352` build args, so every
+Sentry event since 2026-04 was tagged `release=droneops@2.63.5`.
+Fixed by A6's compose change. Going forward, Sentry events from the
+SPA correctly tag the deployed semver (`droneops@2.67.4` after this
+ship) so error grouping + regression detection in GlitchTip work
+properly.
+
 ## [2.67.3] — 2026-05-04 — feat: unsaved-changes guard on facet editors + Stripe pay-link in PDF + demo refresh (Tier 2 partial)
 
 Three Tier-2 items shipped together (the rest deferred per operator):

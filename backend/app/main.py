@@ -390,7 +390,7 @@ logger.info("MultiPartParser max_file_size set to 200 MB")
 app = FastAPI(
     title="D.O.C — Drone Operations Command",
     description="Self-hosted mission management, flight log analysis, AI report generation, invoicing, telemetry visualization, and real-time airspace monitoring for commercial drone operators.",
-    version="2.67.3",
+    version="2.67.4",
     lifespan=lifespan,
 )
 
@@ -511,19 +511,39 @@ _HEALTH_CACHE: dict = {"checked_at": 0.0, "stripe_status": None, "stripe_error":
 _HEALTH_STRIPE_TTL_SECONDS = 30.0
 
 
-async def _probe_stripe_cached() -> tuple[str, str | None]:
+async def _probe_stripe_cached(db: AsyncSession) -> tuple[str, str | None]:
     """Probe Stripe connectivity with a 30s TTL.
 
     Stripe rate-limits API calls; healthchecks fire every 10s in
     docker-compose.yml. Without a cache we'd burn 6 API calls/min.
     Returns (status, error_or_none). status ∈ {"ok", "unconfigured", "error"}.
+
+    v2.67.4 (Tier 2 A7) — read the secret from `system_settings` (the
+    canonical store, set live via Settings UI / DB row) with `settings.stripe_secret_key`
+    (env-only fallback) as a backstop. Previously this probe checked
+    only env, so even after the operator pasted a live key into the
+    Settings table the health endpoint kept reporting "unconfigured" —
+    misleading anyone debugging.
     """
     now = time.monotonic()
     if now - _HEALTH_CACHE["checked_at"] < _HEALTH_STRIPE_TTL_SECONDS \
             and _HEALTH_CACHE["stripe_status"] is not None:
         return _HEALTH_CACHE["stripe_status"], _HEALTH_CACHE["stripe_error"]
 
-    if not settings.stripe_secret_key:
+    # Resolve the secret: system_settings DB row first, then env fallback.
+    secret_key: str | None = None
+    try:
+        from app.services.stripe_service import get_stripe_settings
+        cfg = await get_stripe_settings(db)
+        secret_key = cfg.get("stripe_secret_key") or None
+    except Exception:
+        # If the lookup itself fails (DB blip, Stripe service import error),
+        # don't crash the probe — fall through to env.
+        secret_key = None
+    if not secret_key:
+        secret_key = settings.stripe_secret_key or None
+
+    if not secret_key:
         _HEALTH_CACHE.update({
             "checked_at": now,
             "stripe_status": "unconfigured",
@@ -533,7 +553,7 @@ async def _probe_stripe_cached() -> tuple[str, str | None]:
 
     try:
         import stripe as _stripe
-        _stripe.api_key = settings.stripe_secret_key
+        _stripe.api_key = secret_key
         # Account.retrieve is the cheapest authoritative ping.
         await asyncio.to_thread(_stripe.Account.retrieve)
         _HEALTH_CACHE.update({
@@ -604,7 +624,7 @@ async def health_check(db: AsyncSession = Depends(get_db)):
         logger.error("[HEALTH] Redis probe failed: %s", exc)
 
     # Stripe (cached, only if configured)
-    stripe_status, stripe_err = await _probe_stripe_cached()
+    stripe_status, stripe_err = await _probe_stripe_cached(db)
     body["stripe"] = stripe_status
     if stripe_status == "error":
         body["stripe_error"] = stripe_err
