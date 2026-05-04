@@ -736,6 +736,83 @@ async def create_client_payment(
 # OPERATOR ENDPOINTS — /api/missions/{id}/client-link
 # ═══════════════════════════════════════════════════════════════════════
 
+
+async def get_or_mint_active_client_link(
+    db: AsyncSession,
+    mission_id: UUID,
+    *,
+    days: int = 30,
+    ip_address: str | None = None,
+) -> tuple[str, datetime, ClientAccessToken] | None:
+    """Idempotent client-link helper (ADR-0011 spirit, applied to portal tokens).
+
+    Returns (jwt, expires_at, token_record) for the given mission. Reuses an
+    existing non-revoked, non-expired ClientAccessToken row when one exists for
+    the (customer, mission) pair instead of inserting a duplicate. The JWT is
+    always re-minted (the hash is a one-way digest, so the original JWT cannot
+    be recovered from the row), but its `exp` claim is aligned to the existing
+    row's `expires_at` so the URL window does not silently extend on every
+    call. The row's `token_hash` is updated to point at the freshly-minted JWT
+    so future revocation still nukes whatever URL is currently in flight.
+
+    Returns ``None`` when:
+      - The mission does not exist.
+      - The mission has no customer assigned.
+
+    Reuses ADR-0011 idempotent client-link logic — repeated callers (PDF
+    renders, retried operator clicks) do not mint duplicate magic links.
+    """
+    result = await db.execute(select(Mission).where(Mission.id == mission_id))
+    mission = result.scalar_one_or_none()
+    if not mission or not mission.customer_id:
+        return None
+
+    now = datetime.utcnow()
+    mission_id_str = str(mission.id)
+
+    # Look for an active (non-revoked, non-expired) token row that already
+    # covers this mission for this customer.
+    existing_q = await db.execute(
+        select(ClientAccessToken).where(
+            ClientAccessToken.customer_id == mission.customer_id,
+            ClientAccessToken.revoked_at.is_(None),
+            ClientAccessToken.expires_at > now,
+        )
+    )
+    for row in existing_q.scalars().all():
+        scope = [str(m) for m in (row.mission_scope or [])]
+        if mission_id_str in scope:
+            # Re-mint a JWT with exp aligned to the existing row's window.
+            remaining = row.expires_at - now
+            remaining_days = max(remaining.total_seconds() / 86400.0, 1.0 / 86400.0)
+            client_jwt = create_client_token(
+                mission.customer_id, [mission_id_str], remaining_days
+            )
+            row.token_hash = hash_token(client_jwt)
+            await db.flush()
+            return client_jwt, row.expires_at, row
+
+    # No active row — mint fresh and insert.
+    client_jwt = create_client_token(mission.customer_id, [mission_id_str], days)
+    expires_at = now + timedelta(days=days)
+    token_record = ClientAccessToken(
+        customer_id=mission.customer_id,
+        token_hash=hash_token(client_jwt),
+        mission_scope=[mission_id_str],
+        expires_at=expires_at,
+        ip_address=ip_address,
+    )
+    db.add(token_record)
+    await db.flush()
+    return client_jwt, expires_at, token_record
+
+
+def build_client_portal_url(client_jwt: str) -> str:
+    """Compose the customer-facing portal URL from a JWT."""
+    frontend_url = settings.frontend_url.rstrip("/")
+    return f"{frontend_url}/client/{client_jwt}"
+
+
 @router.post("/api/missions/{mission_id}/client-link", response_model=ClientLinkResponse)
 async def create_client_link(
     mission_id: UUID,
@@ -744,51 +821,43 @@ async def create_client_link(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
-    """Operator auth: generate a client portal token/URL for a mission."""
+    """Operator auth: generate (or reuse) a client portal token/URL for a mission."""
     start = time.perf_counter()
     client_ip = _client_ip(request)
 
-    logger.info("[CLIENT-LINK-CREATE] Operator creating link for mission=%s, expires_days=%d from ip=%s", mission_id, data.expires_days, client_ip)
+    logger.info(
+        "[CLIENT-LINK-CREATE] Operator creating link for mission=%s, expires_days=%d from ip=%s",
+        mission_id, data.expires_days, client_ip,
+    )
 
-    result = await db.execute(select(Mission).where(Mission.id == mission_id))
-    mission = result.scalar_one_or_none()
-    if not mission:
-        logger.warning("[CLIENT-LINK-CREATE] Mission not found: %s", mission_id)
-        raise HTTPException(status_code=404, detail="Mission not found")
-
-    if not mission.customer_id:
+    minted = await get_or_mint_active_client_link(
+        db, mission_id, days=data.expires_days, ip_address=client_ip
+    )
+    if minted is None:
+        # Disambiguate the failure for the operator UI.
+        result = await db.execute(select(Mission).where(Mission.id == mission_id))
+        mission = result.scalar_one_or_none()
+        if not mission:
+            logger.warning("[CLIENT-LINK-CREATE] Mission not found: %s", mission_id)
+            raise HTTPException(status_code=404, detail="Mission not found")
         logger.warning("[CLIENT-LINK-CREATE] Mission %s has no customer assigned", mission_id)
         raise HTTPException(status_code=400, detail="Mission must have a customer assigned")
 
-    # Create the JWT
-    mission_ids = [str(mission.id)]
-    client_jwt = create_client_token(mission.customer_id, mission_ids, data.expires_days)
-
-    # Store token record for tracking/revocation
-    token_record = ClientAccessToken(
-        customer_id=mission.customer_id,
-        token_hash=hash_token(client_jwt),
-        mission_scope=[str(mission.id)],
-        expires_at=datetime.utcnow() + timedelta(days=data.expires_days),
-        ip_address=client_ip,
-    )
-    db.add(token_record)
-    await db.flush()
-
-    frontend_url = settings.frontend_url.rstrip("/")
-    portal_url = f"{frontend_url}/client/{client_jwt}"
+    client_jwt, expires_at, token_record = minted
+    portal_url = build_client_portal_url(client_jwt)
+    mission_ids = [str(mission_id)]
 
     elapsed = time.perf_counter() - start
     logger.info(
-        "[CLIENT-LINK-CREATE] Token created id=%s for mission=%s, customer=%s (%.3fs)",
-        token_record.id, mission_id, mission.customer_id, elapsed,
+        "[CLIENT-LINK-CREATE] Token id=%s for mission=%s, customer=%s, expires=%s (%.3fs)",
+        token_record.id, mission_id, token_record.customer_id, expires_at.isoformat(), elapsed,
     )
 
     return ClientLinkResponse(
         token_id=str(token_record.id),
         portal_url=portal_url,
-        expires_at=token_record.expires_at,
-        customer_id=str(mission.customer_id),
+        expires_at=expires_at,
+        customer_id=str(token_record.customer_id),
         mission_ids=mission_ids,
     )
 
@@ -818,23 +887,17 @@ async def send_client_link(
     if not customer or not customer.email:
         raise HTTPException(status_code=400, detail="Customer has no email address")
 
-    # Generate a fresh token
-    mission_ids = [str(mission.id)]
-    client_jwt = create_client_token(customer.id, mission_ids, settings.client_token_expire_days)
-    expires_at = datetime.utcnow() + timedelta(days=settings.client_token_expire_days)
-
-    token_record = ClientAccessToken(
-        customer_id=customer.id,
-        token_hash=hash_token(client_jwt),
-        mission_scope=[str(mission.id)],
-        expires_at=expires_at,
+    minted = await get_or_mint_active_client_link(
+        db,
+        mission_id,
+        days=settings.client_token_expire_days,
         ip_address=client_ip,
     )
-    db.add(token_record)
-    await db.flush()
-
-    frontend_url = settings.frontend_url.rstrip("/")
-    portal_url = f"{frontend_url}/client/{client_jwt}"
+    if minted is None:
+        # Already guarded above, but keep the contract honest.
+        raise HTTPException(status_code=400, detail="Mission has no customer assigned")
+    client_jwt, expires_at, token_record = minted
+    portal_url = build_client_portal_url(client_jwt)
 
     # Send email
     from app.services.email_service import send_client_portal_email
