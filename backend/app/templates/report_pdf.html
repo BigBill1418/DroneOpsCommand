@@ -550,12 +550,18 @@
     <span style="font-family: 'Liberation Sans', 'Noto Sans', Arial, sans-serif; font-weight: 700; text-transform: uppercase; font-size: 18pt; color: #2ecc40; letter-spacing: 2px;">PAID IN FULL</span>
   </div>
   {% else %}
-  {% if payment_links and (payment_links.get('paypal_link') or payment_links.get('venmo_link')) %}
+  {% if stripe_pay_url or (payment_links and (payment_links.get('paypal_link') or payment_links.get('venmo_link'))) %}
   <div style="margin-top: 20px; padding: 15px 20px; background: #f5f7fa; border: 1px solid #e0e4ea; border-radius: 6px;">
     <div style="font-family: 'Liberation Sans', 'Noto Sans', Arial, sans-serif; font-weight: 700; text-transform: uppercase; font-size: 14pt; color: #0e1117; letter-spacing: 1px; margin-bottom: 8px;">
       PAYMENT OPTIONS
     </div>
     <div style="font-size: 10pt;">
+      {% if stripe_pay_url %}
+      <div style="margin-bottom: 10px;">
+        <strong>Pay online (credit/debit/ACH):</strong>
+        <a href="{{ stripe_pay_url }}" style="color: #189cc6; text-decoration: underline; font-weight: bold;">{{ stripe_pay_url }}</a>
+      </div>
+      {% endif %}
       {% if payment_links.get('paypal_link') %}
       <div style="margin-bottom: 6px;">
         <strong>PayPal:</strong> <a href="{{ payment_links.paypal_link }}" style="color: #003087; text-decoration: underline;">{{ payment_links.paypal_link }}</a>
