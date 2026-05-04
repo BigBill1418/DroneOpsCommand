@@ -335,12 +335,42 @@ async def generate_report_pdf(
 
     # Load payment links for invoice
     payment_links = {}
+    stripe_pay_url: str | None = None
     if mission.is_billable and invoice_dict and not invoice_dict.get("paid_in_full"):
         from app.models.system_settings import SystemSetting
         pl_result = await db.execute(
             select(SystemSetting).where(SystemSetting.key.in_(["paypal_link", "venmo_link"]))
         )
         payment_links = {r.key: r.value for r in pl_result.scalars().all()}
+
+        # Reuses ADR-0011 idempotent client-link logic — repeated PDF renders
+        # do not mint duplicate magic links. Only mint a Stripe pay URL when
+        # there is a non-zero balance to collect; a $0 invoice or a missing
+        # customer leaves stripe_pay_url=None and the template falls through
+        # to the legacy PayPal/Venmo block (or hides the section entirely).
+        if float(invoice_dict.get("total") or 0) > 0:
+            from app.routers.client_portal import (
+                build_client_portal_url,
+                get_or_mint_active_client_link,
+            )
+
+            try:
+                minted = await get_or_mint_active_client_link(
+                    db, mission_id, days=30
+                )
+                if minted is not None:
+                    client_jwt, _expires_at, _record = minted
+                    stripe_pay_url = build_client_portal_url(client_jwt)
+                else:
+                    logger.info(
+                        "[PDF-PAY-LINK] Skipping Stripe pay URL for mission=%s — no customer assigned",
+                        mission_id,
+                    )
+            except Exception as exc:  # noqa: BLE001 — fail-soft on link-mint errors
+                logger.warning(
+                    "[PDF-PAY-LINK] Failed to mint Stripe pay URL for mission=%s: %s — PDF will render without it",
+                    mission_id, exc,
+                )
 
     # Images
     image_list = [{"file_path": img.file_path, "caption": img.caption} for img in mission.images]
@@ -372,6 +402,7 @@ async def generate_report_pdf(
                 aircraft_list=aircraft_list,
                 image_paths=image_list,
                 payment_links=payment_links,
+                stripe_pay_url=stripe_pay_url,
                 download_link=download_link,
                 branding=branding,
             ),

@@ -48,6 +48,7 @@ def generate_pdf(
     payment_links: dict | None = None,
     download_link: dict | None = None,
     branding: dict | None = None,
+    stripe_pay_url: str | None = None,
 ) -> str:
     """Generate a PDF report and return the file path."""
     from app.routers.system_settings import BRANDING_DEFAULTS
@@ -82,6 +83,7 @@ def generate_pdf(
             aircraft_list=aircraft_list or [],
             images=image_paths or [],
             payment_links=payment_links or {},
+            stripe_pay_url=stripe_pay_url,
             download_link=download_link,
             generated_at=datetime.utcnow().strftime("%B %d, %Y"),
             year=datetime.utcnow().year,

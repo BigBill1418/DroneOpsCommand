@@ -4,6 +4,14 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## [2.67.3] — 2026-05-04 — feat: unsaved-changes guard on facet editors + Stripe pay-link in PDF + demo refresh (Tier 2 partial)
+
+Three Tier-2 items shipped together (the rest deferred per operator):
+1. Unsaved-changes guard across all 5 Mission Hub facet editors (B1)
+2. Stripe pay-link in emailed PDF invoice (B2)
+3. Demo instance refresh from v2.63.3 → v2.67.2 (12-release jump). NOC config corrected: `services[DroneOps Demo].repo` was pointing at the non-existent `BigBill1418/DroneOpsDemo` repo; corrected to `DroneOpsCommand` (the demo's local clone has always tracked that repo). 8 demo missions + 4 demo customers preserved; schema migrations (deposit columns + tos_acceptances) applied; demo serving 200.
+
+### B1 — facet editors unsaved-changes guard
 ## [Unreleased] — feat(facets): unsaved-changes guard across all 5 Mission Hub editors
 
 Adds a confirm-before-discard prompt to every facet editor so an operator who has typed into a field and then clicks Cancel / the back arrow / closes the tab gets a confirmation step instead of silently losing the edit.
@@ -26,7 +34,19 @@ Adds a confirm-before-discard prompt to every facet editor so an operator who ha
 - `MissionDetailsEdit.test.tsx` (4 new tests) — Cancel after edit shows modal / Keep Editing closes without nav / Discard navigates without write / Cancel after Save does NOT prompt (dirty cleared).
 - `MissionInvoiceEdit.test.tsx` (5 new tests, file is new) — clean Cancel doesn't prompt / dirty Cancel shows modal / Keep Editing closes / Discard navigates without write / Cancel after Save doesn't prompt. Includes the load-bearing CONTRACT TRIPWIRE that POST `/api/missions` is never fired from this page.
 
-No backend changes. No version bump (orchestrator handles a consolidated v2.67.3 release after merge). No ADR (UX polish, not architecture).
+No backend changes. No ADR (UX polish, not architecture).
+
+### B2 — Stripe pay-link in emailed PDF
+
+The emailed PDF invoice has carried PayPal + Venmo links since v2.65.0 but no Stripe equivalent. Customers who wanted to pay by card / Apple Pay / ACH had to dig back through the original portal email to find their magic link. This adds a "Pay online (credit/debit/ACH)" row at the top of the PAYMENT OPTIONS block that drops the customer onto their existing client portal page (`${frontend_url}/client/<jwt>`), where the Pay Deposit / Pay Balance buttons (Stripe Checkout, ADR-0009) take it from there.
+
+The URL is minted via a new helper `get_or_mint_active_client_link(db, mission_id, days=30)` extracted from the two existing `/api/missions/{id}/client-link` endpoints. Idempotency contract (per ADR-0011 spirit, applied to portal tokens): if a non-revoked, non-expired ClientAccessToken row already covers this (customer, mission), do NOT insert a duplicate row — re-mint a JWT whose `exp` matches the existing row's `expires_at` and update the row's `token_hash` to point at the new JWT. Three PDF renders in a row produce three valid magic-link URLs, all bound to the same registry row, all with the same expiry window.
+
+URL is omitted (None) when `mission.is_billable` is False, no Invoice exists, `paid_in_full` is True, `total` is 0, mission has no customer (fail-soft, log + skip), or the helper raises (fail-soft, log + skip; PDF still renders). Brand color is the customer-facing TOS PDF cyan `#189cc6`, NOT the operator dark-theme `#00d4ff`. The legacy PayPal/Venmo block is preserved unchanged below the Stripe row.
+
+Failover guard: pure additive logic in the router + a single helper call. No PG schema changes, no replication impact, no swap-flow effect, no failover-engine interaction.
+
+Files: `backend/app/routers/client_portal.py` (helper extraction + idempotent operator endpoints), `backend/app/routers/reports.py` (mint URL into PDF context), `backend/app/services/pdf_generator.py` (`stripe_pay_url` kwarg), `backend/app/templates/report_pdf.html` (render row above PayPal/Venmo). 17 hermetic tests in `backend/tests/test_pdf_invoice_pay_link.py` covering helper idempotency, template render edge cases, and route-layer context threading. No new ADR required.
 
 ## [2.67.2] — 2026-05-04 — fix(spa): graceful handling of stale-bundle errors after deploy
 

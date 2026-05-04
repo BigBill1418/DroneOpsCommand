@@ -118,7 +118,7 @@ function NavContent({
             c="#5a6478"
             style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: '15px' }}
           >
-            v2.67.2
+            v2.67.3
           </Text>
           <Tooltip label="Star on GitHub" position="right">
             <ActionIcon
@@ -391,7 +391,7 @@ export default function AppLayout({ onLogout }: AppLayoutProps) {
                   fontSize: '15px',
                 }}
               >
-                v2.67.2
+                v2.67.3
               </Text>
               <Tooltip label="Star on GitHub" position="right">
                 <ActionIcon
