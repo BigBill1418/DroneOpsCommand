@@ -39,6 +39,8 @@ import { useNavigate, useParams } from 'react-router-dom';
 import api from '../api/client';
 import type { Aircraft, Mission } from '../api/types';
 import { cardStyle } from '../components/shared/styles';
+import UnsavedChangesModal from '../components/shared/UnsavedChangesModal';
+import { useDirtyGuard } from '../hooks/useDirtyGuard';
 
 interface AttachedFlight {
   /** mission_flight row id */
@@ -104,6 +106,10 @@ export default function MissionFlightsEdit() {
   const [flightsLoading, setFlightsLoading] = useState(false);
   const [aircraft, setAircraft] = useState<Aircraft[]>([]);
   const [missionAircraft, setMissionAircraft] = useState<string[]>([]);
+  // Baseline for the AIRCRAFT-USED checkbox group — the only field
+  // here that doesn't persist via its own endpoint. (Attach / detach /
+  // assign-aircraft each fire their own immediate write.)
+  const [missionAircraftBaseline, setMissionAircraftBaseline] = useState<string[]>([]);
   const [availableFlights, setAvailableFlights] = useState<AvailableFlight[]>([]);
   const [attached, setAttached] = useState<AttachedFlight[]>([]);
 
@@ -123,6 +129,7 @@ export default function MissionFlightsEdit() {
         ...new Set(m.flights.filter((f) => f.aircraft_id).map((f) => f.aircraft_id!)),
       ];
       setMissionAircraft(aircraftIds);
+      setMissionAircraftBaseline(aircraftIds);
     } catch (err) {
       console.error('[MissionFlightsEdit] mission load failed', err);
       notifications.show({
@@ -264,8 +271,24 @@ export default function MissionFlightsEdit() {
     }
   };
 
+  // Dirty calc for the Flights facet:
+  //   Add / Remove / Assign-aircraft each fire their own POST/DELETE/
+  //   PATCH immediately, so they're never "unsaved". The only state
+  //   that lives only in the browser is the AIRCRAFT-USED checkbox
+  //   group above the table; compare against its loaded baseline.
+  //   (A length-then-set comparison so order of selection doesn't
+  //   matter; either side may have duplicates suppressed.)
+  const aircraftDirty =
+    !loading &&
+    (missionAircraft.length !== missionAircraftBaseline.length ||
+      missionAircraft.some((aid) => !missionAircraftBaseline.includes(aid)) ||
+      missionAircraftBaseline.some((aid) => !missionAircraft.includes(aid)));
+
+  const { showConfirm, setShowConfirm, guardedNavigate, confirmAndNavigate } =
+    useDirtyGuard({ isDirty: aircraftDirty, navigate });
+
   const handleDone = () => {
-    navigate(`/missions/${id}`);
+    guardedNavigate(`/missions/${id}`);
   };
 
   if (loading) {
@@ -535,6 +558,12 @@ export default function MissionFlightsEdit() {
           BACK TO MISSION
         </Button>
       </Group>
+
+      <UnsavedChangesModal
+        opened={showConfirm}
+        onKeepEditing={() => setShowConfirm(false)}
+        onDiscard={confirmAndNavigate}
+      />
     </Stack>
   );
 }

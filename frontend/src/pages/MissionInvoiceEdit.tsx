@@ -43,6 +43,8 @@ import { useNavigate, useParams } from 'react-router-dom';
 import api from '../api/client';
 import type { Invoice, Mission, RateTemplate } from '../api/types';
 import { cardStyle, inputStyles } from '../components/shared/styles';
+import UnsavedChangesModal from '../components/shared/UnsavedChangesModal';
+import { useDirtyGuard } from '../hooks/useDirtyGuard';
 
 // Same enum as MissionNew — kept in sync intentionally; a shared constant
 // would be the right refactor when there are 3+ consumers.
@@ -60,6 +62,34 @@ interface EditableLineItem {
   category: string;
   quantity: number;
   unit_price: number;
+}
+
+/**
+ * Serialize the operator-editable invoice state into a string for
+ * dirty-comparison. Stable key order via explicit object construction
+ * (JSON.stringify on a hand-built object is deterministic in V8/JSC).
+ */
+function serializeInvoiceState(state: {
+  lineItems: EditableLineItem[];
+  taxRate: number;
+  notes: string;
+  paidInFull: boolean;
+  depositRequired: boolean;
+  depositAmount: number | null;
+}): string {
+  return JSON.stringify({
+    lineItems: state.lineItems.map((li) => ({
+      description: li.description,
+      category: li.category,
+      quantity: li.quantity,
+      unit_price: li.unit_price,
+    })),
+    taxRate: state.taxRate,
+    notes: state.notes,
+    paidInFull: state.paidInFull,
+    depositRequired: state.depositRequired,
+    depositAmount: state.depositAmount,
+  });
 }
 
 export default function MissionInvoiceEdit() {
@@ -84,6 +114,20 @@ export default function MissionInvoiceEdit() {
   const [depositRequired, setDepositRequired] = useState(true);
   const [depositAmount, setDepositAmount] = useState<number | null>(null);
   const [depositPaid, setDepositPaid] = useState(false);
+
+  // Serialized baseline for dirty-guard. Re-baselined on initial load
+  // and after every successful save. depositPaid is excluded — it's
+  // server-driven and not operator-editable.
+  const [baselineSerialized, setBaselineSerialized] = useState<string>(
+    serializeInvoiceState({
+      lineItems: [],
+      taxRate: 0,
+      notes: '',
+      paidInFull: false,
+      depositRequired: true,
+      depositAmount: null,
+    }),
+  );
 
   useEffect(() => {
     if (!id) return;
@@ -113,25 +157,50 @@ export default function MissionInvoiceEdit() {
           const inv = invoiceResult.value.data as Invoice;
           setInvoiceExists(true);
           setInvoiceId(inv.id);
-          setTaxRate(inv.tax_rate ?? 0);
-          setNotes(inv.notes ?? '');
-          setPaidInFull(inv.paid_in_full);
-          setDepositRequired(inv.deposit_required ?? false);
-          setDepositAmount(inv.deposit_amount ?? null);
+          const initialTaxRate = inv.tax_rate ?? 0;
+          const initialNotes = inv.notes ?? '';
+          const initialPaidInFull = inv.paid_in_full;
+          const initialDepositRequired = inv.deposit_required ?? false;
+          const initialDepositAmount = inv.deposit_amount ?? null;
+          const initialLineItems: EditableLineItem[] = (inv.line_items || []).map((li) => ({
+            description: li.description,
+            category: li.category,
+            quantity: li.quantity,
+            unit_price: li.unit_price,
+          }));
+          setTaxRate(initialTaxRate);
+          setNotes(initialNotes);
+          setPaidInFull(initialPaidInFull);
+          setDepositRequired(initialDepositRequired);
+          setDepositAmount(initialDepositAmount);
           setDepositPaid(inv.deposit_paid ?? false);
-          setLineItems(
-            (inv.line_items || []).map((li) => ({
-              description: li.description,
-              category: li.category,
-              quantity: li.quantity,
-              unit_price: li.unit_price,
-            })),
+          setLineItems(initialLineItems);
+          setBaselineSerialized(
+            serializeInvoiceState({
+              lineItems: initialLineItems,
+              taxRate: initialTaxRate,
+              notes: initialNotes,
+              paidInFull: initialPaidInFull,
+              depositRequired: initialDepositRequired,
+              depositAmount: initialDepositAmount,
+            }),
           );
         } else {
           // 404 — no invoice yet for this mission. Form starts empty so
-          // the operator can build one.
+          // the operator can build one. Baseline matches the post-mount
+          // empty state so an untouched form is NOT considered dirty.
           setInvoiceExists(false);
           setInvoiceId(null);
+          setBaselineSerialized(
+            serializeInvoiceState({
+              lineItems: [],
+              taxRate: 0,
+              notes: '',
+              paidInFull: false,
+              depositRequired: true,
+              depositAmount: null,
+            }),
+          );
         }
       } catch (err) {
         console.error('[MissionInvoiceEdit] load failed:', err);
@@ -249,6 +318,20 @@ export default function MissionInvoiceEdit() {
         setDepositAmount(finalInv.deposit_amount ?? null);
       }
 
+      // Re-baseline from current in-memory state so a Cancel after a
+      // successful Save doesn't re-prompt. We use the latest state we
+      // posted (validItems, not the raw lineItems which may include
+      // empty-description rows the backend dropped).
+      setBaselineSerialized(
+        serializeInvoiceState({
+          lineItems: validItems,
+          taxRate,
+          notes,
+          paidInFull,
+          depositRequired,
+          depositAmount,
+        }),
+      );
       notifications.show({
         title: 'Invoice Saved',
         message: 'Line items, deposit, and totals updated.',
@@ -264,6 +347,26 @@ export default function MissionInvoiceEdit() {
       savingRef.current = false;
       setSaving(false);
     }
+  };
+
+  // Dirty calc: serialized current state diverges from baseline.
+  // Gated to false during initial load so the empty default state
+  // doesn't false-positive before the GET response lands.
+  const currentSerialized = serializeInvoiceState({
+    lineItems,
+    taxRate,
+    notes,
+    paidInFull,
+    depositRequired,
+    depositAmount,
+  });
+  const isDirty = !loading && currentSerialized !== baselineSerialized;
+
+  const { showConfirm, setShowConfirm, guardedNavigate, confirmAndNavigate } =
+    useDirtyGuard({ isDirty, navigate });
+
+  const handleCancel = () => {
+    guardedNavigate(`/missions/${id}`);
   };
 
   if (loading || !mission) {
@@ -284,7 +387,7 @@ export default function MissionInvoiceEdit() {
               size="xs"
               color="gray"
               leftSection={<IconArrowLeft size={14} />}
-              onClick={() => navigate(`/missions/${id}`)}
+              onClick={handleCancel}
               styles={{ root: { fontFamily: "'Share Tech Mono', monospace", letterSpacing: '1px' } }}
             >
               BACK TO MISSION
@@ -551,7 +654,7 @@ export default function MissionInvoiceEdit() {
         <Button
           variant="subtle"
           color="gray"
-          onClick={() => navigate(`/missions/${id}`)}
+          onClick={handleCancel}
           disabled={saving}
         >
           Cancel
@@ -566,6 +669,12 @@ export default function MissionInvoiceEdit() {
           SAVE INVOICE
         </Button>
       </Group>
+
+      <UnsavedChangesModal
+        opened={showConfirm}
+        onKeepEditing={() => setShowConfirm(false)}
+        onDiscard={confirmAndNavigate}
+      />
     </Stack>
   );
 }
