@@ -45,6 +45,8 @@ import api from '../api/client';
 import type { Mission } from '../api/types';
 import RichTextEditor from '../components/RichTextEditor/RichTextEditor';
 import PdfViewer from '../components/PDFPreview/PdfViewer';
+import UnsavedChangesModal from '../components/shared/UnsavedChangesModal';
+import { useDirtyGuard } from '../hooks/useDirtyGuard';
 
 const inputStyles = {
   input: { background: '#050608', borderColor: '#1a1f2e', color: '#e8edf2' },
@@ -84,6 +86,15 @@ export default function MissionReportEdit() {
   const [narrative, setNarrative] = useState<string>('');
   const [reportContent, setReportContent] = useState<string>('');
   const [includeDownloadLink, setIncludeDownloadLink] = useState<boolean>(false);
+
+  // Baseline snapshot for dirty-guard. Populated on initial load and
+  // re-baselined after a successful Save Draft / AI generate / PDF
+  // generate (each persists at least one of these fields).
+  const [baseline, setBaseline] = useState({
+    narrative: '',
+    reportContent: '',
+    includeDownloadLink: false,
+  });
 
   // Action state
   const [generating, setGenerating] = useState<boolean>(false);
@@ -148,9 +159,17 @@ export default function MissionReportEdit() {
 
         if (reportResult.status === 'fulfilled') {
           const r = reportResult.value.data || {};
-          setNarrative(r.user_narrative || '');
-          setReportContent(r.final_content || '');
-          setIncludeDownloadLink(Boolean(r.include_download_link));
+          const initialNarrative = r.user_narrative || '';
+          const initialContent = r.final_content || '';
+          const initialIncludeLink = Boolean(r.include_download_link);
+          setNarrative(initialNarrative);
+          setReportContent(initialContent);
+          setIncludeDownloadLink(initialIncludeLink);
+          setBaseline({
+            narrative: initialNarrative,
+            reportContent: initialContent,
+            includeDownloadLink: initialIncludeLink,
+          });
           setLastSavedAt(r.updated_at || r.generated_at || null);
           setLastSentAt(r.sent_at || null);
           setLastGeneratedAt(r.generated_at || null);
@@ -191,6 +210,13 @@ export default function MissionReportEdit() {
         resp?.data?.generated_at ||
         new Date().toISOString();
       setLastSavedAt(ts);
+      // Re-baseline so a subsequent Cancel doesn't prompt for changes
+      // we just persisted.
+      setBaseline({
+        narrative,
+        reportContent,
+        includeDownloadLink,
+      });
       notifications.show({
         title: 'Draft Saved',
         message: 'Report draft has been saved',
@@ -221,8 +247,14 @@ export default function MissionReportEdit() {
       const taskId = resp?.data?.task_id;
       if (!taskId) {
         // Fallback: synchronous response (older backends).
-        setReportContent(resp?.data?.final_content || '');
+        const syncContent = resp?.data?.final_content || '';
+        setReportContent(syncContent);
         setLastGeneratedAt(new Date().toISOString());
+        setBaseline({
+          narrative,
+          reportContent: syncContent,
+          includeDownloadLink,
+        });
         setGenerating(false);
         return;
       }
@@ -244,10 +276,19 @@ export default function MissionReportEdit() {
             stopPolling();
             try {
               const reportResp = await api.get(`/missions/${missionId}/report`);
-              setReportContent(reportResp?.data?.final_content || '');
+              const generatedContent = reportResp?.data?.final_content || '';
+              setReportContent(generatedContent);
               setLastGeneratedAt(
                 reportResp?.data?.generated_at || new Date().toISOString(),
               );
+              // AI generation persisted on the server; treat narrative
+              // + new content as the new clean baseline so Cancel
+              // doesn't fire after a successful Generate.
+              setBaseline({
+                narrative,
+                reportContent: generatedContent,
+                includeDownloadLink,
+              });
               notifications.show({
                 title: 'Report Ready',
                 message: 'Your AI report is ready for review',
@@ -297,6 +338,17 @@ export default function MissionReportEdit() {
           final_content: reportContent,
         });
         setLastSavedAt(new Date().toISOString());
+        // The PUT only included final_content but the operator's
+        // narrative + include-link toggle live alongside it. Re-
+        // baseline all three so Cancel after a Generate-PDF doesn't
+        // prompt; the narrative may genuinely still differ from server
+        // but if the operator triggered Generate-PDF we treat that as
+        // an explicit "ship it" intent.
+        setBaseline({
+          narrative,
+          reportContent,
+          includeDownloadLink,
+        });
       }
 
       const resp = await api.post(
@@ -372,9 +424,19 @@ export default function MissionReportEdit() {
     }
   };
 
+  // Dirty calc: any of the 3 operator-editable fields drifted from the
+  // baseline snapshot. Gate to false during initial load.
+  const isDirty =
+    !loading &&
+    (narrative !== baseline.narrative ||
+      reportContent !== baseline.reportContent ||
+      includeDownloadLink !== baseline.includeDownloadLink);
+
+  const { showConfirm, setShowConfirm, guardedNavigate, confirmAndNavigate } =
+    useDirtyGuard({ isDirty, navigate });
+
   const handleCancel = () => {
-    if (missionId) navigate(`/missions/${missionId}`);
-    else navigate('/missions');
+    guardedNavigate(missionId ? `/missions/${missionId}` : '/missions');
   };
 
   if (!missionId) {
@@ -597,6 +659,12 @@ export default function MissionReportEdit() {
           )}
         </Stack>
       </Card>
+
+      <UnsavedChangesModal
+        opened={showConfirm}
+        onKeepEditing={() => setShowConfirm(false)}
+        onDiscard={confirmAndNavigate}
+      />
     </Stack>
   );
 }
