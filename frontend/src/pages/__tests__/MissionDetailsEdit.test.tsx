@@ -166,4 +166,106 @@ describe('MissionDetailsEdit', () => {
     expect(lastPutBody).toBeNull();
     expect(postMissionsCallCount).toBe(0);
   });
+
+  // ─── Unsaved-changes guard (v2.67.3 polish) ────────────────────────
+  describe('unsaved-changes guard', () => {
+    it('Cancel after editing shows the confirm modal and does NOT navigate', async () => {
+      const user = userEvent.setup();
+      navigateSpy.mockClear();
+      render(
+        <TestProviders>
+          <MissionDetailsEdit />
+        </TestProviders>,
+      );
+
+      const titleInput = (await screen.findByLabelText(/Mission Title/i)) as HTMLInputElement;
+      await user.type(titleInput, ' edited');
+
+      const cancelBtn = screen.getByRole('button', { name: /CANCEL/i });
+      await user.click(cancelBtn);
+
+      // Modal renders; navigation suppressed.
+      expect(await screen.findByText(/Discard unsaved changes\?/i)).toBeInTheDocument();
+      expect(navigateSpy).not.toHaveBeenCalled();
+    });
+
+    it('Keep Editing closes the modal without navigating', async () => {
+      const user = userEvent.setup();
+      navigateSpy.mockClear();
+      render(
+        <TestProviders>
+          <MissionDetailsEdit />
+        </TestProviders>,
+      );
+
+      const titleInput = (await screen.findByLabelText(/Mission Title/i)) as HTMLInputElement;
+      await user.type(titleInput, ' edited');
+      await user.click(screen.getByRole('button', { name: /CANCEL/i }));
+
+      const keepBtn = await screen.findByRole('button', { name: /KEEP EDITING/i });
+      await user.click(keepBtn);
+
+      await waitFor(() => {
+        expect(screen.queryByText(/Discard unsaved changes\?/i)).not.toBeInTheDocument();
+      });
+      expect(navigateSpy).not.toHaveBeenCalled();
+    });
+
+    it('Discard Changes navigates to /missions/{id}', async () => {
+      const user = userEvent.setup();
+      navigateSpy.mockClear();
+      render(
+        <TestProviders>
+          <MissionDetailsEdit />
+        </TestProviders>,
+      );
+
+      const titleInput = (await screen.findByLabelText(/Mission Title/i)) as HTMLInputElement;
+      await user.type(titleInput, ' edited');
+      await user.click(screen.getByRole('button', { name: /CANCEL/i }));
+
+      const discardBtn = await screen.findByRole('button', { name: /DISCARD CHANGES/i });
+      await user.click(discardBtn);
+
+      await waitFor(() => {
+        expect(navigateSpy).toHaveBeenCalledWith(`/missions/${MISSION_ID}`);
+      });
+      // Cancel must never write.
+      expect(lastPutBody).toBeNull();
+      expect(postMissionsCallCount).toBe(0);
+    });
+
+    it('Cancel after a successful Save does NOT prompt (dirty cleared)', async () => {
+      const user = userEvent.setup();
+      navigateSpy.mockClear();
+      render(
+        <TestProviders>
+          <MissionDetailsEdit />
+        </TestProviders>,
+      );
+
+      const titleInput = (await screen.findByLabelText(/Mission Title/i)) as HTMLInputElement;
+      await user.clear(titleInput);
+      await user.type(titleInput, 'Edited then saved');
+
+      await user.click(screen.getByRole('button', { name: /SAVE CHANGES/i }));
+
+      // Save fires + navigates as part of the existing Save contract.
+      await waitFor(() => {
+        expect(lastPutBody).not.toBeNull();
+      });
+      await waitFor(() => {
+        expect(navigateSpy).toHaveBeenCalledWith(`/missions/${MISSION_ID}`);
+      });
+
+      // The Save handler resets dirty state. A subsequent click on
+      // Cancel (still mounted post-Save) must NOT fire the modal.
+      navigateSpy.mockClear();
+      const cancelBtn = screen.getByRole('button', { name: /CANCEL/i });
+      await user.click(cancelBtn);
+
+      expect(screen.queryByText(/Discard unsaved changes\?/i)).not.toBeInTheDocument();
+      expect(navigateSpy).toHaveBeenCalledWith(`/missions/${MISSION_ID}`);
+    });
+  });
 });

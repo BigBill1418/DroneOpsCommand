@@ -4,6 +4,30 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## [Unreleased] — feat(facets): unsaved-changes guard across all 5 Mission Hub editors
+
+Adds a confirm-before-discard prompt to every facet editor so an operator who has typed into a field and then clicks Cancel / the back arrow / closes the tab gets a confirmation step instead of silently losing the edit.
+
+**New shared pieces:**
+- `frontend/src/hooks/useDirtyGuard.ts` — drop-in hook taking `{ isDirty, navigate }`. Returns `{ showConfirm, setShowConfirm, guardedNavigate, confirmAndNavigate }`. Editors call `guardedNavigate(target)` instead of `navigate(target)` directly; the hook stashes the target and surfaces `showConfirm=true` when dirty. Also registers a `beforeunload` listener while dirty so tab close / hard refresh / browser back surfaces the native "Leave site?" prompt.
+- `frontend/src/components/shared/UnsavedChangesModal.tsx` — operator-brand Mantine modal: cyan KEEP-EDITING (default, autoFocus) + red DISCARD-CHANGES. Editors can override body copy.
+
+**Per-editor wiring:**
+- **MissionDetailsEdit** — Mantine `useForm` covers 7 fields; the 3 UNAS fields are plain useState tracked via baseline snapshot. `form.resetDirty(loaded)` after initial setValues so a freshly loaded form isn't false-positive dirty. Save handler re-baselines via `form.resetDirty()` + UNAS-snapshot reset.
+- **MissionReportEdit** — plain useState for narrative + reportContent + includeDownloadLink; baseline snapshot taken on load + re-baselined after Save Draft, AI generate (sync + async-poll paths), and Generate PDF.
+- **MissionInvoiceEdit** — 6 operator-editable fields (lineItems array + 5 scalars) tracked via JSON-serialized snapshot with explicit key order; both back paths (top arrow + bottom Cancel) routed through `guardedNavigate`. depositPaid excluded from the snapshot (server-driven).
+- **MissionFlightsEdit** — Add/Remove/Assign-aircraft persist immediately so they're never "unsaved"; only the AIRCRAFT-USED checkbox group lives purely client-side. Tracked via order-insensitive set diff against the baseline.
+- **MissionImagesEdit** — uploads + deletes persist immediately; the dirty signal is the dropzone's `uploading` flag plus any row in 'uploading' status. Custom modal copy explains pending uploads will be aborted on discard.
+
+**Architectural note** — react-router-dom@6.28 with `BrowserRouter` (not the data router) does not expose `useBlocker`. So clicking a sidebar nav-link while a facet editor is dirty bypasses Layer 1; Layer 2's `beforeunload` doesn't fire on intra-SPA navigation either. Covered surface: editor's own Cancel/back buttons + tab close + hard refresh + external link. Documented inline in `useDirtyGuard.ts` header.
+
+**Tests** — 49 passing (was 34, +15 new):
+- `useDirtyGuard.test.ts` (6 tests) — hook unit tests covering navigate-immediately when clean, modal-stash-and-suppress when dirty, confirmAndNavigate flow, KEEP-EDITING flow, beforeunload listener add/remove on dirty toggle + unmount, and beforeunload handler preventDefault + returnValue.
+- `MissionDetailsEdit.test.tsx` (4 new tests) — Cancel after edit shows modal / Keep Editing closes without nav / Discard navigates without write / Cancel after Save does NOT prompt (dirty cleared).
+- `MissionInvoiceEdit.test.tsx` (5 new tests, file is new) — clean Cancel doesn't prompt / dirty Cancel shows modal / Keep Editing closes / Discard navigates without write / Cancel after Save doesn't prompt. Includes the load-bearing CONTRACT TRIPWIRE that POST `/api/missions` is never fired from this page.
+
+No backend changes. No version bump (orchestrator handles a consolidated v2.67.3 release after merge). No ADR (UX polish, not architecture).
+
 ## [2.67.2] — 2026-05-04 — fix(spa): graceful handling of stale-bundle errors after deploy
 
 After v2.67.1 deployed, operator's already-loaded browser tab (still holding the v2.67.0 `index.html` in memory) tried to dynamic-import `Settings-FvnyORN8.js` — a chunk hash that no longer existed on the new build. Vite emits new content-hashed filenames every build; the old hash 404s. The pre-existing `ErrorBoundary` showed the generic "Something went wrong" message, leaving the operator confused about what happened or how to recover.
