@@ -37,6 +37,8 @@ import { useNavigate, useParams } from 'react-router-dom';
 import api from '../api/client';
 import type { Mission, MissionImage } from '../api/types';
 import { cardStyle } from '../components/shared/styles';
+import UnsavedChangesModal from '../components/shared/UnsavedChangesModal';
+import { useDirtyGuard } from '../hooks/useDirtyGuard';
 
 interface RowState {
   /** server image id (after upload completes) */
@@ -201,8 +203,20 @@ export default function MissionImagesEdit() {
     });
   };
 
+  // Dirty guard for the Images facet:
+  //   Image upload + delete persist immediately, so there is no
+  //   conventional "unsaved" state once a row reaches `done`. The
+  //   only window of operator risk is mid-upload — leaving the page
+  //   while a `uploading` row is in flight would abort the request.
+  //   Treat `uploading=true` (the dropzone state) AND any pending
+  //   row in the rows[] table as the dirty signal.
+  const isDirty = uploading || rows.some((r) => r.status === 'uploading');
+
+  const { showConfirm, setShowConfirm, guardedNavigate, confirmAndNavigate } =
+    useDirtyGuard({ isDirty, navigate });
+
   const handleDone = () => {
-    navigate(`/missions/${id}`);
+    guardedNavigate(`/missions/${id}`);
   };
 
   // Free any leftover blob URLs on unmount.
@@ -400,6 +414,13 @@ export default function MissionImagesEdit() {
           BACK TO MISSION
         </Button>
       </Group>
+
+      <UnsavedChangesModal
+        opened={showConfirm}
+        onKeepEditing={() => setShowConfirm(false)}
+        onDiscard={confirmAndNavigate}
+        body="Image uploads are still in progress. Discard and return to the mission? Pending uploads will be aborted."
+      />
     </Stack>
   );
 }
