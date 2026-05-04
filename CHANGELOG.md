@@ -4,6 +4,18 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## [Unreleased] — feat(pdf): Stripe pay-link in emailed invoice PDF
+
+The emailed PDF invoice has carried PayPal + Venmo links since v2.65.0 but no Stripe equivalent. Customers who wanted to pay by card / Apple Pay / ACH had to dig back through the original portal email to find their magic link. This adds a "Pay online (credit/debit/ACH)" row at the top of the PAYMENT OPTIONS block that drops the customer onto their existing client portal page (`${frontend_url}/client/<jwt>`), where the Pay Deposit / Pay Balance buttons (Stripe Checkout, ADR-0009) take it from there.
+
+The URL is minted via a new helper `get_or_mint_active_client_link(db, mission_id, days=30)` extracted from the two existing `/api/missions/{id}/client-link` endpoints. Idempotency contract (per ADR-0011 spirit, applied to portal tokens): if a non-revoked, non-expired ClientAccessToken row already covers this (customer, mission), do NOT insert a duplicate row — re-mint a JWT whose `exp` matches the existing row's `expires_at` and update the row's `token_hash` to point at the new JWT. Three PDF renders in a row produce three valid magic-link URLs, all bound to the same registry row, all with the same expiry window.
+
+URL is omitted (None) when `mission.is_billable` is False, no Invoice exists, `paid_in_full` is True, `total` is 0, mission has no customer (fail-soft, log + skip), or the helper raises (fail-soft, log + skip; PDF still renders). Brand color is the customer-facing TOS PDF cyan `#189cc6`, NOT the operator dark-theme `#00d4ff`. The legacy PayPal/Venmo block is preserved unchanged below the Stripe row.
+
+Failover guard: pure additive logic in the router + a single helper call. No PG schema changes, no replication impact, no swap-flow effect, no failover-engine interaction.
+
+Files: `backend/app/routers/client_portal.py` (helper extraction + idempotent operator endpoints), `backend/app/routers/reports.py` (mint URL into PDF context), `backend/app/services/pdf_generator.py` (`stripe_pay_url` kwarg), `backend/app/templates/report_pdf.html` (render row above PayPal/Venmo). 17 hermetic tests in `backend/tests/test_pdf_invoice_pay_link.py` covering helper idempotency, template render edge cases, and route-layer context threading. Version bump deferred to consolidated v2.67.3 release; no new ADR required.
+
 ## [2.67.2] — 2026-05-04 — fix(spa): graceful handling of stale-bundle errors after deploy
 
 After v2.67.1 deployed, operator's already-loaded browser tab (still holding the v2.67.0 `index.html` in memory) tried to dynamic-import `Settings-FvnyORN8.js` — a chunk hash that no longer existed on the new build. Vite emits new content-hashed filenames every build; the old hash 404s. The pre-existing `ErrorBoundary` showed the generic "Something went wrong" message, leaving the operator confused about what happened or how to recover.
