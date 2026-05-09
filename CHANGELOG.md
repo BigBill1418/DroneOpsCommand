@@ -4,6 +4,48 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## [2.67.5] — 2026-05-09 — chore(obs-migration): repoint OTLP defaults to alloy.barnardhq.com per ADR-0050
+
+PR draft, awaiting cutover-window merge at 2026-05-09 00:00 PDT. The
+application-observability stack relocates from HSH-HQ to BOS-HQ per
+[noc-master ADR-0050](https://github.com/BigBill1418/NOC-Master-Control-SWARM/blob/main/docs/adr/0050-obs-stack-bos-migration-v2.md).
+DroneOpsCommand flips its OTLP defaults to the new stable hostname
+(`alloy.barnardhq.com:4317`, resolves to 10.99.0.4 / BOS-HQ over WG)
+so the next host-shift is a DNS edit rather than a code edit. Both
+prod and demo overlays now point at the same central Alloy.
+
+### Changed
+
+- `backend/app/observability/otel.py` — `_DEFAULT_ENDPOINT`
+  `http://10.99.0.1:4317` → `http://alloy.barnardhq.com:4317`;
+  module docstring updated to describe post-cutover topology.
+- `docker-compose.demo.yml` line 46 — `OTEL_EXPORTER_OTLP_ENDPOINT`
+  default `http://10.99.0.2:4317` → `http://alloy.barnardhq.com:4317`;
+  comment refresh.
+- `.env.example` lines 92-99 — comment block describing prod + demo
+  default endpoints rewritten to reflect post-migration stable-DNS.
+
+### Version bump (per CLAUDE.md "Version Bumping" + fleet rule)
+
+- `frontend/package.json`: 2.67.4 → 2.67.5
+- `backend/app/main.py`: FastAPI `version=` 2.67.4 → 2.67.5
+- `README.md`: `Version 2.67.4` → `Version 2.67.5`
+- `frontend/src/components/Layout/AppShell.tsx`: navbar footer `v2.67.4` → `v2.67.5` (×2)
+
+### Operator notes
+
+- This PR is **draft** and **must not be merged before the
+  2026-05-09 00:00 PDT cutover window**. NOC deployer auto-pulls
+  within 30s; merging before BOS Alloy is up will degrade trace
+  capture until the cutover completes (Sentry path independent;
+  errors still flow to GlitchTip).
+- Branch name (`obs-migration-bos-v2`) deliberately avoids the
+  `claude/*` auto-merge path per noc-master/CLAUDE.md.
+- The pre-existing stale `APP_VERSION:-2.67.3` defaults in
+  `docker-compose.yml` (lines 176, 267, 304, 352) and
+  `docker-compose.demo.yml` (line 86) are left untouched in this PR
+  (separate fleet-wide cleanup needed; live `.env` overrides them).
+
 ## [2.67.4] — 2026-05-04 — fix: ops hygiene cluster (Tier 2 A5/A6/A7/A8)
 
 Four small Tier-2 items shipped as one consolidated release. Operator
