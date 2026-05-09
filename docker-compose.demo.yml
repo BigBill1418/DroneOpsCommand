@@ -42,8 +42,10 @@ services:
       - SMTP_HOST=
       - SMTP_USER=
       - SMTP_PASSWORD=
-      # Phase-5 observability — demo pins CHAD-HQ Alloy + env=demo.
-      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://10.99.0.2:4317}
+      # Phase-5 observability — central Alloy at alloy.barnardhq.com:4317
+      # (BOS-HQ post-2026-05-09 per noc-master ADR-0050; was CHAD-HQ
+      # 10.99.0.2:4317). env=demo distinguishes traces from prod.
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://alloy.barnardhq.com:4317}
       - OTEL_SERVICE_NAME=droneops-api
       - ENV=demo
       - SENTRY_ENVIRONMENT=demo

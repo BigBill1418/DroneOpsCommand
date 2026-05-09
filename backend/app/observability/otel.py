@@ -1,10 +1,13 @@
 """OpenTelemetry bootstrap for DroneOpsCommand.
 
-Sends OTLP/gRPC traces to the nearest Alloy collector, which in turn
-cascades them to HSH-HQ Tempo over the WireGuard mesh. Endpoint is
-read from ``OTEL_EXPORTER_OTLP_ENDPOINT`` — for prod the default is
-``http://10.99.0.1:4317`` (HSH-HQ Alloy); the demo override pins
-``http://10.99.0.2:4317`` (CHAD-HQ Alloy).
+Sends OTLP/gRPC traces to the central Alloy at
+``alloy.barnardhq.com:4317`` (currently co-located with InfraWatch on
+BOS-HQ per noc-master ADR-0050; resolves to 10.99.0.4 over WireGuard).
+Stable DNS means the next host-shift is a DNS edit, not a code edit.
+Endpoint is read from ``OTEL_EXPORTER_OTLP_ENDPOINT`` — for both prod
+and demo the default is ``http://alloy.barnardhq.com:4317`` (was
+``http://10.99.0.1:4317`` for prod and ``http://10.99.0.2:4317`` for
+demo pre-2026-05-09).
 
 DSN-style gating: if ``OTEL_EXPORTER_OTLP_ENDPOINT`` is empty, this is
 a no-op — dev, test, and any single-tenant self-hosted DroneOps install
@@ -23,7 +26,7 @@ import os
 
 logger = logging.getLogger("doc.observability.otel")
 
-_DEFAULT_ENDPOINT = "http://10.99.0.1:4317"
+_DEFAULT_ENDPOINT = "http://alloy.barnardhq.com:4317"
 
 
 def init_otel(service: str) -> bool:
