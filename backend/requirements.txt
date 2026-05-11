@@ -10,7 +10,10 @@ alembic==1.14.0
 psycopg2-binary==2.9.10
 
 # Auth
-python-jose[cryptography]==3.3.0
+# python-jose 3.4.0 fixes CVE-2024-33663 (algorithm confusion — signing
+# JWT with public key is now forbidden) and CVE-2024-33664 (JWE-bomb DoS
+# — JWE input now capped at 250 KiB). Both vulns affect <= 3.3.0.
+python-jose[cryptography]==3.4.0
 bcrypt==4.0.1
 # NOTE: passlib removed in v2.38.6 — it's unmaintained and silently breaks
 # password verification with bcrypt >= 4.0. We now use bcrypt directly.
@@ -21,7 +24,11 @@ redis==5.2.1
 
 # PDF Generation
 weasyprint==63.1
-jinja2==3.1.4
+# jinja2 3.1.6 fixes the sandbox-escape trio: CVE-2024-56201 (CVSS 8.8 —
+# attacker-controlled template filename + content yields arbitrary Python
+# exec, sandboxed or not), CVE-2024-56326 (str.format sandbox bypass),
+# and CVE-2025-27516 (|attr filter sandbox bypass). All three affect 3.1.4.
+jinja2==3.1.6
 pypdf==5.1.0
 reportlab==4.2.5
 

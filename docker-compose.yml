@@ -61,7 +61,12 @@ services:
     logging: *logging
 
   ollama:
-    image: ollama/ollama:latest
+    # Pinned: CVE-2026-7482 "Bleeding Llama" — unauth memory leak via GGUF
+    # model handling allows extraction of prompts/system instructions/env
+    # vars in 3 API calls (CVSS 9.1). Fixed in 0.17.1; pinning to the
+    # current stable 0.23.2 (2026-05-07) so future patches are an
+    # explicit edit, not a surprise from `:latest` rolling forward.
+    image: ollama/ollama:0.23.2
     restart: unless-stopped
     volumes:
       - ollama_data:/root/.ollama
@@ -89,7 +94,7 @@ services:
     logging: *logging
 
   ollama-setup:
-    image: curlimages/curl:latest
+    image: curlimages/curl:8.20.0
     depends_on:
       ollama:
         condition: service_healthy
@@ -111,7 +116,7 @@ services:
   # Checks for new images daily and sends notifications.
   # Set WATCHTOWER_NOTIFICATION_URL in .env for alerts.
   watchtower:
-    image: containrrr/watchtower:latest
+    image: containrrr/watchtower:1.7.1
     restart: unless-stopped
     environment:
       - WATCHTOWER_CLEANUP=true
@@ -371,7 +376,7 @@ services:
   # Exposes the app securely without opening router ports.
   # Set CLOUDFLARE_TUNNEL_TOKEN in .env — service is a no-op without it.
   cloudflared:
-    image: cloudflare/cloudflared:latest
+    image: cloudflare/cloudflared:2026.3.0
     restart: unless-stopped
     command: tunnel run
     environment:

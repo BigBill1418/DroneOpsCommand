@@ -4,6 +4,99 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## [2.67.6] — 2026-05-11 — security: patch CVE-2026-7482 (Ollama "Bleeding Llama") + jinja2 + python-jose; pin all `:latest` images
+
+Security release. Three independent CVE clusters resolved in one bundle,
+plus supply-chain hygiene on previously-unpinned images. No functional
+changes; no schema changes; no runtime behavior changes other than the
+upgraded library versions.
+
+### Security fixes
+
+- **Ollama → `0.23.2` (was `:latest`).** CVE-2026-7482 "Bleeding Llama"
+  (CVSS 9.1) — unauthenticated memory disclosure via crafted GGUF model
+  upload allows extraction of in-flight prompts, system instructions,
+  API keys, and process env vars in three API calls. Disclosed by Cyera
+  early May 2026; ~300k public Ollama servers affected. Fixed upstream
+  in 0.17.1; we pin to current stable `0.23.2` (released 2026-05-07).
+  Container is internal-only (no host port exposed; only `backend` and
+  `worker` reach it via the compose network), so blast radius is limited
+  to a backend RCE chain — but the upgrade closes the hole regardless.
+  Companion Windows-auto-updater CVEs (2026-42248/42249) do not apply
+  to Docker deployments.
+- **python-jose → `3.4.0` (was `3.3.0`).** Two CVEs:
+  - CVE-2024-33663 — algorithm confusion when an OpenSSH ECDSA / other
+    asymmetric key is used to verify a JWT signed with HS256; 3.4.0
+    forbids signing JWTs with public keys.
+  - CVE-2024-33664 — "JWT bomb" DoS via a JWE token with a high
+    compression ratio; 3.4.0 caps JWE input at 250 KiB.
+  Used by `app/auth/*` (access + refresh token verification). Pre-fix
+  the JWE-bomb path was reachable by any unauthenticated client posting
+  to `/api/auth/refresh` with a crafted token.
+- **jinja2 → `3.1.6` (was `3.1.4`).** Sandbox-escape trio:
+  - CVE-2024-56201 (CVSS 8.8) — attacker-controlled template content +
+    filename yields arbitrary Python execution, sandboxed or not.
+  - CVE-2024-56326 — `str.format` sandbox bypass.
+  - CVE-2025-27516 — `|attr` filter sandbox bypass.
+  Used by WeasyPrint PDF rendering (`app/services/pdf_service.py`) and
+  email template rendering (`app/services/email_service.py`). Templates
+  are repo-controlled today, but the sandbox-escape vectors meaningfully
+  raise blast radius if any future feature ever takes user input into a
+  template path or content (e.g. customer-branded report templates).
+
+### Supply-chain hygiene — unpinned `:latest` images pinned
+
+These had no known active CVEs but `:latest` is non-reproducible and
+silently rolls a new image in on every `docker compose pull`, giving
+the upstream maintainer an implicit RCE channel onto every fleet host.
+ADR-0027 / fleet-wide convention is explicit pins.
+
+- `containrrr/watchtower:latest` → `1.7.1` (last stable; project is
+  semi-dormant — `:latest` and `:1.7.1` resolve to the same digest
+  today, but the pin protects against a future surprise).
+- `cloudflare/cloudflared:latest` → `2026.3.0` (released 2026-03-09).
+- `curlimages/curl:latest` → `8.20.0` (~2 weeks old at release).
+
+### Changed
+
+- `docker-compose.yml` line 64 — `ollama/ollama:latest` →
+  `ollama/ollama:0.23.2` + 5-line CVE comment.
+- `docker-compose.yml` line 92 — `curlimages/curl:latest` → `8.20.0`.
+- `docker-compose.yml` line 114 — `containrrr/watchtower:latest` → `1.7.1`.
+- `docker-compose.yml` line 374 — `cloudflare/cloudflared:latest` → `2026.3.0`.
+- `backend/requirements.txt` — `python-jose[cryptography]==3.3.0` →
+  `==3.4.0`; `jinja2==3.1.4` → `==3.1.6`. Both pins gain inline CVE
+  references so the next maintainer doesn't roll them back.
+- `docker-compose.demo.yml` — no edits required. The override disables
+  `ollama` / `watchtower` via `replicas: 0` and inherits the (now-pinned)
+  image from the base compose. cloudflared in the demo stack also
+  inherits the pinned base image.
+
+### Version bump (per CLAUDE.md "Version Bumping" + fleet rule)
+
+- `frontend/package.json`: 2.67.5 → 2.67.6
+- `backend/app/main.py`: FastAPI `version=` 2.67.5 → 2.67.6
+- `README.md`: `Version 2.67.5` → `Version 2.67.6`
+- `frontend/src/components/Layout/AppShell.tsx`: navbar footer `v2.67.5` → `v2.67.6` (×2)
+
+### Operator notes
+
+- **Deploy is not a no-op.** `docker compose pull && docker compose up -d`
+  on the prod host will pull `ollama:0.23.2` (~1.5 GB image) and rebuild
+  the backend / worker / beat containers (requirements.txt change). The
+  `ollama_data` volume is preserved, so the cached Llama 3.1 8B model
+  does not re-download (~5 GB). Expect ~60-120s of API downtime during
+  the backend rebuild.
+- **NTFY:** no separate alert needed; this rides the standard NOC
+  deploy-watcher post-deploy notification on the `noc-deploys` topic.
+- **CHAD-HQ demo:** auto-pulls within 30s. Demo stack does not run
+  Ollama, so the only impact is the backend/worker rebuild for the
+  jinja2 + python-jose pickup. Same ~60s blip on `command-demo.barnardhq.com`.
+- **Pre-existing stale `APP_VERSION:-2.67.3` defaults in compose** (lines
+  176, 267, 304, 352 — see 2.67.5 operator-notes) are STILL untouched in
+  this release; live `.env` overrides them. Fleet-wide cleanup remains
+  open.
+
 ## [2.67.5] — 2026-05-09 — chore(obs-migration): repoint OTLP defaults to alloy.barnardhq.com per ADR-0050
 
 PR draft, awaiting cutover-window merge at 2026-05-09 00:00 PDT. The
