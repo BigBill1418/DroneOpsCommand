@@ -4,6 +4,41 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## [unreleased] — 2026-05-13 — security: tighten CF Access on droneops.barnardhq.com to bill-only via Entra (personal instance only)
+
+Hostname-scoped Cloudflare Access change. **No repo code, no compose, no
+image rebuild** — control-plane API change only.
+
+- **Scope:** `droneops.barnardhq.com` (personal instance) ONLY. The public
+  demo at `command-demo.barnardhq.com` is **explicitly UNAFFECTED** — it
+  continues to run intentionally open with the `demo/demo123` 24h-reset
+  flow. Verified zero Access apps reference the demo hostname.
+- **Before:** `DroneOps Admin` app (`d226f352…`) consumed reusable policy
+  `NOC Auth Access` (`3aba4b97…`) whose includes were
+  `bbarnard065@gmail.com` OR `email_domain: barnardhq.com` — broader than
+  the locked single-operator policy. `allowed_idps: []`,
+  `auto_redirect_to_identity: false`.
+- **After:** App-scoped non-reusable policy `DroneOps Admin - Bill Only`
+  (`1511226a…`) with `include: [{email: bill@barnardhq.com}]`. App
+  pinned to Entra IdP `429ee672-d15a-4c16-b5d7-814c1d465e4a` with
+  `auto_redirect_to_identity: true` for parity with TitanForge.
+- **InfraWatch preserved.** The reusable `NOC Auth Access` policy is also
+  attached to `Private Services` (`noc.barnardhq.com`). Rather than narrow
+  the shared policy and bleed change into NOC, we detached it from
+  `d226f352…` and replaced with a dedicated app-scoped policy. Reusable
+  policy contents restored to pre-task state; `app_count` now `1`.
+- **Customer-facing paths preserved.** Existing bypass apps
+  `DroneOps Public (Intake + …)` (`9d27b534…`,
+  `droneops.barnardhq.com/intake/*` + assets + api/intake + flight-library
+  device-link + health) and `DroneOps Public (Customer Portal + Stripe
+  Webhook)` (`e2d36c3f…`, `client/*`, `api/client/*`, `tos/*`,
+  `api/webhooks/stripe`) were not touched — `updated_at` unchanged.
+  Anonymous `GET /intake/bogus-token` returns HTTP 200 (no SSO redirect).
+- **HSH IP-bypass preserved.** Operator workstation
+  (`69.9.133.92/32`, `HSH-IP-Bypass`) still bypasses for break-glass.
+
+Per fleet ADR — TitanForge / DroneOps personal-instance lockdown.
+
 ## [2.67.6] — 2026-05-11 — security: patch CVE-2026-7482 (Ollama "Bleeding Llama") + jinja2 + python-jose; pin all `:latest` images
 
 Security release. Three independent CVE clusters resolved in one bundle,
