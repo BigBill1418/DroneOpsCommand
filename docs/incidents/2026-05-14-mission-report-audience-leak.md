@@ -1,7 +1,7 @@
 # Incident: Mission-report audience leak — 2026-05-14
 
 **Author:** Terry (research / documentation lane; aegis owns the code-level RCA + fix)
-**Status:** Open — under investigation. Quality defect, not an outage. No customer impact (operator caught the defect on his own personal instance before the report shipped). Use "close-out thoroughness" workflow per operator preference, not active-incident hotfix.
+**Status:** Closed (RCA + prompt fix) / In-progress (runtime soft-block gate). Quality defect, not an outage. No customer impact (operator caught the defect on his own personal instance before the report shipped). "Close-out thoroughness" workflow per operator preference, not active-incident hotfix. See §10 for the post-RCA decisions.
 **Severity:** Class-Q (quality defect in a generated, client-facing artifact). Below ntfy alerting threshold under ADR-0037. No publish.
 
 ## 1. Symptom
@@ -132,9 +132,134 @@ Pending aegis's definitive RCA, the expected shape of the fix is a prompt-templa
 - ADR-0037 §5-question gate — confirms this defect is below ntfy publish threshold (no customer impact, no imminent service degradation, no actionable 5-min window — dashboard / log only)
 - Operator preference: `~/.claude/projects/.../feedback_close_out_thoroughness.md` — planned-work close-out style applies; no hotfix shortcut.
 
-## 9. Open questions (require aegis or operator follow-up)
+## 9. Open questions — close-out status (2026-05-14 PM)
 
-1. **(operator)** What does `SELECT value FROM system_settings WHERE key='llm_provider';` return on the personal instance? Confirms whether Claude or Ollama is currently in the loop.
-2. **(aegis)** Did the actual offending generation use Claude or Ollama? If logs from `logger.info("LLM provider resolved to '%s'", provider)` are still in Loki for 2026-05-14, that answers Q1 for the specific run.
-3. **(aegis)** Is the defect reproducible with `temperature=0` on both providers? If yes, it is fully prompt-driven; if no, temperature contributes and the fix should also drop temperature to e.g. `0.1` for the client-facing path.
-4. **(operator)** Should the prompt fix ship as a backport to the managed-hosting tenants immediately, or wait for one self-hosted soak cycle on the personal instance? (Default recommendation: 24h soak on personal, then push to managed.)
+1. **(Q1 — root cause confirmation) — CLOSED.** Aegis confirmed the
+   preliminary prompt-level RCA and committed the fix at `22469ed`
+   (`fix(reports): mission-report audience leak — client report no
+   longer addresses the operator (ADR-0015)`). System prompt rewritten
+   in `backend/app/services/ollama.py:9-38` to name the CLIENT as
+   reader, name the operator as upstream author (not reader), forbid
+   second-person address to the pilot, call out four common leak
+   phrases as FORBIDDEN, and reframe Section 5 to "Client Follow-Up
+   Items" with an OMIT-fallback when no client action is warranted.
+   User-prompt block in both providers (`ollama.py:75-89` +
+   `claude_llm.py:52-66`) now labels operator notes `CONTEXT ONLY` and
+   instructs translation into third-person narrative. Plus a 17-test
+   regression suite at `backend/tests/services/test_report_audience_guard.py`
+   (all green) and a deterministic detector module
+   `backend/app/services/report_audience.py` (exposed as a callable for
+   the runtime gate — see §10).
+
+2. **(Q2 — DB provider value) — OPEN, OPERATOR ACTION.** Operator to
+   verify which provider was actually in the loop for the offending
+   run, either via the Settings UI ("AI / Report Generation" panel)
+   or:
+   ```
+   docker compose exec db psql -U droneops -c "SELECT key, value FROM system_settings WHERE key IN ('llm_provider','anthropic_api_key');"
+   ```
+   Not blocking — the prompt fix is provider-agnostic by construction
+   (both Claude and Ollama import the same `SYSTEM_PROMPT_TEMPLATE`).
+   Answer is for completeness of the incident record.
+
+3. **(Q3 — Loki log evidence) — OPEN, OPERATOR ACTION.** Loki should
+   carry the `LLM provider resolved to '%s'` INFO line from
+   `llm_provider.py:54` for 2026-05-14, which would pin Q2 to the
+   specific run. Operator to grep when convenient; same not-blocking
+   status as Q2.
+
+4. **(Q4 — temperature contribution) — DEFERRED, LOW PRIORITY.**
+   Aegis's patch did not address temperature; the prompt rewrite alone
+   appears sufficient (17/17 regression tests passing, Layer 1
+   structural assertions + Layer 2 detector exercising the verbatim
+   shape of the operator-reported leak). If the soft-block gate
+   (§10) ever flags a real-world draft in production, that is the
+   moment to revisit whether temperature also needs to drop to e.g.
+   `0.1` on the client-facing path. Until then, no action.
+
+5. **(Q5 — managed-tenant rollout cadence) — DECIDED.** Default of
+   24h personal-instance soak before propagating to managed tenants is
+   accepted (operator's standing preference for thoroughness over
+   speed on planned non-incident work).
+
+## 10. Decisions made post-RCA (2026-05-14 PM)
+
+After aegis's prompt fix at commit `22469ed`, the operator made two
+close-out decisions that resolve the open architectural questions
+this incident raised and supersede the earlier "Proposed" framing of
+ADR-0015.
+
+### Decision A — Operator-facing debrief surface is DROPPED (not deferred)
+
+Operator quote at close-out:
+
+> "drop it — i don't need a operator debrief — never asked for that."
+
+The earlier framing — "client surface today, operator debrief
+tomorrow" — assumed there was a legitimate future home for the
+operator-coaching prose that leaked. That assumption was wrong. The
+operator never requested AI-generated self-coaching; it was
+Terry-supplied scaffolding.
+
+**Result:** ADR-0015 rewritten from Proposed → Accepted with the
+stronger decision: *this system produces client-facing reports only.*
+No second LLM call, no second `Report` column, no parallel
+"retrospective" facet. If operator self-review is ever wanted, it is
+a different product decision evaluated on its own merits.
+
+ROADMAP item FU-AI-1 (operator retrospective surface) is **removed
+from the roadmap**, not deferred. See ADR-0015 §"Rejected
+alternative" for the full reasoning.
+
+### Decision B — Runtime audience-leak soft-block gate is APPROVED
+
+Aegis's commit `22469ed` shipped the detector module
+(`backend/app/services/report_audience.py`) as a stable callable
+specifically to enable a runtime gate without re-implementing the
+rules. The operator approved wiring it as a **soft-block** gate on
+every generated report draft:
+
+- Every LLM-produced draft is passed through `has_audience_leak()`
+  before reaching the editorial UI.
+- On leak detection: the draft is flagged (not silently passed
+  through); offending phrasings are surfaced in the
+  `MissionReportEdit` banner.
+- Operator override is allowed — soft-block, not hard-block. The
+  editorial human-in-the-loop gate stays load-bearing.
+- The runtime gate is a tripwire on top of the corrected prompt, not
+  a substitute for it.
+
+**Shipped (local) at commit `4953edf` (2026-05-14).** Wire-in lives at
+the persistence site (`backend/app/tasks/celery_tasks.py:150-189`,
+helper `_apply_audience_findings`) so both Claude and Ollama paths are
+covered by a single insertion. Two new `Report` columns
+(`has_audience_leak BOOL`, `audience_leak_details JSONB`) added via the
+existing idempotent `_add_missing_columns` migration path
+(`backend/app/main.py:114-122`); failover-safe per CLAUDE.md §Failover
+Guard. Helper never raises (detector failure logs and leaves defaults
+so generation never 500s on a regex regression). **No regen loop** per
+operator directive — detection + surfacing only, with a
+doc-string-lock test (`test_no_regen_loop_contract_is_documented`)
+preventing drift toward a retry-until-clean pattern. 10 new hermetic
+tests in `backend/tests/services/test_audience_leak_persistence.py`
+green; existing 17-test audience suite unchanged. ROADMAP item
+FU-AI-RUNTIME-GATE flipped IN PROGRESS → SHIPPED; ADR-0015 §Decision-5
+updated with the same hash. Deploy is gated on the operator's 24h soak
+preference; `.deployer-disabled` keeps SwarmPilot out of the way.
+
+### Related improvement — clear stale draft on Generate click (commit `700c9b0`)
+
+Small UX follow-up landed in the same close-out cycle as the audience
+work. Clicking **Generate Report** now clears `reportContent`,
+`hasAudienceLeak`, and `audienceLeakDetails` immediately
+(`frontend/src/pages/MissionReportEdit.tsx:262-272`) so the operator
+gets visual confirmation the new request was accepted rather than
+seeing the prior draft sit on screen for the 10–30s generation window.
+Conditional render on `reportContent` (line ~625) unmounts the FINAL
+REPORT block while empty; the `GENERATING...` button label is the
+in-flight signal. PDF + Send naturally disable during the in-flight
+window via their existing `!reportContent` guards. Re-entrant clicks
+on Generate were already a no-op via `disabled={generating || !narrative}`.
+Not an ADR-worthy decision; logged here because it landed alongside
+the runtime-gate close-out and addresses the operator-reported "did
+it hear me?" confusion during long generations.

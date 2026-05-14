@@ -84,7 +84,7 @@ no customer impact. Planned-work close-out workflow.
     decision)" items aegis flagged.
 
 - **Runtime soft-block gate wire-in (aegis) — COMPLETE at commit
-  `<aegis-runtime-gate>` (hash recorded in CHANGELOG entry).**
+  `4953edf` (2026-05-14, local; deploy pending operator review).**
   - Detector wired into the **persistence site** of report generation
     rather than the per-provider call paths. Both providers
     (`claude_llm.py`, `ollama.py`) funnel through `llm_provider.generate_report`
@@ -131,6 +131,26 @@ their own narrative beat. When aegis's runtime-gate code commits, the
 CHANGELOG entry for that commit should be a third `[unreleased]`
 block referenced from ADR-0015 §Decision-5 — not folded into either
 of the existing two.
+
+## 2026-05-14 — Mission-report overall quality — OPEN BACKLOG (watching brief)
+
+Operator feedback at the ADR-0015 close-out, verbatim: *"its ok for
+now but it needs to get better."* Referring to the overall
+client-facing mission report quality, not any specific defect. No
+specific changes requested; this is a signal that the current quality
+bar is not the destination.
+
+**Status.** NOT STARTED. Tracked on ROADMAP as `FU-AI-QUALITY-PASS`
+under the "LLM-assisted report surface" section. The audience-separation
+contract from ADR-0015 is load-bearing; any quality work happens
+inside that contract.
+
+**Operating rule for future sessions.** Do not assume a direction and
+start editing the prompt or the report template. When asked to "improve
+the report," first ask the operator what specifically he wants
+improved. Candidate areas captured on the ROADMAP entry are inference
+for kickoff, not a committed punch-list. Trigger to act is
+operator-driven.
 
 ## 2026-05-03 — v2.66.0 backend hardening (Agent A — IN-FLIGHT, awaiting orchestrator merge)
 

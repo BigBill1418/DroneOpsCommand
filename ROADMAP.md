@@ -112,60 +112,87 @@ Deliverable / Owner block structure.
 
 ## LLM-assisted report surface (follow-ups from ADR-0015, 2026-05-14)
 
-**Context.** ADR-0015 pinned the contract: *mission reports are
-client-facing artifacts; operator-facing coaching is a separate surface.*
-The current LLM dispatch (`backend/app/services/llm_provider.py`) and
-shared system prompt produce one artifact (the customer-facing report).
-The audience-leak incident on 2026-05-14 exposed the gap; the follow-ups
-below build out the operator-facing side of the contract and harden the
-prompt path against future audience drift.
+**Context.** ADR-0015 (Accepted 2026-05-14) pinned the contract:
+*mission reports are client-facing artifacts; operator-facing coaching
+is explicitly out of scope.* The current LLM dispatch
+(`backend/app/services/llm_provider.py`) and shared system prompt
+produce one artifact — the customer-facing report — and that is the
+entirety of the LLM-assisted surface in this product. The follow-ups
+below harden the prompt path against future audience drift; they do
+not introduce additional LLM surfaces.
 
-### FU-AI-1 — Operator retrospective surface (separate from client report)
+**Note on dropped item:** an earlier draft listed an operator-facing
+retrospective surface (FU-AI-1) as a follow-up. The operator confirmed
+at close-out that no operator debrief was ever requested; FU-AI-1 is
+**dropped**, not deferred. See ADR-0015 §"Rejected alternative" for the
+rationale.
 
-- **Scope.** Add a second LLM-generated draft to the `MissionReportEdit`
-  facet: an operator-facing retrospective ("what went well / what to do
-  differently next time / equipment notes") that lives on its own field
-  in the `Report` model and is **never** included in the customer PDF or
-  email. Distinct system prompt; same dispatcher; same provider routing.
-  Operator can opt to generate it, edit it, and keep it on the mission
-  record. A future view aggregates retrospectives across missions for
-  trend-spotting.
-- **Trigger.** ADR-0015 lands (Proposed → Accepted) and the prompt-fix
-  soak completes. No earlier — building the second surface before the
-  first surface's audience is fixed would repeat the leak.
-- **Deliverable.** Schema migration (one nullable text column on
-  `Report`), new prompt in `llm_prompts.py`, dispatcher wiring, frontend
-  facet addition under `MissionReportEdit`, ADR-0016 if the design
-  diverges from ADR-0015's outline.
-- **Owner.** TBD. ~1-2 eng days.
+### FU-AI-RUNTIME-GATE — Runtime audience-leak soft-block — ✅ SHIPPED at commit `4953edf` (2026-05-14, local; deploy pending operator review)
 
-### FU-AI-2 — Prompt regression fixture (carried forward from the incident)
+- **Scope.** Wire `report_audience.has_audience_leak()` (shipped at
+  commit `22469ed` as a callable module) as a post-generation gate on
+  every LLM-produced report draft. On leak detection: flag the draft
+  (do not silently pass), surface the offending phrasings in the
+  `MissionReportEdit` editorial UI banner, allow operator override
+  ("soft-block" — never block the operator from shipping, but never
+  let the leak be invisible). Tripwire on top of the corrected prompt,
+  not a substitute for it.
+- **Delivered as.** Wire-in lives at the persistence site, not the
+  per-provider call paths: `_apply_audience_findings(report, llm_content)`
+  in `backend/app/tasks/celery_tasks.py:150-189` runs the detector after
+  every LLM generation and persists findings into two new `Report`
+  columns (`has_audience_leak BOOL`, `audience_leak_details JSONB`)
+  added via the idempotent `_add_missing_columns` migration path in
+  `backend/app/main.py:114-122`. Helper never raises (detector failure
+  logs and leaves defaults so generation never 500s). No regen loop
+  per operator directive — detection + surfacing only, with a
+  doc-string-lock test preventing drift toward retry-clean. Yellow
+  `IconAlertTriangle` Mantine `Alert` banner above the FINAL REPORT
+  editor in `MissionReportEdit.tsx` lists each matched phrase with its
+  rule name; Save / PDF / Send remain enabled (editorial review IS the
+  gate). Test coverage: 10 new hermetic tests in
+  `backend/tests/services/test_audience_leak_persistence.py` (10/10
+  green); existing 17-test audience suite stays green; full backend
+  suite 240 passed, 1 skipped, 2 pre-existing unrelated failures.
+- **Deploy status.** Personal-instance only; no deploy yet
+  (`.deployer-disabled` per fleet convention). 24h soak with a real
+  report generated against the new gate before any push to
+  managed-hosting tenants, per operator's standing close-out preference.
 
-- **Scope.** A pytest fixture that exercises the LLM dispatcher with a
-  deliberately operator-voiced mission narrative and asserts the output
-  contains no second-person address to the operator and no
-  operator-coaching prose. Deterministic provider (Ollama,
-  `temperature=0`, small model) for CI stability. Optional
-  network-marked Claude path the operator can run locally.
-- **Trigger.** Lands with the prompt fix (aegis's patch for the
-  2026-05-14 incident). Listed here for tracking only — not a deferred
-  item.
-- **Deliverable.** `backend/tests/test_llm_report_audience.py`.
-- **Owner.** aegis.
+### FU-AI-2 — Prompt regression fixture — ✅ SHIPPED at commit `22469ed` (2026-05-14)
 
-### FU-AI-3 — Prompt source-of-truth relocation
+- **Delivered as `backend/tests/services/test_report_audience_guard.py`**
+  rather than the originally proposed `test_llm_report_audience.py` path.
+  17-test suite: Layer 1 (4 tests) locks structural guarantees of the
+  system prompt (audience pin, operator-address ban, Section-5 reframe,
+  operator-notes framing); Layer 2 (13 tests) exercises the deterministic
+  regex-based detector against nine representative bad phrasings, a
+  known-clean third-person sample, empty input, diagnostic snippet
+  shape, and the verbatim shape of the operator-reported leak.
+  Hermetic — no network, no LLM, no DB. Runs ~1.8s. All 17/17 passing
+  on Python 3.12.3.
 
-- **Scope.** Move `SYSTEM_PROMPT_TEMPLATE` (and the future operator
-  retrospective prompt) out of `backend/app/services/ollama.py` and into
-  `backend/app/services/llm_prompts.py`. Update imports in `claude_llm.py`
-  and `ollama.py`. The prompt is the cross-provider contract; it does
-  not belong in one provider's adapter.
-- **Trigger.** Lands with the prompt fix (aegis's patch for the
-  2026-05-14 incident). Listed here so the architectural improvement is
-  visible on the roadmap even though it ships in the same commit.
+### FU-AI-3 — Prompt source-of-truth relocation — ⚠ DE-PRIORITIZED (2026-05-14)
+
+- **Scope unchanged.** Move `SYSTEM_PROMPT_TEMPLATE` out of
+  `backend/app/services/ollama.py` into
+  `backend/app/services/llm_prompts.py`; update imports in
+  `claude_llm.py` and `ollama.py`. The prompt is the cross-provider
+  contract; it does not belong in one provider's adapter.
+- **Why de-prioritized.** Aegis's audience-fix commit (`22469ed`)
+  deliberately left the prompt in `ollama.py` to keep the change
+  footprint tight (CHANGELOG entry calls this out). The relocation is
+  a pure refactor with no behavioral coverage; pairing it with the
+  audience fix would have expanded the surgical surface without adding
+  safety. Item still stands on its own merits — the cross-provider
+  contract does logically belong outside any one provider adapter — but
+  is no longer urgent.
+- **Trigger.** Next time the prompt is meaningfully edited (e.g., a
+  managed-tenant tone addendum per FU-AI-4 lands), bundle the
+  relocation. Until then, leave it.
 - **Deliverable.** Refactor commit + one-line import update in two
-  files.
-- **Owner.** aegis.
+  files. No version bump (no behavior change).
+- **Owner.** TBD.
 
 ### FU-AI-4 — Per-tenant prompt override (managed-hosting only, optional)
 
@@ -174,12 +201,61 @@ prompt path against future audience drift.
   terse"), expose a tenant-scoped prompt-fragment override in
   `system_settings` (key e.g. `llm_prompt_tone_addendum`). The
   audience-separation invariant from ADR-0015 stays hard-coded and not
-  overridable; only the tone-shaping addendum is tenant-tunable.
+  overridable; only the tone-shaping addendum is tenant-tunable. The
+  runtime soft-block gate (FU-AI-RUNTIME-GATE) still applies — a
+  managed-tenant tone override that produced an audience leak would be
+  flagged in `MissionReportEdit` like any other draft.
 - **Trigger.** First managed-hosting customer asks for a different
   voice. Not before — premature flexibility.
 - **Deliverable.** One new setting key, one prompt-construction site
   updated, one Settings-page UI element gated to `managed_instance=true`.
 - **Owner.** TBD. ~0.5 eng day.
+
+  *Standalone justification (post 2026-05-14 close-out):* FU-AI-4 is
+  about tenant-branded voice/tone, not about audience separation. It
+  remains coherent under the tightened ADR-0015 scope — the single
+  client-facing artifact can still have its voice tuned per tenant
+  without re-introducing a second audience.
+
+### FU-AI-QUALITY-PASS — Overall mission-report quality iteration — NOT STARTED (watching brief)
+
+- **Status.** NOT STARTED. Awaiting operator direction on priority and scope.
+- **Source.** Operator feedback at the 2026-05-14 ADR-0015 close-out,
+  verbatim: *"its ok for now but it needs to get better."* No specific
+  changes requested — this is a signal that the current report quality
+  bar is not the destination, not a directive to make a specific
+  change today.
+- **Scope (open-ended).** Quality improvement to the client-facing
+  mission report generated by `backend/app/services/llm_provider.py`
+  and the shared `SYSTEM_PROMPT_TEMPLATE`. The audience-separation
+  contract from ADR-0015 stays load-bearing; quality work happens
+  inside that contract, not by relaxing it.
+- **Candidate areas (inference, not commitment — operator has not
+  specified).** Listed so future sessions have a starting point if
+  asked to dig in, *not* as a punch-list to grind through:
+  - Section 5 framing strength — currently "Client Follow-Up Items"
+    with an explicit OMIT-fallback; possible iterations on how the
+    section is structured when it does fire.
+  - Weak / hedging language — sentence-level passes against
+    "appeared," "seemed," "was observed to" where a definitive
+    statement is warranted.
+  - Conciseness — current drafts tend toward narrative bulk; signal
+    density per paragraph may be a lever.
+  - Signal-to-noise on routine flights — when nothing notable
+    happened, the report still produces five sections. May be worth a
+    "routine flight" prompt variant or an explicit length budget.
+  - Consistency across mission types — same prompt drives both
+    inspection and survey reports; per-mission-type prompt fragments
+    are a possible direction (overlaps with FU-AI-4's per-tenant
+    fragment infrastructure if that lands first).
+- **Trigger to act.** Operator-driven. This is a watching-brief item:
+  next session that touches the prompt should ask the operator what
+  specifically he wants improved before opening work. Do not assume
+  a direction and start editing.
+- **Deliverable.** TBD when scoped. Likely a prompt iteration plus an
+  extension of the existing 17-test `test_report_audience_guard.py`
+  suite for any new structural guarantees added during the pass.
+- **Owner.** TBD. Operator scopes when ready.
 
 ### FU-7 — Zero-touch device API key rotation — **CLOSED 2026-04-24** (v2.63.6 / DroneOpsSync v1.3.25)
 
