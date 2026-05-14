@@ -4,6 +4,39 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## [unreleased] — 2026-05-14 — fix(reports): clear stale draft on Generate Report click
+
+Small UX tweak on the Mission Report Edit page. Clicking **Generate Report**
+now clears the FINAL REPORT editor and resets the audience-leak banner state
+**immediately** instead of leaving the previous draft visible until the
+poll completes. Operator-reported confusion ("did it hear me?") — the
+prior behavior left stale text on screen during the 10–30s generation
+window with no visual indication the new request was accepted.
+
+### Changed
+
+- **`frontend/src/pages/MissionReportEdit.tsx:262-272`** — `handleGenerate`
+  now calls `setReportContent('')`, `setHasAudienceLeak(false)`, and
+  `setAudienceLeakDetails([])` before firing the POST. The conditional
+  render on `reportContent` (line ~625) unmounts the FINAL REPORT block
+  entirely while empty; the `GENERATING...` button label is the in-flight
+  signal. PDF + Send buttons naturally disable during the in-flight
+  window because their existing guards already include `!reportContent`.
+  Re-entrant clicks on Generate are already a no-op via the existing
+  `disabled={generating || !narrative}` — no new pattern introduced.
+  Failed/cancelled generation: cleared state stays cleared by design
+  (operator can hit Generate again or type manually). Banner re-appears
+  on next successful generation when the backend re-flags.
+
+### Tests
+
+- **`frontend/src/pages/__tests__/MissionReportEdit.test.tsx`** — added
+  `Generate Report clears the existing draft content immediately` locking
+  the new behavior (asserts the mocked RTE testid unmounts after click).
+  Reordered the CONTRACT test so Generate runs LAST since clicking it
+  now disables PDF + Send via the `!reportContent` guards; load-bearing
+  assertion (`POST /missions count = 0`) is unaffected. 8/8 pass.
+
 ## [unreleased] — 2026-05-14 — feat(reports): ADR-0015 runtime audience-leak gate (soft block)
 
 Wires `report_audience.detect_audience_leaks` into the LLM report-generation

@@ -4,6 +4,29 @@ Maintained alongside `CHANGELOG.md` and `docs/adr/`. `CHANGELOG.md` is
 the ledger of shipped changes; this file tracks what's in-flight or
 blocked.
 
+## 2026-05-14 — Mission Report: clear stale draft on Generate click — CLOSED
+
+Single-file UX tweak on top of the ADR-0015 work. `handleGenerate` in
+`frontend/src/pages/MissionReportEdit.tsx` now clears `reportContent`,
+`hasAudienceLeak`, and `audienceLeakDetails` immediately before firing
+the POST so the operator gets instant visual confirmation. PDF + Send
+naturally disable during the in-flight window via their existing
+`!reportContent` guards (no new disabled-state logic introduced).
+Re-entrant Generate clicks were already a no-op via the existing
+`disabled={generating || !narrative}`.
+
+Verification:
+
+- 8/8 tests in `frontend/src/pages/__tests__/MissionReportEdit.test.tsx`
+  pass (new test `Generate Report clears the existing draft content
+  immediately` locks the behavior; CONTRACT test reordered so Generate
+  runs LAST — load-bearing claim unaffected).
+- `tsc --noEmit` clean on the frontend.
+
+Out of scope this round (operator flagged for future iteration):
+broader **report quality** is "ok for now but needs to get better."
+That's prompt-quality + detector-coverage work for a later pass.
+
 ## 2026-05-14 — Mission-report audience leak — CLOSED on docs + RCA + prompt fix; runtime gate IN-FLIGHT
 
 Quality defect on the LLM-generated mission report. Operator-only catch,

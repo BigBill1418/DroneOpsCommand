@@ -319,6 +319,44 @@ describe('MissionReportEdit', () => {
     expect(callCounts.postMissions).toBe(0);
   });
 
+  // v2.67.x UX fix: clicking Generate Report clears the existing
+  // draft content immediately so the operator gets visual feedback
+  // that the request was heard. The previous behavior (keep stale
+  // draft visible until poll completes) read as "did it hear me?"
+  it('Generate Report clears the existing draft content immediately', async () => {
+    const user = userEvent.setup();
+    render(
+      <TestProviders>
+        <MissionReportEdit />
+      </TestProviders>,
+    );
+
+    await screen.findByText(/EDIT REPORT/);
+    await screen.findByPlaceholderText(/Describe what happened/);
+
+    // Pre-condition: existing report content is rendered into the
+    // mocked editor surface.
+    const rteBefore = await screen.findByTestId('rte');
+    expect((rteBefore as HTMLTextAreaElement).value).toBe(
+      '<p>Existing AI report content.</p>',
+    );
+
+    await user.click(
+      screen.getByRole('button', {
+        name: /REGENERATE REPORT|GENERATE REPORT/i,
+      }),
+    );
+
+    // The conditional render on `reportContent` removes the FINAL
+    // REPORT block entirely when empty — the editor is unmounted.
+    await waitFor(() => {
+      expect(screen.queryByTestId('rte')).toBeNull();
+    });
+
+    // POST /missions still untouched (contract).
+    expect(callCounts.postMissions).toBe(0);
+  });
+
   it('Generate PDF fires POST /api/missions/{id}/report/pdf', async () => {
     const user = userEvent.setup();
     render(
@@ -388,9 +426,19 @@ describe('MissionReportEdit', () => {
     await screen.findByText(/EDIT REPORT/);
     await screen.findByPlaceholderText(/Describe what happened/);
 
-    // Fire every mutation in sequence.
+    // Fire every mutation in sequence. NOTE: Generate is run LAST
+    // because clicking it now clears reportContent (v2.67.x UX fix —
+    // immediate visual confirmation) which disables PDF + Send via
+    // their existing `!reportContent` guards. The load-bearing claim
+    // of this test is "POST /missions stays at 0", not ordering.
     await user.click(screen.getByRole('button', { name: /SAVE DRAFT/i }));
     await waitFor(() => expect(callCounts.putReport).toBeGreaterThanOrEqual(1));
+
+    await user.click(screen.getByRole('button', { name: /GENERATE PDF/i }));
+    await waitFor(() => expect(callCounts.postPdf).toBe(1));
+
+    await user.click(screen.getByRole('button', { name: /SEND TO CUSTOMER/i }));
+    await waitFor(() => expect(callCounts.postSend).toBe(1));
 
     await user.click(
       screen.getByRole('button', {
@@ -398,12 +446,6 @@ describe('MissionReportEdit', () => {
       }),
     );
     await waitFor(() => expect(callCounts.postGenerate).toBe(1));
-
-    await user.click(screen.getByRole('button', { name: /GENERATE PDF/i }));
-    await waitFor(() => expect(callCounts.postPdf).toBe(1));
-
-    await user.click(screen.getByRole('button', { name: /SEND TO CUSTOMER/i }));
-    await waitFor(() => expect(callCounts.postSend).toBe(1));
 
     // The load-bearing assertion: no rogue POST /missions across any
     // facet-editor action. This is what makes duplicate-mission

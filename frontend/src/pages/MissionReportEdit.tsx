@@ -259,6 +259,17 @@ export default function MissionReportEdit() {
   /** Trigger AI generation; poll for completion; populate final content. */
   const handleGenerate = async () => {
     if (!missionId) return;
+    // UX: clear the old draft + leak state the instant the operator
+    // commits to a regenerate. Leaving the previous text in place
+    // until the poll completes reads as "did it hear me?" The
+    // conditional render on `reportContent` hides the FINAL REPORT
+    // block entirely while empty — the "GENERATING..." button label
+    // is the in-flight signal. If generation fails or is cancelled
+    // the cleared state stays cleared by design (operator can hit
+    // Generate again or type manually).
+    setReportContent('');
+    setHasAudienceLeak(false);
+    setAudienceLeakDetails([]);
     setGenerating(true);
     try {
       const resp = await api.post(`/missions/${missionId}/report/generate`, {
