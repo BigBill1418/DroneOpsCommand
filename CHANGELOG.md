@@ -4,6 +4,136 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## [unreleased] — 2026-05-14 — feat(reports): ADR-0015 runtime audience-leak gate (soft block)
+
+Wires `report_audience.detect_audience_leaks` into the LLM report-generation
+pipeline as a **soft-block** runtime gate. Generation always completes; the
+gate's job is to flag suspect output so the editorial review step catches
+it. Personal-instance only; no deploy (`.deployer-disabled` per fleet
+convention). Operator review before deploy.
+
+### Added
+
+- **`backend/app/models/report.py`** — two new columns on `Report`:
+  - `has_audience_leak BOOLEAN NOT NULL DEFAULT FALSE` — fast filter for
+    the editorial-gate banner.
+  - `audience_leak_details JSONB NOT NULL DEFAULT '[]'::jsonb` — list of
+    `{rule, snippet, start, end}` records, one per matched phrase, so the
+    UI can render exactly what tripped.
+- **`backend/app/main.py:114-122`** — idempotent ALTER migrations under the
+  existing `_add_missing_columns` path (the repo convention; no Alembic in
+  this repo). Defaults are `false` / `[]` so legacy rows (pre-runtime-gate)
+  and any path that writes a Report without going through generation read
+  cleanly. Failover-safe per CLAUDE.md §Failover Guard (additive only, no
+  PK/FK/index changes).
+- **`backend/app/tasks/celery_tasks.py:150-189`** — new module-level helper
+  `_apply_audience_findings(report, llm_content)` runs the detector after
+  every LLM generation and persists findings on the row. Wired into both
+  branches of the persist site (line 268). The helper **never raises** —
+  detector failure logs and leaves flags at their defaults so generation
+  never 500s on a regex regression. **No regen loop** — detection +
+  surfacing only (decision per operator soft-block directive).
+- **`backend/app/schemas/report.py`** — new `AudienceLeakDetail` Pydantic
+  model + `ReportResponse.has_audience_leak` + `ReportResponse.audience_leak_details`
+  so the API surface carries the findings to the frontend.
+- **`frontend/src/api/types.ts`** — `AudienceLeakDetail` interface +
+  optional `has_audience_leak` / `audience_leak_details` on `Report`.
+- **`frontend/src/pages/MissionReportEdit.tsx`** — yellow `IconAlertTriangle`
+  Mantine `Alert` banner above the `FINAL REPORT` editor when
+  `has_audience_leak === true`, listing each matched phrase with its rule
+  name. Save Draft / Generate PDF / Send remain enabled — the operator's
+  editorial review IS the gate. Generation-complete toast switches to a
+  yellow "Audience Leak Flagged" variant when findings are non-empty.
+- **`backend/tests/services/test_audience_leak_persistence.py`** — 10 new
+  hermetic tests covering:
+  - Clean LLM output → `has_audience_leak=False`, empty list.
+  - Verbatim 2026-05-14 incident-shape input → `has_audience_leak=True`,
+    ≥3 distinct rule categories, JSONB shape contract honored.
+  - Single-rule smoke check.
+  - Empty input / `None` input → clean defaults.
+  - **ADR-0015 contract:** detector failure (patched to raise) does NOT
+    propagate; report saves with clean defaults.
+  - Helper preserves one-to-one match cardinality with the detector
+    (no dedup/aggregation drift).
+  - `ReportResponse` Pydantic round-trip — both clean and leaky shapes
+    serialize through the typed `AudienceLeakDetail` model.
+  - Soft-block doc-string lock (CI signal if someone later rewrites the
+    helper into a regen-loop pattern).
+
+### Verification
+
+- `pytest tests/services/test_audience_leak_persistence.py -v` —
+  **10/10 passing** in 1.89s.
+- `pytest tests/services/test_report_audience_guard.py -v` —
+  **17/17 passing** (no regression in the existing audience suite).
+- `pytest` (full backend suite) — **240 passed, 1 skipped, 2 failed**.
+  The 2 failures (`test_health_stripe_db_lookup.py::test_stripe_probe_falls_back_to_env_when_db_empty`
+  and `::test_stripe_probe_db_lookup_failure_falls_back_to_env`) are the
+  same pre-existing failures called out in the prior audience-fix entry —
+  unrelated to this change, out of scope.
+
+### Not done (deliberate)
+
+- **No regen loop.** Operator directive: detection + surfacing only. A
+  retry-until-clean loop would burn API credits, mask prompt regressions,
+  and is not what was agreed. The doc-string lock test (`test_no_regen_loop_contract_is_documented`)
+  trips CI if a future edit drifts toward that pattern.
+- **No operator-debrief surface.** Dropped per operator decision; ADR-0015
+  follow-up under Terry's ROADMAP edit.
+
+## [unreleased] — 2026-05-14 — docs(reports): operator close-out decisions on mission-report audience leak
+
+Documentation close-out for the audience-leak quality defect, separate
+from aegis's code patch (commit `22469ed`, see entry below). Two
+operator decisions resolved the open architectural questions aegis
+flagged as "out of scope (operator decision)" at the bottom of his
+CHANGELOG entry.
+
+### Decided
+
+- **Operator-facing debrief surface — DROPPED, not deferred.** Operator
+  confirmed at close-out: "drop it — i don't need a operator debrief —
+  never asked for that." DroneOpsCommand produces exactly one
+  LLM-generated artifact and it is unambiguously client-facing. The
+  earlier "client surface today, operator surface tomorrow" framing in
+  the Proposed draft of ADR-0015 was Terry-supplied scaffolding, not
+  a product requirement. Rejected at close-out.
+- **Runtime audience-leak soft-block gate — APPROVED.** Aegis's
+  detector module (`backend/app/services/report_audience.py`, shipped
+  at `22469ed` as a stable callable) gets wired as a post-generation
+  gate on every LLM-produced draft. Soft-block: on detection, the draft
+  is flagged and the offending phrasings surface in the
+  `MissionReportEdit` editorial banner; operator can still override and
+  ship. Wire-in commit hash TBD (aegis implementing in parallel).
+
+### Docs updated
+
+- `docs/adr/0015-mission-report-audience-separation.md` — flipped from
+  Proposed → Accepted with the stronger decision ("operator-facing
+  coaching is explicitly out of scope"), added §"Rejected alternative:
+  operator-facing debrief surface" with the rationale, and added
+  decision #5 for the runtime soft-block gate.
+- `docs/incidents/2026-05-14-mission-report-audience-leak.md` — open
+  questions §9 reconciled against aegis's findings (Q1 closed at
+  `22469ed`, Q2/Q3 marked operator-action, Q4 deferred low-priority),
+  plus new §10 "Decisions made post-RCA" capturing both operator
+  decisions verbatim.
+- `ROADMAP.md` — FU-AI-1 (operator retrospective surface) removed
+  entirely (dropped, not deferred). FU-AI-2 (regression fixture)
+  marked SHIPPED at `22469ed`. FU-AI-3 (prompt module relocation)
+  marked DE-PRIORITIZED (still stands on its own, no longer urgent
+  after aegis deliberately scoped it out of the audience fix). FU-AI-4
+  (per-tenant tone override) kept — it stands alone on its
+  managed-tenant branding rationale, not tied to the dropped surface.
+  New FU-AI-RUNTIME-GATE item added covering the soft-block wire-in.
+- `PROGRESS.md` — close-out narrative for the incident.
+
+No code changes in this docs commit. Aegis owns the runtime-gate
+wire-in code; this entry exists separately because the *decisions*
+that authorized that wire-in (and that explicitly rejected the
+operator-surface alternative) are the load-bearing post-RCA narrative
+and belong in the ledger on their own.
+
 ## [unreleased] — 2026-05-14 — fix(reports): mission-report audience leak — aegis patch landed
 
 Code-side close-out of the audience-leak quality defect documented in the

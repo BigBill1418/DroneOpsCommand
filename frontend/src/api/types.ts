@@ -71,6 +71,13 @@ export interface Mission {
   images: MissionImage[];
 }
 
+export interface AudienceLeakDetail {
+  rule: string;
+  snippet: string;
+  start: number;
+  end: number;
+}
+
 export interface Report {
   id: string;
   mission_id: string;
@@ -84,6 +91,12 @@ export interface Report {
   include_download_link: boolean;
   generated_at: string | null;
   sent_at: string | null;
+  // ADR-0015 soft-block runtime audience-leak gate.
+  // `has_audience_leak` is the fast flag for the editorial-gate banner;
+  // `audience_leak_details` carries one record per matched phrase so the
+  // banner can list exactly what tripped.
+  has_audience_leak?: boolean;
+  audience_leak_details?: AudienceLeakDetail[];
 }
 
 export interface LineItem {

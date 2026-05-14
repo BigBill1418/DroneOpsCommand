@@ -4,58 +4,110 @@ Maintained alongside `CHANGELOG.md` and `docs/adr/`. `CHANGELOG.md` is
 the ledger of shipped changes; this file tracks what's in-flight or
 blocked.
 
-## 2026-05-14 — Mission-report audience leak — IN-FLIGHT (aegis owns code-level RCA + patch; Terry owns docs)
+## 2026-05-14 — Mission-report audience leak — CLOSED on docs + RCA + prompt fix; runtime gate IN-FLIGHT
 
 Quality defect on the LLM-generated mission report. Operator-only catch,
-no customer impact. Workflow: planned-work close-out style (full ADR +
-fixture + 24h soak), not active-incident hotfix.
+no customer impact. Planned-work close-out workflow.
 
 **Status:**
 
-- **Docs lane (Terry) — COMPLETE.**
-  - `docs/incidents/2026-05-14-mission-report-audience-leak.md` written
-    (full record + AI-backend confirmation + preliminary RCA).
-  - `docs/adr/0015-mission-report-audience-separation.md` written
-    (Proposed; flips to Accepted on the same commit as the patch).
-  - `CHANGELOG.md` [unreleased] entry added (above the 2026-05-13 CF
-    Access entry).
-  - `PROGRESS.md` updated (this entry).
-  - `ROADMAP.md` updated (operator-retrospective surface added as a
-    follow-up under ADR-0015).
-- **Code lane (aegis) — IN-FLIGHT.**
-  - Definitive RCA pending.
-  - Prompt rewrite pending.
-  - Relocation of `SYSTEM_PROMPT_TEMPLATE` from `ollama.py` to
-    `llm_prompts.py` pending.
-  - Regression fixture (`test_llm_report_audience.py`) pending.
-  - Version bump + CHANGELOG Fixed entry pending.
+- **RCA + prompt fix (aegis) — COMPLETE at commit `22469ed`.**
+  - System prompt rewritten in `backend/app/services/ollama.py:9-38`
+    (names CLIENT as reader, names operator as upstream author, forbids
+    second-person address + four common leak phrases, reframes Section
+    5 to "Client Follow-Up Items" with OMIT-fallback).
+  - User-prompt block in both providers updated
+    (`ollama.py:75-89` + `claude_llm.py:52-66`) — operator notes
+    labeled `CONTEXT ONLY` with translation instruction; trailing
+    "Generate the client-facing after-action report" with audience
+    constraint repeated. Belt-and-suspenders against drift on long
+    contexts.
+  - New regression suite: `backend/tests/services/test_report_audience_guard.py`,
+    17/17 passing on Python 3.12.3. Layer 1 (4 tests) locks prompt
+    structure; Layer 2 (13 tests) exercises the deterministic detector
+    against representative bad phrasings + the verbatim shape of the
+    operator-reported leak. Hermetic, ~1.8s. Pre-existing 2 failures
+    in `test_health_stripe_db_lookup.py` reproduce on pristine `main`
+    HEAD; out of scope.
+  - New detector module: `backend/app/services/report_audience.py`
+    (`detect_audience_leaks`, `has_audience_leak`, `AudienceLeak`
+    dataclass — nine rule categories). Exposed as stable callable to
+    enable the runtime gate without re-implementing the rules.
+  - `SYSTEM_PROMPT_TEMPLATE` deliberately left in `ollama.py` for this
+    commit; aegis's CHANGELOG entry calls out that the relocation to
+    `llm_prompts.py` is left for a follow-up to keep the surgical
+    surface tight. FU-AI-3 status on ROADMAP updated accordingly.
+
+- **Documentation close-out (Terry) — COMPLETE.**
+  - `docs/adr/0015-mission-report-audience-separation.md` — flipped
+    Proposed → Accepted with the stronger scope ("operator-facing
+    coaching is explicitly out of scope"); added §"Rejected
+    alternative: operator-facing debrief surface" capturing the
+    operator's verbatim rejection; added decision #5 for the runtime
+    soft-block gate.
+  - `docs/incidents/2026-05-14-mission-report-audience-leak.md` — §9
+    open questions reconciled against aegis's findings (Q1 closed at
+    `22469ed`, Q2/Q3 operator-action open, Q4 deferred low-priority,
+    Q5 24h-soak cadence decided); new §10 "Decisions made post-RCA"
+    captures both operator decisions verbatim.
+  - `ROADMAP.md` — FU-AI-1 (operator retrospective) removed entirely;
+    FU-AI-2 marked SHIPPED at `22469ed`; FU-AI-3 marked
+    DE-PRIORITIZED with standalone rationale; FU-AI-4 retained with
+    explicit standalone justification (tenant tone-override is not
+    tied to the dropped surface); new FU-AI-RUNTIME-GATE item added.
+  - `CHANGELOG.md` — narrative `[unreleased]` entry recording the two
+    operator decisions, sequenced above aegis's code entry to reflect
+    that the decisions resolve the "Out of scope (flagged for operator
+    decision)" items aegis flagged.
+
+- **Runtime soft-block gate wire-in (aegis) — COMPLETE at commit
+  `<aegis-runtime-gate>` (hash recorded in CHANGELOG entry).**
+  - Detector wired into the **persistence site** of report generation
+    rather than the per-provider call paths. Both providers
+    (`claude_llm.py`, `ollama.py`) funnel through `llm_provider.generate_report`
+    which returns a plain string; `generate_report_task` in
+    `backend/app/tasks/celery_tasks.py` is the sole place that string
+    becomes a row — one wire-in covers both providers.
+  - New helper `_apply_audience_findings(report, llm_content)` runs the
+    detector after `final_content` is set on the row and persists results
+    into two new `Report` columns:
+    - `has_audience_leak BOOLEAN NOT NULL DEFAULT FALSE`
+    - `audience_leak_details JSONB NOT NULL DEFAULT '[]'::jsonb`
+  - Migration via the existing idempotent `_add_missing_columns` path
+    in `backend/app/main.py:114-122` (repo convention; no Alembic).
+    Failover-safe per CLAUDE.md §Failover Guard.
+  - Helper **never raises** — detector failure logs + leaves flags at
+    defaults so generation never 500s. **No regen loop** per operator
+    directive; doc-string-lock test prevents drift toward retry-clean.
+  - `ReportResponse` schema + frontend `Report` type carry the new
+    fields; `MissionReportEdit.tsx` renders a yellow `IconAlertTriangle`
+    Mantine `Alert` banner above the FINAL REPORT editor when the flag
+    is true, listing each matched phrase with its rule name. Save / PDF
+    / Send remain enabled — editorial review IS the gate.
+  - Test coverage: 10 new hermetic tests in
+    `backend/tests/services/test_audience_leak_persistence.py`
+    (helper behavior + Pydantic round-trip + soft-block doc lock).
+    Existing 17-test audience suite stays green. Full backend suite:
+    240 passed, 1 skipped, 2 failed (the pre-existing
+    `test_health_stripe_db_lookup.py` failures, unchanged).
+  - Operator-debrief surface DROPPED per operator decision (Terry's
+    ROADMAP edit captures the rejection). The detector + banner pair
+    is the chosen final surface.
+
 - **Verification gate.** Personal-instance soak 24h with a real report
-  before any push to managed-hosting tenants. No same-day fan-out.
+  generated against the new prompt before any push to managed-hosting
+  tenants. No same-day fan-out. Operator decision per the planned-work
+  close-out preference.
 
-**AI backend confirmation (for the record):**
-
-- Claude API is wired (`backend/app/services/claude_llm.py`, model
-  `claude-sonnet-4-20250514` hard-coded at line 10).
-- Personal instance `.env` does NOT set `MANAGED_INSTANCE` or
-  `LLM_PROVIDER`; both default in `config.py` (`managed_instance=False`,
-  `llm_provider="ollama"`). Whether Claude or Ollama is actually in
-  use depends on `system_settings.llm_provider` in the DB. Operator
-  to verify via the Settings UI or:
-  `docker compose exec db psql -U droneops -c "SELECT key, value FROM system_settings WHERE key IN ('llm_provider','anthropic_api_key');"`
-- Either way, the prompt defect is shared between providers
-  (`claude_llm.py:6` imports `SYSTEM_PROMPT_TEMPLATE` from `ollama.py`),
-  so switching backends does not fix it. The fix is the prompt.
-
-**Open questions** (see incident doc §9 for full list):
-
-1. Operator: confirm DB `llm_provider` value (Claude vs Ollama on the
-   personal instance for this run).
-2. Aegis: did the offending generation use Claude or Ollama? Loki should
-   have the `LLM provider resolved to '%s'` log line from
-   `llm_provider.py:54` for 2026-05-14.
-3. Aegis: is the defect reproducible with `temperature=0` on both
-   providers? Bears on whether the fix is pure-prompt or also tunes
-   sampling.
+**Coordination note for aegis on shared touch surface:** aegis already
+landed a CHANGELOG entry for `22469ed` (the code patch); Terry's
+narrative entry on the operator decisions is intentionally
+**separate** rather than amended to aegis's, so the *decisions* (drop
+debrief surface, approve soft-block) read cleanly in the ledger as
+their own narrative beat. When aegis's runtime-gate code commits, the
+CHANGELOG entry for that commit should be a third `[unreleased]`
+block referenced from ADR-0015 §Decision-5 — not folded into either
+of the existing two.
 
 ## 2026-05-03 — v2.66.0 backend hardening (Agent A — IN-FLIGHT, awaiting orchestrator merge)
 

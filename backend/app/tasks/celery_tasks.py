@@ -147,6 +147,44 @@ def send_report_email_task(to_email: str, customer_name: str, mission_title: str
         loop.close()
 
 
+def _apply_audience_findings(report, llm_content: str) -> None:
+    """Run the audience-leak detector and persist findings on ``report``.
+
+    ADR-0015 soft-block runtime gate. This NEVER raises and NEVER mutates
+    ``llm_content`` — its only job is to populate the two flag columns so
+    the editorial gate in the frontend can surface a warning banner.
+    Detector failure is logged and the report saves with `has_audience_leak`
+    left at its DB default (False) so generation never 500s on a regex bug.
+
+    Kept as a module-level helper (rather than inline in the task body) so
+    it's directly testable without a sync engine — tests can hand it a
+    plain ``SimpleNamespace`` and assert the post-state.
+    """
+    try:
+        from app.services.report_audience import detect_audience_leaks
+
+        leaks = detect_audience_leaks(llm_content or "")
+        report.audience_leak_details = [
+            {"rule": leak.rule, "snippet": leak.snippet, "start": leak.start, "end": leak.end}
+            for leak in leaks
+        ]
+        report.has_audience_leak = bool(leaks)
+        if leaks:
+            logger.warning(
+                "Audience-leak detector flagged %d match(es) on mission %s: rules=%s",
+                len(leaks),
+                getattr(report, "mission_id", "<unknown>"),
+                sorted({leak.rule for leak in leaks}),
+            )
+    except Exception as exc:
+        # Detector must never block report persistence — that would
+        # violate the always-generate contract. Leave flags at their
+        # defaults and continue.
+        logger.error("Audience-leak detector failed; report will save with flags unset: %s", exc, exc_info=True)
+        report.has_audience_leak = False
+        report.audience_leak_details = []
+
+
 @celery_app.task(name="generate_report", bind=True)
 def generate_report_task(
     self,
@@ -244,6 +282,11 @@ def generate_report_task(
                     generated_at=datetime.utcnow(),
                 )
                 db.add(report)
+
+            # ADR-0015 — soft-block audience-leak gate. Runs AFTER content
+            # is set on the row so the helper sees the post-state. Always
+            # saves; never raises.
+            _apply_audience_findings(report, llm_content)
 
             db.commit()
 

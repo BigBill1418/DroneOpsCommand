@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import String, Text, DateTime, Float, Boolean, ForeignKey
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -26,5 +26,15 @@ class Report(Base):
     include_download_link: Mapped[bool] = mapped_column(Boolean, default=False)
     generated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    # ADR-0015 runtime audience-leak gate (soft block).
+    # Populated by `generate_report_task` after every LLM generation.
+    # `has_audience_leak` is the fast-filter boolean; `audience_leak_details`
+    # is a JSON list of `{rule, snippet, start, end}` records mirroring
+    # `app.services.report_audience.AudienceLeak`. Empty list = clean.
+    # Defaults are False / [] so legacy rows (pre-runtime-gate) and any
+    # path that bypasses generation (manual edit-only) read cleanly.
+    has_audience_leak: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    audience_leak_details: Mapped[list] = mapped_column(JSONB, nullable=False, default=list, server_default="[]")
 
     mission = relationship("Mission", back_populates="report")

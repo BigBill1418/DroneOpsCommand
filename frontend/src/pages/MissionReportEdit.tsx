@@ -22,9 +22,11 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  Alert,
   Button,
   Card,
   Group,
+  List,
   Loader,
   Stack,
   Switch,
@@ -34,6 +36,7 @@ import {
 } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import {
+  IconAlertTriangle,
   IconArrowLeft,
   IconDeviceFloppy,
   IconDownload,
@@ -42,7 +45,7 @@ import {
 } from '@tabler/icons-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import api from '../api/client';
-import type { Mission } from '../api/types';
+import type { AudienceLeakDetail, Mission } from '../api/types';
 import RichTextEditor from '../components/RichTextEditor/RichTextEditor';
 import PdfViewer from '../components/PDFPreview/PdfViewer';
 import UnsavedChangesModal from '../components/shared/UnsavedChangesModal';
@@ -110,6 +113,18 @@ export default function MissionReportEdit() {
   const [lastSentAt, setLastSentAt] = useState<string | null>(null);
   const [lastGeneratedAt, setLastGeneratedAt] = useState<string | null>(null);
 
+  // ADR-0015 soft-block runtime audience-leak gate.
+  //
+  // Populated by the backend after every LLM generation. When true, the
+  // banner renders above the FINAL REPORT editor listing the matched
+  // phrases so the operator can correct or regenerate before send. This
+  // is informational ONLY — Save Draft / Generate PDF / Send all remain
+  // enabled. The editorial review IS the gate.
+  const [hasAudienceLeak, setHasAudienceLeak] = useState<boolean>(false);
+  const [audienceLeakDetails, setAudienceLeakDetails] = useState<
+    AudienceLeakDetail[]
+  >([]);
+
   // AI generation polling — preserved verbatim from MissionNew.tsx.
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -173,6 +188,12 @@ export default function MissionReportEdit() {
           setLastSavedAt(r.updated_at || r.generated_at || null);
           setLastSentAt(r.sent_at || null);
           setLastGeneratedAt(r.generated_at || null);
+          setHasAudienceLeak(Boolean(r.has_audience_leak));
+          setAudienceLeakDetails(
+            Array.isArray(r.audience_leak_details)
+              ? (r.audience_leak_details as AudienceLeakDetail[])
+              : [],
+          );
         }
       } catch (err) {
         if (!cancelled) {
@@ -281,6 +302,15 @@ export default function MissionReportEdit() {
               setLastGeneratedAt(
                 reportResp?.data?.generated_at || new Date().toISOString(),
               );
+              // ADR-0015 — surface fresh leak findings from this generation.
+              const leakFlag = Boolean(reportResp?.data?.has_audience_leak);
+              const leakDetails = Array.isArray(
+                reportResp?.data?.audience_leak_details,
+              )
+                ? (reportResp.data.audience_leak_details as AudienceLeakDetail[])
+                : [];
+              setHasAudienceLeak(leakFlag);
+              setAudienceLeakDetails(leakDetails);
               // AI generation persisted on the server; treat narrative
               // + new content as the new clean baseline so Cancel
               // doesn't fire after a successful Generate.
@@ -290,9 +320,11 @@ export default function MissionReportEdit() {
                 includeDownloadLink,
               });
               notifications.show({
-                title: 'Report Ready',
-                message: 'Your AI report is ready for review',
-                color: 'green',
+                title: leakFlag ? 'Report Ready — Audience Leak Flagged' : 'Report Ready',
+                message: leakFlag
+                  ? `Audience-leak detector flagged ${leakDetails.length} phrase(s) — review before send.`
+                  : 'Your AI report is ready for review',
+                color: leakFlag ? 'yellow' : 'green',
               });
             } catch {
               notifications.show({
@@ -538,6 +570,57 @@ export default function MissionReportEdit() {
               </Text>
             )}
           </Group>
+
+          {reportContent && hasAudienceLeak && (
+            <Alert
+              icon={<IconAlertTriangle size={18} />}
+              color="yellow"
+              variant="light"
+              title="AUDIENCE-LEAK CHECK FLAGGED THIS REPORT"
+              data-testid="audience-leak-banner"
+              styles={{
+                root: { background: '#1a1308', border: '1px solid #5a4500' },
+                title: {
+                  color: '#ffcc44',
+                  fontFamily: "'Bebas Neue', sans-serif",
+                  letterSpacing: '1px',
+                },
+                message: { color: '#e8edf2' },
+              }}
+            >
+              <Stack gap="xs">
+                <Text size="sm">
+                  The detector found {audienceLeakDetails.length}{' '}
+                  {audienceLeakDetails.length === 1 ? 'phrase' : 'phrases'} that
+                  read as operator-coaching rather than client-facing narrative.
+                  Edit or regenerate before sending. (ADR-0015 soft block —
+                  save/PDF/send remain enabled; this is for your review.)
+                </Text>
+                <List size="sm" spacing={2}>
+                  {audienceLeakDetails.slice(0, 8).map((leak, idx) => (
+                    <List.Item
+                      key={`${leak.rule}-${leak.start}-${idx}`}
+                      data-testid="audience-leak-item"
+                    >
+                      <Text size="sm" component="span" c="#ffcc44">
+                        [{leak.rule}]
+                      </Text>{' '}
+                      <Text size="sm" component="span" c="#c5cdd9">
+                        “{leak.snippet}”
+                      </Text>
+                    </List.Item>
+                  ))}
+                  {audienceLeakDetails.length > 8 && (
+                    <List.Item>
+                      <Text size="sm" c="#5a6478">
+                        … and {audienceLeakDetails.length - 8} more
+                      </Text>
+                    </List.Item>
+                  )}
+                </List>
+              </Stack>
+            </Alert>
+          )}
 
           {reportContent && (
             <>

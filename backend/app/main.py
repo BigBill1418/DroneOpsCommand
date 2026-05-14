@@ -113,6 +113,12 @@ def _add_missing_columns(conn):
         migrations = {
             "reports": [
                 ("include_download_link", "ALTER TABLE reports ADD COLUMN include_download_link BOOLEAN DEFAULT FALSE"),
+                # ADR-0015 — runtime audience-leak gate (soft block). Both additive
+                # with safe defaults so existing rows (and any future path that
+                # writes a report without going through generation) read cleanly.
+                # Failover-safe per CLAUDE.md §Failover Guard.
+                ("has_audience_leak",     "ALTER TABLE reports ADD COLUMN has_audience_leak BOOLEAN NOT NULL DEFAULT FALSE"),
+                ("audience_leak_details", "ALTER TABLE reports ADD COLUMN audience_leak_details JSONB NOT NULL DEFAULT '[]'::jsonb"),
             ],
             "missions": [
                 ("unas_folder_path", "ALTER TABLE missions ADD COLUMN unas_folder_path VARCHAR(500)"),
