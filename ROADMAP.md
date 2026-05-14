@@ -110,6 +110,77 @@ None yet captured here. When a new forward-looking plan is drafted,
 append it under its own heading with the same Scope / Trigger /
 Deliverable / Owner block structure.
 
+## LLM-assisted report surface (follow-ups from ADR-0015, 2026-05-14)
+
+**Context.** ADR-0015 pinned the contract: *mission reports are
+client-facing artifacts; operator-facing coaching is a separate surface.*
+The current LLM dispatch (`backend/app/services/llm_provider.py`) and
+shared system prompt produce one artifact (the customer-facing report).
+The audience-leak incident on 2026-05-14 exposed the gap; the follow-ups
+below build out the operator-facing side of the contract and harden the
+prompt path against future audience drift.
+
+### FU-AI-1 — Operator retrospective surface (separate from client report)
+
+- **Scope.** Add a second LLM-generated draft to the `MissionReportEdit`
+  facet: an operator-facing retrospective ("what went well / what to do
+  differently next time / equipment notes") that lives on its own field
+  in the `Report` model and is **never** included in the customer PDF or
+  email. Distinct system prompt; same dispatcher; same provider routing.
+  Operator can opt to generate it, edit it, and keep it on the mission
+  record. A future view aggregates retrospectives across missions for
+  trend-spotting.
+- **Trigger.** ADR-0015 lands (Proposed → Accepted) and the prompt-fix
+  soak completes. No earlier — building the second surface before the
+  first surface's audience is fixed would repeat the leak.
+- **Deliverable.** Schema migration (one nullable text column on
+  `Report`), new prompt in `llm_prompts.py`, dispatcher wiring, frontend
+  facet addition under `MissionReportEdit`, ADR-0016 if the design
+  diverges from ADR-0015's outline.
+- **Owner.** TBD. ~1-2 eng days.
+
+### FU-AI-2 — Prompt regression fixture (carried forward from the incident)
+
+- **Scope.** A pytest fixture that exercises the LLM dispatcher with a
+  deliberately operator-voiced mission narrative and asserts the output
+  contains no second-person address to the operator and no
+  operator-coaching prose. Deterministic provider (Ollama,
+  `temperature=0`, small model) for CI stability. Optional
+  network-marked Claude path the operator can run locally.
+- **Trigger.** Lands with the prompt fix (aegis's patch for the
+  2026-05-14 incident). Listed here for tracking only — not a deferred
+  item.
+- **Deliverable.** `backend/tests/test_llm_report_audience.py`.
+- **Owner.** aegis.
+
+### FU-AI-3 — Prompt source-of-truth relocation
+
+- **Scope.** Move `SYSTEM_PROMPT_TEMPLATE` (and the future operator
+  retrospective prompt) out of `backend/app/services/ollama.py` and into
+  `backend/app/services/llm_prompts.py`. Update imports in `claude_llm.py`
+  and `ollama.py`. The prompt is the cross-provider contract; it does
+  not belong in one provider's adapter.
+- **Trigger.** Lands with the prompt fix (aegis's patch for the
+  2026-05-14 incident). Listed here so the architectural improvement is
+  visible on the roadmap even though it ships in the same commit.
+- **Deliverable.** Refactor commit + one-line import update in two
+  files.
+- **Owner.** aegis.
+
+### FU-AI-4 — Per-tenant prompt override (managed-hosting only, optional)
+
+- **Scope.** For managed-hosting tenants that want to brand the report
+  voice differently ("warm and conversational" vs "technical and
+  terse"), expose a tenant-scoped prompt-fragment override in
+  `system_settings` (key e.g. `llm_prompt_tone_addendum`). The
+  audience-separation invariant from ADR-0015 stays hard-coded and not
+  overridable; only the tone-shaping addendum is tenant-tunable.
+- **Trigger.** First managed-hosting customer asks for a different
+  voice. Not before — premature flexibility.
+- **Deliverable.** One new setting key, one prompt-construction site
+  updated, one Settings-page UI element gated to `managed_instance=true`.
+- **Owner.** TBD. ~0.5 eng day.
+
 ### FU-7 — Zero-touch device API key rotation — **CLOSED 2026-04-24** (v2.63.6 / DroneOpsSync v1.3.25)
 
 - **Status.** PR open against `main` on this repo (`claude/zero-touch-key-rotation-backend`); paired DroneOpsSync PR open against `main` (`claude/auto-rotation-client`). Operator reviews + merges.

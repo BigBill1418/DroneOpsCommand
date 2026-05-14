@@ -4,6 +4,138 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## [unreleased] — 2026-05-14 — fix(reports): mission-report audience leak — aegis patch landed
+
+Code-side close-out of the audience-leak quality defect documented in the
+incident narrative below. Personal-instance only; no customer-facing report
+ever shipped with the defect. No deploy yet — operator review before deploy
+per the close-out-thoroughness workflow. Repo carries `.deployer-disabled`
+so SwarmPilot will not auto-pick this up; deploy is manual.
+
+### Fixed
+
+- **`backend/app/services/ollama.py:9-38`** — `SYSTEM_PROMPT_TEMPLATE`
+  rewritten. Now explicitly names the CLIENT as the reader, names the
+  operator as upstream author (not reader), forbids second-person address
+  to the pilot, calls out the four most common leak phrases as
+  FORBIDDEN, and reframes Section 5 from "Recommendations - Follow-up
+  actions or suggestions for the client" (which the LLM consistently
+  read as a pilot-coaching slot) to "Client Follow-Up Items" with an
+  explicit ban on pilot/aircraft/flight-technique recommendations and
+  an explicit "OMIT this section entirely" fallback when no client
+  action is warranted.
+- **`backend/app/services/ollama.py:75-89`** and
+  **`backend/app/services/claude_llm.py:52-66`** — user-prompt template
+  in both providers now labels `Operator Notes:` as `CONTEXT ONLY` with
+  an inline instruction to translate them into third-person narrative,
+  and the trailing instruction is now "Generate the client-facing
+  after-action report" with the audience constraint repeated. Belt-and-
+  suspenders against system-prompt drift on long contexts.
+- Note: `SYSTEM_PROMPT_TEMPLATE` continues to live in
+  `app/services/ollama.py` and is imported by `claude_llm.py` (current
+  pattern). The proposal in the incident narrative to relocate to a
+  dedicated `llm_prompts.py` module is left for a follow-up PR — it is
+  a refactor, not part of the audience-fix surface, and bundling it
+  would expand the change footprint without adding behavioral coverage.
+
+### Added
+
+- **`backend/app/services/report_audience.py`** — deterministic regex-
+  based audience-leak detector (`detect_audience_leaks`,
+  `has_audience_leak`, `AudienceLeak` dataclass). Nine rule categories
+  covering second-person operator address, first-person-plural pilot
+  advice, coaching framing ("next time consider…"), and operator/pilot
+  self-critique. Currently consumed by the regression test; exposed as
+  a stable callable so it can be wired into a post-generation runtime
+  gate in a follow-up without re-implementing the rules.
+- **`backend/tests/services/test_report_audience_guard.py`** — 17-test
+  regression suite. Layer 1 (4 tests) locks structural guarantees of
+  the system prompt: audience pin, operator-address ban, Section-5
+  reframe, operator-notes framing. Layer 2 (13 tests) exercises the
+  detector against nine representative bad phrasings, a known-clean
+  third-person sample, empty input, the diagnostic snippet shape, and
+  the verbatim shape of the operator-reported leak from this incident.
+  Fully hermetic — no network, no LLM, no DB. Runs in ~1.8s.
+
+### Verification
+
+- `pytest tests/services/test_report_audience_guard.py -v` — 17/17
+  passing on Python 3.12.3.
+- Full backend suite: 230 passed, 1 skipped, 2 failed. The 2 failures
+  (`test_health_stripe_db_lookup.py`) are pre-existing and reproduce
+  against pristine `main` HEAD without these changes — unrelated to
+  the audience fix and out of scope.
+
+### Out of scope (flagged for operator decision)
+
+- Whether to keep an operator-facing debrief surface at all (and if
+  so, where). Today the system has exactly one report and it is now
+  unambiguously client-facing. If pilot coaching is wanted as a
+  separate deliverable, it needs a new endpoint + new prompt + UI
+  exposure — not a knob on this report.
+- Whether to wire `report_audience.has_audience_leak()` as a hard
+  runtime gate on `generate_report_task` (regenerate or flag the
+  report when a leak is detected). The detector is ready; the policy
+  decision (block vs. flag + UI banner) is operator-owned.
+
+See `docs/incidents/2026-05-14-mission-report-audience-leak.md` and
+`docs/adr/0015-mission-report-audience-separation.md` (terry-research-
+architect) for full RCA, ADR, and prevention frame.
+
+## [unreleased] — 2026-05-14 — fix(reports): mission-report audience leak — pending aegis patch
+
+Quality defect, not an outage. Operator-only catch on the personal instance;
+no customer-facing report shipped with the defect. Use the "close-out
+thoroughness" workflow per operator preference — full doc + ADR + fixture,
+no hotfix shortcut.
+
+- **Symptom.** LLM-generated mission report `final_content` contained
+  recommendations addressed to the *operator* (how to fly future missions,
+  gear suggestions, technique advice) inside a section that is supposed to
+  be customer-facing follow-up. Operator caught it in the
+  `MissionReportEdit` editorial gate before send.
+- **Scope.** Both LLM providers — Claude (`claude-sonnet-4-20250514`,
+  `backend/app/services/claude_llm.py`) and Ollama
+  (`llama3.1:8b-instruct-q4_K_M`, `backend/app/services/ollama.py`) share
+  the same `SYSTEM_PROMPT_TEMPLATE`, so the defect is provider-agnostic.
+  Affects personal instance, demo instance, and any managed-hosting
+  tenant on this image. Not a regression — defect has been present since
+  the LLM dispatch system was introduced.
+- **Root cause (preliminary, pending aegis RCA).** The shared system
+  prompt declares the artifact "client-facing" but (a) does not name the
+  customer as the reader, (b) does not name the operator as upstream
+  author rather than reader, (c) Section 5 "Recommendations" has no
+  audience pin, (d) no negative instruction prohibiting operator-coaching
+  prose. The LLM resolves the audience toward whoever is closest in the
+  conversation context — the operator, via the labeled `Operator Notes:`
+  block in the user prompt.
+- **Fix (pending aegis patch).** Rewrite the prompt to (1) name audience
+  + author explicitly, (2) reframe Section 5 to require customer-targeted
+  follow-up actions or be empty, (3) forbid operator-coaching prose, (4)
+  relocate `SYSTEM_PROMPT_TEMPLATE` from `ollama.py` to
+  `backend/app/services/llm_prompts.py` so both providers import from a
+  shared module, (5) pin the contract with a regression fixture
+  (`backend/tests/test_llm_report_audience.py`).
+- **Verification gate.** Personal-instance soak 24h with a real report
+  generated and reviewed, then propagate to managed tenants. No same-day
+  fan-out.
+- **Below ntfy threshold (ADR-0037).** No customer impact, no actionable
+  5-minute window. Dashboard / log only; no publish.
+
+Docs landed alongside this entry:
+
+- `docs/incidents/2026-05-14-mission-report-audience-leak.md` —
+  full incident record with AI-backend confirmation, scope, root
+  cause analysis, fix plan, prevention.
+- `docs/adr/0015-mission-report-audience-separation.md` — durable
+  decision: mission reports are client-facing artifacts; operator-facing
+  coaching is a separate (future) surface. Proposed → Accepted on the
+  same commit that lands the prompt fix.
+
+CHANGELOG line for the patch itself will be appended by aegis as a
+separate `[unreleased]` Fixed entry when the prompt rewrite + fixture
+land, or rolled into a version bump entry on the next release cut.
+
 ## [unreleased] — 2026-05-13 — security: tighten CF Access on droneops.barnardhq.com to bill-only via Entra (personal instance only)
 
 Hostname-scoped Cloudflare Access change. **No repo code, no compose, no

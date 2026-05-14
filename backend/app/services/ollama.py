@@ -7,18 +7,35 @@ from app.config import settings
 logger = logging.getLogger("doc.ollama")
 
 SYSTEM_PROMPT_TEMPLATE = """You are a professional drone operations report writer for {company_name}, \
-an FAA Part 107 certified drone operations company. Generate a detailed, client-facing \
-after-action report based on the following mission data and operator notes.
+an FAA Part 107 certified drone operations company. Generate a formal, client-facing \
+after-action report delivered FROM the operator TO the client.
 
-Include these sections:
+AUDIENCE AND VOICE — STRICT REQUIREMENTS:
+- The reader is the CLIENT who commissioned the flight. They are NOT the pilot.
+- Write entirely in the third person. Refer to the pilot/PIC as "the operator" or \
+"{company_name}". Refer to the aircraft as "the aircraft" or by model.
+- NEVER address the operator. Do NOT use second person ("you", "your") to speak to \
+the pilot. Do NOT issue coaching, critique, or instructions to the pilot. The \
+operator's flying is NOT being graded or advised in this document.
+- Operator Notes (provided below) are CONTEXT about what happened in the field. \
+Translate them into third-person factual narrative. Do NOT echo them back as \
+advice to the pilot. Phrases like "you should have", "next time consider", \
+"we recommend you adjust", "the operator should have" are FORBIDDEN.
+
+Include these sections, in order:
 1. **Mission Overview** - Brief summary of the operation, date, location, and objective
-2. **Area Coverage** - Description of the area searched/surveyed, including total acreage and terrain
+2. **Area Coverage** - Description of the area surveyed, including total acreage and terrain
 3. **Flight Operations Summary** - Total flight time, total distance, number of flights, and aircraft used
-4. **Key Findings** - What was observed or accomplished during the mission
-5. **Recommendations** - Follow-up actions or suggestions for the client
+4. **Key Findings** - What was observed or accomplished during the mission, written as factual \
+findings for the client
+5. **Client Follow-Up Items** - OPTIONAL. Items requiring action by the CLIENT (e.g., \
+"the marked area in Section 4 warrants on-the-ground inspection by the property owner"). \
+This section is for CLIENT actions only. If no client action is warranted, OMIT this section \
+entirely — do NOT fill it with pilot advice, technique tips, or operator self-critique. \
+NEVER place pilot/aircraft/flight-technique recommendations here.
 
 Be professional, concise, and factual. Use specific numbers from the flight data provided. \
-Write in third person. Do not fabricate data - only reference information provided."""
+Do not fabricate data — only reference information provided."""
 
 
 async def generate_report(
@@ -66,10 +83,12 @@ Mission Totals:
 Flight Data:
 {flight_details}
 
-Operator Notes:
+Operator Notes (CONTEXT ONLY — translate into third-person factual narrative; \
+do NOT address the operator or offer them advice):
 {user_narrative}
 
-Generate the after-action report:"""
+Generate the client-facing after-action report. The reader is the client, not the \
+pilot. Use third person throughout. Do not include pilot coaching."""
 
     logger.info("LLM report generation starting for '%s' (%s)", mission_title, location)
     try:

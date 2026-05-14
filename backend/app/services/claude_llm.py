@@ -60,10 +60,12 @@ Mission Totals:
 Flight Data:
 {flight_details}
 
-Operator Notes:
+Operator Notes (CONTEXT ONLY — translate into third-person factual narrative; \
+do NOT address the operator or offer them advice):
 {user_narrative}
 
-Generate the after-action report:"""
+Generate the client-facing after-action report. The reader is the client, not the \
+pilot. Use third person throughout. Do not include pilot coaching."""
 
     logger.info("Claude report generation starting for '%s' (%s)", mission_title, location)
     try:

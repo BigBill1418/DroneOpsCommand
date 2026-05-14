@@ -4,6 +4,59 @@ Maintained alongside `CHANGELOG.md` and `docs/adr/`. `CHANGELOG.md` is
 the ledger of shipped changes; this file tracks what's in-flight or
 blocked.
 
+## 2026-05-14 — Mission-report audience leak — IN-FLIGHT (aegis owns code-level RCA + patch; Terry owns docs)
+
+Quality defect on the LLM-generated mission report. Operator-only catch,
+no customer impact. Workflow: planned-work close-out style (full ADR +
+fixture + 24h soak), not active-incident hotfix.
+
+**Status:**
+
+- **Docs lane (Terry) — COMPLETE.**
+  - `docs/incidents/2026-05-14-mission-report-audience-leak.md` written
+    (full record + AI-backend confirmation + preliminary RCA).
+  - `docs/adr/0015-mission-report-audience-separation.md` written
+    (Proposed; flips to Accepted on the same commit as the patch).
+  - `CHANGELOG.md` [unreleased] entry added (above the 2026-05-13 CF
+    Access entry).
+  - `PROGRESS.md` updated (this entry).
+  - `ROADMAP.md` updated (operator-retrospective surface added as a
+    follow-up under ADR-0015).
+- **Code lane (aegis) — IN-FLIGHT.**
+  - Definitive RCA pending.
+  - Prompt rewrite pending.
+  - Relocation of `SYSTEM_PROMPT_TEMPLATE` from `ollama.py` to
+    `llm_prompts.py` pending.
+  - Regression fixture (`test_llm_report_audience.py`) pending.
+  - Version bump + CHANGELOG Fixed entry pending.
+- **Verification gate.** Personal-instance soak 24h with a real report
+  before any push to managed-hosting tenants. No same-day fan-out.
+
+**AI backend confirmation (for the record):**
+
+- Claude API is wired (`backend/app/services/claude_llm.py`, model
+  `claude-sonnet-4-20250514` hard-coded at line 10).
+- Personal instance `.env` does NOT set `MANAGED_INSTANCE` or
+  `LLM_PROVIDER`; both default in `config.py` (`managed_instance=False`,
+  `llm_provider="ollama"`). Whether Claude or Ollama is actually in
+  use depends on `system_settings.llm_provider` in the DB. Operator
+  to verify via the Settings UI or:
+  `docker compose exec db psql -U droneops -c "SELECT key, value FROM system_settings WHERE key IN ('llm_provider','anthropic_api_key');"`
+- Either way, the prompt defect is shared between providers
+  (`claude_llm.py:6` imports `SYSTEM_PROMPT_TEMPLATE` from `ollama.py`),
+  so switching backends does not fix it. The fix is the prompt.
+
+**Open questions** (see incident doc §9 for full list):
+
+1. Operator: confirm DB `llm_provider` value (Claude vs Ollama on the
+   personal instance for this run).
+2. Aegis: did the offending generation use Claude or Ollama? Loki should
+   have the `LLM provider resolved to '%s'` log line from
+   `llm_provider.py:54` for 2026-05-14.
+3. Aegis: is the defect reproducible with `temperature=0` on both
+   providers? Bears on whether the fix is pure-prompt or also tunes
+   sampling.
+
 ## 2026-05-03 — v2.66.0 backend hardening (Agent A — IN-FLIGHT, awaiting orchestrator merge)
 
 Branch: `feat/v266-backend-hardening`. All 8 P0/P1 fixes implemented;
