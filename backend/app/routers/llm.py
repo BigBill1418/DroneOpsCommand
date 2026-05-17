@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.jwt import get_current_user
+from app.config import settings
 from app.database import get_db
 from app.models.user import User
 from app.services.llm_provider import get_llm_provider
@@ -22,7 +23,7 @@ async def get_llm_status(
         return {
             "status": "online",
             "provider": "claude",
-            "configured_model": "claude-sonnet-4-20250514",
+            "configured_model": settings.claude_model,
             "model_available": True,
         }
 

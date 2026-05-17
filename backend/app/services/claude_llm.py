@@ -7,8 +7,6 @@ from app.services.ollama import SYSTEM_PROMPT_TEMPLATE
 
 logger = logging.getLogger("doc.claude_llm")
 
-MODEL = "claude-sonnet-4-20250514"
-
 
 async def generate_report(
     user_narrative: str,
@@ -67,12 +65,13 @@ do NOT address the operator or offer them advice):
 Generate the client-facing after-action report. The reader is the client, not the \
 pilot. Use third person throughout. Do not include pilot coaching."""
 
+    model = settings.claude_model
     logger.info("Claude report generation starting for '%s' (%s)", mission_title, location)
     try:
         client = anthropic.Anthropic(api_key=resolved_key)
-        logger.info("Claude request: model=%s", MODEL)
+        logger.info("Claude request: model=%s", model)
         message = client.messages.create(
-            model=MODEL,
+            model=model,
             max_tokens=1024,
             system=SYSTEM_PROMPT_TEMPLATE.format(company_name=company_name),
             messages=[{"role": "user", "content": user_prompt}],

@@ -14,6 +14,12 @@ class Settings(BaseSettings):
 
     # Claude (Anthropic)
     anthropic_api_key: str = ""
+    # Current default: Sonnet 4.6 (2026 generation). Override via
+    # CLAUDE_MODEL env var when bumping or pinning. Don't hardcode model
+    # IDs in service modules — older snapshots are retired periodically
+    # by Anthropic and the resulting model-not-found error otherwise
+    # surfaces in the UI as a generic "report failed" toast.
+    claude_model: str = "claude-sonnet-4-6"
 
     # LLM provider selection: "ollama" or "claude"
     llm_provider: str = "ollama"

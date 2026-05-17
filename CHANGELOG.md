@@ -4,6 +4,33 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## [unreleased] — 2026-05-17 — fix(llm): bump Claude model + stop blaming Ollama in error toasts
+
+Report generation was silently failing on Claude-configured instances
+because `backend/app/services/claude_llm.py:10` hardcoded the Sonnet
+model snapshot `claude-sonnet-4-20250514` (May 2025). That snapshot is
+retired; Anthropic returns model-not-found, the celery task retries
+3x then dies, and the frontend's catch-all toast was hardcoded to
+**"Could not generate report. Is Ollama running?"** — making a Claude
+failure look like an Ollama outage even when Ollama wasn't in the
+picture at all.
+
+### Changed
+
+- **`backend/app/config.py`** — added `claude_model` setting (default
+  `claude-sonnet-4-6`, override via `CLAUDE_MODEL` env var). The
+  rationale comment in-file warns future readers not to hardcode model
+  IDs in service modules.
+- **`backend/app/services/claude_llm.py`** — read model from
+  `settings.claude_model` instead of a module-level constant.
+- **`backend/app/routers/llm.py`** — `/api/llm/status` now reports the
+  configured model from settings rather than a stale hardcoded string,
+  so the Settings page's "configured model" display stays accurate.
+- **`frontend/src/pages/MissionReportEdit.tsx`** + **`MissionWizardLegacy.tsx`** —
+  generation-failure toast no longer blames Ollama. The new fallback
+  reads "Check Settings → AI for provider status." The backend's
+  `err.response.data.detail` is still preferred when present.
+
 ## [unreleased] — 2026-05-16 — feat(missions): derive aircraft from flight log on attach
 
 The mission editor no longer asks the operator to pick which drones flew a

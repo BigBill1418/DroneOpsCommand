@@ -660,7 +660,7 @@ export default function MissionNew() {
     } catch (err: any) {
       notifications.show({
         title: 'Generation Failed',
-        message: err.response?.data?.detail || 'Could not generate report. Is Ollama running?',
+        message: err.response?.data?.detail || 'Could not generate report. Check Settings → AI for provider status.',
         color: 'red',
       });
       setGenerating(false);
