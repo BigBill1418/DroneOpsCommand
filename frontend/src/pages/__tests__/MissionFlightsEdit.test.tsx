@@ -4,8 +4,12 @@
  * Per ADR-0013 + spec §7: msw at the network boundary asserts:
  *
  *   1. Add → POST /api/missions/{id}/flights with the right body shape.
+ *      Body must NOT include aircraft_id — the server derives it from
+ *      the flight log (the operator never picks aircraft on this page).
  *   2. Remove → DELETE /api/missions/{id}/flights/{flight_id}.
  *   3. CONTRACT: POST /api/missions is NEVER fired from this page.
+ *   4. CONTRACT: PATCH /api/missions/{id}/flights/{flight_id}/aircraft
+ *      is NEVER fired from this page either — that whole concept is gone.
  */
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
@@ -24,6 +28,7 @@ let lastPostFlightUrl: string | null = null;
 let lastPostFlightBody: Record<string, unknown> | null = null;
 let lastDeleteFlightUrl: string | null = null;
 let postMissionsCallCount = 0;
+let patchAircraftCallCount = 0;
 
 function freshMission() {
   return {
@@ -100,9 +105,12 @@ function buildHandlers() {
       lastDeleteFlightUrl = request.url;
       return new HttpResponse(null, { status: 204 });
     }),
-    http.patch(`*/api/missions/${MISSION_ID}/flights/:flightRowId/aircraft`, () =>
-      HttpResponse.json({ ok: true }),
-    ),
+    // CONTRACT TRIPWIRE: PATCH .../aircraft must never fire from this
+    // page anymore — aircraft is derived server-side from the flight log.
+    http.patch(`*/api/missions/${MISSION_ID}/flights/:flightRowId/aircraft`, () => {
+      patchAircraftCallCount++;
+      return HttpResponse.json({ ok: true });
+    }),
     // CONTRACT TRIPWIRE.
     http.post('*/api/missions', () => {
       postMissionsCallCount++;
@@ -120,6 +128,7 @@ afterEach(() => {
   lastPostFlightBody = null;
   lastDeleteFlightUrl = null;
   postMissionsCallCount = 0;
+  patchAircraftCallCount = 0;
 });
 afterAll(() => server.close());
 
@@ -155,9 +164,12 @@ describe('MissionFlightsEdit', () => {
     // The native-flight branch sets flight_id; opendronelog_flight_id is null.
     expect(lastPostFlightBody?.flight_id).toBe(NATIVE_FLIGHT_ID);
     expect(lastPostFlightBody?.opendronelog_flight_id).toBeNull();
+    // aircraft_id must NOT be in the body — the server derives it.
+    expect(lastPostFlightBody).not.toHaveProperty('aircraft_id');
 
-    // Load-bearing invariant.
+    // Load-bearing invariants.
     expect(postMissionsCallCount).toBe(0);
+    expect(patchAircraftCallCount).toBe(0);
   });
 
   it('Remove fires DELETE /api/missions/{id}/flights/{flight_id} and NEVER POST /api/missions', async () => {

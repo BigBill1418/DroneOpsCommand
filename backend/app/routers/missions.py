@@ -389,12 +389,18 @@ async def add_flight(
     if not result.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Mission not found")
 
-    # If linking a local flight, populate cache from Flight record
+    # Aircraft attribution is derived from the flight log — the operator
+    # never picks it. Flight uploads already fleet-match by serial/model
+    # (see flight_library._match_fleet_aircraft), so by the time a flight
+    # is being attached to a mission, Flight.aircraft_id is authoritative.
+    # We ignore any client-sent aircraft_id to keep a single source of
+    # truth.
     if data.flight_id:
         from app.models.flight import Flight as FlightModel
         flt_result = await db.execute(select(FlightModel).where(FlightModel.id == data.flight_id))
         local_flight = flt_result.scalar_one_or_none()
         if local_flight:
+            data.aircraft_id = local_flight.aircraft_id
             cache = data.flight_data_cache or {}
             cache.update({
                 "id": str(local_flight.id),
@@ -414,8 +420,26 @@ async def add_flight(
             })
             data.flight_data_cache = cache
     else:
-        # Legacy: enrich flight_data_cache with GPS track from OpenDroneLog
+        # Legacy ODL row — no Flight row to read from. Fleet-match by
+        # serial/model out of the cache so reports/financials still see
+        # an aircraft.
         cache = data.flight_data_cache or {}
+        try:
+            from app.routers.flight_library import _match_fleet_aircraft
+            fleet_match = await _match_fleet_aircraft(
+                db,
+                cache.get("drone_serial"),
+                cache.get("drone_model"),
+            )
+            if fleet_match is not None:
+                data.aircraft_id = fleet_match.id
+            else:
+                data.aircraft_id = None
+        except Exception as exc:
+            logger.warning("Fleet match failed for ODL flight attach: %s", exc)
+            data.aircraft_id = None
+
+        # Enrich flight_data_cache with GPS track from OpenDroneLog
         has_track = any(
             key in cache and isinstance(cache[key], list) and len(cache[key]) > 0
             for key in ("track", "gps_data", "coordinates")

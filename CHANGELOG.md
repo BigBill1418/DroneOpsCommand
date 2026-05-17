@@ -4,6 +4,61 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## [unreleased] — 2026-05-16 — feat(missions): derive aircraft from flight log on attach
+
+The mission editor no longer asks the operator to pick which drones flew a
+mission, or to assign each attached flight to an aircraft. Both pieces of
+information already live on the flight log (matched to the fleet at upload
+time by serial/model), so the editor was just making the operator key in
+data the system already had — slowly, manually, and in a way that could
+disagree with the underlying flight record.
+
+### Changed
+
+- **`backend/app/routers/missions.py:381-442`** (`add_flight`) — derives
+  `MissionFlight.aircraft_id` from `Flight.aircraft_id` when the attach
+  references a native flight, and fleet-matches by serial/model from the
+  cache for legacy ODL rows. Any client-sent `aircraft_id` in the request
+  body is ignored — the flight log is the single source of truth.
+- **`frontend/src/pages/MissionWizardLegacy.tsx`** (`/missions/:id/edit-legacy`) —
+  same cleanup applied to the soak fallback so the bad UX is unreachable
+  from any route: removed the AIRCRAFT USED checkbox group on Step 2,
+  collapsed the DRONE + ASSIGN AIRCRAFT columns into a single read-only
+  AIRCRAFT cell (driven by `flightAircraftLabel(flight, fleet)`), removed
+  `handleAssignAircraft` and its PATCH call, removed `missionAircraft`
+  state, and made Step 6's aircraft-card row derive from
+  `selectedFlights[]._aircraftId` instead of operator picks.
+- **`frontend/src/pages/MissionFlightsEdit.tsx`** — full rewrite:
+  - Removed the **AIRCRAFT USED** checkbox card (the per-mission drone
+    multi-select). Distinct aircraft are now derived from attached flights
+    and shown as read-only badges in the ATTACHED FLIGHTS header. Unmatched
+    flight-log drones show as a yellow `(unmatched)` badge so the operator
+    can fix the source flight on the Flights page.
+  - Removed the **ASSIGN AIRCRAFT** column from the attached table.
+    Replaced with a read-only AIRCRAFT column showing the fleet aircraft
+    name (or the cached drone model when unmatched).
+  - Removed the aircraft-list fetch, the `missionAircraft` state and its
+    baseline, the dirty-guard hook, and the `UnsavedChangesModal` — none
+    of the remaining controls have unsaved state (attach/detach are
+    immediate writes).
+  - Removed the call to `PATCH /api/missions/{id}/flights/{flight_id}/aircraft`.
+    The backend endpoint is left in place for `MissionWizardLegacy.tsx`
+    (the `/missions/:id/edit-legacy` soak fallback) but the Hub editor
+    never fires it.
+
+### Tests
+
+- **`backend/tests/test_mission_flight_attach_derives_aircraft.py`** —
+  new. Three contract tests through the FastAPI ASGI stack:
+  (1) omitting `aircraft_id` in the body → server fills it from the
+  Flight row; (2) sending a stale `aircraft_id` → server overrides it
+  with the flight log's value; (3) unmatched flight log → stored as
+  `null`, never the client's guess. 3/3 pass.
+- **`frontend/src/pages/__tests__/MissionFlightsEdit.test.tsx`** —
+  tightened the Add-flight contract assertion: the POST body must NOT
+  carry `aircraft_id`, and the page must NEVER fire the legacy PATCH
+  `/aircraft` endpoint. Updated handler tracks both invariants. 3/3 pass.
+
 ## [unreleased] — 2026-05-14 — fix(reports): clear stale draft on Generate Report click
 
 Small UX tweak on the Mission Report Edit page. Clicking **Generate Report**

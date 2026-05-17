@@ -75,6 +75,19 @@ function flightDrone(f: any): string {
   return f.drone_model || f.droneModel || f.drone || f.aircraft || f.model || f.aircraft_name || '—';
 }
 
+/** Resolve a fleet aircraft model name from the flight's aircraft_id,
+ *  falling back to the cached drone_model when the upload didn't match
+ *  the fleet. Aircraft attribution is read-only here — it comes from
+ *  the flight log. */
+function flightAircraftLabel(f: any, fleet: { id: string; model_name: string }[]): string {
+  const aid = f._aircraftId || f.aircraft_id;
+  if (aid) {
+    const match = fleet.find((a) => a.id === aid);
+    if (match) return match.model_name;
+  }
+  return flightDrone(f);
+}
+
 /** Get display name for a flight */
 function flightName(f: any): string {
   return f.display_name || f.displayName || f.name || f.title || f.file_name || f.fileName || `Flight ${f.id ?? ''}`;
@@ -153,9 +166,6 @@ export default function MissionNew() {
   const [downloadLinkExpiresAt, setDownloadLinkExpiresAt] = useState<Date | null>(null);
   const [includeDownloadLink, setIncludeDownloadLink] = useState(false);
 
-  // Aircraft assigned to this mission
-  const [missionAircraft, setMissionAircraft] = useState<string[]>([]);
-
   const navigate = useNavigate();
 
   // Track the highest step the user has reached so they can freely click
@@ -222,7 +232,8 @@ export default function MissionNew() {
         setDownloadLinkUrl(m.download_link_url || '');
         setDownloadLinkExpiresAt(m.download_link_expires_at ? new Date(m.download_link_expires_at) : null);
 
-        // Populate flights from cached data
+        // Populate flights from cached data. _aircraftId is read-only
+        // here — derived server-side from the flight log on attach.
         const flights = m.flights.map((f) => ({
           ...(f.flight_data_cache || {}),
           _flightId: f.id,
@@ -231,10 +242,6 @@ export default function MissionNew() {
           flight_id: f.opendronelog_flight_id,
         }));
         setSelectedFlights(flights);
-
-        // Populate aircraft used
-        const aircraftIds = [...new Set(m.flights.filter((f) => f.aircraft_id).map((f) => f.aircraft_id!))];
-        setMissionAircraft(aircraftIds);
 
         // Populate images
         if (m.images.length > 0) {
@@ -415,12 +422,20 @@ export default function MissionNew() {
     }
   };
 
-  // Step 2: Add / remove flights — optimistic UI, parallel API calls
-  const handleAddFlight = (flight: any, aircraftId?: string) => {
+  // Step 2: Add / remove flights — optimistic UI, parallel API calls.
+  // Aircraft attribution is derived server-side from the flight log; we
+  // never send aircraft_id in the body.
+  const handleAddFlight = (flight: any) => {
     if (!missionId) return;
-    // Optimistic: add immediately with a temp placeholder _flightId
+    // Optimistic: add immediately with a temp placeholder _flightId.
+    // Pre-fill _aircraftId from the flight's own aircraft_id so the
+    // Review step shows the right aircraft chip without a refetch.
     const tempId = `_pending_${Date.now()}_${Math.random()}`;
-    const optimistic = { ...flight, _flightId: tempId, _aircraftId: aircraftId || null };
+    const optimistic = {
+      ...flight,
+      _flightId: tempId,
+      _aircraftId: flight.aircraft_id || null,
+    };
     setSelectedFlights((prev) => [...prev, optimistic]);
 
     trackOp(async () => {
@@ -430,11 +445,17 @@ export default function MissionNew() {
         const resp = await api.post(`/missions/${missionId}/flights`, {
           flight_id: isNativeFlight ? flight.id : null,
           opendronelog_flight_id: isNativeFlight ? null : String(flight.id || flight.flight_id),
-          aircraft_id: aircraftId || flight.aircraft_id || null,
           flight_data_cache: flight,
         });
-        // Replace temp ID with real one
-        setSelectedFlights((prev) => prev.map((f) => f._flightId === tempId ? { ...f, _flightId: resp.data.id } : f));
+        // Replace temp ID with real one, and adopt the server-derived
+        // aircraft_id (single source of truth).
+        setSelectedFlights((prev) =>
+          prev.map((f) =>
+            f._flightId === tempId
+              ? { ...f, _flightId: resp.data.id, _aircraftId: resp.data.aircraft_id || null }
+              : f,
+          ),
+        );
       } catch {
         // Revert on failure
         setSelectedFlights((prev) => prev.filter((f) => f._flightId !== tempId));
@@ -462,31 +483,6 @@ export default function MissionNew() {
         notifications.show({ title: 'Error', message: 'Failed to remove flight', color: 'red' });
       }
     });
-  };
-
-  const handleAssignAircraft = async (flightIndex: number, aircraftId: string | null) => {
-    if (!missionId) return;
-    const flight = selectedFlights[flightIndex];
-    if (!flight?._flightId) return;
-    // Optimistic update — immediately show the selection
-    setSelectedFlights((prev) => {
-      const updated = [...prev];
-      updated[flightIndex] = { ...updated[flightIndex], _aircraftId: aircraftId };
-      return updated;
-    });
-    try {
-      await api.patch(`/missions/${missionId}/flights/${flight._flightId}/aircraft`, {
-        aircraft_id: aircraftId,
-      });
-    } catch {
-      // Revert on failure
-      setSelectedFlights((prev) => {
-        const updated = [...prev];
-        updated[flightIndex] = { ...updated[flightIndex], _aircraftId: flight._aircraftId };
-        return updated;
-      });
-      notifications.show({ title: 'Error', message: 'Failed to assign aircraft', color: 'red' });
-    }
   };
 
   // Step 3: Upload images
@@ -936,32 +932,13 @@ export default function MissionNew() {
           </Card>
         </Stepper.Step>
 
-        {/* Step 2: Flights & Aircraft */}
-        <Stepper.Step label="Flights" description="Flights & aircraft">
+        {/* Step 2: Flights */}
+        <Stepper.Step label="Flights" description="Attach flight logs">
           <Card padding="lg" radius="md" mt="md" style={cardStyle}>
             <Stack gap="sm">
-              {/* Aircraft selection — compact inline */}
-              <Group justify="space-between" align="center">
-                <Text c="#e8edf2" fw={600} style={{ fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' }}>
-                  AIRCRAFT USED
-                </Text>
-                <Checkbox.Group value={missionAircraft} onChange={setMissionAircraft}>
-                  <Group gap="xs">
-                    {aircraft.map((a) => (
-                      <Checkbox
-                        key={a.id}
-                        value={a.id}
-                        label={a.model_name}
-                        color="cyan"
-                        size="xs"
-                        styles={{ label: { color: '#e8edf2', fontSize: '12px' } }}
-                      />
-                    ))}
-                  </Group>
-                </Checkbox.Group>
-              </Group>
-
-              {/* Flight logs — scrollable table */}
+              {/* Flight logs — scrollable table.
+                  Aircraft attribution is derived from the flight log on
+                  attach (no operator picker). */}
               <Group justify="space-between" align="center">
                 <Group gap="xs">
                   <Text c="#e8edf2" fw={600} style={{ fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' }}>
@@ -999,9 +976,8 @@ export default function MissionNew() {
                         <Table.Th w={40}></Table.Th>
                         <Table.Th>NAME</Table.Th>
                         <Table.Th>DATE</Table.Th>
-                        <Table.Th>DRONE</Table.Th>
+                        <Table.Th>AIRCRAFT</Table.Th>
                         <Table.Th>DURATION</Table.Th>
-                        <Table.Th>ASSIGN AIRCRAFT</Table.Th>
                       </Table.Tr>
                     </Table.Thead>
                     <Table.Tbody>
@@ -1021,25 +997,15 @@ export default function MissionNew() {
                             </Table.Td>
                             <Table.Td style={{ fontSize: '13px' }}>{flightName(flight)}</Table.Td>
                             <Table.Td style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: '13px' }}>{flightDate(flight)}</Table.Td>
-                            <Table.Td style={{ fontSize: '13px' }}>{flightDrone(flight)}</Table.Td>
+                            <Table.Td style={{ fontSize: '13px' }}>{flightAircraftLabel(flight, aircraft)}</Table.Td>
                             <Table.Td style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: '13px' }}>{flightDuration(flight)}</Table.Td>
-                            <Table.Td>
-                              <Select
-                                size="xs"
-                                placeholder="Assign..."
-                                data={aircraft.map((a) => ({ value: a.id, label: a.model_name }))}
-                                value={flight._aircraftId || null}
-                                onChange={(val) => handleAssignAircraft(i, val)}
-                                clearable
-                                styles={{ input: { background: '#050608', borderColor: '#1a1f2e', color: '#e8edf2', minWidth: 130, height: 28, minHeight: 28, fontSize: '13px' } }}
-                              />
-                            </Table.Td>
                           </Table.Tr>
                         );
                       })}
                       {availableFlights.map((flight: any, i: number) => {
                         const selectedIdx = selectedFlights.findIndex((f) => (f.id || f.flight_id) === (flight.id || flight.flight_id));
                         const isSelected = selectedIdx >= 0;
+                        const displayFlight = isSelected ? selectedFlights[selectedIdx] : flight;
                         return (
                           <Table.Tr key={`av-${i}`} style={{ background: isSelected ? 'rgba(0,212,255,0.05)' : undefined }}>
                             <Table.Td>
@@ -1047,28 +1013,13 @@ export default function MissionNew() {
                                 color="cyan"
                                 size="xs"
                                 checked={isSelected}
-                                onChange={() => isSelected ? handleRemoveFlight(selectedIdx) : handleAddFlight(flight, missionAircraft[0] || undefined)}
+                                onChange={() => isSelected ? handleRemoveFlight(selectedIdx) : handleAddFlight(flight)}
                               />
                             </Table.Td>
                             <Table.Td style={{ fontSize: '13px' }}>{flightName(flight)}</Table.Td>
                             <Table.Td style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: '13px' }}>{flightDate(flight)}</Table.Td>
-                            <Table.Td style={{ fontSize: '13px' }}>{flightDrone(flight)}</Table.Td>
+                            <Table.Td style={{ fontSize: '13px' }}>{flightAircraftLabel(displayFlight, aircraft)}</Table.Td>
                             <Table.Td style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: '13px' }}>{flightDuration(flight)}</Table.Td>
-                            <Table.Td>
-                              {isSelected ? (
-                                <Select
-                                  size="xs"
-                                  placeholder="Assign..."
-                                  data={aircraft.map((a) => ({ value: a.id, label: a.model_name }))}
-                                  value={selectedFlights[selectedIdx]?._aircraftId || null}
-                                  onChange={(val) => handleAssignAircraft(selectedIdx, val)}
-                                  clearable
-                                  styles={{ input: { background: '#050608', borderColor: '#1a1f2e', color: '#e8edf2', minWidth: 130, height: 28, minHeight: 28, fontSize: '13px' } }}
-                                />
-                              ) : (
-                                <Text c="#5a6478" size="xs">—</Text>
-                              )}
-                            </Table.Td>
                           </Table.Tr>
                         );
                       })}
@@ -1431,14 +1382,23 @@ export default function MissionNew() {
                 REVIEW & SEND
               </Text>
 
-              {/* Aircraft used */}
-              {missionAircraft.length > 0 && (
-                <Group>
-                  {aircraft.filter((a) => missionAircraft.includes(a.id)).map((a) => (
-                    <AircraftCard key={a.id} aircraft={a} compact />
-                  ))}
-                </Group>
-              )}
+              {/* Aircraft used — derived from attached flights (read-only) */}
+              {(() => {
+                const ids = new Set(
+                  selectedFlights
+                    .map((f: any) => f._aircraftId)
+                    .filter((aid: string | null): aid is string => Boolean(aid)),
+                );
+                const used = aircraft.filter((a) => ids.has(a.id));
+                if (used.length === 0) return null;
+                return (
+                  <Group>
+                    {used.map((a) => (
+                      <AircraftCard key={a.id} aircraft={a} compact />
+                    ))}
+                  </Group>
+                );
+              })()}
 
               {/* Map preview */}
               {mapGeojson && <FlightMap geojson={mapGeojson} coverage={coverage ?? undefined} height="300px" />}

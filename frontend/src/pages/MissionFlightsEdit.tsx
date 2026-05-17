@@ -2,17 +2,20 @@
  * MissionFlightsEdit — Mission Hub redesign (v2.67.0, ADR-0014).
  *
  * Focused editor for the Flights facet. Mounted at
- * `/missions/:id/flights/edit`. Add or remove flights, assign an
- * aircraft per flight, manage which aircraft were used.
+ * `/missions/:id/flights/edit`. Add or remove flights — that's it.
+ *
+ * Aircraft attribution is NOT chosen by the operator here. Each flight
+ * log already carries its drone (matched to the fleet at upload time
+ * by serial/model), so the backend derives `aircraft_id` on attach.
+ * The aircraft column in the attached table is read-only — it shows
+ * what the flight log says.
  *
  * Endpoints:
  * - GET /api/missions/{id}                        — load attached flights
  * - GET /api/flight-library                       — load available flights
  *   (falls back to GET /api/flights for legacy ODL data)
- * - GET /api/aircraft                             — load aircraft list
  * - POST /api/missions/{id}/flights               — attach flight
  * - DELETE /api/missions/{id}/flights/{flight_id} — detach flight
- * - PATCH /api/missions/{id}/flights/{flight_id}/aircraft — reassign
  *
  * NEVER calls POST /api/missions — see constraint comment on
  * `handleAddFlight()` below.
@@ -23,11 +26,9 @@ import {
   Badge,
   Button,
   Card,
-  Checkbox,
   Group,
   Loader,
   ScrollArea,
-  Select,
   Stack,
   Table,
   Text,
@@ -39,14 +40,12 @@ import { useNavigate, useParams } from 'react-router-dom';
 import api from '../api/client';
 import type { Aircraft, Mission } from '../api/types';
 import { cardStyle } from '../components/shared/styles';
-import UnsavedChangesModal from '../components/shared/UnsavedChangesModal';
-import { useDirtyGuard } from '../hooks/useDirtyGuard';
 
 interface AttachedFlight {
   /** mission_flight row id */
   _flightId: string;
-  /** assigned aircraft id (may be null) */
-  _aircraftId: string | null;
+  /** fleet aircraft (derived server-side from the flight log) */
+  _aircraft: Aircraft | null;
   /** native flight UUID (may be null on legacy ODL rows) */
   flight_id: string | null;
   /** display fields lifted from flight_data_cache */
@@ -98,18 +97,17 @@ function flightDrone(f: { drone_model?: string; drone?: string }): string {
   return f.drone_model || f.drone || '—';
 }
 
+function aircraftLabel(a: Aircraft | null, cacheDrone?: string): string {
+  if (a?.model_name) return a.model_name;
+  return cacheDrone || '—';
+}
+
 export default function MissionFlightsEdit() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
 
   const [loading, setLoading] = useState(true);
   const [flightsLoading, setFlightsLoading] = useState(false);
-  const [aircraft, setAircraft] = useState<Aircraft[]>([]);
-  const [missionAircraft, setMissionAircraft] = useState<string[]>([]);
-  // Baseline for the AIRCRAFT-USED checkbox group — the only field
-  // here that doesn't persist via its own endpoint. (Attach / detach /
-  // assign-aircraft each fire their own immediate write.)
-  const [missionAircraftBaseline, setMissionAircraftBaseline] = useState<string[]>([]);
   const [availableFlights, setAvailableFlights] = useState<AvailableFlight[]>([]);
   const [attached, setAttached] = useState<AttachedFlight[]>([]);
 
@@ -121,15 +119,10 @@ export default function MissionFlightsEdit() {
       const rows: AttachedFlight[] = m.flights.map((f) => ({
         ...(f.flight_data_cache || {}),
         _flightId: f.id,
-        _aircraftId: f.aircraft_id ?? null,
+        _aircraft: f.aircraft ?? null,
         flight_id: f.opendronelog_flight_id || (f.flight_data_cache?.id as string | undefined) || null,
       }));
       setAttached(rows);
-      const aircraftIds = [
-        ...new Set(m.flights.filter((f) => f.aircraft_id).map((f) => f.aircraft_id!)),
-      ];
-      setMissionAircraft(aircraftIds);
-      setMissionAircraftBaseline(aircraftIds);
     } catch (err) {
       console.error('[MissionFlightsEdit] mission load failed', err);
       notifications.show({
@@ -179,9 +172,6 @@ export default function MissionFlightsEdit() {
     let cancelled = false;
     const init = async () => {
       try {
-        const aircraftResp = await api.get<Aircraft[]>('/aircraft').catch(() => ({ data: [] as Aircraft[] }));
-        if (cancelled) return;
-        setAircraft(aircraftResp.data);
         await Promise.all([loadMission(), loadFlights()]);
       } finally {
         if (!cancelled) setLoading(false);
@@ -193,7 +183,7 @@ export default function MissionFlightsEdit() {
     };
   }, [loadMission, loadFlights]);
 
-  const handleAddFlight = async (flight: AvailableFlight, aircraftId?: string | null) => {
+  const handleAddFlight = async (flight: AvailableFlight) => {
     // CONSTRAINT: this page edits an EXISTING mission only.
     // POST /missions is forbidden here per ADR-0013 / spec §2.
     // Only the per-mission flights subresource is touched.
@@ -206,13 +196,12 @@ export default function MissionFlightsEdit() {
         opendronelog_flight_id: isNativeFlight
           ? null
           : String(flight.id ?? flight.flight_id ?? ''),
-        aircraft_id: aircraftId || flight.aircraft_id || null,
         flight_data_cache: flight,
       });
       const newRow: AttachedFlight = {
         ...(flight as Record<string, unknown>),
         _flightId: resp.data.id,
-        _aircraftId: aircraftId || flight.aircraft_id || null,
+        _aircraft: resp.data.aircraft ?? null,
         flight_id:
           (typeof flight.id === 'string' || typeof flight.id === 'number')
             ? String(flight.id)
@@ -246,49 +235,8 @@ export default function MissionFlightsEdit() {
     }
   };
 
-  const handleAssignAircraft = async (flightRowId: string, aircraftId: string | null) => {
-    // CONSTRAINT: see handleAddFlight above — no POST /missions here either.
-    if (!id) return;
-    const previous = attached.find((f) => f._flightId === flightRowId)?._aircraftId ?? null;
-    setAttached((prev) =>
-      prev.map((f) => (f._flightId === flightRowId ? { ...f, _aircraftId: aircraftId } : f)),
-    );
-    try {
-      await api.patch(`/missions/${id}/flights/${flightRowId}/aircraft`, {
-        aircraft_id: aircraftId,
-      });
-    } catch (err) {
-      console.error('[MissionFlightsEdit] aircraft assign failed', err);
-      // revert
-      setAttached((prev) =>
-        prev.map((f) => (f._flightId === flightRowId ? { ...f, _aircraftId: previous } : f)),
-      );
-      notifications.show({
-        title: 'Error',
-        message: 'Failed to assign aircraft',
-        color: 'red',
-      });
-    }
-  };
-
-  // Dirty calc for the Flights facet:
-  //   Add / Remove / Assign-aircraft each fire their own POST/DELETE/
-  //   PATCH immediately, so they're never "unsaved". The only state
-  //   that lives only in the browser is the AIRCRAFT-USED checkbox
-  //   group above the table; compare against its loaded baseline.
-  //   (A length-then-set comparison so order of selection doesn't
-  //   matter; either side may have duplicates suppressed.)
-  const aircraftDirty =
-    !loading &&
-    (missionAircraft.length !== missionAircraftBaseline.length ||
-      missionAircraft.some((aid) => !missionAircraftBaseline.includes(aid)) ||
-      missionAircraftBaseline.some((aid) => !missionAircraft.includes(aid)));
-
-  const { showConfirm, setShowConfirm, guardedNavigate, confirmAndNavigate } =
-    useDirtyGuard({ isDirty: aircraftDirty, navigate });
-
   const handleDone = () => {
-    guardedNavigate(`/missions/${id}`);
+    navigate(`/missions/${id}`);
   };
 
   if (loading) {
@@ -311,6 +259,24 @@ export default function MissionFlightsEdit() {
     return key && !attachedKeys.has(key);
   });
 
+  // Distinct aircraft summary, derived from attached flights. The operator
+  // doesn't pick this; it's a read-only "what's on this mission" tally.
+  const aircraftSummary = (() => {
+    const seen = new Map<string, string>();
+    const unmatched = new Set<string>();
+    for (const f of attached) {
+      if (f._aircraft) {
+        seen.set(f._aircraft.id, f._aircraft.model_name);
+      } else if (f.drone_model) {
+        unmatched.add(String(f.drone_model));
+      }
+    }
+    return {
+      matched: Array.from(seen.values()),
+      unmatched: Array.from(unmatched),
+    };
+  })();
+
   return (
     <Stack gap="lg">
       <Group justify="space-between">
@@ -326,39 +292,7 @@ export default function MissionFlightsEdit() {
         </Button>
       </Group>
 
-      {/* Aircraft used (multi-select chip group) */}
-      <Card padding="lg" radius="md" style={cardStyle}>
-        <Stack gap="sm">
-          <Text
-            c="#e8edf2"
-            fw={600}
-            style={{ fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' }}
-          >
-            AIRCRAFT USED
-          </Text>
-          <Checkbox.Group value={missionAircraft} onChange={setMissionAircraft}>
-            <Group gap="xs">
-              {aircraft.map((a) => (
-                <Checkbox
-                  key={a.id}
-                  value={a.id}
-                  label={a.model_name}
-                  color="cyan"
-                  size="sm"
-                  styles={{ label: { color: '#e8edf2', fontSize: 13 } }}
-                />
-              ))}
-              {aircraft.length === 0 && (
-                <Text c="#5a6478" size="xs">
-                  No aircraft on file. Add aircraft in Settings.
-                </Text>
-              )}
-            </Group>
-          </Checkbox.Group>
-        </Stack>
-      </Card>
-
-      {/* Already-attached flights — remove + reassign */}
+      {/* Already-attached flights */}
       <Card padding="lg" radius="md" style={cardStyle}>
         <Stack gap="sm">
           <Group justify="space-between">
@@ -369,9 +303,27 @@ export default function MissionFlightsEdit() {
             >
               ATTACHED FLIGHTS
             </Text>
-            <Badge color="cyan" variant="light" size="sm">
-              {attached.length} attached
-            </Badge>
+            <Group gap="xs">
+              {aircraftSummary.matched.map((name) => (
+                <Badge key={name} color="cyan" variant="light" size="sm">
+                  {name}
+                </Badge>
+              ))}
+              {aircraftSummary.unmatched.map((name) => (
+                <Badge
+                  key={`u-${name}`}
+                  color="yellow"
+                  variant="light"
+                  size="sm"
+                  title="Not matched to a fleet aircraft — check serial/model on the Flights page."
+                >
+                  {name} (unmatched)
+                </Badge>
+              ))}
+              <Badge color="gray" variant="light" size="sm">
+                {attached.length} flight{attached.length === 1 ? '' : 's'}
+              </Badge>
+            </Group>
           </Group>
           {attached.length === 0 ? (
             <Text c="#5a6478" size="sm">
@@ -397,9 +349,8 @@ export default function MissionFlightsEdit() {
                   <Table.Tr>
                     <Table.Th>NAME</Table.Th>
                     <Table.Th>DATE</Table.Th>
-                    <Table.Th>DRONE</Table.Th>
+                    <Table.Th>AIRCRAFT</Table.Th>
                     <Table.Th>DURATION</Table.Th>
-                    <Table.Th>ASSIGN AIRCRAFT</Table.Th>
                     <Table.Th w={48}></Table.Th>
                   </Table.Tr>
                 </Table.Thead>
@@ -410,31 +361,11 @@ export default function MissionFlightsEdit() {
                       <Table.Td style={{ fontFamily: "'Share Tech Mono', monospace" }}>
                         {flightDate(f as { start_time?: string })}
                       </Table.Td>
-                      <Table.Td>{flightDrone(f as { drone_model?: string })}</Table.Td>
+                      <Table.Td>
+                        {aircraftLabel(f._aircraft, f.drone_model)}
+                      </Table.Td>
                       <Table.Td style={{ fontFamily: "'Share Tech Mono', monospace" }}>
                         {flightDuration(f as { duration_secs?: number })}
-                      </Table.Td>
-                      <Table.Td>
-                        <Select
-                          size="xs"
-                          placeholder="Assign..."
-                          data={aircraft.map((a) => ({ value: a.id, label: a.model_name }))}
-                          value={f._aircraftId}
-                          onChange={(val) => handleAssignAircraft(f._flightId, val)}
-                          clearable
-                          aria-label={`Assign aircraft to ${flightName(f as { display_name?: string })}`}
-                          styles={{
-                            input: {
-                              background: '#050608',
-                              borderColor: '#1a1f2e',
-                              color: '#e8edf2',
-                              minWidth: 130,
-                              height: 28,
-                              minHeight: 28,
-                              fontSize: 13,
-                            },
-                          }}
-                        />
                       </Table.Td>
                       <Table.Td>
                         <ActionIcon
@@ -534,7 +465,7 @@ export default function MissionFlightsEdit() {
                           size="xs"
                           color="cyan"
                           variant="light"
-                          onClick={() => handleAddFlight(f, missionAircraft[0])}
+                          onClick={() => handleAddFlight(f)}
                           aria-label={`Add ${flightName(f)}`}
                         >
                           ADD
@@ -558,12 +489,6 @@ export default function MissionFlightsEdit() {
           BACK TO MISSION
         </Button>
       </Group>
-
-      <UnsavedChangesModal
-        opened={showConfirm}
-        onKeepEditing={() => setShowConfirm(false)}
-        onDiscard={confirmAndNavigate}
-      />
     </Stack>
   );
 }
