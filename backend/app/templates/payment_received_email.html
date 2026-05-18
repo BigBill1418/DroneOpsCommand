@@ -77,6 +77,25 @@
         </tr>
       </table>
 
+      {% if google_review_url %}
+      <!-- Google review CTA -->
+      <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin: 0 0 24px 0;">
+        <tr>
+          <td style="background: #1a1410; border-radius: 8px; padding: 24px 24px; text-align: center; border: 1px solid #ffba00;">
+            <div style="font-family: 'Bebas Neue', 'Arial Black', Arial, sans-serif; font-size: 22px; letter-spacing: 3px; color: #ffba00; margin: 0 0 8px 0;">
+              &#11088; ENJOYED OUR WORK?
+            </div>
+            <p style="font-size: 13px; color: #c0c8d4; line-height: 1.6; margin: 0 0 16px 0;">
+              A 30-second Google review helps a small business a lot.
+            </p>
+            <a href="{{ google_review_url }}" style="display: inline-block; padding: 12px 32px; background: #ffba00; color: #0e1117; font-family: 'Bebas Neue', 'Arial Black', Arial, sans-serif; font-size: 14px; letter-spacing: 3px; text-decoration: none; border-radius: 6px; font-weight: 700;">
+              LEAVE A GOOGLE REVIEW
+            </a>
+          </td>
+        </tr>
+      </table>
+      {% endif %}
+
       <p style="font-size: 14px; color: #c0c8d4; line-height: 1.7; margin: 16px 0 8px 0;">
         If you have any questions about your mission or payment, don&rsquo;t hesitate to reach out.
       </p>

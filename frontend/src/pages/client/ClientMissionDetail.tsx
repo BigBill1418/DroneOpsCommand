@@ -78,6 +78,7 @@ interface ClientInvoiceData {
   deposit_payment_method: string | null;
   balance_amount: number;
   payment_phase: 'deposit_due' | 'awaiting_completion' | 'balance_due' | 'paid_in_full';
+  google_review_url?: string;
 }
 
 const PAYMENT_PHASE_LABELS: Record<ClientInvoiceData['payment_phase'], string> = {
@@ -914,6 +915,67 @@ export default function ClientMissionDetail() {
                 </Table.Tbody>
               </Table>
             </Paper>
+
+            {/* Post-payment Google review CTA — fires once invoice is
+                fully paid. The post-pay redirect lands the customer
+                right back on this page, so the card surfaces at the
+                exact moment of highest goodwill. */}
+            {invoice.paid_in_full && invoice.google_review_url && (
+              <Paper
+                p="md"
+                radius="md"
+                style={{
+                  background: 'linear-gradient(135deg, #1a1410, #241a0e)',
+                  border: '1px solid #ffba00',
+                  borderLeft: '4px solid #ffba00',
+                }}
+              >
+                <Stack gap="xs" align="center">
+                  <Text
+                    style={{
+                      color: '#ffba00',
+                      fontFamily: customerBrand.fontDisplay,
+                      letterSpacing: customerBrand.trackWide,
+                      fontWeight: 700,
+                      fontSize: 16,
+                    }}
+                  >
+                    &#11088; ENJOYED OUR WORK?
+                  </Text>
+                  <Text
+                    size="sm"
+                    ta="center"
+                    style={{
+                      color: customerBrand.textBody,
+                      fontFamily: customerBrand.fontBody,
+                      maxWidth: 420,
+                    }}
+                  >
+                    A 30-second Google review helps a small business a lot. Thank you.
+                  </Text>
+                  <Button
+                    component="a"
+                    href={invoice.google_review_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    size="sm"
+                    styles={{
+                      root: {
+                        background: '#ffba00',
+                        color: '#0e1117',
+                        fontFamily: customerBrand.fontDisplay,
+                        letterSpacing: customerBrand.trackMid,
+                        fontWeight: 700,
+                        minHeight: 36,
+                        marginTop: 4,
+                      },
+                    }}
+                  >
+                    LEAVE A GOOGLE REVIEW
+                  </Button>
+                </Stack>
+              </Paper>
+            )}
 
             {/* Itemized line items (read-only). */}
             {invoice.line_items.length > 0 && (

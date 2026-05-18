@@ -90,6 +90,13 @@ class Settings(BaseSettings):
     # Per-key dedup cooldown to avoid alert spam on a long outage.
     device_silence_dedup_hours: int = 12
 
+    # Google review prompt. Surfaces on the final-invoice PDF, the
+    # report-delivery email, the post-payment success state in the
+    # client portal, the payment-received email, and the report-ready
+    # email. Override per deployment via GOOGLE_REVIEW_URL; unset =
+    # CTAs hide themselves (templates gate on truthiness).
+    google_review_url: str = "https://g.page/r/Cbblmcdaz3GfEBM/review"
+
     @property
     def database_url_sync(self) -> str:
         """Synchronous database URL for Celery tasks."""

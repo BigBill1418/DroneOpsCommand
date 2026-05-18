@@ -88,6 +88,7 @@ def generate_pdf(
             generated_at=datetime.utcnow().strftime("%B %d, %Y"),
             year=datetime.utcnow().year,
             company_logo_path=company_logo_path,
+            google_review_url=settings.google_review_url,
             **brand,
         )
     except Exception as exc:

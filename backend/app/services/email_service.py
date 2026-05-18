@@ -32,7 +32,9 @@ async def _get_branding(db: AsyncSession | None) -> dict:
     """Load branding settings from DB, with defaults. Adds company_logo_url for emails."""
     from app.routers.system_settings import BRANDING_DEFAULTS
     if not db:
-        return dict(BRANDING_DEFAULTS)
+        brand = dict(BRANDING_DEFAULTS)
+        brand["google_review_url"] = settings.google_review_url
+        return brand
     try:
         from app.routers.system_settings import get_branding
         brand = await get_branding(db)
@@ -42,9 +44,12 @@ async def _get_branding(db: AsyncSession | None) -> dict:
             brand["company_logo_url"] = f"{settings.frontend_url}/uploads/{logo}"
         else:
             brand["company_logo_url"] = ""
+        brand["google_review_url"] = settings.google_review_url
         return brand
     except Exception:
-        return dict(BRANDING_DEFAULTS)
+        brand = dict(BRANDING_DEFAULTS)
+        brand["google_review_url"] = settings.google_review_url
+        return brand
 
 
 async def get_smtp_settings(db: AsyncSession) -> dict:

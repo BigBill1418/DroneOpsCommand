@@ -113,6 +113,11 @@ class ClientInvoiceResponse(BaseModel):
     # for the truth table.
     payment_phase: str
 
+    # Google review URL surfaced to the client portal so the
+    # post-payment success state can render a review CTA. Empty
+    # string when unset — UI hides the block.
+    google_review_url: str = ""
+
 
 class ClientPaymentResponse(BaseModel):
     checkout_url: str

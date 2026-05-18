@@ -394,6 +394,7 @@ async def get_client_invoice(
         deposit_payment_method=invoice.deposit_payment_method,
         balance_amount=invoice.balance_amount,
         payment_phase=payment_phase,
+        google_review_url=settings.google_review_url,
     )
 
 

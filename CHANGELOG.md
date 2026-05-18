@@ -4,6 +4,53 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## [unreleased] — 2026-05-18 — feat(reviews): Google review CTA across invoice + checkout surfaces
+
+Five customer-facing touchpoints now surface a Google review prompt
+keyed off a single `GOOGLE_REVIEW_URL` env var (defaults to the
+BarnardHQ business profile short link). Asking at the moment of
+highest goodwill — once the invoice clears — is the cheapest review
+acquisition surface we have, and the PDF invoice doubles as a
+permanent ask that lives in the customer's inbox.
+
+### Added
+
+- **`backend/app/config.py`** — `google_review_url` setting (default
+  `https://g.page/r/Cbblmcdaz3GfEBM/review`; override via
+  `GOOGLE_REVIEW_URL`). Empty value hides every CTA — all templates
+  gate on truthiness.
+- **`backend/app/templates/report_pdf.html`** — review line beneath
+  the invoice notes block, visible in every emailed/downloaded
+  invoice PDF.
+- **`backend/app/templates/email_body.html`** — yellow "leave a
+  Google review" CTA card injected into the report-delivery email
+  (the message that carries the invoice PDF).
+- **`backend/app/templates/payment_received_email.html`** — gold-on-
+  dark CTA card directly under the "INVOICE PAID IN FULL" success
+  badge in the Stripe receipt email.
+- **`backend/app/templates/report_ready_email.html`** — light-theme
+  CTA card under the "Next Steps" block in the report-ready
+  notification.
+- **`frontend/src/pages/client/ClientMissionDetail.tsx`** — gold
+  review card surfaces in the client portal when
+  `invoice.paid_in_full === true`. This is the page customers land on
+  after the Stripe `?payment=success` redirect, so the ask hits at
+  the exact moment of confirmed payment.
+- **`backend/app/routers/client_portal.py`** + **`schemas/client_portal.py`** —
+  `ClientInvoiceResponse` now carries `google_review_url` so the
+  frontend doesn't have to ship its own copy of the URL.
+- **`backend/app/services/email_service.py`** — `_get_branding()`
+  injects `google_review_url` into every template render context, so
+  every existing and future email template gets the variable
+  automatically.
+- **`backend/app/services/pdf_generator.py`** — passes
+  `google_review_url` into the PDF Jinja context.
+- **`backend/tests/test_google_review_cta.py`** — 8 template-render
+  tests covering the present/absent matrix across all four Jinja
+  templates.
+- **`.env.example`** — documents `GOOGLE_REVIEW_URL` next to the
+  Stripe block.
+
 ## [unreleased] — 2026-05-17 — fix(llm): bump Claude model + stop blaming Ollama in error toasts
 
 Report generation was silently failing on Claude-configured instances
