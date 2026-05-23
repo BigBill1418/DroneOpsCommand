@@ -745,21 +745,23 @@ export default function MissionNew() {
         }
       }
 
-      // After items land, re-PUT to recompute deposit (auto-50%
-      // resolution depends on the new total). Only when deposit
-      // not yet collected and we asked for auto-fill.
-      if (!depositPaid && depositRequired && depositAmount === null) {
+      // The backend defers any deposit at create (total is 0 before line
+      // items exist), so once items land we must (re-)apply the deposit
+      // against the now-positive total — for BOTH auto-fill (null →
+      // backend computes 50%) and explicit amounts. Skipping the explicit
+      // case here would silently drop a typed deposit.
+      if (!depositPaid && depositRequired) {
         try {
           await api.put(`/missions/${missionId}/invoice`, {
             deposit_required: true,
-            deposit_amount: null,
+            deposit_amount: depositAmount,
           });
           // Pull back the resolved value so the UI reflects truth.
           const refresh = await api.get(`/missions/${missionId}/invoice`);
           setDepositAmount(refresh.data.deposit_amount ?? null);
         } catch (e) {
           // Non-fatal — operator can re-save manually.
-          console.warn('[MissionNew] deposit auto-fill refresh failed', e);
+          console.warn('[MissionNew] deposit refresh failed', e);
         }
       }
 

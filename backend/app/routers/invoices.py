@@ -72,6 +72,25 @@ async def _next_invoice_number(db: AsyncSession) -> str:
     return formatted
 
 
+def _create_time_deposit_state() -> tuple[bool, float]:
+    """(deposit_required, deposit_amount) to persist when an invoice is
+    first created.
+
+    A new invoice has no line items, so its total is always 0 at create
+    (InvoiceCreate carries no line_items — they are added afterward via
+    POST /invoice/items). At total=0 no required deposit can satisfy the
+    DB CHECK constraints: `deposit_required_consistent` needs
+    deposit_amount > 0, while `deposit_amount_le_total` needs
+    deposit_amount <= total (i.e. <= 0). The only constraint-safe state
+    is a deferred deposit. The operator's requested deposit is re-applied
+    by the first PUT /invoice once line items push total > 0 (see
+    frontend MissionInvoiceEdit.handleSave). Persisting the deposit
+    eagerly here raised a raw 500 IntegrityError that surfaced to the
+    operator as "failing to save invoice".
+    """
+    return False, 0.0
+
+
 def _recalculate_invoice(invoice: Invoice):
     """Recalculate invoice totals from line items.
 
@@ -164,8 +183,13 @@ async def create_invoice(
         raise HTTPException(status_code=400, detail="Invoice already exists for this mission")
 
     payload = data.model_dump()
-    deposit_required = bool(payload.pop("deposit_required", False))
-    deposit_amount_input = payload.pop("deposit_amount", None)
+    # Deposit fields are popped and ignored at create: a new invoice has
+    # no line items (total=0) and the DB CHECK constraints make any
+    # required deposit impossible at total=0. The deposit is deferred and
+    # applied by the first PUT once line items exist. See
+    # _create_time_deposit_state for the full rationale.
+    payload.pop("deposit_required", None)
+    payload.pop("deposit_amount", None)
 
     # ADR-0011 §2 — allocate sequential invoice number IF the operator
     # didn't supply one explicitly. Pre-existing rows with NULL
@@ -178,21 +202,17 @@ async def create_invoice(
         payload["invoice_number"] = incoming_number
 
     invoice = Invoice(mission_id=mission_id, **payload)
-    # Total is 0 at creation (no line items yet); resolve deposit
-    # against current (probably 0) total. The operator typically adds
-    # line items via /invoice/items, then PATCHes deposit_amount via
-    # PUT /invoice — which re-runs validation.
-    invoice.deposit_required = deposit_required
-    invoice.deposit_amount = _resolve_deposit_amount(
-        deposit_required=deposit_required,
-        deposit_amount=deposit_amount_input,
-        total=float(invoice.total or 0),
-    )
+    # Total is 0 at creation (no line items yet). A required deposit
+    # cannot satisfy the DB CHECK constraints at total=0, so persist a
+    # deferred deposit. The operator adds line items via /invoice/items,
+    # then PUT /invoice applies the deposit against the real total.
+    invoice.deposit_required, invoice.deposit_amount = _create_time_deposit_state()
     db.add(invoice)
     await db.flush()
     logger.info(
-        "[INVOICE-CREATE] mission=%s invoice=%s deposit_required=%s deposit_amount=%.2f",
-        mission_id, invoice.id, deposit_required, float(invoice.deposit_amount),
+        "[INVOICE-CREATE] mission=%s invoice=%s deposit deferred (total=0; "
+        "applied on next PUT once line items exist)",
+        mission_id, invoice.id,
     )
 
     # Recalculate totals from line items (if any were provided).

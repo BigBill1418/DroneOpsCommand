@@ -17,8 +17,29 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 
-from app.routers.invoices import _resolve_deposit_amount
+from app.routers.invoices import _create_time_deposit_state, _resolve_deposit_amount
 from app.models.invoice import Invoice
+
+
+def test_create_time_deposit_is_constraint_safe_at_zero_total():
+    """Regression (operator-reported 'failing to save invoice', 2026-05-23).
+
+    A brand-new invoice has no line items, so total is always 0. At
+    total=0 no required deposit can satisfy the DB CHECK constraints
+    (deposit_required_consistent needs amount>0; deposit_amount_le_total
+    needs amount<=0). create_invoice used to persist deposit_required=True
+    with a 50%-of-0 = 0 deposit, producing a raw 500 IntegrityError. The
+    create-time deposit must therefore be deferred to a constraint-safe
+    state; the operator's choice is re-applied by the first PUT once
+    line items push total>0.
+    """
+    required, amount = _create_time_deposit_state()
+    # deposit_required_consistent: deposit_required=False OR amount>0
+    assert (required is False) or (amount > 0)
+    # deposit_amount_le_total at total=0: amount <= 0
+    assert amount <= 0.0
+    # specifically: deferred until line items exist
+    assert required is False and amount == 0.0
 
 
 @pytest.mark.parametrize(

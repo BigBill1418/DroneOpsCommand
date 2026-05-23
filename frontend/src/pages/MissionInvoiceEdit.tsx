@@ -302,12 +302,16 @@ export default function MissionInvoiceEdit() {
           });
         }
 
-        // After items change, total may have moved — re-PUT deposit_amount
-        // when operator left auto-fill mode (null) so backend recomputes.
-        if (!depositPaid && depositRequired && depositAmount === null) {
+        // The backend defers any deposit at create (total is 0 before
+        // line items exist), so once items are in place we must (re-)apply
+        // the operator's deposit choice against the now-positive total —
+        // for BOTH auto-fill (null → backend computes 50%) and explicit
+        // amounts. Skipping the explicit case here would silently drop a
+        // typed deposit.
+        if (!depositPaid && depositRequired) {
           await api.put(`/missions/${id}/invoice`, {
             deposit_required: true,
-            deposit_amount: null,
+            deposit_amount: depositAmount,
           });
         }
 

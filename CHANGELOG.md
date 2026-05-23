@@ -4,6 +4,46 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## [unreleased] — 2026-05-23 — fix(invoices): defer deposit at create — stop "failing to save invoice" 500
+
+**Incident:** Operator reported "failing to save invoice." Live BOS-HQ
+backend was raising a raw 500 on `POST /api/missions/{id}/invoice` with
+`CheckViolationError: deposit_required_consistent`.
+
+**Root cause:** A new invoice has no line items, so `total` is always 0
+at create time. At total=0 the two DB CHECK constraints make a required
+deposit structurally impossible — `deposit_required_consistent` needs
+`deposit_amount > 0` while `deposit_amount_le_total` needs
+`deposit_amount <= total` (i.e. ≤ 0). `create_invoice` nonetheless
+persisted `deposit_required=True` with a 50%-of-0 = 0 deposit (the
+default `InvoiceCreate.deposit_required=True` + auto-fill amount path),
+so Postgres rejected the INSERT. The frontend *intends* to set the
+deposit in a follow-up PUT once line items exist, but the create
+crashed first. Latent since ADR-0009; tripped now by a new invoice
+created with the default deposit-on + auto-amount.
+
+### Fixed
+
+- **`backend/app/routers/invoices.py`** — `create_invoice` now defers
+  the deposit unconditionally at create (new `_create_time_deposit_state`
+  helper → `deposit_required=False, deposit_amount=0`), the only
+  constraint-safe state at total=0. Authoritative server-side guard for
+  all clients. The deposit is applied by the first `PUT /invoice` once
+  line items push total > 0.
+- **`frontend/src/pages/MissionInvoiceEdit.tsx`** + **`MissionWizardLegacy.tsx`**
+  — the post-line-items deposit re-PUT now fires for *explicit* deposit
+  amounts too, not only the auto-fill (`null`) case. Without this, the
+  backend deferral would silently drop a typed deposit.
+- **`backend/tests/test_deposit_pricing.py`** — regression test pinning
+  that the create-time deposit state satisfies both CHECK constraints at
+  total=0.
+
+### Known issues (pre-existing, unrelated)
+
+- `backend/tests/test_health_stripe_db_lookup.py` — 2 Stripe health-probe
+  env-fallback tests fail on a clean checkout (not introduced by this
+  change). Tracked separately.
+
 ## [unreleased] — 2026-05-18 — feat(reviews): Google review CTA across invoice + checkout surfaces
 
 Five customer-facing touchpoints now surface a Google review prompt
