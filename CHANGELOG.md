@@ -4,6 +4,23 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## [unreleased] — 2026-05-23 — fix(invoices): decimal hours in line-item Qty (e.g. 1.5h, 2.1h)
+
+Operator needs to bill fractional billed-time (1.5 hours, 2.1 hours). The Qty
+field accepted decimals but had no `decimalScale`, so it allowed 3+ decimals
+(e.g. `2.151`) that the DB's `Numeric(10,2)` then rounds — the displayed/computed
+total could disagree with the saved value. Its `onChange` also snapped an
+emptied field back to `1`, fighting clear-and-retype.
+
+### Fixed
+
+- **`frontend/src/components/invoice/LineItemFields.tsx`** — Qty now has
+  `decimalScale={2}` (matches the DB exactly, so typed = stored = computed) and
+  an `onChange` that handles empty/partial input without snapping to 1. Verified:
+  1.5h→$225.00, 2.1h→$315.00, 0.25h→$37.50, and a stray 3rd decimal (2.151) caps
+  to 2.15→$322.50. Backend already stored/computed quantity as a float; no
+  backend change needed.
+
 ## [unreleased] — 2026-05-23 — feat(invoices): mobile-first invoice editor (MissionInvoiceEdit)
 
 The invoice editor was desktop-first and unusable in the field on a phone —

@@ -71,9 +71,10 @@ export function LineItemFields({
           label="Qty"
           value={item.quantity}
           min={0}
-          onChange={(val) => onChange({ quantity: typeof val === 'number' ? val : 1 })}
+          decimalScale={2}
+          onChange={(val) => onChange({ quantity: Number.isFinite(Number(val)) ? Number(val) : 0 })}
           styles={inputStyles}
-          style={{ width: 80 }}
+          style={{ width: 90 }}
         />
         <NumberInput
           label="Price"
@@ -133,7 +134,8 @@ export function LineItemFields({
             size="md"
             value={item.quantity}
             min={0}
-            onChange={(val) => onChange({ quantity: typeof val === 'number' ? val : 1 })}
+            decimalScale={2}
+            onChange={(val) => onChange({ quantity: Number.isFinite(Number(val)) ? Number(val) : 0 })}
             styles={inputStyles}
           />
           <NumberInput
