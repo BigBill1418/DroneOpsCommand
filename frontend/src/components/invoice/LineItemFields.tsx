@@ -48,6 +48,9 @@ export function LineItemFields({
   onRemove,
 }: LineItemFieldsProps) {
   const lineTotal = (item.quantity || 0) * (item.unit_price || 0);
+  // Billed-time lines are priced per hour, so label the quantity "Hours"
+  // to make fractional billed time (e.g. 2.1) unambiguous.
+  const qtyLabel = item.category === 'billed_time' ? 'Hours' : 'Qty';
 
   if (!isMobile) {
     return (
@@ -68,7 +71,7 @@ export function LineItemFields({
           style={{ flex: 1 }}
         />
         <NumberInput
-          label="Qty"
+          label={qtyLabel}
           value={item.quantity}
           min={0}
           decimalScale={2}
@@ -130,7 +133,7 @@ export function LineItemFields({
         />
         <Group grow align="end" wrap="nowrap">
           <NumberInput
-            label="Qty"
+            label={qtyLabel}
             size="md"
             value={item.quantity}
             min={0}

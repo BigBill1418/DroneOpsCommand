@@ -4,6 +4,14 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## [unreleased] — 2026-05-23 — feat(invoices): label billed-time line quantity "Hours"
+
+Line items in the `billed_time` category are priced per hour, so the quantity
+field now reads **"Hours"** (instead of the generic "Qty") on both the mobile
+and desktop editor, making fractional billed time (e.g. 2.1) unambiguous. Other
+categories keep "Qty". Label is derived from `item.category`, so it updates live
+if the category changes. (`frontend/src/components/invoice/LineItemFields.tsx`.)
+
 ## [unreleased] — 2026-05-23 — fix(invoices): decimal hours in line-item Qty (e.g. 1.5h, 2.1h)
 
 Operator needs to bill fractional billed-time (1.5 hours, 2.1 hours). The Qty
