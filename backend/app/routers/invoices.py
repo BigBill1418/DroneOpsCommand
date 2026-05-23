@@ -92,12 +92,13 @@ def _create_time_deposit_state() -> tuple[bool, float]:
 
 
 def _recalculate_invoice(invoice: Invoice):
-    """Recalculate invoice totals from line items.
+    """Recalculate invoice totals from line items, then derive the deposit.
 
-    ADR-0009: also re-clamp `deposit_amount` against the new total.
-    Without this, an operator who lowers a line item below the existing
-    deposit_amount would leave a deposit > total — which the DB CHECK
-    constraint `deposit_amount_le_total` would reject on next flush.
+    ADR-0009 / operator decision 2026-05-23: "Require 50% deposit" means
+    the deposit is ALWAYS exactly 50% of the current total — there is no
+    manual override. Because every mutation (add/edit/delete line item,
+    any PUT /invoice) ends in this function, deriving the deposit here is
+    what makes it track line-item changes automatically and accurately.
     """
     subtotal = sum(float(li.total) for li in invoice.line_items)
     tax_amount = subtotal * float(invoice.tax_rate)
@@ -105,29 +106,32 @@ def _recalculate_invoice(invoice: Invoice):
     invoice.tax_amount = tax_amount
     invoice.total = subtotal + tax_amount
 
-    # Re-clamp deposit on every recalc. Only relevant when deposit
-    # not yet collected — once paid, the amount is locked.
-    if invoice.deposit_required and not invoice.deposit_paid:
+    # Derive the deposit from (deposit_required, total) on every recalc.
+    # Skip entirely once collected — a paid deposit is locked at the
+    # amount actually charged and must not be recomputed.
+    if not invoice.deposit_paid:
         new_total = float(invoice.total)
-        current_deposit = float(invoice.deposit_amount or 0)
-        if new_total <= 0:
-            # Every line item was removed (e.g. the transient state during
-            # the frontend's delete-then-recreate save). A required deposit
-            # cannot satisfy the deposit_* CHECK constraints at total=0
+        if not invoice.deposit_required:
+            invoice.deposit_amount = 0.0
+        elif new_total <= 0:
+            # No line items yet, or all removed (e.g. the transient state
+            # mid delete-then-recreate save). A required deposit can't
+            # satisfy the deposit_* CHECK constraints at total=0
             # (deposit_required_consistent needs amount>0;
             # deposit_amount_le_total needs amount<=0), so defer it. The
-            # deposit is restored by the next PUT once line items push
-            # total>0 — same contract as _create_time_deposit_state.
-            # Without this, deleting the last line item raised a raw 500
-            # and aborted the save, silently dropping line items.
+            # deposit is restored on the next PUT once total>0 — same
+            # contract as _create_time_deposit_state. Without this,
+            # deleting the last line item raised a raw 500 and aborted the
+            # save, silently dropping line items.
             invoice.deposit_required = False
             invoice.deposit_amount = 0.0
-        elif current_deposit > new_total:
-            logger.info(
-                "[INVOICE-RECALC] Clamping deposit_amount %.2f -> %.2f for invoice=%s (total dropped)",
-                current_deposit, new_total, invoice.id,
+        else:
+            # Always 50% of the live total; re-derived so it tracks every
+            # line-item change. _resolve_deposit_amount(.., None, total)
+            # is the validated 50% computation.
+            invoice.deposit_amount = _resolve_deposit_amount(
+                deposit_required=True, deposit_amount=None, total=new_total,
             )
-            invoice.deposit_amount = round(new_total, 2)
 
 
 def _resolve_deposit_amount(*, deposit_required: bool, deposit_amount: float | None, total: float) -> float:
@@ -269,38 +273,21 @@ async def update_invoice(
             detail="Cannot modify deposit_required / deposit_amount after the deposit has been paid",
         )
 
-    # Pop deposit fields so we can resolve them through the validator
-    # rather than just setattr-ing raw user input that bypasses the
-    # CHECK constraints.
+    # Deposit amount is no longer operator-settable: "Require 50% deposit"
+    # means the deposit is always 50% of the total, derived authoritatively
+    # by _recalculate_invoice below. Accept and ignore any amount a client
+    # sends so older UIs don't 400.
     new_deposit_required = payload.pop("deposit_required", None)
-    new_deposit_amount = payload.pop("deposit_amount", None)
+    payload.pop("deposit_amount", None)
 
     for key, value in payload.items():
         setattr(invoice, key, value)
 
-    if new_deposit_required is not None or new_deposit_amount is not None:
-        # Either field touched — re-resolve both to keep them coherent.
-        deposit_required = (
-            bool(new_deposit_required)
-            if new_deposit_required is not None
-            else bool(invoice.deposit_required)
-        )
-        # If only deposit_required changed (now True) and no amount was
-        # provided, recompute the 50% default off current total.
-        amount_input = (
-            new_deposit_amount
-            if "deposit_amount" in (data.model_fields_set or set())
-            else (None if deposit_required and not invoice.deposit_required else float(invoice.deposit_amount or 0))
-        )
-        invoice.deposit_required = deposit_required
-        invoice.deposit_amount = _resolve_deposit_amount(
-            deposit_required=deposit_required,
-            deposit_amount=amount_input,
-            total=float(invoice.total or 0),
-        )
+    if new_deposit_required is not None:
+        invoice.deposit_required = bool(new_deposit_required)
         logger.info(
-            "[INVOICE-UPDATE] mission=%s invoice=%s deposit_required=%s deposit_amount=%.2f",
-            mission_id, invoice.id, invoice.deposit_required, float(invoice.deposit_amount),
+            "[INVOICE-UPDATE] mission=%s invoice=%s deposit_required=%s",
+            mission_id, invoice.id, invoice.deposit_required,
         )
 
     _recalculate_invoice(invoice)

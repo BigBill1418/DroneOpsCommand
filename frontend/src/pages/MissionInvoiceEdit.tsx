@@ -258,7 +258,9 @@ export default function MissionInvoiceEdit() {
       // 400s if you send them after deposit_paid).
       if (!depositPaid) {
         updatePayload.deposit_required = depositRequired;
-        updatePayload.deposit_amount = depositRequired ? depositAmount : 0;
+        // Deposit is always 50% of total, derived by the backend. Send
+        // null (auto); any amount is ignored server-side.
+        updatePayload.deposit_amount = null;
       }
 
       try {
@@ -274,7 +276,7 @@ export default function MissionInvoiceEdit() {
             notes: notes.trim() || null,
             paid_in_full: paidInFull,
             deposit_required: depositRequired,
-            deposit_amount: depositRequired ? depositAmount : 0,
+            deposit_amount: null,
           });
           hasInvoice = true;
         } else {
@@ -302,16 +304,14 @@ export default function MissionInvoiceEdit() {
           });
         }
 
-        // The backend defers any deposit at create (total is 0 before
-        // line items exist), so once items are in place we must (re-)apply
-        // the operator's deposit choice against the now-positive total —
-        // for BOTH auto-fill (null → backend computes 50%) and explicit
-        // amounts. Skipping the explicit case here would silently drop a
-        // typed deposit.
+        // The backend defers the deposit at create (total is 0 before line
+        // items exist), so once items are in place re-assert deposit_required
+        // — _recalculate_invoice then derives the deposit as 50% of the now-
+        // complete total.
         if (!depositPaid && depositRequired) {
           await api.put(`/missions/${id}/invoice`, {
             deposit_required: true,
-            deposit_amount: depositAmount,
+            deposit_amount: null,
           });
         }
 
@@ -574,38 +574,19 @@ export default function MissionInvoiceEdit() {
               styles={{ label: { color: '#e8edf2', fontFamily: "'Share Tech Mono', monospace" } }}
             />
             {depositRequired && (
-              <NumberInput
-                label="Deposit Amount"
-                description={
-                  depositPaid
+              <Stack gap={2}>
+                <Text size="sm" style={{ color: '#e8edf2', fontFamily: "'Share Tech Mono', monospace" }}>
+                  {depositPaid ? 'Deposit Collected' : 'Deposit (50% of total)'}
+                </Text>
+                <Text fw={700} c="cyan" style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: '22px' }}>
+                  ${(depositPaid ? (depositAmount ?? 0) : Math.round(subtotal * 50) / 100).toFixed(2)}
+                </Text>
+                <Text size="xs" style={{ color: '#5a6478', fontStyle: 'italic' }}>
+                  {depositPaid
                     ? 'Locked — deposit already collected.'
-                    : 'TOS §6.2 default. Leave blank to auto-fill 50% of total. Uncheck above for Emergent Services per §6.3.'
-                }
-                value={depositAmount ?? ''}
-                onChange={(val) => {
-                  if (val === '' || val === null || val === undefined) {
-                    setDepositAmount(null);
-                  } else {
-                    const num = typeof val === 'number' ? val : parseFloat(String(val));
-                    setDepositAmount(Number.isFinite(num) ? num : null);
-                  }
-                }}
-                disabled={depositPaid}
-                min={0}
-                decimalScale={2}
-                prefix="$"
-                placeholder="auto-fill 50% of total"
-                styles={{
-                  input: {
-                    background: '#050608',
-                    borderColor: '#1a1f2e',
-                    color: '#e8edf2',
-                    maxWidth: 220,
-                  },
-                  label: { color: '#e8edf2', fontFamily: "'Share Tech Mono', monospace" },
-                  description: { color: '#5a6478', fontStyle: 'italic' },
-                }}
-              />
+                    : 'Auto-calculated. Updates as you add or edit line items. Uncheck above for Emergent Services per TOS §6.3.'}
+                </Text>
+              </Stack>
             )}
           </Stack>
 

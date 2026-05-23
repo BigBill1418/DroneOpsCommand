@@ -4,6 +4,40 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## [unreleased] — 2026-05-23 — feat(invoices): "Require 50% deposit" now always tracks 50% of the live total
+
+**Incident:** Operator reported the 50% deposit "not adding up" — an
+invoice totalling $844.30 (mileage + rapid deployment + night ops +
+hourly) showed a $272.15 deposit, which is 50% of only the first three
+items ($544.30). The last-added line item wasn't reflected in the deposit.
+
+**Root cause:** "auto-fill 50%" was a one-shot calculation. On first save
+the backend computed 50% of the then-current total and stored it as a
+plain number. On reload the app couldn't distinguish that value from an
+operator-typed override, so it froze. `_recalculate_invoice` only ever
+clamped the deposit *down*, never re-derived it, so adding line items grew
+the total but left the deposit stale.
+
+**Decision (operator, 2026-05-23):** "Require 50% deposit" means the
+deposit is *always* exactly 50% of the current total — no manual override.
+
+### Changed
+
+- **`backend/app/routers/invoices.py`** — `_recalculate_invoice` is now the
+  single authoritative source for the deposit: when required and not yet
+  paid, `deposit_amount = 50% of total`, re-derived on every recalc (which
+  runs after every line-item add/edit/delete and every PUT) so it tracks
+  changes automatically. `deposit_required=False` → 0; total=0 → deferred;
+  a *paid* deposit is never recomputed (locked at the collected amount).
+  `update_invoice` no longer accepts a manual deposit amount (ignored if
+  sent).
+- **`frontend/.../MissionInvoiceEdit.tsx`** — the editable "Deposit Amount"
+  field is replaced by a read-only live display of 50% of the total that
+  updates as line items change; saves send `deposit_amount: null` (auto).
+- **`backend/tests/test_deposit_pricing.py`** — tests for: deposit tracks
+  added items ($844.30 → $422.15), always 50% regardless of prior value,
+  zeroed when not required, untouched when paid.
+
 ## [unreleased] — 2026-05-23 — fix(invoices): defer deposit when total hits 0 on recalc — stop line items being silently dropped on edit
 
 **Incident (follow-on to the create-time fix below):** Operator reported

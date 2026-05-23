@@ -50,15 +50,52 @@ def test_recalculate_defers_deposit_when_all_items_removed():
     assert inv.deposit_required is False and float(inv.deposit_amount) == 0.0
 
 
-def test_recalculate_clamps_deposit_to_lowered_positive_total():
-    """Existing ADR-0009 clamp still holds for a positive total: a deposit
-    above the new total is clamped down but stays required."""
+def test_recalculate_sets_deposit_to_50pct_regardless_of_prior_amount():
+    """Operator decision 2026-05-23: "Require 50% deposit" always derives
+    50% of the current total, ignoring any prior stored amount (no manual
+    override). A stale 300 on a 100 total becomes 50."""
     li = LineItem(description="x", quantity=1, unit_price=100, total=100)
     inv = _invoice_with_items([li], deposit_required=True, deposit_amount=300)
     _recalculate_invoice(inv)
     assert float(inv.total) == 100.0
     assert inv.deposit_required is True
-    assert float(inv.deposit_amount) == 100.0
+    assert float(inv.deposit_amount) == 50.0
+
+
+def test_recalculate_deposit_tracks_added_line_items():
+    """Regression (operator-reported, 2026-05-23): the deposit must equal
+    50% of ALL line items, re-derived as items are added. Prior bug froze
+    it at 50% of an earlier, smaller total."""
+    items = [
+        LineItem(description="Mileage", quantity=290, unit_price=0.67, total=194.30),
+        LineItem(description="Rapid Deployment", quantity=1, unit_price=250, total=250.00),
+        LineItem(description="Night Ops", quantity=1, unit_price=100, total=100.00),
+        LineItem(description="Standard Hourly", quantity=2, unit_price=150, total=300.00),
+    ]
+    # Simulate the deposit having been frozen at 50% of the first 3 items.
+    inv = _invoice_with_items(items, deposit_required=True, deposit_amount=272.15)
+    _recalculate_invoice(inv)
+    assert float(inv.total) == 844.30
+    assert float(inv.deposit_amount) == 422.15
+
+
+def test_recalculate_zeroes_deposit_when_not_required():
+    """deposit_required=False forces deposit_amount to 0 on recalc."""
+    li = LineItem(description="x", quantity=1, unit_price=100, total=100)
+    inv = _invoice_with_items([li], deposit_required=False, deposit_amount=999)
+    _recalculate_invoice(inv)
+    assert inv.deposit_required is False
+    assert float(inv.deposit_amount) == 0.0
+
+
+def test_recalculate_does_not_touch_paid_deposit():
+    """A collected deposit is locked — recalc must not recompute it even if
+    the total changes."""
+    li = LineItem(description="x", quantity=1, unit_price=1000, total=1000)
+    inv = _invoice_with_items([li], deposit_required=True, deposit_amount=97.15, deposit_paid=True)
+    _recalculate_invoice(inv)
+    assert inv.deposit_paid is True
+    assert float(inv.deposit_amount) == 97.15  # unchanged
 
 
 def test_create_time_deposit_is_constraint_safe_at_zero_total():
