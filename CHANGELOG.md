@@ -4,6 +4,29 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## [unreleased] — 2026-05-23 — feat(invoices): mobile-first invoice editor (MissionInvoiceEdit)
+
+The invoice editor was desktop-first and unusable in the field on a phone —
+line items were a single non-wrapping row and several inputs had hard-coded
+widths that forced horizontal scrolling. Redesigned the presentation layer
+(no change to data flow, the deposit logic, or the save sequence).
+
+### Changed
+
+- **`frontend/src/components/invoice/LineItemFields.tsx`** (new) — line items
+  render as a card-per-item on mobile (full-width stacked fields, Qty/Price side
+  by side, a visible per-item line total, a labelled Remove button) and as the
+  original single dense row on tablet/desktop (>768px), now also showing the
+  per-item line total.
+- **`frontend/src/pages/MissionInvoiceEdit.tsx`** — `useMediaQuery` drives the
+  responsive layout; a sticky bottom bar on mobile shows live Subtotal + 50%
+  deposit and a full-width SAVE (always reachable, respects safe-area inset);
+  template select / deposit / tax widths are now fluid on mobile. Desktop layout
+  unchanged.
+
+Verified with Playwright at 390/412/768/1280px (reviewed by eye): no horizontal
+overflow at any width, desktop unchanged. Design: `docs/plans/2026-05-23-mobile-invoice-editor-ux.md`.
+
 ## [unreleased] — 2026-05-23 — feat(invoices): "Require 50% deposit" now always tracks 50% of the live total
 
 **Incident:** Operator reported the 50% deposit "not adding up" — an

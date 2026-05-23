@@ -22,8 +22,8 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActionIcon,
   Badge,
+  Box,
   Button,
   Card,
   Group,
@@ -33,16 +33,18 @@ import {
   Stack,
   Switch,
   Text,
-  TextInput,
   Textarea,
   Title,
 } from '@mantine/core';
+import { useMediaQuery } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
-import { IconArrowLeft, IconDeviceFloppy, IconPlus, IconTrash } from '@tabler/icons-react';
+import { IconArrowLeft, IconDeviceFloppy, IconPlus } from '@tabler/icons-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import api from '../api/client';
 import type { Invoice, Mission, RateTemplate } from '../api/types';
-import { cardStyle, inputStyles } from '../components/shared/styles';
+import { LineItemFields } from '../components/invoice/LineItemFields';
+import type { EditableLineItem } from '../components/invoice/LineItemFields';
+import { cardStyle, inputStyles, monoFont } from '../components/shared/styles';
 import UnsavedChangesModal from '../components/shared/UnsavedChangesModal';
 import { useDirtyGuard } from '../hooks/useDirtyGuard';
 
@@ -56,13 +58,6 @@ const lineItemCategories = [
   { value: 'special', label: 'Special Circumstances' },
   { value: 'other', label: 'Other' },
 ];
-
-interface EditableLineItem {
-  description: string;
-  category: string;
-  quantity: number;
-  unit_price: number;
-}
 
 /**
  * Serialize the operator-editable invoice state into a string for
@@ -215,10 +210,17 @@ export default function MissionInvoiceEdit() {
     };
   }, [id, navigate]);
 
+  const isMobile = useMediaQuery('(max-width: 768px)') ?? false;
+
   const subtotal = useMemo(
     () => lineItems.reduce((sum, li) => sum + (li.quantity || 0) * (li.unit_price || 0), 0),
     [lineItems],
   );
+
+  // 50% deposit preview, mirroring the backend's round(total * 0.5, 2).
+  // Tax is 0 in practice; subtotal == total. The saved value is
+  // authoritative (recomputed server-side on save).
+  const depositPreview = Math.round(subtotal * 50) / 100;
 
   const handleAddLineItem = () => {
     setLineItems((prev) => [
@@ -382,7 +384,7 @@ export default function MissionInvoiceEdit() {
   }
 
   return (
-    <Stack gap="lg">
+    <Stack gap="lg" pb={isMobile ? 104 : 0}>
       <Group justify="space-between" wrap="wrap">
         <div>
           <Group gap="xs" mb={4}>
@@ -407,19 +409,21 @@ export default function MissionInvoiceEdit() {
               </Badge>
             )}
           </Group>
-          <Title order={2} c="#e8edf2" style={{ letterSpacing: '2px' }}>
+          <Title order={isMobile ? 3 : 2} c="#e8edf2" style={{ letterSpacing: isMobile ? '1px' : '2px' }}>
             EDIT INVOICE — {mission.title.toUpperCase()}
           </Title>
         </div>
-        <Button
-          leftSection={<IconDeviceFloppy size={16} />}
-          color="cyan"
-          loading={saving}
-          onClick={handleSave}
-          styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}
-        >
-          SAVE INVOICE
-        </Button>
+        {!isMobile && (
+          <Button
+            leftSection={<IconDeviceFloppy size={16} />}
+            color="cyan"
+            loading={saving}
+            onClick={handleSave}
+            styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}
+          >
+            SAVE INVOICE
+          </Button>
+        )}
       </Group>
 
       <Card padding="lg" radius="md" style={cardStyle}>
@@ -428,7 +432,7 @@ export default function MissionInvoiceEdit() {
             <Text c="#e8edf2" fw={600}>
               Line Items
             </Text>
-            <Group gap="xs" wrap="wrap">
+            <Group gap="xs" wrap="wrap" style={{ flex: isMobile ? '1 1 100%' : undefined }}>
               <Select
                 placeholder="Add from template..."
                 data={rateTemplates.map((t) => ({
@@ -436,7 +440,8 @@ export default function MissionInvoiceEdit() {
                   label: `${t.name} ($${t.default_rate}/${t.default_unit || 'ea'})`,
                 }))}
                 clearable
-                size="xs"
+                size={isMobile ? 'sm' : 'xs'}
+                style={{ flex: 1, minWidth: isMobile ? 0 : 240 }}
                 onChange={(val) => {
                   if (!val) return;
                   const tmpl = rateTemplates.find((t) => t.id === val);
@@ -458,16 +463,16 @@ export default function MissionInvoiceEdit() {
                     background: '#050608',
                     borderColor: '#1a1f2e',
                     color: '#e8edf2',
-                    width: 280,
                   },
                 }}
               />
               <Button
                 leftSection={<IconPlus size={14} />}
-                size="xs"
+                size={isMobile ? 'sm' : 'xs'}
                 color="cyan"
                 variant="light"
                 onClick={handleAddLineItem}
+                styles={{ root: { flexShrink: 0 } }}
               >
                 Blank Item
               </Button>
@@ -481,64 +486,19 @@ export default function MissionInvoiceEdit() {
           )}
 
           {lineItems.map((item, i) => (
-            <Group key={i} align="end">
-              <TextInput
-                label="Description"
-                style={{ flex: 2 }}
-                value={item.description}
-                onChange={(e) => {
-                  const updated = [...lineItems];
-                  updated[i].description = e.target.value;
-                  setLineItems(updated);
-                }}
-                styles={inputStyles}
-              />
-              <Select
-                label="Category"
-                data={lineItemCategories}
-                value={item.category}
-                onChange={(val) => {
-                  const updated = [...lineItems];
-                  updated[i].category = val || 'other';
-                  setLineItems(updated);
-                }}
-                styles={inputStyles}
-                style={{ flex: 1 }}
-              />
-              <NumberInput
-                label="Qty"
-                value={item.quantity}
-                onChange={(val) => {
-                  const updated = [...lineItems];
-                  updated[i].quantity = typeof val === 'number' ? val : 1;
-                  setLineItems(updated);
-                }}
-                min={0}
-                styles={inputStyles}
-                style={{ width: 80 }}
-              />
-              <NumberInput
-                label="Price"
-                value={item.unit_price}
-                onChange={(val) => {
-                  const updated = [...lineItems];
-                  updated[i].unit_price = typeof val === 'number' ? val : 0;
-                  setLineItems(updated);
-                }}
-                min={0}
-                decimalScale={2}
-                prefix="$"
-                styles={inputStyles}
-                style={{ width: 110 }}
-              />
-              <ActionIcon
-                color="red"
-                variant="subtle"
-                onClick={() => setLineItems(lineItems.filter((_, j) => j !== i))}
-              >
-                <IconTrash size={16} />
-              </ActionIcon>
-            </Group>
+            <LineItemFields
+              key={i}
+              item={item}
+              index={i}
+              isMobile={isMobile}
+              categories={lineItemCategories}
+              onChange={(patch) => {
+                const updated = [...lineItems];
+                updated[i] = { ...updated[i], ...patch };
+                setLineItems(updated);
+              }}
+              onRemove={() => setLineItems(lineItems.filter((_, j) => j !== i))}
+            />
           ))}
 
           <Text
@@ -598,12 +558,13 @@ export default function MissionInvoiceEdit() {
             min={0}
             max={100}
             decimalScale={3}
+            size={isMobile ? 'md' : 'sm'}
             styles={{
               input: {
                 background: '#050608',
                 borderColor: '#1a1f2e',
                 color: '#e8edf2',
-                maxWidth: 180,
+                maxWidth: isMobile ? undefined : 180,
               },
               label: {
                 color: '#5a6478',
@@ -635,25 +596,79 @@ export default function MissionInvoiceEdit() {
         </Stack>
       </Card>
 
-      <Group justify="flex-end">
-        <Button
-          variant="subtle"
-          color="gray"
-          onClick={handleCancel}
-          disabled={saving}
+      {!isMobile && (
+        <Group justify="flex-end">
+          <Button
+            variant="subtle"
+            color="gray"
+            onClick={handleCancel}
+            disabled={saving}
+          >
+            Cancel
+          </Button>
+          <Button
+            leftSection={<IconDeviceFloppy size={16} />}
+            color="cyan"
+            loading={saving}
+            onClick={handleSave}
+            styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}
+          >
+            SAVE INVOICE
+          </Button>
+        </Group>
+      )}
+
+      {/* Mobile: subtotal + live deposit + Save pinned to the bottom of the
+          screen so they're always reachable without scrolling in the field. */}
+      {isMobile && (
+        <Box
+          style={{
+            position: 'fixed',
+            bottom: 0,
+            left: 0,
+            right: 0,
+            zIndex: 190,
+            background: '#0e1117',
+            borderTop: '1px solid #1a1f2e',
+            padding: '8px 12px calc(8px + env(safe-area-inset-bottom))',
+            boxShadow: '0 -6px 16px rgba(0,0,0,0.45)',
+          }}
         >
-          Cancel
-        </Button>
-        <Button
-          leftSection={<IconDeviceFloppy size={16} />}
-          color="cyan"
-          loading={saving}
-          onClick={handleSave}
-          styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}
-        >
-          SAVE INVOICE
-        </Button>
-      </Group>
+          <Group justify="space-between" gap="xs" mb={6} wrap="nowrap">
+            <Text size="xs" c="#5a6478" style={monoFont}>
+              SUBTOTAL <Text span c="#e8edf2" fw={700}>${subtotal.toFixed(2)}</Text>
+              {depositRequired && (
+                <>
+                  {'  ·  DEPOSIT '}
+                  <Text span c="cyan" fw={700}>${depositPreview.toFixed(2)}</Text>
+                </>
+              )}
+            </Text>
+          </Group>
+          <Group gap="xs" wrap="nowrap">
+            <Button
+              variant="default"
+              color="gray"
+              onClick={handleCancel}
+              disabled={saving}
+              styles={{ root: { flexShrink: 0 } }}
+            >
+              Cancel
+            </Button>
+            <Button
+              flex={1}
+              size="md"
+              leftSection={<IconDeviceFloppy size={18} />}
+              color="cyan"
+              loading={saving}
+              onClick={handleSave}
+              styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}
+            >
+              SAVE INVOICE
+            </Button>
+          </Group>
+        </Box>
+      )}
 
       <UnsavedChangesModal
         opened={showConfirm}
