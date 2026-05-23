@@ -15,6 +15,7 @@
  * with the Edit action.
  */
 import { Card, Group, Stack, Text, Button, Tooltip } from '@mantine/core';
+import { useMediaQuery } from '@mantine/hooks';
 import { IconEdit } from '@tabler/icons-react';
 import { useNavigate } from 'react-router-dom';
 import type { ReactNode } from 'react';
@@ -37,6 +38,7 @@ export default function MissionFacetCard({
   extraActions,
 }: Props) {
   const navigate = useNavigate();
+  const isMobile = useMediaQuery('(max-width: 768px)') ?? false;
 
   const editButton = (
     <Button
@@ -53,31 +55,49 @@ export default function MissionFacetCard({
     </Button>
   );
 
+  const summaryBlock = (
+    <Stack gap={6} style={isMobile ? undefined : { flex: 1, minWidth: 0 }}>
+      <Text
+        c="#00d4ff"
+        size="sm"
+        fw={700}
+        style={{ fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '2px' }}
+      >
+        {title.toUpperCase()}
+      </Text>
+      <div>{summary}</div>
+    </Stack>
+  );
+
+  const actionsBlock = (
+    <Group gap="xs" wrap={isMobile ? 'wrap' : 'nowrap'}>
+      {extraActions}
+      {disabled ? (
+        <Tooltip label="Mission sent — locked" withArrow>
+          <span>{editButton}</span>
+        </Tooltip>
+      ) : (
+        editButton
+      )}
+    </Group>
+  );
+
   return (
     <Card padding="lg" radius="md" style={cardStyle}>
-      <Group justify="space-between" align="flex-start" wrap="nowrap" gap="md">
-        <Stack gap={6} style={{ flex: 1, minWidth: 0 }}>
-          <Text
-            c="#00d4ff"
-            size="sm"
-            fw={700}
-            style={{ fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '2px' }}
-          >
-            {title.toUpperCase()}
-          </Text>
-          <div>{summary}</div>
+      {isMobile ? (
+        // Stack vertically so the summary reads full-width; on a phone the
+        // side-by-side nowrap layout crushed cards with action buttons
+        // (the Invoice card) into an unreadable sliver.
+        <Stack gap="sm">
+          {summaryBlock}
+          {actionsBlock}
         </Stack>
-        <Group gap="xs" wrap="nowrap">
-          {extraActions}
-          {disabled ? (
-            <Tooltip label="Mission sent — locked" withArrow>
-              <span>{editButton}</span>
-            </Tooltip>
-          ) : (
-            editButton
-          )}
+      ) : (
+        <Group justify="space-between" align="flex-start" wrap="nowrap" gap="md">
+          {summaryBlock}
+          {actionsBlock}
         </Group>
-      </Group>
+      )}
     </Card>
   );
 }

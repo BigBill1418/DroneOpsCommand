@@ -4,6 +4,28 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## [unreleased] — 2026-05-23 — fix(mission-hub): readable facet cards on mobile (Invoice card was garbled)
+
+On a phone, the Mission Hub's Invoice card was unreadable — the title stacked
+one letter per line and the summary collapsed into a ~3-character column on the
+left. Root cause: `MissionFacetCard` laid out summary and actions side-by-side
+in a `wrap="nowrap"` row. The Invoice card is the only one with `extraActions`
+(Issue Link / Email / Edit), so on a narrow screen those buttons claimed the
+width and squeezed the `flex:1, minWidth:0` summary to a sliver.
+
+### Fixed
+
+- **`frontend/src/components/MissionFacetCard.tsx`** — on mobile (≤768px) the
+  card stacks vertically: title + summary full-width, action buttons in a
+  wrapping row beneath. Desktop keeps the side-by-side layout (unchanged).
+- **`frontend/src/pages/MissionDetail.tsx`** — the invoice card's portal action
+  group now wraps (`wrap="wrap"`) so Issue Link / Email / Edit reflow on narrow
+  screens instead of overflowing.
+
+Verified with Playwright at 390px (Invoice card now fully readable — title,
+`Total/Deposit/Balance`, and buttons all legible) and 1280px (desktop unchanged);
+no horizontal overflow at either width.
+
 ## [unreleased] — 2026-05-23 — feat(invoices): show billed-time quantity as hours on the client invoice
 
 The "Hours" labelling now carries through to the client-facing invoice so

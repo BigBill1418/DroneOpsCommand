@@ -352,7 +352,7 @@ export default function MissionDetail() {
   );
 
   const portalActions = (
-    <Group gap="xs" wrap="nowrap">
+    <Group gap="xs" wrap="wrap">
       <Tooltip label="Issue or refresh client-portal magic link" withArrow>
         <Button
           size="sm"
