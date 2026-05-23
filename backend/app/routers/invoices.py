@@ -298,6 +298,64 @@ async def update_invoice(
 
 # --- Line Items ---
 
+@router.put("/{mission_id}/invoice/items", response_model=InvoiceResponse)
+async def replace_line_items(
+    mission_id: UUID,
+    data: list[LineItemCreate],
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """Atomically replace ALL line items for an invoice in one transaction.
+
+    Supersedes the editor's old delete-each-then-add-each loop, which was
+    non-transactional: an interruption mid-loop (e.g. a flaky field
+    connection) left the line items and the stored total out of sync — a
+    stale total that then drives the wrong balance/charge. Doing the full
+    replace + recalc inside one request makes it all-or-nothing (get_db
+    commits once on success, rolls back entirely on any error), so the
+    stored total can never desync from the line items.
+    """
+    result = await db.execute(
+        select(Invoice)
+        .where(Invoice.mission_id == mission_id)
+        .options(selectinload(Invoice.line_items))
+    )
+    invoice = result.scalar_one_or_none()
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+
+    for li in list(invoice.line_items):
+        await db.delete(li)
+    await db.flush()
+
+    for i, item in enumerate(data):
+        db.add(LineItem(
+            invoice_id=invoice.id,
+            description=item.description,
+            category=item.category,
+            quantity=item.quantity,
+            unit_price=item.unit_price,
+            total=float(item.quantity) * float(item.unit_price),
+            sort_order=i,
+        ))
+    await db.flush()
+
+    result2 = await db.execute(
+        select(Invoice)
+        .where(Invoice.id == invoice.id)
+        .options(selectinload(Invoice.line_items))
+    )
+    invoice = result2.scalar_one()
+    _recalculate_invoice(invoice)
+    await db.flush()
+    await db.refresh(invoice)
+    logger.info(
+        "[INVOICE-ITEMS-REPLACE] mission=%s invoice=%s items=%d total=%.2f",
+        mission_id, invoice.id, len(data), float(invoice.total),
+    )
+    return invoice
+
+
 @router.post("/{mission_id}/invoice/items", response_model=LineItemResponse, status_code=status.HTTP_201_CREATED)
 async def add_line_item(
     mission_id: UUID,

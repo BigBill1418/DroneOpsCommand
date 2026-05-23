@@ -88,6 +88,24 @@ def test_recalculate_zeroes_deposit_when_not_required():
     assert float(inv.deposit_amount) == 0.0
 
 
+def test_recalculate_paid_deposit_balance_grows_when_items_added():
+    """Operator workflow (2026-05-23): bill a 50% deposit pre-mission, then
+    add line items after the mission. The paid deposit must stay locked at
+    the collected amount and the BALANCE must grow to (new total - deposit)."""
+    items = [LineItem(description='x', quantity=1, unit_price=t, total=t) for t in (194.30, 250.0, 400.0)]
+    inv = _invoice_with_items(items, deposit_required=True, deposit_amount=422.15, deposit_paid=True)
+    _recalculate_invoice(inv)
+    assert float(inv.total) == 844.30
+    assert float(inv.deposit_amount) == 422.15  # locked
+    assert abs(inv.balance_amount - 422.15) < 0.001
+    # operator adds $360 of actual work after the mission
+    inv.line_items.append(LineItem(description='y', quantity=1, unit_price=360.0, total=360.0))
+    _recalculate_invoice(inv)
+    assert float(inv.total) == 1204.30
+    assert float(inv.deposit_amount) == 422.15  # still locked
+    assert abs(inv.balance_amount - 782.15) < 0.001
+
+
 def test_recalculate_does_not_touch_paid_deposit():
     """A collected deposit is locked — recalc must not recompute it even if
     the total changes."""

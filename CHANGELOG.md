@@ -4,6 +4,39 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## [unreleased] — 2026-05-23 — fix(invoices): bulletproof totals — recompute-at-charge + atomic line-item save
+
+**Incident:** The stored invoice `total` repeatedly went stale vs. the line
+items (observed live: line items summing to $1,204.30 / $1,216.36 while the
+stored total read $544.30 / $556.36). Root cause: the editor saved line items
+via a non-transactional delete-each-then-add-each loop; an interruption
+(flaky field connection) left the items written but the total reflecting only
+a partial set. A stale total would then drive the wrong Stripe charge —
+critical for an operator who bills a deposit pre-mission and adds line items
+after.
+
+### Fixed
+
+- **`backend/app/routers/invoices.py`** — new `PUT /{mission_id}/invoice/items`
+  replaces ALL line items + recalculates the total in a single request (one
+  DB transaction via `get_db`), so items and total can never desync. Replaces
+  the per-item delete/add loop.
+- **`backend/app/routers/client_portal.py`** — `_load_pay_context` (the
+  chokepoint for every `/pay/*` endpoint) now recomputes the total from the
+  current line items before any Stripe charge, so a stale stored total can
+  never be billed; it self-heals the row at the same time. A paid deposit
+  stays locked, so adding line items after the deposit only grows the balance.
+  Checkout-session reuse is now amount-aware — a session minted for a
+  now-changed amount is never reused (no stale-price charge).
+- **`frontend/src/pages/MissionInvoiceEdit.tsx`** — the editor save now calls
+  the atomic replace endpoint instead of the delete/add loop.
+- **`backend/tests/test_deposit_pricing.py`** — regression test: paid deposit
+  stays locked and the balance grows correctly when line items are added after.
+
+Full backend suite (258 pass) + frontend type-check clean. Follow-ups tracked:
+the same atomic save for the legacy mission wizard, and the latent tax-rate
+unit bug.
+
 ## [unreleased] — 2026-05-23 — fix(mission-hub): readable facet cards on mobile (Invoice card was garbled)
 
 On a phone, the Mission Hub's Invoice card was unreadable — the title stacked

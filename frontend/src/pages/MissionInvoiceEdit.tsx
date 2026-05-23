@@ -286,25 +286,22 @@ export default function MissionInvoiceEdit() {
         }
       }
 
-      // Replace line items: fetch existing IDs then delete + re-add.
-      // Same delete-then-recreate strategy MissionNew uses; cheaper than
-      // diff-and-patch and the backend recalculates totals each step.
+      // Replace ALL line items in one atomic request (PUT /invoice/items).
+      // The old per-item delete-then-add loop was non-transactional — an
+      // interruption (e.g. a flaky field connection) left the line items
+      // and the stored total out of sync. The backend recalculates the
+      // total as part of the atomic replace.
       if (hasInvoice) {
-        const refresh = await api.get(`/missions/${id}/invoice`);
-        const existing: { id: string }[] = refresh.data.line_items || [];
-        for (const li of existing) {
-          await api.delete(`/missions/${id}/invoice/items/${li.id}`);
-        }
-        for (let i = 0; i < validItems.length; i++) {
-          const li = validItems[i];
-          await api.post(`/missions/${id}/invoice/items`, {
+        await api.put(
+          `/missions/${id}/invoice/items`,
+          validItems.map((li, i) => ({
             description: li.description,
             category: li.category,
             quantity: li.quantity,
             unit_price: li.unit_price,
             sort_order: i,
-          });
-        }
+          })),
+        );
 
         // The backend defers the deposit at create (total is 0 before line
         // items exist), so once items are in place re-assert deposit_required

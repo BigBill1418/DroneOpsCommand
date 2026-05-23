@@ -429,6 +429,20 @@ async def _load_pay_context(
     if not invoice:
         raise HTTPException(status_code=404, detail="No invoice found for this mission")
 
+    # Recompute-at-charge: derive total/deposit/balance from the CURRENT
+    # line items before any Stripe charge, so a stale stored total (e.g.
+    # from an interrupted editor save) can never be billed. This is the
+    # authoritative guard — it also self-heals the persisted row. A paid
+    # deposit stays locked (_recalculate_invoice skips it once paid), so
+    # adding line items after the deposit only grows the balance.
+    # Only recompute when line items exist: the real stale-total defect
+    # always has line items, and a stored total with no line-item rows is
+    # a legacy/edge case whose stored value we leave untouched.
+    if invoice.line_items:
+        from app.routers.invoices import _recalculate_invoice
+        _recalculate_invoice(invoice)
+        await db.flush()
+
     if float(invoice.total) <= 0:
         raise HTTPException(status_code=400, detail="Invoice total must be greater than zero")
 
@@ -462,6 +476,7 @@ async def _reuse_existing_checkout_session(
     session_id: str | None,
     db: AsyncSession,
     log_prefix: str,
+    expected_amount_cents: int | None = None,
 ) -> str | None:
     """If `session_id` points at a recent, unpaid Stripe Checkout session,
     return its URL so the caller can return that to the client without
@@ -508,6 +523,21 @@ async def _reuse_existing_checkout_session(
             log_prefix, session_id, age, _CHECKOUT_REUSE_WINDOW,
         )
         return None
+    # Never reuse a session whose amount no longer matches the current
+    # (recomputed) amount — e.g. the operator added/changed line items
+    # after the session was minted. Reusing it would charge the stale
+    # price. Mint a fresh session at the correct amount instead.
+    amount_total = getattr(existing, "amount_total", None)
+    if (
+        expected_amount_cents is not None
+        and amount_total is not None
+        and amount_total != expected_amount_cents
+    ):
+        logger.info(
+            "%s existing session=%s amount=%s != current=%s — line items changed; minting fresh",
+            log_prefix, session_id, amount_total, expected_amount_cents,
+        )
+        return None
     logger.info(
         "%s reusing existing checkout session=%s age=%s status=%s",
         log_prefix, session_id, age, payment_status,
@@ -550,6 +580,7 @@ async def create_client_deposit_payment(
         session_id=invoice.deposit_checkout_session_id,
         db=db,
         log_prefix="[CLIENT-PAY-DEPOSIT]",
+        expected_amount_cents=int(round(float(invoice.deposit_amount) * 100)),
     )
     if reused is not None:
         elapsed = time.perf_counter() - start
@@ -640,6 +671,7 @@ async def create_client_balance_payment(
         session_id=invoice.stripe_checkout_session_id,
         db=db,
         log_prefix="[CLIENT-PAY-BALANCE]",
+        expected_amount_cents=int(round(balance * 100)),
     )
     if reused is not None:
         elapsed = time.perf_counter() - start
