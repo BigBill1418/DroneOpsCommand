@@ -58,6 +58,7 @@ interface ClientMissionData {
 
 interface ClientInvoiceLineItem {
   description: string;
+  category: string;
   quantity: number;
   unit_price: number;
   total: number;
@@ -1015,7 +1016,7 @@ export default function ClientMissionDetail() {
                         <Table.Tr key={i}>
                           <Table.Td>{li.description}</Table.Td>
                           <Table.Td style={{ textAlign: 'right', ...monoFont }}>
-                            {li.quantity}
+                            {li.category === 'billed_time' ? `${li.quantity} hrs` : li.quantity}
                           </Table.Td>
                           <Table.Td style={{ textAlign: 'right', ...monoFont }}>
                             {fmtMoney(li.unit_price)}

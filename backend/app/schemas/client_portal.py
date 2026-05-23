@@ -81,6 +81,7 @@ class ClientMissionDetail(BaseModel):
 
 class ClientInvoiceLineItem(BaseModel):
     description: str
+    category: str
     quantity: float
     unit_price: float
     total: float

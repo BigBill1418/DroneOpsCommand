@@ -365,6 +365,7 @@ async def get_client_invoice(
     line_items = [
         ClientInvoiceLineItem(
             description=item.description,
+            category=item.category.value,
             quantity=float(item.quantity),
             unit_price=float(item.unit_price),
             total=float(item.total),

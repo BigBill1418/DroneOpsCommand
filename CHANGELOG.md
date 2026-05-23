@@ -4,6 +4,25 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## [unreleased] — 2026-05-23 — feat(invoices): show billed-time quantity as hours on the client invoice
+
+The "Hours" labelling now carries through to the client-facing invoice so
+fractional billed time is unambiguous to the customer, not just the operator.
+
+### Changed
+
+- **`backend/app/templates/report_pdf.html`** — billed-time line items render
+  the quantity with an "hrs" suffix (e.g. `2.1 hrs`); the quantity is also
+  formatted to drop trailing zeros (`290.00` → `290`, `2.10` → `2.1`).
+- **`backend/app/schemas/client_portal.py`** + **`backend/app/routers/client_portal.py`**
+  — `ClientInvoiceLineItem` now carries `category` so the portal can label by line type.
+- **`frontend/src/pages/client/ClientMissionDetail.tsx`** — the client portal
+  invoice table shows `N hrs` for billed-time lines, the bare quantity otherwise.
+
+Verified: PDF cell renders `2.1 hrs` / `2 hrs` / `0.25 hrs` (billed-time) and clean
+`290` (travel); backend suite + frontend type-check pass. Stripe already folds
+fractional quantities into the unit amount, so the charged amount is correct.
+
 ## [unreleased] — 2026-05-23 — feat(invoices): label billed-time line quantity "Hours"
 
 Line items in the `billed_time` category are priced per hour, so the quantity

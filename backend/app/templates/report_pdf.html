@@ -528,7 +528,7 @@
       <tr>
         <td>{{ item.description }}</td>
         <td>{{ item.category | replace('_', ' ') | title }}</td>
-        <td style="text-align: right;">{{ item.quantity }}</td>
+        <td style="text-align: right;">{{ "%g"|format(item.quantity) }}{% if item.category == 'billed_time' %} hrs{% endif %}</td>
         <td style="text-align: right;">${{ "%.2f"|format(item.unit_price) }}</td>
         <td style="text-align: right;">${{ "%.2f"|format(item.total) }}</td>
       </tr>
