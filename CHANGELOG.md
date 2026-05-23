@@ -4,6 +4,37 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## [unreleased] — 2026-05-23 — fix(invoices): defer deposit when total hits 0 on recalc — stop line items being silently dropped on edit
+
+**Incident (follow-on to the create-time fix below):** Operator reported
+an invoice's line items "not adding up." The frontend save replaces line
+items by deleting all then re-adding (`MissionInvoiceEdit` /
+`MissionWizardLegacy`). Deleting the **last** line item drops the total
+to 0; `_recalculate_invoice` clamped `deposit_amount` to 0 but left
+`deposit_required=True` — the same impossible state as the create bug —
+so the DELETE raised a 500 (`deposit_required_consistent`), aborted the
+save, and the re-add loop never ran. Net effect: existing line items were
+deleted but the operator's edited set was never written, leaving one
+stray item and a wrong total.
+
+### Fixed
+
+- **`backend/app/routers/invoices.py`** — `_recalculate_invoice` now
+  defers the deposit (`deposit_required=False, deposit_amount=0`) when the
+  recalculated total is ≤ 0, instead of clamping to a constraint-violating
+  `deposit_required=True, deposit_amount=0`. Same contract as
+  `_create_time_deposit_state`; the deposit is restored on the next PUT
+  once line items push total > 0. Removes the 500 on the delete-then-
+  recreate save path.
+- **`backend/tests/test_deposit_pricing.py`** — regression tests: recalc
+  defers deposit at total=0, and still clamps (not defers) for a lowered
+  positive total.
+
+**Note:** the underlying delete-then-recreate item replacement is
+non-transactional — a mid-sequence failure (like this one) deletes items
+without re-adding them. The 500 is fixed, but making the replacement
+atomic is tracked as a follow-up hardening item.
+
 ## [unreleased] — 2026-05-23 — fix(invoices): defer deposit at create — stop "failing to save invoice" 500
 
 **Incident:** Operator reported "failing to save invoice." Live BOS-HQ

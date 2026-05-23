@@ -17,8 +17,48 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 
-from app.routers.invoices import _create_time_deposit_state, _resolve_deposit_amount
-from app.models.invoice import Invoice
+from app.routers.invoices import (
+    _create_time_deposit_state,
+    _recalculate_invoice,
+    _resolve_deposit_amount,
+)
+from app.models.invoice import Invoice, LineItem
+
+
+def _invoice_with_items(items, *, deposit_required, deposit_amount, deposit_paid=False, tax_rate=0):
+    inv = Invoice(mission_id=None)  # type: ignore[arg-type]
+    inv.deposit_required = deposit_required
+    inv.deposit_amount = deposit_amount
+    inv.deposit_paid = deposit_paid
+    inv.tax_rate = tax_rate
+    inv.line_items = items
+    return inv
+
+
+def test_recalculate_defers_deposit_when_all_items_removed():
+    """Regression (operator-reported, 2026-05-23): the frontend save does
+    delete-then-recreate of line items. Deleting the LAST item dropped
+    total to 0; _recalculate_invoice clamped deposit_amount to 0 but left
+    deposit_required=True, violating deposit_required_consistent. The
+    DELETE 500'd, aborting the save and silently dropping line items.
+    Now total=0 defers the deposit (restored by the next PUT)."""
+    inv = _invoice_with_items([], deposit_required=True, deposit_amount=97.15)
+    _recalculate_invoice(inv)
+    assert float(inv.total) == 0.0
+    # constraint-safe: deposit_required=False OR deposit_amount>0
+    assert (inv.deposit_required is False) or (float(inv.deposit_amount) > 0)
+    assert inv.deposit_required is False and float(inv.deposit_amount) == 0.0
+
+
+def test_recalculate_clamps_deposit_to_lowered_positive_total():
+    """Existing ADR-0009 clamp still holds for a positive total: a deposit
+    above the new total is clamped down but stays required."""
+    li = LineItem(description="x", quantity=1, unit_price=100, total=100)
+    inv = _invoice_with_items([li], deposit_required=True, deposit_amount=300)
+    _recalculate_invoice(inv)
+    assert float(inv.total) == 100.0
+    assert inv.deposit_required is True
+    assert float(inv.deposit_amount) == 100.0
 
 
 def test_create_time_deposit_is_constraint_safe_at_zero_total():

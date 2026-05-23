@@ -110,7 +110,19 @@ def _recalculate_invoice(invoice: Invoice):
     if invoice.deposit_required and not invoice.deposit_paid:
         new_total = float(invoice.total)
         current_deposit = float(invoice.deposit_amount or 0)
-        if current_deposit > new_total:
+        if new_total <= 0:
+            # Every line item was removed (e.g. the transient state during
+            # the frontend's delete-then-recreate save). A required deposit
+            # cannot satisfy the deposit_* CHECK constraints at total=0
+            # (deposit_required_consistent needs amount>0;
+            # deposit_amount_le_total needs amount<=0), so defer it. The
+            # deposit is restored by the next PUT once line items push
+            # total>0 — same contract as _create_time_deposit_state.
+            # Without this, deleting the last line item raised a raw 500
+            # and aborted the save, silently dropping line items.
+            invoice.deposit_required = False
+            invoice.deposit_amount = 0.0
+        elif current_deposit > new_total:
             logger.info(
                 "[INVOICE-RECALC] Clamping deposit_amount %.2f -> %.2f for invoice=%s (total dropped)",
                 current_deposit, new_total, invoice.id,
