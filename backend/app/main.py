@@ -168,6 +168,11 @@ def _add_missing_columns(conn):
                 ("deposit_payment_intent_id",   "ALTER TABLE invoices ADD COLUMN deposit_payment_intent_id VARCHAR(255)"),
                 ("deposit_checkout_session_id", "ALTER TABLE invoices ADD COLUMN deposit_checkout_session_id VARCHAR(255)"),
                 ("deposit_payment_method",      "ALTER TABLE invoices ADD COLUMN deposit_payment_method VARCHAR(50)"),
+                # Dunning / payment-reminder tracking (2026-05-24).
+                # Nullable, no default — safe additive ALTER on a populated table.
+                ("billed_at",            "ALTER TABLE invoices ADD COLUMN billed_at TIMESTAMP"),
+                ("reminder_sent_at",     "ALTER TABLE invoices ADD COLUMN reminder_sent_at TIMESTAMP"),
+                ("final_notice_sent_at", "ALTER TABLE invoices ADD COLUMN final_notice_sent_at TIMESTAMP"),
             ],
             "maintenance_records": [
                 ("images", "ALTER TABLE maintenance_records ADD COLUMN images JSONB DEFAULT '[]'"),

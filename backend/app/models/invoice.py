@@ -88,6 +88,11 @@ class Invoice(Base):
     deposit_checkout_session_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     deposit_payment_method: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
+    # Dunning / payment-reminder tracking (2026-05-24).
+    billed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    reminder_sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    final_notice_sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
     mission = relationship("Mission", back_populates="invoice")
     line_items = relationship("LineItem", back_populates="invoice", lazy="selectin", cascade="all, delete-orphan")
 
