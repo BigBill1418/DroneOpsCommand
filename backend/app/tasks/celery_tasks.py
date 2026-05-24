@@ -77,6 +77,11 @@ celery_app.conf.beat_schedule = {
         "task": "finalize_key_rotations",
         "schedule": crontab(minute="*/15"),
     },
+    # Payment reminders / dunning — daily at 16:00 UTC (~9am Pacific).
+    "payment-reminders": {
+        "task": "send_payment_reminders",
+        "schedule": crontab(hour=16, minute=0),
+    },
 }
 
 
@@ -489,3 +494,21 @@ def finalize_key_rotations_task() -> dict:
         engine.dispose()
 
     return {"promoted": len(promoted)}
+
+
+# ── Payment reminders / dunning sweep ─────────────────────────────────
+@celery_app.task(name="send_payment_reminders")
+def send_payment_reminders_task() -> dict:
+    """Daily dunning sweep — see app/services/dunning.py."""
+    from app.database import async_session
+    from app.services.dunning import run_dunning_sweep
+
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        async def _run():
+            async with async_session() as db:
+                return await run_dunning_sweep(db, loop)
+        return loop.run_until_complete(_run())
+    finally:
+        loop.close()
