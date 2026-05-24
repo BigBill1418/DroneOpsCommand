@@ -4,6 +4,18 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## [unreleased] — 2026-05-24 — style(dunning): theme the reminder/final-notice emails to match the project
+
+The dunning emails shipped as bare 14-16 line layouts (logo + name only, hard-coded
+teal/red, no table structure) — off-brand next to the rest of the project's emails.
+Rebuilt both `payment_reminder_email.html` and `payment_final_notice_email.html` on
+the same template as `payment_received_email.html`: dark `#0e1117/#161b22` theme, the
+shared `_brand_header.html` / `_brand_footer.html` partials, `brand_accent_color`
+(cyan) for the reminder and red for the final notice, a mono amount-due card, the
+gold pay CTA, and a past-due badge on the final notice. Render-verified with the
+branding dict the send functions already pass (wordmark, amount, pay link, FAA
+footer all present).
+
 ## [unreleased] — 2026-05-24 — fix(dunning): await email sends instead of nesting run_until_complete
 
 **Bug (confirmed + reproduced):** the dunning sweep runs inside
