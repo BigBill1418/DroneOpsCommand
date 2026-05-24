@@ -4,6 +4,30 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## [unreleased] — 2026-05-24 — fix(nginx): re-resolve backend DNS per request so backend rebuilds don't 502 the API
+
+**Incident (resolved):** after rebuilding + recreating the `backend` container, the
+`frontend` nginx kept proxying `/api/` to the backend's **old** container IP and
+returned **502 for the entire API** (`connect() failed (111: Connection refused)
+... upstream: http://172.19.0.11:8000`, while the live backend was at `172.19.0.9`).
+The customer portal surfaced this as "link expired or invalid" because the SPA treats
+a failed `/api/client/auth/validate` call as an invalid token. Immediate recovery was
+an `nginx -s reload`.
+
+**Root cause:** `nginx.conf` used `proxy_pass http://backend:8000;` with no `resolver`
+directive, so nginx resolved the `backend` name **once at startup** and pinned the IP.
+Any backend container recreate (every image rebuild / real deploy) changes that IP and
+strands nginx on the dead address until it is reloaded.
+
+### Fixed
+
+- **`frontend/nginx.conf`** — added `resolver 127.0.0.11 valid=10s ipv6=off;` (Docker
+  embedded DNS) and `set $backend_upstream backend;` at server scope, and switched all
+  six `proxy_pass` directives to `http://$backend_upstream:8000`. Using a variable in
+  `proxy_pass` forces nginx to re-resolve the name per request (cached 10s), so it picks
+  up a recreated backend's new IP within 10s instead of 502-ing until a manual reload.
+  Requires a frontend image rebuild to take effect.
+
 ## [unreleased] — 2026-05-24 — fix(client-portal): correct broken `/client/missions/` redirect route + sign-off
 
 **Two latent bugs in the customer-facing portal URLs**, surfaced while verifying the
