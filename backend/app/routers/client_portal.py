@@ -958,6 +958,17 @@ async def send_client_link(
         "[CLIENT-LINK-SEND] Email sent to %s for mission=%s, token_id=%s (%.3fs)",
         customer.email, mission_id, token_record.id, elapsed,
     )
+
+    # Anchor the dunning clock on the first time we send the customer the
+    # invoice link (never overwrite — the 48h/7d reminders count from here).
+    inv = (await db.execute(
+        select(Invoice).where(Invoice.mission_id == mission_id)
+    )).scalar_one_or_none()
+    if inv is not None and inv.billed_at is None:
+        from datetime import datetime as _dt
+        inv.billed_at = _dt.utcnow()
+        await db.commit()
+
     return {"message": "Client portal link sent", "portal_url": portal_url}
 
 
