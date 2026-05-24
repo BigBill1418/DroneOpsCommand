@@ -25,16 +25,22 @@ All shipped to `main` and deployed to the public instance
   a real backend IP change). Closed a live 502 that surfaced as a false
   "link expired".
 
-### Open / follow-ups
-- **Demo** (`~/droneops-demo`, demo.droneops.barnardhq.com) is a separate
-  checkout stuck at **v2.67.2** (13-day-old containers) — has none of the
-  above. Updating it is an operator deploy decision.
+### Deployment state (all current as of 2026-05-24)
+- **Public** (`~/droneops`, https://droneops.barnardhq.com) — ✅ v2.67.7.
+- **Demo** (`~/droneops-demo`, https://command-demo.barnardhq.com) — ✅ updated
+  to v2.67.7 on 2026-05-24 (backend/frontend/flight-parser rebuilt; DB
+  self-migrated via the `main.py` `_add_missing_columns` startup helper).
+  **worker/beat intentionally left stopped** so the demo never sends real
+  dunning email — re-confirm they stay down on any future demo `up`.
 - **Managed** (`~/droneops-managed`) has **zero active clients**; the managed
   template builds from `droneops-backend:latest`/`droneops-frontend:latest`
   (rebuilt today), so future clients auto-inherit these fixes.
-- **SECURITY:** scrubbed plaintext GH tokens from `~/droneops/.git/config` and
-  `~/droneops-demo/.git/config` on BOS (now bare URLs + credential helper). The
-  exposed token should be rotated at GitHub.
+
+### Open / follow-ups
+- **SECURITY (operator action):** scrubbed plaintext GH tokens from
+  `~/droneops/.git/config` and `~/droneops-demo/.git/config` on BOS (now bare
+  URLs + credential helper). The exposed `ghp_…` token should be **rotated at
+  GitHub** — overwrite the single line in `~/.secrets/git-credentials` after.
 - **Deferred:** SMS reminders (Phase 2); deployer self-roll fix (queued in
   noc-master).
 
