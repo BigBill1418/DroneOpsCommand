@@ -43,6 +43,23 @@ async def _safe_scalar(db: AsyncSession, stmt, label: str):
         return None
 
 
+def _utc_windows(now: datetime | None = None) -> tuple[datetime, datetime, datetime]:
+    """Return ``(now, now-30d, now-90d)`` as tz-NAIVE UTC datetimes.
+
+    Naive on purpose: ``paid_at`` / ``updated_at`` / ``created_at`` are stored
+    tz-naive (``datetime.utcnow()``), and asyncpg refuses to compare a tz-aware
+    bind param against a naive column ("can't subtract offset-naive and
+    offset-aware datetimes"). That previously made every windowed query raise,
+    get swallowed by ``_safe_scalar``, and report 0/null. Keeping these naive
+    is the fix.
+    """
+    if now is None:
+        now = datetime.utcnow()
+    elif now.tzinfo is not None:
+        now = now.astimezone(timezone.utc).replace(tzinfo=None)
+    return now, now - timedelta(days=30), now - timedelta(days=90)
+
+
 @router.get("/business-signals")
 async def business_signals(
     db: AsyncSession = Depends(get_db),
@@ -71,9 +88,7 @@ async def business_signals(
     """
     from app.models.mission import MissionFlight  # lazy import — cheap
 
-    now = datetime.now(timezone.utc)
-    d30 = now - timedelta(days=30)
-    d90 = now - timedelta(days=90)
+    now, d30, d90 = _utc_windows()
 
     async def _window(start: datetime) -> dict:
         completed_stmt = (
@@ -129,5 +144,5 @@ async def business_signals(
             "missions_in_progress": await _safe_scalar(db, in_progress_stmt, "in_progress"),
             "missions_review":      await _safe_scalar(db, review_stmt, "review"),
         },
-        "generated_at": now.isoformat(),
+        "generated_at": now.isoformat() + "Z",
     }

@@ -4,6 +4,33 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## [unreleased] — 2026-05-24 — fix(business-signals): tz-aware vs naive datetime zeroed every windowed metric
+
+**Bug:** `GET /api/v1/business-signals` computed its 30/90-day window bounds with
+`datetime.now(timezone.utc)` (tz-**aware**), then compared them against
+`paid_at` / `updated_at` / `created_at` / `mission_date` columns, which are
+stored tz-**naive** (`datetime.utcnow()`). asyncpg rejects that comparison
+(`DataError: can't subtract offset-naive and offset-aware datetimes`), so every
+windowed query raised and was silently swallowed by `_safe_scalar` → the
+endpoint always returned `0` / `null` for `invoice_paid_usd`, `missions_*`,
+`new_customers`, etc. Project J.A.R.V.I.S. (the consumer) has been getting
+zeroed innovation signals, and the value was unusable for the marketing
+revenue bridge (which routed around it via `financials/summary`).
+
+**Fix:** new `_utc_windows()` helper returns the `(now, now-30d, now-90d)` triple
+as tz-**naive** UTC (matching the columns), coercing any tz-aware input to naive
+UTC defensively. The endpoint uses it. `generated_at` now carries an explicit
+`Z` suffix. Verified live on BOS-HQ: `invoice_paid_usd` (30d) `0 → 1216.36`,
+`missions_completed` `null → 1`.
+
+**Failover / blue-green / replication impact:** none. Read-only query fix; no
+schema change, no writes, no migration. Both blue and green versions read the
+same data correctly post-fix; safe to deploy under the standby-first flow.
+
+**Tests:** `tests/test_business_signals_windows.py` pins the naive-UTC invariant
+(3 tests). Full suite: 276 passed (2 pre-existing Stripe-probe env failures
+unrelated to this change).
+
 ## [unreleased] — 2026-05-24 — fix(nginx): re-resolve backend DNS per request so backend rebuilds don't 502 the API
 
 **Incident (resolved):** after rebuilding + recreating the `backend` container, the
