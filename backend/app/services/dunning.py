@@ -78,7 +78,7 @@ async def _build_pay_url(db, mission_id) -> str:
     if minted:
         client_jwt = minted[0]
         return f"{settings.frontend_url.rstrip('/')}/client/{client_jwt}"
-    return f"{settings.frontend_url.rstrip('/')}/client/missions/{mission_id}"
+    return f"{settings.frontend_url.rstrip('/')}/client/mission/{mission_id}"
 
 
 class DunningSender:

@@ -457,8 +457,8 @@ async def _load_pay_context(
 def _client_redirect_urls(mission_id: UUID) -> tuple[str, str]:
     frontend_url = settings.frontend_url.rstrip("/")
     return (
-        f"{frontend_url}/client/missions/{mission_id}?payment=success",
-        f"{frontend_url}/client/missions/{mission_id}?payment=cancelled",
+        f"{frontend_url}/client/mission/{mission_id}?payment=success",
+        f"{frontend_url}/client/mission/{mission_id}?payment=cancel",
     )
 
 

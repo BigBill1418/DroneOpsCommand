@@ -4,6 +4,33 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## [unreleased] — 2026-05-24 — fix(client-portal): correct broken `/client/missions/` redirect route + sign-off
+
+**Two latent bugs in the customer-facing portal URLs**, surfaced while verifying the
+dunning pay-link. The frontend page route is `/client/mission/:missionId` (singular)
+and the magic-link route is `/client/:token` — but two backend code paths emitted a
+**plural** `/client/missions/{id}` URL that matches no route, so the browser fell
+through to the operator login screen.
+
+### Fixed
+
+- **`backend/app/routers/client_portal.py`** — `_client_redirect_urls` (the Stripe
+  Checkout `success_url` / `cancel_url`) used the plural `/client/missions/{id}` route
+  → a customer returning from a successful payment landed on the operator login instead
+  of their mission page. Also the cancel URL sent `?payment=cancelled` while the
+  frontend only handles `?payment=cancel`. Both corrected to
+  `/client/mission/{id}?payment=success|cancel`.
+- **`backend/app/services/dunning.py`** — `_build_pay_url`'s no-token fallback used the
+  same broken plural route. (The happy path already returns the correct
+  `/client/{jwt}` magic-link; only the edge-case fallback was wrong.) Now
+  `/client/mission/{id}`.
+
+### Changed
+
+- **dunning email templates** — sign-off changed from the templated
+  `{{ company_name }} {{ company_tagline }}` to a fixed **"Bill Barnard — BarnardHQ"**
+  in both `payment_reminder_email.html` and `payment_final_notice_email.html`.
+
 ## [unreleased] — 2026-05-24 — style(dunning): theme the reminder/final-notice emails to match the project
 
 The dunning emails shipped as bare 14-16 line layouts (logo + name only, hard-coded
