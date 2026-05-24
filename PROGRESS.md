@@ -4,6 +4,20 @@ Maintained alongside `CHANGELOG.md` and `docs/adr/`. `CHANGELOG.md` is
 the ledger of shipped changes; this file tracks what's in-flight or
 blocked.
 
+## 2026-05-24 — business-signals tz bug fixed — SHIPPED (06365ef)
+
+`GET /api/v1/business-signals` compared tz-aware window bounds
+(`datetime.now(timezone.utc)`) against tz-naive `paid_at`/`updated_at`/
+`created_at` columns; asyncpg raised `DataError`, `_safe_scalar` swallowed it,
+and every windowed metric silently returned 0/null. Project J.A.R.V.I.S. (the
+consumer) had been getting zeroed innovation signals. Fixed via a new
+`_utc_windows()` helper returning tz-naive UTC bounds (+ `generated_at` now
+carries `Z`); 3 regression tests pin the invariant. Read-only query fix — no
+schema/writes/failover impact. Verified live on BOS-HQ: `invoice_paid_usd` 30d
+`0 → 1216.36`, `missions_completed` `null → 1`. Also unblocked the marketing
+revenue bridge's 30/90-day windows (it had routed around this via
+`financials/summary`).
+
 ## 2026-05-24 — Invoicing hardening + dunning + portal/nginx fixes — SHIPPED (v2.67.7)
 
 All shipped to `main` and deployed to the public instance
