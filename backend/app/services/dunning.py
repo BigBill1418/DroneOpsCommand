@@ -39,3 +39,31 @@ def due_stage(invoice, now: datetime) -> str | None:
     if age >= REMINDER_AFTER:
         return None if invoice.reminder_sent_at else STAGE_REMINDER
     return None
+
+
+def amount_due(invoice) -> float:
+    """The next amount the portal will charge -- matches the Stripe charge."""
+    if getattr(invoice, "deposit_required", False) and not getattr(invoice, "deposit_paid", False):
+        return float(invoice.deposit_amount or 0)
+    return float(invoice.balance_amount or 0)
+
+
+def process_invoice(invoice, now: datetime, sender, *, now_fn=datetime.utcnow) -> str | None:
+    """Send the due stage for `invoice` (via `sender`) and stamp it. Pure aside
+    from the injected `sender`. Returns the stage sent, or None.
+
+    `sender` must expose send_reminder(invoice, amount), send_final(invoice, amount),
+    send_operator(invoice, amount). `now_fn` supplies the stamp value (injectable
+    for tests)."""
+    stage = due_stage(invoice, now)
+    if stage is None:
+        return None
+    amt = amount_due(invoice)
+    if stage == STAGE_REMINDER:
+        sender.send_reminder(invoice, amt)
+        invoice.reminder_sent_at = now_fn()
+    elif stage == STAGE_FINAL:
+        sender.send_final(invoice, amt)
+        sender.send_operator(invoice, amt)
+        invoice.final_notice_sent_at = now_fn()
+    return stage
