@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html>
+<body style="font-family: Arial, sans-serif; color: #1a1f2e; max-width: 600px; margin: 0 auto;">
+  {% if company_logo_url %}<img src="{{ company_logo_url }}" alt="{{ company_name }}" style="max-height: 60px; margin: 16px 0;">{% endif %}
+  <h2 style="color: #b91c1c;">Final notice &mdash; invoice {{ invoice_number }} is past due</h2>
+  <p>Hi {{ customer_name }},</p>
+  <p>Our records show invoice <strong>{{ invoice_number }}</strong> for <strong>{{ mission_title }}</strong>
+     remains unpaid, with an outstanding balance of <strong>${{ "%.2f"|format(amount_due) }}</strong>, now more than
+     7 days past billing.</p>
+  <p>Please settle the balance to avoid late charges. Per our Terms of Service (&sect;6.4), invoices unpaid more than 30
+     days past due accrue a late fee of 1.5% per month.</p>
+  <p><a href="{{ pay_url }}" style="background:#b91c1c;color:#fff;padding:12px 20px;border-radius:6px;text-decoration:none;display:inline-block;">Pay invoice {{ invoice_number }} now</a></p>
+  <p>If you've already paid or have questions, please reply to this email.</p>
+  <p>&mdash; {{ company_name }}</p>
+</body>
+</html>

@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html>
+<body style="font-family: Arial, sans-serif; color: #1a1f2e; max-width: 600px; margin: 0 auto;">
+  {% if company_logo_url %}<img src="{{ company_logo_url }}" alt="{{ company_name }}" style="max-height: 60px; margin: 16px 0;">{% endif %}
+  <h2 style="color: #0e7490;">A friendly reminder &mdash; invoice {{ invoice_number }}</h2>
+  <p>Hi {{ customer_name }},</p>
+  <p>Just a gentle nudge that your invoice for <strong>{{ mission_title }}</strong> has an outstanding balance of
+     <strong>${{ "%.2f"|format(amount_due) }}</strong>.</p>
+  <p>You can pay securely here:</p>
+  <p><a href="{{ pay_url }}" style="background:#0e7490;color:#fff;padding:12px 20px;border-radius:6px;text-decoration:none;display:inline-block;">Pay invoice {{ invoice_number }}</a></p>
+  <p>If you've already paid, please disregard this message &mdash; thank you!</p>
+  <p>&mdash; {{ company_name }}</p>
+</body>
+</html>

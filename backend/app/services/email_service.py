@@ -657,3 +657,66 @@ async def send_payment_received_email(
         raise
 
     return True
+
+
+async def _send_html_email(to_email: str, subject: str, html_body: str, db=None) -> bool:
+    """Shared HTML-email sender (SMTP from DB settings, env fallback)."""
+    if db:
+        smtp = await get_smtp_settings(db)
+    else:
+        smtp = {
+            "smtp_host": settings.smtp_host, "smtp_port": str(settings.smtp_port),
+            "smtp_user": settings.smtp_user, "smtp_password": settings.smtp_password,
+            "smtp_from_email": settings.smtp_from_email, "smtp_from_name": settings.smtp_from_name,
+            "smtp_use_tls": settings.smtp_use_tls,
+        }
+    if not smtp["smtp_host"]:
+        raise ValueError("SMTP not configured. Set SMTP_HOST in settings.")
+
+    msg = MIMEMultipart()
+    msg["From"] = f"{smtp['smtp_from_name']} <{smtp['smtp_from_email']}>"
+    msg["To"] = to_email
+    msg["Subject"] = subject
+    msg.attach(MIMEText(html_body, "html"))
+
+    smtp_port = int(smtp["smtp_port"])
+    tls_flag = smtp["smtp_use_tls"] if isinstance(smtp["smtp_use_tls"], bool) else _parse_bool(str(smtp["smtp_use_tls"]), True)
+    tls_kwargs = {"use_tls": True} if smtp_port == 465 else {"start_tls": tls_flag}
+    await aiosmtplib.send(
+        msg, hostname=smtp["smtp_host"], port=smtp_port,
+        username=smtp["smtp_user"] or None, password=smtp["smtp_password"] or None,
+        **tls_kwargs,
+    )
+    logger.info("Email sent to %s (%s)", to_email, subject)
+    return True
+
+
+async def send_payment_reminder_email(*, to_email, customer_name, mission_title,
+                                      invoice_number, amount_due, pay_url, db=None) -> bool:
+    branding = await _get_branding(db)
+    html = jinja_env.get_template("payment_reminder_email.html").render(
+        customer_name=customer_name, mission_title=mission_title,
+        invoice_number=invoice_number, amount_due=amount_due, pay_url=pay_url, **branding,
+    )
+    return await _send_html_email(to_email, f"Reminder: invoice {invoice_number}", html, db)
+
+
+async def send_payment_final_notice_email(*, to_email, customer_name, mission_title,
+                                          invoice_number, amount_due, pay_url, db=None) -> bool:
+    branding = await _get_branding(db)
+    html = jinja_env.get_template("payment_final_notice_email.html").render(
+        customer_name=customer_name, mission_title=mission_title,
+        invoice_number=invoice_number, amount_due=amount_due, pay_url=pay_url, **branding,
+    )
+    return await _send_html_email(to_email, f"Final notice: invoice {invoice_number} past due", html, db)
+
+
+async def send_operator_overdue_email(*, invoice_number, amount_due, customer_name,
+                                      customer_email, mission_url, db=None) -> bool:
+    html = (
+        f"<p>Invoice <strong>{invoice_number}</strong> is <strong>7+ days overdue</strong>.</p>"
+        f"<p>Amount due: <strong>${amount_due:.2f}</strong><br>"
+        f"Customer: {customer_name} ({customer_email or 'NO EMAIL ON FILE'})</p>"
+        f"<p><a href=\"{mission_url}\">Open the mission</a></p>"
+    )
+    return await _send_html_email("bill@barnardhq.com", f"[OVERDUE] {invoice_number} — ${amount_due:.2f}", html, db)
