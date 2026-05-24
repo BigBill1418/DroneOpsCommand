@@ -1,6 +1,8 @@
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 
+import pytest
+
 from app.models.invoice import Invoice
 from app.services import dunning
 
@@ -66,13 +68,13 @@ class _FakeSender:
         self.finals = []
         self.operator = []
 
-    def send_reminder(self, invoice, amount):
+    async def send_reminder(self, invoice, amount):
         self.reminders.append((invoice, amount))
 
-    def send_final(self, invoice, amount):
+    async def send_final(self, invoice, amount):
         self.finals.append((invoice, amount))
 
-    def send_operator(self, invoice, amount):
+    async def send_operator(self, invoice, amount):
         self.operator.append((invoice, amount))
 
 
@@ -94,26 +96,29 @@ def test_amount_due_deposit_unpaid_uses_deposit():
     assert dunning.amount_due(inv) == 400.0
 
 
-def test_process_reminder_sends_and_stamps():
+@pytest.mark.asyncio
+async def test_process_reminder_sends_and_stamps():
     inv = _payinv()
     s = _FakeSender()
-    sent = dunning.process_invoice(inv, inv.billed_at + timedelta(hours=49), s, now_fn=lambda: datetime(2026, 1, 3))
+    sent = await dunning.process_invoice(inv, inv.billed_at + timedelta(hours=49), s, now_fn=lambda: datetime(2026, 1, 3))
     assert sent == dunning.STAGE_REMINDER
     assert len(s.reminders) == 1 and s.finals == [] and s.operator == []
     assert inv.reminder_sent_at == datetime(2026, 1, 3)
 
 
-def test_process_final_sends_customer_and_operator_and_stamps():
+@pytest.mark.asyncio
+async def test_process_final_sends_customer_and_operator_and_stamps():
     inv = _payinv()
     s = _FakeSender()
-    sent = dunning.process_invoice(inv, inv.billed_at + timedelta(days=8), s, now_fn=lambda: datetime(2026, 1, 9))
+    sent = await dunning.process_invoice(inv, inv.billed_at + timedelta(days=8), s, now_fn=lambda: datetime(2026, 1, 9))
     assert sent == dunning.STAGE_FINAL
     assert len(s.finals) == 1 and len(s.operator) == 1
     assert inv.final_notice_sent_at == datetime(2026, 1, 9)
 
 
-def test_process_nothing_due_returns_none():
+@pytest.mark.asyncio
+async def test_process_nothing_due_returns_none():
     inv = _payinv()
     s = _FakeSender()
-    assert dunning.process_invoice(inv, inv.billed_at + timedelta(hours=1), s) is None
+    assert await dunning.process_invoice(inv, inv.billed_at + timedelta(hours=1), s) is None
     assert s.reminders == [] and s.finals == []

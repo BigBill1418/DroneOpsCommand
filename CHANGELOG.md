@@ -4,6 +4,31 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## [unreleased] — 2026-05-24 — fix(dunning): await email sends instead of nesting run_until_complete
+
+**Bug (confirmed + reproduced):** the dunning sweep runs inside
+`loop.run_until_complete(_run())` from the `send_payment_reminders` Celery
+task, but `DunningSender` then called `self._loop.run_until_complete(<email
+coro>)` on that already-running loop — raising `RuntimeError: This event loop
+is already running`. The per-invoice `try/except` in `run_dunning_sweep`
+swallowed it, so the feature silently sent nothing.
+
+### Fixed
+
+- **`backend/app/services/dunning.py`** — made the send path async/await
+  end-to-end. `process_invoice` is now `async` and `await`s the sender
+  methods; `DunningSender.send_reminder/send_final/send_operator` are `async`
+  and `await` the email coroutine directly; the `loop` constructor param and
+  `self._loop` field are gone. `run_dunning_sweep` dropped its `loop`
+  parameter and `await`s `process_invoice` and the no-customer-email operator
+  send. Decision logic, stamping, guards, and the summary are unchanged.
+- **`backend/app/tasks/celery_tasks.py`** — `send_payment_reminders` now calls
+  `await run_dunning_sweep(db)`; the outer `new_event_loop()` /
+  `run_until_complete(_run())` wrapper (the correct one) is unchanged.
+- **`backend/tests/test_dunning.py`** — the three `process_invoice` tests are
+  now `@pytest.mark.asyncio` and `await` the call; `_FakeSender`'s send methods
+  are `async`. `due_stage`/`amount_due` tests stay synchronous.
+
 ## [unreleased] — 2026-05-24 — fix(invoices): tax-rate unit (100× bug) + atomic save for legacy wizard
 
 Follow-ups to the bulletproofing work — neither affected billing today (all

@@ -508,7 +508,7 @@ def send_payment_reminders_task() -> dict:
     try:
         async def _run():
             async with async_session() as db:
-                return await run_dunning_sweep(db, loop)
+                return await run_dunning_sweep(db)
         return loop.run_until_complete(_run())
     finally:
         loop.close()

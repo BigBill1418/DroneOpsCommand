@@ -48,11 +48,11 @@ def amount_due(invoice) -> float:
     return float(invoice.balance_amount or 0)
 
 
-def process_invoice(invoice, now: datetime, sender, *, now_fn=datetime.utcnow) -> str | None:
+async def process_invoice(invoice, now: datetime, sender, *, now_fn=datetime.utcnow) -> str | None:
     """Send the due stage for `invoice` (via `sender`) and stamp it. Pure aside
     from the injected `sender`. Returns the stage sent, or None.
 
-    `sender` must expose send_reminder(invoice, amount), send_final(invoice, amount),
+    `sender` must expose async send_reminder(invoice, amount), send_final(invoice, amount),
     send_operator(invoice, amount). `now_fn` supplies the stamp value (injectable
     for tests)."""
     stage = due_stage(invoice, now)
@@ -60,11 +60,11 @@ def process_invoice(invoice, now: datetime, sender, *, now_fn=datetime.utcnow) -
         return None
     amt = amount_due(invoice)
     if stage == STAGE_REMINDER:
-        sender.send_reminder(invoice, amt)
+        await sender.send_reminder(invoice, amt)
         invoice.reminder_sent_at = now_fn()
     elif stage == STAGE_FINAL:
-        sender.send_final(invoice, amt)
-        sender.send_operator(invoice, amt)
+        await sender.send_final(invoice, amt)
+        await sender.send_operator(invoice, amt)
         invoice.final_notice_sent_at = now_fn()
     return stage
 
@@ -82,38 +82,38 @@ async def _build_pay_url(db, mission_id) -> str:
 
 
 class DunningSender:
-    """Real email sender. Each method runs its async email coroutine to completion.
+    """Real email sender. Each method awaits its async email coroutine.
     Constructed with the loaded mission/customer context for one invoice."""
-    def __init__(self, db, loop, *, mission, customer, pay_url, mission_url):
-        self._db, self._loop = db, loop
+    def __init__(self, db, *, mission, customer, pay_url, mission_url):
+        self._db = db
         self.mission, self.customer, self.pay_url, self.mission_url = mission, customer, pay_url, mission_url
 
-    def send_reminder(self, invoice, amount):
+    async def send_reminder(self, invoice, amount):
         from app.services.email_service import send_payment_reminder_email
-        self._loop.run_until_complete(send_payment_reminder_email(
+        await send_payment_reminder_email(
             to_email=self.customer.email, customer_name=self.customer.name,
             mission_title=self.mission.title, invoice_number=invoice.invoice_number or "(no number)",
-            amount_due=amount, pay_url=self.pay_url, db=self._db))
+            amount_due=amount, pay_url=self.pay_url, db=self._db)
 
-    def send_final(self, invoice, amount):
+    async def send_final(self, invoice, amount):
         from app.services.email_service import send_payment_final_notice_email
-        self._loop.run_until_complete(send_payment_final_notice_email(
+        await send_payment_final_notice_email(
             to_email=self.customer.email, customer_name=self.customer.name,
             mission_title=self.mission.title, invoice_number=invoice.invoice_number or "(no number)",
-            amount_due=amount, pay_url=self.pay_url, db=self._db))
+            amount_due=amount, pay_url=self.pay_url, db=self._db)
 
-    def send_operator(self, invoice, amount):
+    async def send_operator(self, invoice, amount):
         from app.services.email_service import send_operator_overdue_email
-        self._loop.run_until_complete(send_operator_overdue_email(
+        await send_operator_overdue_email(
             invoice_number=invoice.invoice_number or "(no number)", amount_due=amount,
             customer_name=self.customer.name, customer_email=self.customer.email,
-            mission_url=self.mission_url, db=self._db))
+            mission_url=self.mission_url, db=self._db)
 
 
-async def run_dunning_sweep(db, loop, *, now=None) -> dict:
+async def run_dunning_sweep(db, *, now=None) -> dict:
     """Find billed, unpaid invoices and process the due dunning stage for each.
-    `loop` is the running event loop used by DunningSender for the (async) email
-    sends. Per-invoice errors are caught so one failure can't abort the sweep."""
+    Email sends are awaited directly (the caller drives the event loop).
+    Per-invoice errors are caught so one failure can't abort the sweep."""
     from sqlalchemy import select
     from sqlalchemy.orm import selectinload
     from app.config import settings
@@ -144,19 +144,19 @@ async def run_dunning_sweep(db, loop, *, now=None) -> dict:
                 summary["skipped_no_email"] += 1
                 if stage == STAGE_FINAL:
                     from app.services.email_service import send_operator_overdue_email
-                    loop.run_until_complete(send_operator_overdue_email(
+                    await send_operator_overdue_email(
                         invoice_number=invoice.invoice_number or "(no number)",
                         amount_due=amount_due(invoice),
                         customer_name=(customer.name if customer else "(unknown)"),
                         customer_email=(customer.email if customer else None),
-                        mission_url=f"{settings.frontend_url.rstrip('/')}/missions/{invoice.mission_id}", db=db))
+                        mission_url=f"{settings.frontend_url.rstrip('/')}/missions/{invoice.mission_id}", db=db)
                     invoice.final_notice_sent_at = now
                     await db.commit()
                 continue
             pay_url = await _build_pay_url(db, invoice.mission_id)
             mission_url = f"{settings.frontend_url.rstrip('/')}/missions/{invoice.mission_id}"
-            sender = DunningSender(db, loop, mission=mission, customer=customer, pay_url=pay_url, mission_url=mission_url)
-            sent = process_invoice(invoice, now, sender, now_fn=lambda: now)
+            sender = DunningSender(db, mission=mission, customer=customer, pay_url=pay_url, mission_url=mission_url)
+            sent = await process_invoice(invoice, now, sender, now_fn=lambda: now)
             await db.commit()
             if sent == STAGE_REMINDER:
                 summary["reminders"] += 1
