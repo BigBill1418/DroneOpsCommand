@@ -4,6 +4,40 @@ Maintained alongside `CHANGELOG.md` and `docs/adr/`. `CHANGELOG.md` is
 the ledger of shipped changes; this file tracks what's in-flight or
 blocked.
 
+## 2026-05-24 — Invoicing hardening + dunning + portal/nginx fixes — SHIPPED (v2.67.7)
+
+All shipped to `main` and deployed to the public instance
+(droneops.barnardhq.com); images rebuilt 2026-05-24.
+
+- **Invoice engine:** recompute-at-charge + atomic save (stale-total fix),
+  live exact-50% deposit, decimal hours + "Hours" label, tax-rate 100x fix,
+  legacy-wizard atomic save; mobile invoice-editor + Mission Hub card UX.
+- **Dunning (payment reminders):** 48h gentle reminder + 7d final notice +
+  operator-overdue email (email-only, no ntfy). Daily Celery-beat sweep at
+  16:00 UTC, themed emails, sign-off "Bill Barnard — BarnardHQ". Banks invoice
+  BARNARDHQ-2026-0002 enrolled; BOS cron confirms the 48h fire 2026-05-26
+  16:35 UTC.
+- **Client-portal links:** broken plural `/client/missions/` route fixed in
+  the Stripe success/cancel redirect + dunning fallback (→ `/client/mission/`);
+  `?payment=cancelled`→`cancel`.
+- **nginx resilience:** `frontend/nginx.conf` uses `resolver` + variable
+  `proxy_pass` so a backend rebuild no longer 502s `/api` (verified by forcing
+  a real backend IP change). Closed a live 502 that surfaced as a false
+  "link expired".
+
+### Open / follow-ups
+- **Demo** (`~/droneops-demo`, demo.droneops.barnardhq.com) is a separate
+  checkout stuck at **v2.67.2** (13-day-old containers) — has none of the
+  above. Updating it is an operator deploy decision.
+- **Managed** (`~/droneops-managed`) has **zero active clients**; the managed
+  template builds from `droneops-backend:latest`/`droneops-frontend:latest`
+  (rebuilt today), so future clients auto-inherit these fixes.
+- **SECURITY:** scrubbed plaintext GH tokens from `~/droneops/.git/config` and
+  `~/droneops-demo/.git/config` on BOS (now bare URLs + credential helper). The
+  exposed token should be rotated at GitHub.
+- **Deferred:** SMS reminders (Phase 2); deployer self-roll fix (queued in
+  noc-master).
+
 ## 2026-05-14 — Mission Report: clear stale draft on Generate click — CLOSED
 
 Single-file UX tweak on top of the ADR-0015 work. `handleGenerate` in

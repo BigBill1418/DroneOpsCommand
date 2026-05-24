@@ -1,5 +1,11 @@
 # Payment Reminders (Dunning) — Implementation Plan
 
+> **STATUS: ✅ SHIPPED 2026-05-24 (v2.67.7).** Implemented, deployed to the
+> public instance, and runtime-verified (Banks invoice BARNARDHQ-2026-0002
+> enrolled; 48h fire confirmed via BOS cron 2026-05-26 16:35 UTC). Pay-link
+> route + themed email sign-off corrected post-ship. SMS is Phase 2 (deferred).
+> Retained for history — no open tasks.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Automatically email a customer a gentle payment reminder 48h after an unpaid invoice is billed, and a firmer final notice at 7 days that also emails an overdue alert to `bill@barnardhq.com`.
