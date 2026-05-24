@@ -152,7 +152,9 @@ export default function MissionInvoiceEdit() {
           const inv = invoiceResult.value.data as Invoice;
           setInvoiceExists(true);
           setInvoiceId(inv.id);
-          const initialTaxRate = inv.tax_rate ?? 0;
+          // tax_rate is stored as a fraction (0.085); the field is a
+          // percent, so show it ×100 (8.5) and divide by 100 on save.
+          const initialTaxRate = (inv.tax_rate ?? 0) * 100;
           const initialNotes = inv.notes ?? '';
           const initialPaidInFull = inv.paid_in_full;
           const initialDepositRequired = inv.deposit_required ?? false;
@@ -217,10 +219,11 @@ export default function MissionInvoiceEdit() {
     [lineItems],
   );
 
-  // 50% deposit preview, mirroring the backend's round(total * 0.5, 2).
-  // Tax is 0 in practice; subtotal == total. The saved value is
-  // authoritative (recomputed server-side on save).
-  const depositPreview = Math.round(subtotal * 50) / 100;
+  // Total incl. tax, mirroring the backend (tax_rate is a fraction; the
+  // field holds a percent, so /100). 50% deposit preview is half of this
+  // total — matches _recalculate_invoice. Saved value is authoritative.
+  const previewTotal = subtotal * (1 + (taxRate || 0) / 100);
+  const depositPreview = Math.round(previewTotal * 50) / 100;
 
   const handleAddLineItem = () => {
     setLineItems((prev) => [
@@ -252,7 +255,7 @@ export default function MissionInvoiceEdit() {
       // stale-state races (mirrors MissionNew.handleSaveInvoice).
       let hasInvoice = invoiceExists;
       const updatePayload: Record<string, unknown> = {
-        tax_rate: taxRate,
+        tax_rate: taxRate / 100,
         paid_in_full: paidInFull,
         notes: notes.trim() || null,
       };
@@ -274,7 +277,7 @@ export default function MissionInvoiceEdit() {
           // No invoice row yet — create one. (Backend POST honors
           // deposit_required + deposit_amount in the create payload.)
           await api.post(`/missions/${id}/invoice`, {
-            tax_rate: taxRate,
+            tax_rate: taxRate / 100,
             notes: notes.trim() || null,
             paid_in_full: paidInFull,
             deposit_required: depositRequired,
@@ -536,7 +539,7 @@ export default function MissionInvoiceEdit() {
                   {depositPaid ? 'Deposit Collected' : 'Deposit (50% of total)'}
                 </Text>
                 <Text fw={700} c="cyan" style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: '22px' }}>
-                  ${(depositPaid ? (depositAmount ?? 0) : Math.round(subtotal * 50) / 100).toFixed(2)}
+                  ${(depositPaid ? (depositAmount ?? 0) : depositPreview).toFixed(2)}
                 </Text>
                 <Text size="xs" style={{ color: '#5a6478', fontStyle: 'italic' }}>
                   {depositPaid

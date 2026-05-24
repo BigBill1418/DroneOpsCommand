@@ -106,6 +106,21 @@ def test_recalculate_paid_deposit_balance_grows_when_items_added():
     assert abs(inv.balance_amount - 782.15) < 0.001
 
 
+def test_recalculate_applies_tax_as_fraction_and_deposit_includes_tax():
+    """tax_rate is a FRACTION (0.085 == 8.5%). tax_amount = subtotal*rate;
+    total = subtotal + tax; a required deposit is 50% of the TAX-INCLUSIVE
+    total. Pins the convention the frontend percent field divides into."""
+    inv = _invoice_with_items(
+        [LineItem(description='x', quantity=1, unit_price=1000, total=1000)],
+        deposit_required=True, deposit_amount=0, tax_rate=0.085,
+    )
+    _recalculate_invoice(inv)
+    assert float(inv.subtotal) == 1000.00
+    assert abs(float(inv.tax_amount) - 85.00) < 0.001
+    assert abs(float(inv.total) - 1085.00) < 0.001
+    assert abs(float(inv.deposit_amount) - 542.50) < 0.001  # 50% of 1085
+
+
 def test_recalculate_does_not_touch_paid_deposit():
     """A collected deposit is locked — recalc must not recompute it even if
     the total changes."""

@@ -4,6 +4,31 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## [unreleased] — 2026-05-24 — fix(invoices): tax-rate unit (100× bug) + atomic save for legacy wizard
+
+Follow-ups to the bulletproofing work — neither affected billing today (all
+invoices use 0 tax) but both closed for robustness.
+
+### Fixed
+
+- **Tax-rate unit (100× overcharge, latent):** the editor's "Tax Rate (%)"
+  field loaded/saved the raw stored fraction, so typing "8.5" stored 8.5 and
+  the backend computed `subtotal × 8.5` = 850% tax. The field is now a true
+  percent — loads ×100 (0.085 → 8.5), saves ÷100 (8.5 → 0.085) — matching the
+  fraction convention every consumer already used (backend multiply, PDF/Stripe
+  `×100` display, Numeric(5,4)). No data migration needed (0 nonzero tax rows).
+  (`frontend/src/pages/MissionInvoiceEdit.tsx`.) The editor's live deposit
+  preview now also includes tax (50% of subtotal+tax), matching the backend.
+- **Legacy mission wizard** (`MissionWizardLegacy.tsx`) now saves line items via
+  the atomic `PUT /invoice/items` endpoint instead of the old per-item
+  delete-then-add loop — the last non-transactional save path is gone.
+- **`backend/tests/test_deposit_pricing.py`** — test pinning the fraction
+  convention: tax_rate 0.085 on $1000 → tax $85, total $1085, deposit $542.50.
+
+Verified end-to-end (Playwright): tax field shows 8.5% for a stored 0.085,
+deposit preview reads $542.50, and the save sends `tax_rate: 0.085` via the
+atomic items endpoint. Backend suite 259 pass; frontend type-check/build clean.
+
 ## [unreleased] — 2026-05-23 — fix(invoices): bulletproof totals — recompute-at-charge + atomic line-item save
 
 **Incident:** The stored invoice `total` repeatedly went stale vs. the line

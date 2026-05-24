@@ -703,17 +703,15 @@ export default function MissionNew() {
         ? {}
         : { deposit_required: depositRequired, deposit_amount: depositAmount };
 
-      // Determine invoice state from server to avoid stale React state race conditions
-      let hasInvoice = false;
+      // Ensure the invoice row exists (create on first save); line items
+      // are replaced atomically below.
       try {
         await api.put(`/missions/${missionId}/invoice`, {
           paid_in_full: paidInFull,
           ...depositPayload,
         });
-        hasInvoice = true;
       } catch (e: any) {
         if (e?.response?.status === 404) {
-          // Invoice doesn't exist yet — create it
           await api.post(`/missions/${missionId}/invoice`, {
             tax_rate: 0,
             paid_in_full: paidInFull,
@@ -725,25 +723,22 @@ export default function MissionNew() {
       }
       setInvoiceExists(true);
 
-      // If invoice existed, delete old line items before re-adding
-      if (hasInvoice) {
-        const invResp = await api.get(`/missions/${missionId}/invoice`);
-        for (const existing of invResp.data.line_items) {
-          await api.delete(`/missions/${missionId}/invoice/items/${existing.id}`);
-        }
-      }
-
-      // Add all current line items
-      for (const item of lineItems) {
-        if (item.description) {
-          await api.post(`/missions/${missionId}/invoice/items`, {
+      // Replace ALL line items in one atomic request (PUT /invoice/items)
+      // instead of the old per-item delete-then-add loop, which could
+      // desync the stored total if interrupted mid-loop. The backend
+      // recalculates the total as part of the atomic replace.
+      await api.put(
+        `/missions/${missionId}/invoice/items`,
+        lineItems
+          .filter((item) => item.description)
+          .map((item, i) => ({
             description: item.description,
             category: item.category,
             quantity: item.quantity,
             unit_price: item.unit_price,
-          });
-        }
-      }
+            sort_order: i,
+          })),
+      );
 
       // The backend defers any deposit at create (total is 0 before line
       // items exist), so once items land we must (re-)apply the deposit
