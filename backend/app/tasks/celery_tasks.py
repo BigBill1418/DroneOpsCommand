@@ -210,18 +210,20 @@ def generate_report_task(
     from sqlalchemy import create_engine, select
     from sqlalchemy.orm import Session
 
-    from app.database import async_session
     from app.models.report import Report
     from app.services.llm_provider import generate_report as llm_generate_report
     from app.services.llm_provider import get_llm_provider
+    from app.tasks.async_db import new_task_loop_session
 
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
+    # Task-local loop + NullPool engine — never the module-global async_session,
+    # whose asyncpg connections are bound to a prior (closed) loop and raise
+    # "got Future attached to a different loop" when reused across tasks.
+    loop, make_session, _task_engine = new_task_loop_session()
 
     try:
         # Determine provider — only wait for Ollama if that's the active provider
         async def _resolve_provider():
-            async with async_session() as db:
+            async with make_session() as db:
                 return await get_llm_provider(db)
 
         provider = loop.run_until_complete(_resolve_provider())
@@ -247,7 +249,7 @@ def generate_report_task(
 
         # Call the LLM via the dispatcher (passes its own async DB session)
         async def _generate():
-            async with async_session() as db:
+            async with make_session() as db:
                 return await llm_generate_report(
                     db=db,
                     user_narrative=user_narrative,
@@ -302,7 +304,10 @@ def generate_report_task(
         logger.error("Report generation failed for mission %s: %s", mission_id, exc)
         raise self.retry(exc=exc, max_retries=3, countdown=15)
     finally:
-        loop.close()
+        try:
+            loop.run_until_complete(_task_engine.dispose())
+        finally:
+            loop.close()
 
 
 # ── ADR-0002 §5 layer 3 — silent-drift watchdog ───────────────────────
@@ -500,15 +505,13 @@ def finalize_key_rotations_task() -> dict:
 @celery_app.task(name="send_payment_reminders")
 def send_payment_reminders_task() -> dict:
     """Daily dunning sweep — see app/services/dunning.py."""
-    from app.database import async_session
     from app.services.dunning import run_dunning_sweep
+    from app.tasks.async_db import task_event_loop
 
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    try:
+    # Task-local loop + NullPool engine (see async_db.py) — the module-global
+    # async_session would raise "got Future attached to a different loop" here.
+    with task_event_loop() as (loop, make_session):
         async def _run():
-            async with async_session() as db:
+            async with make_session() as db:
                 return await run_dunning_sweep(db)
         return loop.run_until_complete(_run())
-    finally:
-        loop.close()

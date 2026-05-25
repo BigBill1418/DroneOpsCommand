@@ -20,6 +20,7 @@ async def generate_report(
     mission_date: str | None = None,
     company_name: str = "DroneOps",
     api_key: str = "",
+    model: str | None = None,
 ) -> str:
     """Generate a report narrative using the Claude API."""
 
@@ -65,7 +66,7 @@ do NOT address the operator or offer them advice):
 Generate the client-facing after-action report. The reader is the client, not the \
 pilot. Use third person throughout. Do not include pilot coaching."""
 
-    model = settings.claude_model
+    model = model or settings.claude_model
     logger.info("Claude report generation starting for '%s' (%s)", mission_title, location)
     try:
         client = anthropic.Anthropic(api_key=resolved_key)

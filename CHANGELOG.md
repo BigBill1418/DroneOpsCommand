@@ -4,6 +4,33 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## [unreleased] — 2026-05-25 — fix(report-gen): Celery async-loop bug broke AI report generation
+
+**Bug:** AI report generation was flaky/failing. The Celery tasks that run async
+DB work (`generate_report`, `send_payment_reminders`) spun up a fresh event loop
+per invocation but reused the **module-global `async_session`**, whose asyncpg
+connection pool is bound to the *previous* task's now-closed loop. So every such
+task after the worker's first raised `RuntimeError: got Future attached to a
+different loop` / `Event loop is closed`. `generate_report` (bind=True) only
+recovered on Celery's 15s retry and hard-failed after `max_retries=3`;
+`send_payment_reminders` has no retry, so the daily dunning sweep silently failed
+(the Banks reminder due 2026-05-26 would not have fired).
+
+**Fix:** new `app/tasks/async_db.py` (`new_task_loop_session()` /
+`task_event_loop()`) gives each task its own fresh loop + a task-local **NullPool**
+async engine (no cross-loop connection reuse), disposed on exit. Both affected
+tasks now use it. `send_report_email` was already safe (async SMTP, no DB session)
+and is unchanged. 3 regression tests pin the fresh-loop / NullPool / not-global-engine
+invariants. Full suite: 279 passed (2 pre-existing Stripe-probe env failures unrelated).
+
+**Also — per-instance model selection:** `claude_model` is now read from DB system
+settings (mirroring `anthropic_api_key`), falling back to config. This instance is
+set to **`claude-opus-4-7`** (top-tier) for client-facing reports; managed customer
+instances keep the config default (`claude-sonnet-4-6`) unless their own DB overrides.
+
+**Failover / blue-green / replication impact:** none — worker-side task plumbing +
+a read-only settings lookup; no schema change, no migration.
+
 ## [unreleased] — 2026-05-24 — fix(business-signals): tz-aware vs naive datetime zeroed every windowed metric
 
 **Bug:** `GET /api/v1/business-signals` computed its 30/90-day window bounds with

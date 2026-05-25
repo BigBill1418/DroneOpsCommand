@@ -4,6 +4,18 @@ Maintained alongside `CHANGELOG.md` and `docs/adr/`. `CHANGELOG.md` is
 the ledger of shipped changes; this file tracks what's in-flight or
 blocked.
 
+## 2026-05-25 — AI report-gen Celery async-loop bug fixed + Opus 4.7 — SHIPPED
+
+Report generation was flaky/failing: the Celery tasks doing async DB work reused
+the module-global `async_session` across per-task event loops → asyncpg
+`got Future attached to a different loop` / `Event loop is closed`. `generate_report`
+only recovered on retry (hard-fail after 3); `send_payment_reminders` (dunning) had
+no retry and silently failed. Fixed via `app/tasks/async_db.py` (fresh loop +
+task-local NullPool engine per task); both tasks migrated; `send_report_email`
+unaffected (no DB). Provider/key/model were already correct (claude + key set);
+made `claude_model` a per-instance DB setting and set this instance to
+`claude-opus-4-7`. 3 new regression tests; suite 279 passed.
+
 ## 2026-05-24 — business-signals tz bug fixed — SHIPPED (06365ef)
 
 `GET /api/v1/business-signals` compared tz-aware window bounds

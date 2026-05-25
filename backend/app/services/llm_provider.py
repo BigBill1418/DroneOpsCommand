@@ -69,9 +69,10 @@ async def generate_report(
     if provider == "claude":
         from app.services.claude_llm import generate_report as claude_generate
 
-        # Resolve API key from DB first, then config fallback
+        # Resolve API key + model from DB first, then config fallback
         api_key = await _get_setting(db, "anthropic_api_key") or ""
-        return await claude_generate(**kwargs, api_key=api_key)
+        model = await _get_setting(db, "claude_model") or None
+        return await claude_generate(**kwargs, api_key=api_key, model=model)
     else:
         from app.services.ollama import generate_report as ollama_generate
 
