@@ -48,6 +48,17 @@ const missionTypes = [
   { value: 'other', label: 'Other' },
 ];
 
+// ADR-0016 — lead-source options. Values must match the backend
+// MissionSource enum (app/models/mission.py).
+const leadSources = [
+  { value: 'website', label: 'Website' },
+  { value: 'referral', label: 'Referral' },
+  { value: 'repeat_client', label: 'Repeat Client' },
+  { value: 'phone', label: 'Phone' },
+  { value: 'social', label: 'Social Media' },
+  { value: 'other', label: 'Other' },
+];
+
 interface FormValues {
   customer_id: string;
   title: string;
@@ -56,6 +67,7 @@ interface FormValues {
   mission_date: Date | null;
   location_name: string;
   is_billable: boolean;
+  source: string;
 }
 
 export default function MissionDetailsEdit() {
@@ -93,6 +105,7 @@ export default function MissionDetailsEdit() {
       mission_date: null,
       location_name: '',
       is_billable: false,
+      source: '',
     },
     validate: {
       title: (v) => (v.trim() ? null : 'Title is required'),
@@ -121,6 +134,7 @@ export default function MissionDetailsEdit() {
           mission_date: m.mission_date ? new Date(m.mission_date + 'T00:00:00') : null,
           location_name: m.location_name || '',
           is_billable: m.is_billable,
+          source: m.source || '',
         };
         form.setValues(loaded);
         // Mantine's isDirty() compares against initialValues, which were
@@ -212,6 +226,8 @@ export default function MissionDetailsEdit() {
         mission_date: v.mission_date ? v.mission_date.toISOString().split('T')[0] : null,
         location_name: v.location_name,
         is_billable: v.is_billable,
+        // ADR-0016 — empty selection clears the source back to NULL.
+        source: v.source || null,
       };
 
       // UNAS fields — only include when the operator actually set them
@@ -333,6 +349,14 @@ export default function MissionDetailsEdit() {
               styles={inputStyles}
             />
           </Group>
+          <Select
+            label="Lead Source"
+            placeholder="How did this job come in?"
+            data={leadSources}
+            clearable
+            {...form.getInputProps('source')}
+            styles={inputStyles}
+          />
 
           <Box style={{ position: 'relative' }}>
             <TextInput

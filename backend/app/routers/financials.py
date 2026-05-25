@@ -41,6 +41,11 @@ async def financials_summary(
     customer_revenue: dict[str, dict] = {}
     monthly_revenue: dict[str, float] = {}
     mission_type_revenue: dict[str, float] = {}
+    # ADR-0016 — revenue grouped by lead source. NULL source → "unknown".
+    # We track `paid` (collected) and `total` (billed) per source so the
+    # marketing dashboard can surface website-ATTRIBUTED collected revenue
+    # without conflating it with still-outstanding invoices.
+    source_revenue: dict[str, dict] = {}
     mission_list = []
 
     for mission in missions:
@@ -97,6 +102,16 @@ async def financials_summary(
         mt = mission.mission_type.value
         mission_type_revenue[mt] = mission_type_revenue.get(mt, 0) + inv_total
 
+        # Revenue by lead source (ADR-0016). NULL → "unknown".
+        src = mission.source or "unknown"
+        bucket = source_revenue.setdefault(
+            src, {"source": src, "total": 0.0, "paid": 0.0, "missions": 0}
+        )
+        bucket["total"] += inv_total
+        bucket["missions"] += 1
+        if inv.paid_in_full:
+            bucket["paid"] += inv_total
+
         # Mission detail row
         mission_list.append({
             "id": str(mission.id),
@@ -105,6 +120,7 @@ async def financials_summary(
             "mission_date": str(mission.mission_date) if mission.mission_date else None,
             "location": mission.location_name,
             "customer_name": mission.customer.name if mission.customer else None,
+            "source": mission.source,
             "invoice_total": inv_total,
             "paid": inv.paid_in_full,
             "invoice_number": inv.invoice_number,
@@ -134,6 +150,21 @@ async def financials_summary(
         key=lambda x: x["revenue"],
         reverse=True,
     )
+    # ADR-0016 — sort by paid (collected) revenue descending; that's the
+    # number the marketing dashboard headlines as "website-attributed".
+    source_list = sorted(
+        [
+            {
+                "source": b["source"],
+                "paid": round(b["paid"], 2),
+                "total": round(b["total"], 2),
+                "missions": b["missions"],
+            }
+            for b in source_revenue.values()
+        ],
+        key=lambda x: x["paid"],
+        reverse=True,
+    )
     mission_list.sort(key=lambda x: x["mission_date"] or "", reverse=True)
 
     return {
@@ -150,5 +181,6 @@ async def financials_summary(
         "customer_revenue": customer_list,
         "monthly_revenue": monthly_list,
         "mission_type_revenue": type_list,
+        "revenue_by_source": source_list,
         "missions": mission_list,
     }

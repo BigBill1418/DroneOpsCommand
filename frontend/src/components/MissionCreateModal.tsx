@@ -43,6 +43,18 @@ const MISSION_TYPES = [
   { value: 'other', label: 'Other' },
 ];
 
+// ADR-0016 — lead-source options. Values must match the backend
+// MissionSource enum (app/models/mission.py). Drives "how much revenue
+// came from the website" attribution on the Financials dashboard.
+const LEAD_SOURCES = [
+  { value: 'website', label: 'Website' },
+  { value: 'referral', label: 'Referral' },
+  { value: 'repeat_client', label: 'Repeat Client' },
+  { value: 'phone', label: 'Phone' },
+  { value: 'social', label: 'Social Media' },
+  { value: 'other', label: 'Other' },
+];
+
 interface Props {
   opened: boolean;
   onClose: () => void;
@@ -60,6 +72,7 @@ export default function MissionCreateModal({ opened, onClose }: Props) {
       customer_id: '',
       mission_type: 'other',
       mission_date: null as Date | null,
+      source: '' as string,
     },
     validate: {
       title: (v) => (v.trim().length === 0 ? 'Title is required' : null),
@@ -94,6 +107,9 @@ export default function MissionCreateModal({ opened, onClose }: Props) {
         // Send YYYY-MM-DD string (Date column on the server)
         payload.mission_date = values.mission_date.toISOString().slice(0, 10);
       }
+      // ADR-0016 — only send source when the operator picked one; an
+      // empty selection leaves origin unknown (NULL on the server).
+      if (values.source) payload.source = values.source;
 
       const resp = await api.post('/missions', payload);
       const newId = resp.data?.id;
@@ -156,6 +172,13 @@ export default function MissionCreateModal({ opened, onClose }: Props) {
             data={MISSION_TYPES}
             required
             {...form.getInputProps('mission_type')}
+          />
+          <Select
+            label="Lead Source (optional)"
+            placeholder="How did this job come in?"
+            data={LEAD_SOURCES}
+            clearable
+            {...form.getInputProps('source')}
           />
           <DateInput
             label="Mission Date (optional)"

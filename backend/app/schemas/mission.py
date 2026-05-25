@@ -3,7 +3,7 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
-from app.models.mission import MissionType, MissionStatus
+from app.models.mission import MissionType, MissionStatus, MissionSource
 from app.schemas.aircraft import AircraftResponse
 
 
@@ -44,6 +44,11 @@ class MissionCreate(BaseModel):
     location_name: str | None = None
     area_coordinates: dict | None = None
     is_billable: bool = False
+    # ADR-0016 — lead-source attribution. `MissionSource` constrains the
+    # allowed values (Pydantic returns 422 on anything else); NULL/omitted
+    # means origin unknown. `source_ref` is a free-text external reference.
+    source: MissionSource | None = None
+    source_ref: str | None = None
     unas_folder_path: str | None = None
     download_link_url: str | None = None
     download_link_expires_at: datetime | None = None
@@ -59,6 +64,8 @@ class MissionUpdate(BaseModel):
     area_coordinates: dict | None = None
     status: MissionStatus | None = None
     is_billable: bool | None = None
+    source: MissionSource | None = None
+    source_ref: str | None = None
     unas_folder_path: str | None = None
     download_link_url: str | None = None
     download_link_expires_at: datetime | None = None
@@ -76,6 +83,8 @@ class MissionResponse(BaseModel):
     area_coordinates: dict | None
     status: MissionStatus
     is_billable: bool
+    source: MissionSource | None = None
+    source_ref: str | None = None
     unas_folder_path: str | None = None
     download_link_url: str | None = None
     download_link_expires_at: datetime | None = None

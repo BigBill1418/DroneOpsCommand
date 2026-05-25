@@ -4,6 +4,32 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## [2.68.0] — 2026-05-25 — feat(missions): lead-source attribution (ADR-0016)
+
+Answers the operator's question "how much of my job revenue came from the website."
+Nothing previously recorded where a job originated.
+
+- **Schema:** two additive nullable columns on `missions` — `source VARCHAR(50)`
+  (allowed: `website`/`referral`/`repeat_client`/`phone`/`social`/`other`, NULL =
+  unknown) and `source_ref VARCHAR(255)` (optional external lead id). Applied via the
+  repo's idempotent `_add_missing_columns()` startup hook (the repo has no Alembic
+  env), matching the ADR-0009 additive-nullable pattern. Failover-safe: standby
+  promotion runs the same idempotent ALTER; no PK/FK/index/enum-type change.
+- **API:** `source` + `source_ref` added to `MissionCreate` / `MissionUpdate` /
+  `MissionResponse` (validated against the `MissionSource` enum → 422 on bad values,
+  stored as the plain value not a PG enum). `GET /api/financials/summary` gains a
+  `revenue_by_source` block — collected (`paid`) + billed (`total`) revenue and
+  mission count per source, sorted by collected desc, NULL → `unknown`. Each summary
+  `missions` row now carries `source`.
+- **Frontend:** "Lead Source" dropdown on the mission create modal and details
+  editor; "Collected Revenue by Lead Source" panel on Financials.
+- **Backfill:** "Bella / Banks Missing Dog" (mission `11083323…e46f`, invoice
+  `BARNARDHQ-2026-0002`, $1,216.36 paid) set to `source='website'` — it came in
+  through the barnardhq.com contact form.
+- **Tests:** new `test_mission_source_attribution.py` (9 tests) covering schema
+  validate/serialize, enum coercion, and the `revenue_by_source` rollup. Full suite:
+  290 passed (2 pre-existing Stripe-probe env failures unrelated).
+
 ## [unreleased] — 2026-05-25 — fix(pdf-preview): default report PDF zoom 120% → 60%
 
 `PdfViewer` opened report previews at 120% (`scale=1.2`), too zoomed-in. Default

@@ -125,6 +125,15 @@ def _add_missing_columns(conn):
                 ("download_link_url", "ALTER TABLE missions ADD COLUMN download_link_url VARCHAR(1000)"),
                 ("download_link_expires_at", "ALTER TABLE missions ADD COLUMN download_link_expires_at TIMESTAMP"),
                 ("client_notes", "ALTER TABLE missions ADD COLUMN client_notes TEXT"),
+                # ADR-0016 — lead-source attribution (answers "how much
+                # job revenue came from the website"). Plain VARCHAR, NOT
+                # a PG enum, so this is a single additive nullable ALTER
+                # with no CREATE TYPE step. Existing rows read as NULL
+                # ("origin unknown"). Failover-safe per CLAUDE.md
+                # §Failover Guard — standby promotion runs the same
+                # idempotent ALTER.
+                ("source",     "ALTER TABLE missions ADD COLUMN source VARCHAR(50)"),
+                ("source_ref", "ALTER TABLE missions ADD COLUMN source_ref VARCHAR(255)"),
             ],
             "customers": [
                 ("intake_token", "ALTER TABLE customers ADD COLUMN intake_token VARCHAR(64) UNIQUE"),
@@ -401,7 +410,7 @@ logger.info("MultiPartParser max_file_size set to 200 MB")
 app = FastAPI(
     title="D.O.C — Drone Operations Command",
     description="Self-hosted mission management, flight log analysis, AI report generation, invoicing, telemetry visualization, and real-time airspace monitoring for commercial drone operators.",
-    version="2.67.7",
+    version="2.68.0",
     lifespan=lifespan,
 )
 

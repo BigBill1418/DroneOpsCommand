@@ -19,7 +19,7 @@ from app.config import settings
 from app.database import get_db
 from app.models.client_portal import ClientAccessToken
 from app.models.customer import Customer
-from app.models.mission import Mission, MissionFlight, MissionImage, MissionStatus
+from app.models.mission import Mission, MissionFlight, MissionImage, MissionStatus, MissionSource
 from app.models.user import User
 from app.schemas.mission import (
     MissionCreate,
@@ -178,6 +178,10 @@ async def create_mission(
         # Strip timezone from expires_at — DB column is TIMESTAMP WITHOUT TIME ZONE
         if isinstance(fields.get("download_link_expires_at"), datetime):
             fields["download_link_expires_at"] = fields["download_link_expires_at"].replace(tzinfo=None)
+        # ADR-0016 — store the MissionSource enum's plain value ("website"),
+        # not the member repr, on the VARCHAR `source` column.
+        if isinstance(fields.get("source"), MissionSource):
+            fields["source"] = fields["source"].value
         mission = Mission(**fields)
         db.add(mission)
         await db.flush()
@@ -247,6 +251,10 @@ async def update_mission(
             # Strip timezone from expires_at — DB column is TIMESTAMP WITHOUT TIME ZONE
             if key == "download_link_expires_at" and isinstance(value, datetime):
                 value = value.replace(tzinfo=None)
+            # ADR-0016 — persist the MissionSource enum's plain value on the
+            # VARCHAR `source` column (value may also be None to clear it).
+            if key == "source" and isinstance(value, MissionSource):
+                value = value.value
             setattr(mission, key, value)
 
         await db.flush()

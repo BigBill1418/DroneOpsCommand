@@ -32,6 +32,26 @@ class MissionStatus(str, enum.Enum):
     SENT = "sent"
 
 
+class MissionSource(str, enum.Enum):
+    """Where a job came from — lead/origin attribution (ADR-0016).
+
+    Stored as a plain VARCHAR on the missions table (NOT a PostgreSQL
+    enum) so the additive prod migration is a single nullable ALTER with
+    no `CREATE TYPE` / `ALTER TYPE ADD VALUE` step and none of the
+    enum-label case traps documented on `MissionStatus` above. Validation
+    of allowed values lives in the Pydantic schema layer; NULL means the
+    origin is unknown (e.g. every mission booked before this column
+    existed).
+    """
+
+    WEBSITE = "website"
+    REFERRAL = "referral"
+    REPEAT_CLIENT = "repeat_client"
+    PHONE = "phone"
+    SOCIAL = "social"
+    OTHER = "other"
+
+
 class Mission(Base):
     __tablename__ = "missions"
 
@@ -63,6 +83,15 @@ class Mission(Base):
         default=MissionStatus.DRAFT,
     )
     is_billable: Mapped[bool] = mapped_column(Boolean, default=False)
+    # ADR-0016 — lead-source attribution. Plain VARCHAR (not a PG enum);
+    # NULL = origin unknown. Allowed values are the `MissionSource` enum
+    # members, enforced in the Pydantic schema layer. `source_ref` holds
+    # an optional external reference (e.g. a website contact-form lead id)
+    # for future linkage to the marketing pipeline. Both additive +
+    # nullable → failover-safe (no PK/FK/index/enum-type changes; standby
+    # promotion runs the same idempotent ALTER in _add_missing_columns).
+    source: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    source_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)
     unas_folder_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
     download_link_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     download_link_expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

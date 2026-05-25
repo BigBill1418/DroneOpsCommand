@@ -61,6 +61,9 @@ export interface Mission {
   area_coordinates: Record<string, any> | null;
   status: string;
   is_billable: boolean;
+  // ADR-0016 — lead-source attribution. null = origin unknown.
+  source: string | null;
+  source_ref: string | null;
   unas_folder_path: string | null;
   download_link_url: string | null;
   download_link_expires_at: string | null;

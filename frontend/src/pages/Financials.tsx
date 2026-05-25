@@ -48,6 +48,17 @@ const TYPE_LABELS: Record<string, string> = {
   security_investigations: 'Security / Investigations',
   other: 'Other',
 };
+// ADR-0016 — lead-source labels (keys match the backend MissionSource enum;
+// "unknown" is the synthetic bucket for missions with NULL source).
+const SOURCE_LABELS: Record<string, string> = {
+  website: 'Website',
+  referral: 'Referral',
+  repeat_client: 'Repeat Client',
+  phone: 'Phone',
+  social: 'Social Media',
+  other: 'Other',
+  unknown: 'Unknown',
+};
 
 // --- Formatters ---
 
@@ -340,6 +351,21 @@ export default function Financials() {
             />
             <TopCustomers customers={data.customer_revenue} />
           </SimpleGrid>
+
+          {/* ===== Collected Revenue by Lead Source (ADR-0016) ===== */}
+          {/* `paid` is collected revenue; `total` (billed) shown as the sub-label.
+              This is the panel that answers "how much job revenue came from the
+              website" — the Website row is the website-attributed number. */}
+          {Array.isArray(data.revenue_by_source) && data.revenue_by_source.length > 0 && (
+            <HorizontalBars
+              title="Collected Revenue by Lead Source"
+              items={data.revenue_by_source.map((s: any) => ({
+                label: `${SOURCE_LABELS[s.source] || s.source} (${s.missions} mission${s.missions !== 1 ? 's' : ''})`,
+                value: s.paid,
+                sub: s.total !== s.paid ? `${formatCurrency(s.total)} billed` : undefined,
+              }))}
+            />
+          )}
 
           {/* ===== Mission Invoices Table ===== */}
           <Card padding="lg" radius="md" style={cardStyle}>
