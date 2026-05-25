@@ -4,6 +4,12 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## [unreleased] — 2026-05-25 — fix(pdf-preview): default report PDF zoom 120% → 60%
+
+`PdfViewer` opened report previews at 120% (`scale=1.2`), too zoomed-in. Default
+is now 60% (`scale=0.6`); the reset-zoom control matches. Within the existing
+0.5–3.0 zoom range; frontend-only.
+
 ## [unreleased] — 2026-05-25 — fix(report-gen): Celery async-loop bug broke AI report generation
 
 **Bug:** AI report generation was flaky/failing. The Celery tasks that run async

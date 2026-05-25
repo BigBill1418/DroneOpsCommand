@@ -26,7 +26,7 @@ interface PdfViewerProps {
 
 export default function PdfViewer({ url, height = 600, showToolbar = true, downloadFilename }: PdfViewerProps) {
   const [numPages, setNumPages] = useState<number>(0);
-  const [scale, setScale] = useState(1.2);
+  const [scale, setScale] = useState(0.6);
   const [containerWidth, setContainerWidth] = useState(0);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [retryKey, setRetryKey] = useState(0);
@@ -85,7 +85,7 @@ export default function PdfViewer({ url, height = 600, showToolbar = true, downl
     setRetryKey((k) => k + 1);
   }, []);
 
-  const resetZoom = useCallback(() => setScale(1.2), []);
+  const resetZoom = useCallback(() => setScale(0.6), []);
 
   const pageWidth = containerWidth > 0 ? (containerWidth - 32) * scale : undefined;
 
