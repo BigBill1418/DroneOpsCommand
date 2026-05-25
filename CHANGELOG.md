@@ -27,6 +27,10 @@ invariants. Full suite: 279 passed (2 pre-existing Stripe-probe env failures unr
 settings (mirroring `anthropic_api_key`), falling back to config. This instance is
 set to **`claude-opus-4-7`** (top-tier) for client-facing reports; managed customer
 instances keep the config default (`claude-sonnet-4-6`) unless their own DB overrides.
+Opus 4.x deprecated the `temperature` parameter (the API 400s if sent), so the
+Claude call now gates `temperature=0.3` behind `_supports_temperature(model)` —
+omitted for Opus 4.x, kept for Sonnet/Haiku. (This surfaced only after the loop fix
+stopped masking it.)
 
 **Failover / blue-green / replication impact:** none — worker-side task plumbing +
 a read-only settings lookup; no schema change, no migration.

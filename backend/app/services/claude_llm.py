@@ -8,6 +8,16 @@ from app.services.ollama import SYSTEM_PROMPT_TEMPLATE
 logger = logging.getLogger("doc.claude_llm")
 
 
+def _supports_temperature(model: str) -> bool:
+    """Whether the model accepts the ``temperature`` parameter.
+
+    Claude Opus 4.x deprecated it — the API returns 400
+    ("`temperature` is deprecated for this model") if sent. Sonnet/Haiku still
+    honor it, and a low temperature keeps factual reports deterministic.
+    """
+    return not model.startswith("claude-opus-4")
+
+
 async def generate_report(
     user_narrative: str,
     mission_title: str,
@@ -71,13 +81,15 @@ pilot. Use third person throughout. Do not include pilot coaching."""
     try:
         client = anthropic.Anthropic(api_key=resolved_key)
         logger.info("Claude request: model=%s", model)
-        message = client.messages.create(
+        create_kwargs = dict(
             model=model,
             max_tokens=1024,
             system=SYSTEM_PROMPT_TEMPLATE.format(company_name=company_name),
             messages=[{"role": "user", "content": user_prompt}],
-            temperature=0.3,
         )
+        if _supports_temperature(model):
+            create_kwargs["temperature"] = 0.3
+        message = client.messages.create(**create_kwargs)
         response_text = message.content[0].text
         logger.info(
             "Claude report generated: %d chars, %d input tokens, %d output tokens",
