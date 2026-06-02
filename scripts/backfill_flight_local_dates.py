@@ -16,8 +16,9 @@ Behaviour:
     ``^.+_\\d{8}_\\d{4}$``. Operator-customized names are left untouched.
   - The date token is recomputed in the operator timezone; the label and
     sequence number are preserved verbatim.
-  - Collisions (target name already exists) are reported and skipped, never
-    forced — re-run with the report to resolve by hand if any appear.
+  - Collisions (the date-corrected name already exists — two flights flown the
+    same local day) are resolved by bumping the 4-digit sequence to the next
+    free slot for that label+date, preserving uniqueness.
   - Idempotent and safe to re-run: already-correct names pass through.
 
 DRY-RUN by default. Pass ``--apply`` to commit.
@@ -52,12 +53,24 @@ async def run(apply: bool) -> None:
     rewritten = 0
     unchanged = 0
     skipped_custom = 0
-    collisions = 0
+    resequenced = 0
 
     async with async_session() as session:
         result = await session.execute(select(Flight))
         flights = result.scalars().all()
         existing_names = {f.name for f in flights}
+
+        def free_name(label: str, token: str, seq: str) -> tuple[str, bool]:
+            """Return a unique name for label+token, bumping seq on collision."""
+            candidate = f"{label}_{token}_{seq}"
+            if candidate not in existing_names:
+                return candidate, False
+            n = 1
+            while True:
+                bumped = f"{label}_{token}_{str(n).zfill(len(seq))}"
+                if bumped not in existing_names:
+                    return bumped, True
+                n += 1
 
         for f in flights:
             m = _NAME_RE.match(f.name or "")
@@ -75,18 +88,19 @@ async def run(apply: bool) -> None:
                 unchanged += 1
                 continue
 
-            new_name = f"{m.group('label')}_{correct_token}_{m.group('seq')}"
-            if new_name in existing_names:
-                print(f"  COLLISION (skipped)  {f.name!r}  ->  {new_name!r}  (already exists)")
-                collisions += 1
-                continue
-
-            print(f"  {f.name!r}  ->  {new_name!r}")
+            new_name, bumped = free_name(m.group("label"), correct_token, m.group("seq"))
+            tag = "  [reseq]" if bumped else ""
+            print(f"  {f.name!r}  ->  {new_name!r}{tag}")
+            # Reserve the new name and release the old one in the working set so
+            # subsequent collisions resolve against the post-rename state (works
+            # in dry-run too, for an accurate preview).
+            existing_names.discard(f.name)
+            existing_names.add(new_name)
             if apply:
-                existing_names.discard(f.name)
-                existing_names.add(new_name)
                 f.name = new_name
             rewritten += 1
+            if bumped:
+                resequenced += 1
 
         if apply:
             await session.commit()
@@ -94,10 +108,8 @@ async def run(apply: bool) -> None:
     mode = "APPLIED" if apply else "DRY-RUN (no changes written; pass --apply to commit)"
     print(
         f"\n{mode}. rewritten={rewritten}  unchanged={unchanged}  "
-        f"custom/skipped={skipped_custom}  collisions={collisions}  total={len(flights)}"
+        f"custom/skipped={skipped_custom}  resequenced={resequenced}  total={len(flights)}"
     )
-    if collisions:
-        print("NOTE: collisions were left untouched — resolve by hand if needed.")
 
 
 if __name__ == "__main__":
