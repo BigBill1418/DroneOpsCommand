@@ -54,9 +54,6 @@ pip-log.txt
 
 # Docker
 docker-compose.override.yml
-.last_deployed_commit
-.autopull.lock
-autopull.log
 .claude/worktrees/
 # (.env.demo already covered by `.env.*` above — kept here as a comment so
 # operators searching for it know the rule lives in the secrets section.)

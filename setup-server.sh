@@ -1,14 +1,22 @@
 #!/bin/bash
 # ── DroneOpsCommand Server Setup ─────────────────────────────────
 #
-# One-command installer for systemd services:
-#   1. droneops.service        — auto-start Docker stack on boot
-#   2. droneops-autopull.timer — auto-deploy new git commits (every 60s)
+# Installs the boot-time stack-start systemd unit:
+#   1. droneops.service  — auto-start the Docker Compose stack on boot
+#
+# DEPLOYS ARE NOT HANDLED HERE. Continuous deployment of this repo is
+# the responsibility of the **NOC Master Control fleet deployer**
+# (`swarmpilot_deployer` on HSH-HQ), which polls origin/main and
+# rebuilds + recreates the containers on the BOS-HQ production host.
+# The former per-repo autopull (`autopull.sh` + `droneops-autopull.timer`
+# + the long-deleted `update.sh`) was RETIRED — see ADR-0018 and the
+# original removal in commit e4610b5 ("Remove per-repo deployer — now
+# managed by NOC Master Control auto-deployer"). Do not reintroduce a
+# second deploy path; the fleet deployer is the single authority.
 #
 # Usage:
-#   sudo ./setup-server.sh                  # defaults: main branch
-#   sudo ./setup-server.sh --branch <name>  # track a different branch
-#   sudo ./setup-server.sh --uninstall      # remove all systemd units
+#   sudo ./setup-server.sh             # install droneops.service
+#   sudo ./setup-server.sh --uninstall # remove droneops.service
 #
 # ──────────────────────────────────────────────────────────────────
 
@@ -23,7 +31,6 @@ BOLD='\033[1m'
 NC='\033[0m'
 
 # ── Parse args ───────────────────────────────────────────────────
-BRANCH="main"
 UNINSTALL=false
 
 # ── Minimum requirements (warn-only, never blocks install) ───────
@@ -35,12 +42,12 @@ MIN_DISK_GB=30
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --branch)   BRANCH="$2"; shift 2 ;;
     --uninstall) UNINSTALL=true; shift ;;
     -h|--help)
-      echo "Usage: sudo $0 [--branch <branch>] [--uninstall]"
-      echo "  --branch <branch>  Git branch to auto-deploy (default: main)"
-      echo "  --uninstall        Remove all DroneOpsCommand systemd units"
+      echo "Usage: sudo $0 [--uninstall]"
+      echo "  --uninstall  Remove the DroneOpsCommand boot-start systemd unit"
+      echo ""
+      echo "Note: deploys are handled by the NOC fleet deployer, not this script."
       exit 0
       ;;
     *) echo -e "${RED}Unknown option: $1${NC}"; exit 1 ;;
@@ -56,11 +63,13 @@ fi
 # ── Uninstall ────────────────────────────────────────────────────
 if [ "$UNINSTALL" = true ]; then
   echo -e "${CYAN}Removing DroneOpsCommand systemd units...${NC}"
-  systemctl stop droneops-autopull.timer 2>/dev/null || true
-  systemctl disable droneops-autopull.timer 2>/dev/null || true
   systemctl stop droneops 2>/dev/null || true
   systemctl disable droneops 2>/dev/null || true
   rm -f /etc/systemd/system/droneops.service
+  # Belt-and-suspenders: clean up the long-retired autopull units if a
+  # legacy install of this script ever put them on disk.
+  systemctl stop droneops-autopull.timer 2>/dev/null || true
+  systemctl disable droneops-autopull.timer 2>/dev/null || true
   rm -f /etc/systemd/system/droneops-autopull.service
   rm -f /etc/systemd/system/droneops-autopull.timer
   systemctl daemon-reload
@@ -68,20 +77,8 @@ if [ "$UNINSTALL" = true ]; then
   exit 0
 fi
 
-# ── Detect install directory and user ────────────────────────────
+# ── Detect install directory ─────────────────────────────────────
 INSTALL_DIR="$(cd "$(dirname "$0")" && pwd)"
-# Find the user who owns the repo (not root)
-REPO_OWNER=$(stat -c '%U' "$INSTALL_DIR/.git" 2>/dev/null || stat -f '%Su' "$INSTALL_DIR/.git" 2>/dev/null)
-
-if [ -z "$REPO_OWNER" ] || [ "$REPO_OWNER" = "root" ]; then
-  # Fallback: check SUDO_USER
-  REPO_OWNER="${SUDO_USER:-}"
-fi
-
-if [ -z "$REPO_OWNER" ]; then
-  echo -e "${RED}ERROR: Could not determine repo owner. Run with sudo from the repo directory.${NC}"
-  exit 1
-fi
 
 echo ""
 echo -e "${CYAN}╔══════════════════════════════════════════════════╗${NC}"
@@ -89,8 +86,9 @@ echo -e "${CYAN}║${NC}  ${BOLD}DroneOpsCommand${NC} — Server Setup          
 echo -e "${CYAN}╚══════════════════════════════════════════════════╝${NC}"
 echo ""
 echo -e "  Install dir:  ${BOLD}$INSTALL_DIR${NC}"
-echo -e "  Repo owner:   ${BOLD}$REPO_OWNER${NC}"
-echo -e "  Branch:       ${BOLD}$BRANCH${NC}"
+echo ""
+echo -e "  ${YELLOW}Deploys are handled by the NOC fleet deployer (swarmpilot_deployer),${NC}"
+echo -e "  ${YELLOW}not by this host. This script only installs the boot stack-start unit.${NC}"
 echo ""
 
 # ── Validate ─────────────────────────────────────────────────────
@@ -99,8 +97,8 @@ if [ ! -f "$INSTALL_DIR/docker-compose.yml" ]; then
   exit 1
 fi
 
-if [ ! -f "$INSTALL_DIR/autopull.sh" ]; then
-  echo -e "${RED}ERROR: autopull.sh not found in $INSTALL_DIR${NC}"
+if [ ! -f "$INSTALL_DIR/droneops.service" ]; then
+  echo -e "${RED}ERROR: droneops.service not found in $INSTALL_DIR${NC}"
   exit 1
 fi
 
@@ -145,42 +143,11 @@ sed \
   -e "s|__INSTALL_DIR__|$INSTALL_DIR|g" \
   "$INSTALL_DIR/droneops.service" > /etc/systemd/system/droneops.service
 
-# ── Install: droneops-autopull.service + timer ───────────────────
-echo -e "${CYAN}Installing droneops-autopull.service + timer...${NC}"
-sed \
-  -e "s|__INSTALL_DIR__|$INSTALL_DIR|g" \
-  -e "s|__BRANCH__|$BRANCH|g" \
-  -e "s|__USER__|$REPO_OWNER|g" \
-  "$INSTALL_DIR/droneops-autopull.service" > /etc/systemd/system/droneops-autopull.service
-
-cp "$INSTALL_DIR/droneops-autopull.timer" /etc/systemd/system/droneops-autopull.timer
-
-# ── Make sure autopull.sh is executable ──────────────────────────
-chmod +x "$INSTALL_DIR/autopull.sh"
-chmod +x "$INSTALL_DIR/update.sh"
-
-# ── Ensure the repo owner can run docker ─────────────────────────
-if ! id -nG "$REPO_OWNER" | grep -qw docker; then
-  echo -e "${YELLOW}Adding $REPO_OWNER to the docker group...${NC}"
-  usermod -aG docker "$REPO_OWNER"
-  echo -e "${YELLOW}NOTE: User may need to log out/in for docker group to take effect.${NC}"
-fi
-
 # ── Enable and start ─────────────────────────────────────────────
 systemctl daemon-reload
 
 echo -e "${CYAN}Enabling droneops.service (auto-start on boot)...${NC}"
 systemctl enable droneops.service
-
-echo -e "${CYAN}Enabling droneops-autopull.timer (auto-deploy every 60s)...${NC}"
-systemctl enable droneops-autopull.timer
-systemctl start droneops-autopull.timer
-
-# ── Remove any old cron entries for autopull ─────────────────────
-if crontab -u "$REPO_OWNER" -l 2>/dev/null | grep -q "autopull"; then
-  echo -e "${YELLOW}Removing old autopull cron entry...${NC}"
-  crontab -u "$REPO_OWNER" -l 2>/dev/null | grep -v "autopull" | crontab -u "$REPO_OWNER" - 2>/dev/null || true
-fi
 
 # ── Verify ───────────────────────────────────────────────────────
 echo ""
@@ -191,17 +158,14 @@ echo ""
 echo -e "  ${BOLD}Boot auto-start:${NC}"
 echo -e "    systemctl status droneops"
 echo ""
-echo -e "  ${BOLD}Auto-deploy (polls ${BRANCH} every 60s):${NC}"
-echo -e "    systemctl status droneops-autopull.timer"
-echo -e "    systemctl list-timers droneops-autopull*"
-echo -e "    journalctl -u droneops-autopull -f"
-echo -e "    tail -f $INSTALL_DIR/autopull.log"
-echo ""
 echo -e "  ${BOLD}Manual controls:${NC}"
 echo -e "    sudo systemctl start droneops        # start stack"
 echo -e "    sudo systemctl stop droneops          # stop stack"
 echo -e "    sudo systemctl restart droneops       # restart stack"
-echo -e "    sudo ./update.sh                      # interactive deploy menu"
+echo ""
+echo -e "  ${BOLD}Deploys:${NC} handled automatically by the NOC fleet deployer"
+echo -e "    (swarmpilot_deployer on HSH-HQ → builds + recreates on push to main)."
+echo -e "    Deploy history: https://noc-mastercontrol.barnardhq.com/deploys"
 echo ""
 echo -e "  ${BOLD}Uninstall:${NC}"
 echo -e "    sudo ./setup-server.sh --uninstall"

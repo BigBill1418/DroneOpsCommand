@@ -4,6 +4,28 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-06-02 — chore: retire orphaned per-repo autopull; deploy path is the NOC fleet deployer (ADR-0018)
+
+Removed the dead per-repo autopull scaffolding that survived commit `e4610b5`
+(which deleted the `update.sh` they depended on). `autopull.sh` still called the
+non-existent `update.sh`; `droneops-autopull.timer` / `.service` were inactive on
+every host but present on disk; `setup-server.sh` still installed/enabled the
+timer and `chmod`'d the deleted `update.sh`. These corpses advertised a second,
+non-functional deploy path and misled the 2026-06-02 stale-deploy investigation.
+
+- **Deleted:** `autopull.sh`, `droneops-autopull.timer`, `droneops-autopull.service`,
+  the stale tracked `autopull.log`, and the now-dead `.gitignore` entries.
+- **Reconciled** `setup-server.sh`: installs only `droneops.service` (boot-time
+  `docker compose up -d` — NOT a deploy path); dropped all autopull install/enable
+  logic and the `update.sh` chmod; added a banner pointing to the fleet deployer.
+- **Deploy path of record:** the NOC Master Control fleet deployer
+  (`swarmpilot_deployer` on HSH-HQ) — polls `main`, rebuilds + recreates on
+  BOS-HQ. History: https://noc-mastercontrol.barnardhq.com/deploys
+
+The companion deployer-side fix (the image-digest gate now observes this repo's
+`build:`-only services, which was the actual cause of the silent stale deploy) is
+recorded in NOC-Master-Control ADR-0079. See ADR-0018.
+
 ## [2.68.1] — 2026-06-02 — fix(flights): flight date stamped in operator timezone, not UTC (ADR-0017)
 
 An evening flight flown **2026-06-01 20:27 PDT** displayed (and was named) as
