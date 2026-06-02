@@ -4,6 +4,37 @@ Maintained alongside `CHANGELOG.md` and `docs/adr/`. `CHANGELOG.md` is
 the ledger of shipped changes; this file tracks what's in-flight or
 blocked.
 
+## 2026-06-02 — Flight date timezone fix + deploy-path correction — SHIPPED (live)
+
+**Flight date bug (v2.68.1, ADR-0017).** An evening flight flown 2026-06-01
+20:27 PDT displayed and was named `..._20260602_...`. The instant was captured
+correctly (stored naive-UTC `2026-06-02 03:27` *is* `2026-06-01 20:27 PDT`); the
+bug was reducing that UTC instant to a date with no operator-timezone
+conversion, in two places. Fix: `backend/app/utils/timezone.py` (single
+UTC↔operator-local source, `OPERATOR_TIMEZONE` default `America/Los_Angeles`);
+all flight datetimes serialize UTC-aware (`iso_utc`, `+00:00`); frontend
+`src/lib/datetime.ts` formats pinned to the operator TZ (viewer-independent);
+`_generate_flight_name` uses local date. Backfill `scripts/backfill_flight_local_dates.py`
+re-stamped 29 existing names (idempotent, auto-resequences collisions).
+Display self-corrects retroactively; PDFs unaffected (use `mission_date`).
+Built + deployed to BOS-HQ, verified live (the flight now reads "Jun 1, 2026,
+8:27 PM PDT"). 6/6 new tests pass.
+
+**Deploy path corrected (ADR-0018 + NOC-Master ADR-0079).** Discovered the repo
+was in a half-migrated state: the per-repo `update.sh` was deleted in `e4610b5`
+(migrate to the NOC fleet deployer) but `autopull.sh` + the systemd units were
+left behind referencing it — dead, misleading. Retired them (ADR-0018). The
+*actual* reason pushes weren't going live: the NOC deployer's image-digest gate
+was structurally blind to this repo's `build:`-only compose services (no
+`image:` name), so it reported "success" while rebuilding nothing — a silent
+stale deploy. Root-caused + fixed deployer-side in **NOC-Master ADR-0079**
+(`extractImageRefFromCompose` now resolves the compose-default
+`<project>-<service>:latest`). Verified: a push now rebuilds + recreates on
+BOS-HQ automatically. **Deploy path of record = the NOC fleet deployer
+(`swarmpilot_deployer` on HSH-HQ); watch at
+https://noc-mastercontrol.barnardhq.com/deploys. There is no per-repo autopull
+anymore — do not recreate it.**
+
 ## 2026-05-25 — AI report-gen Celery async-loop bug fixed + Opus 4.7 — SHIPPED
 
 Report generation was flaky/failing: the Celery tasks doing async DB work reused
