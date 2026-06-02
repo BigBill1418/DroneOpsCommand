@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.jwt import get_current_user
 from app.database import get_db
 from app.models.flight import Flight
+from app.utils.timezone import iso_utc
 from app.models.pilot import Pilot
 from app.models.user import User
 from app.schemas.pilot import PilotCreate, PilotResponse, PilotSummary, PilotUpdate
@@ -174,7 +175,7 @@ async def list_pilot_flights(
             "id": str(f.id),
             "name": f.name,
             "drone_model": f.drone_model,
-            "start_time": f.start_time.isoformat() if f.start_time else None,
+            "start_time": iso_utc(f.start_time),
             "duration_secs": f.duration_secs,
             "duration_hours": round(f.duration_secs / 3600, 2) if f.duration_secs else 0,
             "max_altitude": f.max_altitude,

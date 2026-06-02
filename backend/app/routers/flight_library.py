@@ -31,6 +31,7 @@ from app.models.user import User
 from app.schemas.flight import (
     FlightCreate, FlightDetailResponse, FlightResponse, FlightUpdate, FlightUploadResponse,
 )
+from app.utils.timezone import iso_utc, local_date_compact
 
 logger = logging.getLogger("doc.flights")
 
@@ -279,9 +280,12 @@ async def _generate_flight_name(db: AsyncSession, drone_model: str | None, fleet
     # Clean it up for a filename-friendly label
     aircraft_label = aircraft_label.replace(" ", "-").strip()
 
-    # Date portion
+    # Date portion — the flight's calendar date in the operator's local
+    # timezone, NOT the UTC date (ADR-0017). An evening Pacific flight whose
+    # stored UTC instant rolls past midnight must still be named for the
+    # local day it was flown.
     flight_date = start_time if start_time else _dt.utcnow()
-    date_str = flight_date.strftime("%Y%m%d")
+    date_str = local_date_compact(flight_date)
 
     # Count existing flights for this date to generate a sequential number
     day_start = flight_date.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -436,8 +440,8 @@ async def flight_stats(
         {
             "id": str(f.id),
             "name": f.name,
-            "start_time": f.start_time.isoformat() if f.start_time else None,
-            "created_at": f.created_at.isoformat() if f.created_at else None,
+            "start_time": iso_utc(f.start_time),
+            "created_at": iso_utc(f.created_at),
             "duration_secs": f.duration_secs,
             "total_distance": f.total_distance,
             "max_altitude": f.max_altitude,
@@ -629,7 +633,7 @@ async def telemetry_stats(
                 "lat": row.home_lat,
                 "lon": row.home_lon,
                 "name": row.name or "",
-                "date": row.start_time.isoformat() if row.start_time else "",
+                "date": iso_utc(row.start_time) or "",
                 "drone": drone_display,
             })
             st = _lat_lon_to_state(row.home_lat, row.home_lon)

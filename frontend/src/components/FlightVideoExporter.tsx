@@ -12,6 +12,7 @@
  */
 
 import { notifications } from '@mantine/notifications';
+import { formatFlightDate } from '../lib/datetime';
 
 // ── Types ──────────────────────────────────────────────────────────
 export interface GpsPoint {
@@ -239,7 +240,7 @@ export async function renderFlightVideo(
     const maxAltFt = flight.max_altitude * 3.28084;
     const maxSpeedMph = flight.max_speed * 2.23694;
     const distanceMiles = flight.total_distance * 0.000621371;
-    const flightDate = flight.start_time ? new Date(flight.start_time).toLocaleDateString() : '';
+    const flightDate = flight.start_time ? formatFlightDate(flight.start_time) : '';
     const aircraftName = flight.drone_name || flight.drone_model || 'Unknown Aircraft';
 
     // ── 7. Render frames ──

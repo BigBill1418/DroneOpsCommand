@@ -4,6 +4,38 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## [2.68.1] — 2026-06-02 — fix(flights): flight date stamped in operator timezone, not UTC (ADR-0017)
+
+An evening flight flown **2026-06-01 20:27 PDT** displayed (and was named) as
+**2026-06-02**. Root cause confirmed against the live production row: the
+instant was captured correctly (`start_time 2026-06-02 03:27 UTC` *is*
+`2026-06-01 20:27 PDT`), but the UTC instant was reduced to a calendar date in
+UTC in two places — the serialized timestamp carried no `Z` (so the frontend
+misread naive-UTC as browser-local), and `_generate_flight_name` ran
+`strftime` directly on the UTC value.
+
+- **New:** `backend/app/utils/timezone.py` — single source of truth for
+  UTC↔operator-local conversion. Operator TZ is `settings.operator_timezone`
+  (default `America/Los_Angeles`, env `OPERATOR_TIMEZONE`).
+- **Wire format:** all flight datetimes now serialize **UTC-aware** (`+00:00`)
+  via `iso_utc` — `FlightResponse` field serializer plus every manual
+  `.isoformat()` site in `flight_library`, `missions`, `pilots`. A naive
+  flight timestamp can no longer reach a client.
+- **Display:** new `frontend/src/lib/datetime.ts` formats every flight
+  date/time pinned to the operator timezone — **viewer-timezone-independent**
+  — and defensively coerces offset-less timestamps to UTC. Wired into
+  `Flights`, `Dashboard`, `FlightReplay`, `FlightVideoExporter`.
+- **Name generation:** `_generate_flight_name` derives `YYYYMMDD` via
+  `local_date_compact` (operator-local).
+- **Backfill:** `scripts/backfill_flight_local_dates.py` (dry-run by default,
+  idempotent, collision-safe) rewrites the date token in existing
+  auto-generated names; e.g. `..._20260602_0001` → `..._20260601_0001`.
+- **Tests:** `backend/tests/test_flight_timezone.py` covers the evening-Pacific
+  boundary, the UTC-aware serialization, and the midday no-regression case.
+- Displayed dates self-correct retroactively (derived live from the correct
+  UTC instant); no data migration needed for display. Client-facing PDFs were
+  unaffected — they use the operator-entered `mission_date`, not `start_time`.
+
 ## [2.68.0] — 2026-05-25 — feat(missions): lead-source attribution (ADR-0016)
 
 Answers the operator's question "how much of my job revenue came from the website."

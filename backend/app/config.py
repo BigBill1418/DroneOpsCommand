@@ -50,6 +50,12 @@ class Settings(BaseSettings):
     upload_dir: str = "/data/uploads"
     reports_dir: str = "/data/reports"
 
+    # Operator timezone (ADR-0017). Defines the calendar date of a flight:
+    # a flight's stored instant is UTC, but its *date* is the date in this
+    # timezone. Flights flown in the evening in the Pacific zone otherwise
+    # show the next (UTC) day. Override per deployment via OPERATOR_TIMEZONE.
+    operator_timezone: str = "America/Los_Angeles"
+
     # Customer intake
     frontend_url: str = "http://localhost:3080"
     intake_token_expire_days: int = 7

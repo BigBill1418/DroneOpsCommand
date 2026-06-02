@@ -16,6 +16,7 @@ from sqlalchemy.orm import selectinload
 from app.auth.client_auth import create_client_token, hash_token
 from app.auth.jwt import get_current_user
 from app.config import settings
+from app.utils.timezone import iso_utc
 from app.database import get_db
 from app.models.client_portal import ClientAccessToken
 from app.models.customer import Customer
@@ -416,7 +417,7 @@ async def add_flight(
                 "display_name": local_flight.name,
                 "drone_model": local_flight.drone_model,
                 "drone_serial": local_flight.drone_serial,
-                "start_time": local_flight.start_time.isoformat() if local_flight.start_time else None,
+                "start_time": iso_utc(local_flight.start_time),
                 "duration_secs": local_flight.duration_secs,
                 "total_distance": local_flight.total_distance,
                 "max_altitude": local_flight.max_altitude,

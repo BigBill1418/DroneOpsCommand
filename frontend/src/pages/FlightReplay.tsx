@@ -33,6 +33,7 @@ import { MapContainer, TileLayer, Polyline, CircleMarker, Popup, LayersControl, 
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import api from '../api/client';
+import { formatFlightDate } from '../lib/datetime';
 import { renderFlightVideo } from '../components/FlightVideoExporter';
 import { cardStyle, monoFont } from '../components/shared/styles';
 
@@ -328,7 +329,7 @@ export default function FlightReplay() {
       {/* Flight name */}
       <Text c="#5a6478" size="xs" style={monoFont} lineClamp={1}>
         {flight.name}
-        {flight.start_time && ` — ${new Date(flight.start_time).toLocaleDateString()}`}
+        {flight.start_time && ` — ${formatFlightDate(flight.start_time)}`}
       </Text>
 
       {/* Map + Sidebar layout */}

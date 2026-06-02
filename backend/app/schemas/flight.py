@@ -1,9 +1,10 @@
 from datetime import date, datetime
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_serializer
 
 from app.schemas.aircraft import AircraftResponse
+from app.utils.timezone import iso_utc
 
 
 class FlightCreate(BaseModel):
@@ -72,6 +73,14 @@ class FlightResponse(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+    # Flight instants are stored as naive UTC. Emit them with an explicit
+    # UTC offset so clients convert to the operator-local calendar date
+    # correctly instead of misreading the value as local wall-clock time
+    # (ADR-0017 — the "flight shows next day" bug).
+    @field_serializer("start_time", "created_at", "updated_at", when_used="json")
+    def _serialize_utc(self, value: datetime | None) -> str | None:
+        return iso_utc(value)
 
 
 class FlightDetailResponse(FlightResponse):

@@ -62,6 +62,7 @@ import { Aircraft, FlightRecord } from '../api/types';
 import FlightMap from '../components/FlightMap/FlightMap';
 import StatCard from '../components/shared/StatCard';
 import { cardStyle, inputStyles, monoFont } from '../components/shared/styles';
+import { formatFlightDate } from '../lib/datetime';
 
 // ── Formatters ───────────────────────────────────────────────────────
 
@@ -104,15 +105,11 @@ function formatSpeed(ms: number | null | undefined): string {
   return `${(Number(ms) * 2.23694).toFixed(1)} mph`;
 }
 
+// Operator-local flight date (ADR-0017). Delegates to the shared helper so a
+// UTC instant is rendered as its operator-timezone calendar date, not the
+// viewer's browser-local (or naive-misparsed) date.
 function formatDate(dateStr: string | null | undefined): string {
-  if (!dateStr) return '—';
-  try {
-    const d = new Date(dateStr);
-    if (isNaN(d.getTime())) return String(dateStr);
-    return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
-  } catch {
-    return String(dateStr);
-  }
+  return formatFlightDate(dateStr);
 }
 
 // ── Field accessors (handle both legacy ODL + native formats) ────────

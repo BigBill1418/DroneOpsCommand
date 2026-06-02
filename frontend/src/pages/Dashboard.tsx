@@ -51,6 +51,7 @@ import {
 } from '@tabler/icons-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
+import { formatFlightDate } from '../lib/datetime';
 import { useApiCache, invalidate as invalidateCache } from '../hooks/useApiCache';
 import { Mission, Customer } from '../api/types';
 import StatCard from '../components/shared/StatCard';
@@ -666,7 +667,7 @@ export default function Dashboard() {
                               {f.name}
                             </Text>
                             <Text size="xs" c="#5a6478" style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: '10px', flexShrink: 0 }}>
-                              {f.start_time ? new Date(f.start_time).toLocaleDateString() : '—'}
+                              {f.start_time ? formatFlightDate(f.start_time) : '—'}
                             </Text>
                           </Group>
                           <Group gap="md" mt={2}>
