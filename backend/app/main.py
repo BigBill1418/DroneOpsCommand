@@ -1,3 +1,6 @@
+# deploy-gate verification 2026-06-02: no-op touch to prove the NOC fleet
+# deployer rebuilds the backend image on BOS-HQ after the ADR-0079 digest-gate
+# fix (build:-only services are now digest-observable). Safe to remove.
 import asyncio
 import logging
 import os
