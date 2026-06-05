@@ -112,26 +112,10 @@ services:
       com.barnardhq.service: "droneops-ollama-setup"
     logging: *logging
 
-  # ── Watchtower — Auto-update monitoring ────────────────────────
-  # Checks for new images daily and sends notifications.
-  # Set WATCHTOWER_NOTIFICATION_URL in .env for alerts.
-  watchtower:
-    image: containrrr/watchtower:1.7.1
-    restart: unless-stopped
-    environment:
-      - WATCHTOWER_CLEANUP=true
-      - WATCHTOWER_LABEL_ENABLE=true
-      - WATCHTOWER_POLL_INTERVAL=86400
-      - WATCHTOWER_MONITOR_ONLY=${WATCHTOWER_MONITOR_ONLY:-false}
-      - WATCHTOWER_NOTIFICATION_URL=${WATCHTOWER_NOTIFICATION_URL:-}
-      - WATCHTOWER_NOTIFICATIONS_HOSTNAME=droneops-server
-      - DOCKER_API_VERSION=1.45
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-    labels:
-      <<: *barnardhq-labels
-      com.barnardhq.service: "droneops-watchtower"
-    logging: *logging
+  # ── Watchtower removed 2026-06-05 (ADR-0088) ──────────────────────
+  # No auto-updater on a deployer-managed host; image updates flow only
+  # through the swarmpilot deployer pipeline. Container removed on BOS-HQ
+  # (was Exited(2)) during the 2026-06-05 best-practices sweep.
 
   backend:
     build:

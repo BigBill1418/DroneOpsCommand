@@ -4,6 +4,17 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-06-05 — chore: remove Watchtower service (ADR-0088, no auto-updater on deployer-managed hosts)
+
+Removed the `watchtower` service from `docker-compose.yml`. Image updates on
+this fleet flow exclusively through the swarmpilot deployer pipeline; an
+in-stack auto-updater is redundant and a supply-chain risk on a
+deployer-managed host (NOC-Master ADR-0088). The BOS-HQ container
+(`droneops-watchtower-1`, already `Exited(2)`) was removed during the
+2026-06-05 best-practices sweep; this commit ensures it cannot return on a
+future manual `docker compose up`. Mirrors the earlier `infrawatch-watchtower`
+removal.
+
 ## 2026-06-05 — chore: widen sub-30s healthcheck intervals to 30s (BOS-HQ exec-storm cleanup)
 
 Follow-up to the 2026-06-04 BOS-HQ high-load work. BOS dockerd/containerd were
