@@ -20,6 +20,11 @@ services:
   db:
     image: postgres:16-alpine
     restart: unless-stopped
+    # BOS-HQ 2026-06-05 sweep: postgres DB floor 1G. On BOS the override
+    # neutralizes this to a sleeping alpine (replication owns the real
+    # primary droneops-standby-db); the cap is harmless there and correct
+    # for the droneops-demo checkout which runs a real postgres here.
+    mem_limit: 1g
     entrypoint: ["/scripts/primary-entrypoint.sh"]
     command: ["postgres"]
     environment:
@@ -50,9 +55,11 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    # BOS-HQ 2026-06-05 sweep: tiny broker (~4 MiB) → 256M floor.
+    mem_limit: 256m
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 30s
+      interval: 45s
       timeout: 5s
       retries: 5
     labels:
@@ -68,6 +75,11 @@ services:
     # explicit edit, not a surprise from `:latest` rolling forward.
     image: ollama/ollama:0.23.2
     restart: unless-stopped
+    # BOS-HQ 2026-06-05 sweep: hard cap well above the loaded-model
+    # footprint. llama3.1:8b-q4_K_M is ~6 GB resident with KV cache; 10G
+    # leaves headroom and sits above the 8G reservation. Lower would risk
+    # OOM-killing a model load mid-inference.
+    mem_limit: 10g
     volumes:
       - ollama_data:/root/.ollama
     environment:
@@ -122,6 +134,9 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     restart: unless-stopped
+    # BOS-HQ 2026-06-05 sweep: FastAPI API, steady ~325 MiB → 1G. Health
+    # interval kept at 30s (customer-facing API).
+    mem_limit: 1g
     # tini reaps orphan curl/subprocesses spawned by FastAPI handlers so
     # they never accumulate as <defunct> (matches worker service; observed
     # uvicorn zombies 2026-04-19 during HSH-HQ high-load incident).
@@ -196,6 +211,9 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     restart: unless-stopped
+    # BOS-HQ 2026-06-05 sweep: celery worker, steady ~547 MiB → 1.5G
+    # (2.5x, headroom for report/email task bursts). Health kept at 30s.
+    mem_limit: 1536m
     # PID 1 init reaper — without this, celery prefork children that exit
     # become zombies if the master loses a SIGCHLD reap. The 2026-04-19
     # high-load incident found 33 defunct celery children of the worker
@@ -281,6 +299,8 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     restart: unless-stopped
+    # BOS-HQ 2026-06-05 sweep: scheduler, steady ~72 MiB → 512M floor.
+    mem_limit: 512m
     init: true
     command: celery -A app.tasks.celery_tasks beat --loglevel=info --schedule=/data/celerybeat-schedule
     environment:
@@ -312,9 +332,11 @@ services:
       context: ./flight-parser
       dockerfile: Dockerfile
     restart: unless-stopped
+    # BOS-HQ 2026-06-05 sweep: idle parser (~1 MiB) → 256M floor.
+    mem_limit: 256m
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8100/health || exit 1"]
-      interval: 30s
+      interval: 45s
       timeout: 10s
       retries: 3
       start_period: 15s
@@ -340,6 +362,9 @@ services:
         VITE_SENTRY_ENVIRONMENT: ${VITE_SENTRY_ENVIRONMENT:-production}
         VITE_APP_VERSION: "${APP_VERSION:-2.67.3}"
     restart: unless-stopped
+    # BOS-HQ 2026-06-05 sweep: static nginx SPA (~8 MiB) → 256M floor.
+    # Health interval kept at 30s — customer edge + the probed :3080 target.
+    mem_limit: 256m
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8080/ || exit 1"]
       interval: 30s
@@ -362,6 +387,8 @@ services:
   cloudflared:
     image: cloudflare/cloudflared:2026.3.0
     restart: unless-stopped
+    # BOS-HQ 2026-06-05 sweep: tunnel sidecar (~17 MiB) → 256M floor.
+    mem_limit: 256m
     command: tunnel run
     environment:
       - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN:-}

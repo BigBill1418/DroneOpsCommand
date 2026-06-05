@@ -4,6 +4,23 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-06-05 — chore: add per-service mem_limit + widen non-critical healthchecks (BOS-HQ sweep)
+
+Caps OOM blast radius on the shared BOS host (no service was previously
+memory-bounded). Limits sized from steady RSS (2.5x or category floor, err
+high): `db` 1G, `redis` 256M, `ollama` 10G (above the ~6 GB loaded-model
+footprint; sits over the 8G reservation), `backend` 1G, `worker` 1.5G,
+`beat` 512M, `flight-parser` 256M, `frontend` 256M, `cloudflared` 256M.
+
+Healthcheck intervals widened 30s → 45s on `redis` and `flight-parser`;
+`backend`/`worker`/`frontend` kept at 30s (customer-facing / probed :3080
+edge), `ollama` kept at 30s (inference health). This base file is shared by
+the `droneops-demo` checkout, which inherits the same limits/intervals.
+
+On BOS the gitignored `docker-compose.override.yml` neutralizes `db` to a
+sleeping alpine; the BOS-promoted primary `droneops-standby-db` is capped to
+1G directly in that override (not tracked here).
+
 ## 2026-06-05 — chore: remove Watchtower service (ADR-0088, no auto-updater on deployer-managed hosts)
 
 Removed the `watchtower` service from `docker-compose.yml`. Image updates on
