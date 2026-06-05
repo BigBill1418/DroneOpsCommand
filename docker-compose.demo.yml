@@ -24,6 +24,8 @@ x-logging-demo: &logging-demo
 
 services:
   backend:
+    # BOS-HQ 2026-06-05 sweep: demo API ~217 MiB -> 768M.
+    mem_limit: 768m
     env_file:
       - .env.demo
     environment:
@@ -75,6 +77,8 @@ services:
 
   # Demo frontend on port 3081 (prod uses 3080)
   frontend:
+    # BOS-HQ 2026-06-05 sweep: demo static SPA ~8 MiB -> 256M floor.
+    mem_limit: 256m
     env_file:
       - .env.demo
     build:
@@ -97,6 +101,8 @@ services:
   # (rmem_max=208KiB, cloudflared wants 7168KiB, causes connection drops)
   # Token is set via CLOUDFLARE_TUNNEL_TOKEN in .env.demo
   cloudflared:
+    # BOS-HQ 2026-06-05 sweep: demo tunnel sidecar ~15 MiB -> 256M floor.
+    mem_limit: 256m
     env_file:
       - .env.demo
     command: tunnel --no-autoupdate --protocol http2 run
@@ -121,8 +127,26 @@ services:
     deploy:
       replicas: 0
 
+  # BOS-HQ 2026-06-05 sweep: demo redis ~3 MiB -> 256M floor.
+  redis:
+    mem_limit: 256m
+    labels:
+      <<: *barnardhq-labels-demo
+      com.barnardhq.service: "droneops-redis"
+    logging: *logging-demo
+
+  # BOS-HQ 2026-06-05 sweep: demo flight-parser (idle) -> 256M floor.
+  flight-parser:
+    mem_limit: 256m
+    labels:
+      <<: *barnardhq-labels-demo
+      com.barnardhq.service: "droneops-flight-parser"
+    logging: *logging-demo
+
   # Override DB port to avoid conflict with DroneOps Command (which uses 5434)
   db:
+    # BOS-HQ 2026-06-05 sweep: demo postgres ~24 MiB -> 1G (DB floor).
+    mem_limit: 1g
     env_file:
       - .env.demo
     ports: !override
