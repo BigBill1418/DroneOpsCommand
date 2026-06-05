@@ -4,6 +4,25 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-06-05 — chore: widen sub-30s healthcheck intervals to 30s (BOS-HQ exec-storm cleanup)
+
+Follow-up to the 2026-06-04 BOS-HQ high-load work. BOS dockerd/containerd were
+burning ~2.3 cores on a healthcheck-exec storm (~108 `container/exec_die` per
+30s fleet-wide). Widened every sub-30s healthcheck interval in this stack to
+Docker's 30s default — roughly halves the per-container exec cadence with only
+tens-of-seconds slower failure detection (acceptable for DB/redis/app checks).
+
+- `docker-compose.yml`: `db` 5s→30s, `redis` 5s→30s, `ollama` 15s→30s,
+  `backend` 15s→30s, `flight-parser` 15s→30s, `frontend` 15s→30s
+  (`worker` already 30s, unchanged). This base file is shared by the
+  `droneops-demo` checkout, so the demo stack inherits the same intervals.
+- The BOS-local `docker-compose.override.yml` (untracked; neutralizes the `db`
+  service to a sleeping alpine on BOS while replication owns the real primary)
+  carried a 2s interval on the trivial `["CMD","true"]` check — widened to 30s
+  in place on the host. Not committed here because the override is BOS-local.
+
+No other compose settings changed.
+
 ## 2026-06-02 — chore: retire orphaned per-repo autopull; deploy path is the NOC fleet deployer (ADR-0018)
 
 Removed the dead per-repo autopull scaffolding that survived commit `e4610b5`
