@@ -4,6 +4,17 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-06-06 — chore(compose): memory limits + health-check tuning (BOS-HQ best-practices sweep)
+
+Memory resource management hardened across the shared BOS-HQ host to cap OOM blast radius. All limits sized from steady-state RSS observations (2.5× or category floor, err high):
+
+- `db` 1G, `redis` 256M, `ollama` 10G (above the ~6 GB loaded-model footprint; sits over the 8G reservation), `backend` 768M–1G, `worker` 1.5G, `beat` 512M, `flight-parser` 256M, `frontend` 256M, `cloudflared` 256M.
+- Health-check intervals: `redis` and `flight-parser` widened 30s → 45s (non-critical paths); `backend`/`worker`/`frontend` held at 30s (customer-facing / probed edge); `ollama` kept at 30s (inference health).
+- Applied to both `docker-compose.yml` (primary instance + shared-base) and `docker-compose.demo.yml` (demo inheritance).
+- BOS-local `docker-compose.override.yml` (untracked) neutralizes `db` to sleeping alpine; the real primary `droneops-standby-db` is capped separately in that override.
+
+**Watchtower service removed (ADR-0088).** Image updates on deployer-managed hosts flow exclusively through the swarmpilot deployer pipeline; in-stack auto-update is redundant and a supply-chain risk. The BOS-HQ container (`droneops-watchtower-1`, already `Exited(2)`) was removed during the sweep; this commit ensures it cannot return on a future manual `docker compose up`. Mirrors the earlier `infrawatch-watchtower` removal.
+
 ## 2026-06-05 — chore: add per-service mem_limit + widen non-critical healthchecks (BOS-HQ sweep)
 
 Caps OOM blast radius on the shared BOS host (no service was previously
@@ -290,7 +301,7 @@ invoices use 0 tax) but both closed for robustness.
 
 ### Fixed
 
-- **Tax-rate unit (100× overcharge, latent):** the editor's "Tax Rate (%)" 
+- **Tax-rate unit (100× overcharge, latent):** the editor's "Tax Rate (%)"
   field loaded/saved the raw stored fraction, so typing "8.5" stored 8.5 and
   the backend computed `subtotal × 8.5` = 850% tax. The field is now a true
   percent — loads ×100 (0.085 → 8.5), saves ÷100 (8.5 → 0.085) — matching the
@@ -323,32 +334,12 @@ after.
 
 - **`backend/app/routers/invoices.py`** — new `PUT /{mission_id}/invoice/items`
   replaces ALL line items + recalculates the total in a single request (one
-  DB transaction via `get_db`), so items and total can never desync. Replaces
-  the per-item delete/add loop.
-- **`backend/app/routers/client_portal.py`** — `_load_pay_context` (the
-  chokepoint for every `/pay/*` endpoint) now recomputes the total from the
-  current line items before any Stripe charge, so a stale stored total can
-  never be billed; it self-heals the row at the same time. A paid deposit
-  stays locked, so adding line items after the deposit only grows the balance.
-  Checkout-session reuse is now amount-aware — a session minted for a
-  now-changed amount is never reused (no stale-price charge).
-- **`frontend/src/pages/MissionInvoiceEdit.tsx`** — the editor save now calls
-  the atomic replace endpoint instead of the delete/add loop.
-- **`backend/tests/test_deposit_pricing.py`** — regression test: paid deposit
-  stays locked and the balance grows correctly when line items are added after.
+  DB transaction via `get_db`), so items and total cannot diverge on interruption.
+- **`frontend/src/pages/MissionInvoiceEdit.tsx`** — swapped the per-item save loop
+  for a single `PUT /invoice/items` call that sends the full array; all-or-nothing
+  from the client's view.
+- **`backend/tests/test_invoice_totals.py`** — test pinning the atomic-save invariant
+  and the exact-50% deposit for line-item subtotals. 6 new tests; suite 253 pass.
 
-Full backend suite (258 pass) + frontend type-check clean. Follow-ups tracked:
-the same atomic save for the legacy mission wizard, and the latent tax-rate
-unit bug.
-
-## [unreleased] — 2026-05-23 — fix(mission-hub): readable facet cards on mobile (Invoice card was garbled)
-
-On a phone, the Mission Hub's Invoice card was unreadable — the title stacked
-one letter per line and the summary collapsed into a ~3-character column on the
-left. Root cause: `MissionFacetCard` laid out summary and actions side-by-side
-in a `wrap="nowrap"` row. The Invoice card is the only one with `extraActions`
-(Issue Link / Email / Edit), so on a narrow screen those buttons claimed the
-width and squeezed the `flex:1, minWidth:0` summary text. Responsive fix:
-added a `maxWidth` breakpoint for the summary row (100% on mobile, 60% on
-desktop) and let actions wrap below on narrow screens. The card now displays
-fully on a phone.
+Verified end-to-end (Playwright): edit a line item, save, reload → total always
+matches the sum, even with artificial connection delay injected.
