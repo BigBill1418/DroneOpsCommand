@@ -4,6 +4,18 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-06-07 — fix(auth): single-flight token refresh — stop the dashboard "cycling" on token expiry — v2.68.2
+
+The operator dashboard visibly blanked → re-authenticated → repopulated in one "blink" roughly every 30 minutes (the reported "portal cycling"). Root cause: when the 30-minute access token expired, the dashboard's parallel polls (missions, customers, batteries, weather, maintenance ×2, flight-library) all 401'd in the same tick, and the axios response interceptor (`frontend/src/api/client.ts`) fired a **separate** `/api/auth/refresh` for *each* 401 — a 7-way refresh storm — before retrying each request.
+
+- **Single-flight refresh.** Concurrent 401s now coalesce onto one shared in-flight refresh promise; the first caller starts it, the rest await it, then every original request retries with the new token. Eliminates the storm and the visible full-dashboard reload.
+- **Latent logout-loop risk removed.** With the old per-request refresh, the moment the server starts rotating/invalidating refresh tokens (single-use), the concurrent refreshes would race a now-stale token → 401 → forced `window.location.href = '/login'` on a loop. Coalescing to one refresh closes that off before it can bite.
+- **No longer swallows refresh failures.** Refresh errors are now `console.warn`'d before the `/login` redirect (per the v2.38.x lesson in CLAUDE.md — the silent-swallow interceptor that made a login-lockout bug hard to diagnose).
+- **Test:** `frontend/src/api/__tests__/client.refresh.test.ts` — proves 5 simultaneous 401s trigger exactly one refresh and that all five requests retry to 200, plus that a later expiry starts a fresh refresh (single-flight is per-event, not a permanent latch).
+- Version markers reconciled to 2.68.2 across README / package.json / main.py / AppShell (README + AppShell had drifted to 2.68.0).
+
+_Backend `/api/auth/refresh` is unchanged (stateless, non-rotating) — this is a pure frontend fix._
+
 ## 2026-06-07 — docs(incidents): log 2026-06-05 CF health flap as external (BOS firewall), not a DroneOps defect
 
 The droneops-api-health CF healthcheck flapped ~10 minutes on 2026-06-05 08:52–09:02 PDT due to BOS-HQ host-firewall maintenance severing the cloudflared→backend origin (CF origin=530), **NOT a DroneOps backend defect**. No code change; the incident has been logged to prevent future sessions from chasing a phantom backend bug. Full RCA and durable fix documented in infrastructure-hardening ADR-0001.
