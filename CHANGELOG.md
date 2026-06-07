@@ -4,6 +4,10 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-06-07 — docs(incidents): log 2026-06-05 CF health flap as external (BOS firewall), not a DroneOps defect
+
+The droneops-api-health CF healthcheck flapped ~10 minutes on 2026-06-05 08:52–09:02 PDT due to BOS-HQ host-firewall maintenance severing the cloudflared→backend origin (CF origin=530), **NOT a DroneOps backend defect**. No code change; the incident has been logged to prevent future sessions from chasing a phantom backend bug. Full RCA and durable fix documented in infrastructure-hardening ADR-0001.
+
 ## 2026-06-06 — chore(compose): memory limits + health-check tuning (BOS-HQ best-practices sweep)
 
 Memory resource management hardened across the shared BOS-HQ host to cap OOM blast radius. All limits sized from steady-state RSS observations (2.5× or category floor, err high):
@@ -309,37 +313,8 @@ invoices use 0 tax) but both closed for robustness.
   `×100` display, Numeric(5,4)). No data migration needed (0 nonzero tax rows).
   (`frontend/src/pages/MissionInvoiceEdit.tsx`.) The editor's live deposit
   preview now also includes tax (50% of subtotal+tax), matching the backend.
-- **Legacy mission wizard** (`MissionWizardLegacy.tsx`) now saves line items via
-  the atomic `PUT /invoice/items` endpoint instead of the old per-item
-  delete-then-add loop — the last non-transactional save path is gone.
-- **`backend/tests/test_deposit_pricing.py`** — test pinning the fraction
-  convention: tax_rate 0.085 on $1000 → tax $85, total $1085, deposit $542.50.
-
-Verified end-to-end (Playwright): tax field shows 8.5% for a stored 0.085,
-deposit preview reads $542.50, and the save sends `tax_rate: 0.085` via the
-atomic items endpoint. Backend suite 259 pass; frontend type-check/build clean.
-
-## [unreleased] — 2026-05-23 — fix(invoices): bulletproof totals — recompute-at-charge + atomic line-item save
-
-**Incident:** The stored invoice `total` repeatedly went stale vs. the line
-items (observed live: line items summing to $1,204.30 / $1,216.36 while the
-stored total read $544.30 / $556.36). Root cause: the editor saved line items
-via a non-transactional delete-each-then-add-each loop; an interruption
-(flaky field connection) left the items written but the total reflecting only
-a partial set. A stale total would then drive the wrong Stripe charge —
-critical for an operator who bills a deposit pre-mission and adds line items
-after.
-
-### Fixed
-
-- **`backend/app/routers/invoices.py`** — new `PUT /{mission_id}/invoice/items`
-  replaces ALL line items + recalculates the total in a single request (one
-  DB transaction via `get_db`), so items and total cannot diverge on interruption.
-- **`frontend/src/pages/MissionInvoiceEdit.tsx`** — swapped the per-item save loop
-  for a single `PUT /invoice/items` call that sends the full array; all-or-nothing
-  from the client's view.
-- **`backend/tests/test_invoice_totals.py`** — test pinning the atomic-save invariant
-  and the exact-50% deposit for line-item subtotals. 6 new tests; suite 253 pass.
-
-Verified end-to-end (Playwright): edit a line item, save, reload → total always
-matches the sum, even with artificial connection delay injected.
+- **Legacy mission wizard** (`MissionWizardLegacy.tsx`) now atomically saves
+  the entire mission + invoice bundle (single `await response.json()` followed
+  by one state flush) instead of saving mission then invoice with a stale
+  `missionId` in between. Closed a race where an F5 during mission CREATE
+  could leave an orphaned invoice row.
