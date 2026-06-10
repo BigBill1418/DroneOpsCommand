@@ -4,6 +4,31 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-06-10 — fix(flights): defer heavy JSON columns in flight-library list — restores mission-picker visibility — v2.68.5
+
+* **Mission picker can see uploaded flights again; API no longer OOM-crash-loops (ADR-0019).**
+  The mission picker loads available flights from `GET /api/flight-library` with
+  the default `limit=500`. The list query was `select(Flight)`, which loads
+  **every** mapped column — including the heavy per-flight JSON blobs
+  `gps_track` (~19k GPS points/flight), `telemetry`, and `raw_metadata`. For 500
+  rows those decompress (TOAST) into >1 GB of Python objects, and the kernel
+  cgroup OOM-killed the 1 GB uvicorn worker mid-serialization (`dmesg`:
+  `Killed process … (uvicorn) … anon-rss:1036196kB`; `RestartCount` had reached
+  9). The picker's request then failed and the frontend **silently fell back to
+  the unreachable OpenDroneLog proxy** — so freshly uploaded flights disappeared
+  from the picker. The same crash-loop is what made DroneOpsSync uploads slow
+  and unreliable (uploads racing a restarting backend). `FlightResponse` never
+  returns those three columns, so they were loaded only to be discarded. Fix:
+  `defer()` them in the list query (`LIST_DEFERRED_COLUMNS`). Detail / telemetry
+  / track routes load their data on demand and are unaffected.
+  * Regression guard: `tests/test_flight_library_list_defers_heavy_columns.py`
+    compiles the production query and asserts the heavy columns are excluded
+    from the SELECT while the light columns the picker needs remain (plus a
+    control proving the plain query *would* load them).
+  * Live evidence before the fix: `limit=5` → 200 OK; `limit=200` → 4 s/265 KB;
+    `limit=250+` → "Empty reply from server" then the API stopped accepting
+    connections. DB had the rows the whole time — sync writes were healthy.
+
 ## 2026-06-10 — fix(email/tos): graceful no-op when SMTP/TOS-template unconfigured — v2.68.4
 
 * **SMTP-not-configured email paths no longer raise (GlitchTip 2169/2170/2171/2264/2265/2318).**

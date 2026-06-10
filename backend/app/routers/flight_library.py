@@ -16,6 +16,7 @@ import httpx
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select, func, desc
+from sqlalchemy.orm import defer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.device import validate_device_api_key
@@ -36,6 +37,13 @@ from app.utils.timezone import iso_utc, local_date_compact
 logger = logging.getLogger("doc.flights")
 
 router = APIRouter(prefix="/api/flight-library", tags=["flight-library"])
+
+# Heavy per-flight JSON columns that the list view never returns. Deferred in
+# list_flights so a 500-row page doesn't materialize ~19k GPS points + a full
+# telemetry time-series per row into >1 GB of Python objects (ADR-0019).
+# Kept as a named constant so the regression test asserts against the same
+# source of truth the endpoint uses.
+LIST_DEFERRED_COLUMNS = (Flight.gps_track, Flight.telemetry, Flight.raw_metadata)
 
 
 _DATE_FORMATS = (
@@ -346,7 +354,21 @@ async def list_flights(
     }
     sort_col = sort_col_map.get(sort_by, Flight.start_time)
     order = desc(sort_col) if sort_dir == "desc" else sort_col.asc()
-    query = select(Flight).order_by(order, desc(Flight.created_at))
+    # CRITICAL (ADR-0019): defer the heavy per-flight JSON columns. The list
+    # response (FlightResponse) never includes gps_track / telemetry /
+    # raw_metadata, but SQLAlchemy loads ALL mapped columns by default — and
+    # those columns can hold ~19k GPS points + a full telemetry time-series
+    # per flight. Materializing them for ~500 rows decompressed the TOASTed
+    # JSON into >1 GB of Python objects, OOM-killing the 1 GB uvicorn worker
+    # mid-serialization. The picker's GET /api/flight-library then failed,
+    # silently fell back to the (unreachable) ODL proxy, and uploaded flights
+    # vanished from the mission picker. Deferring keeps the list lean; the
+    # detail/telemetry/track routes load these columns on demand.
+    query = (
+        select(Flight)
+        .options(*[defer(col) for col in LIST_DEFERRED_COLUMNS])
+        .order_by(order, desc(Flight.created_at))
+    )
 
     if search:
         q = f"%{search}%"
