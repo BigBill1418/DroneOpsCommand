@@ -103,8 +103,10 @@ async def send_report_email(
         }
 
     if not smtp["smtp_host"]:
-        logger.error("SMTP not configured — cannot send email")
-        raise ValueError("SMTP not configured. Set SMTP_HOST in settings.")
+        # Graceful no-op on unconfigured SMTP (DEMO never sends real email).
+        # Consistent with the intake/portal/deposit/payment skip pattern.
+        logger.warning("SMTP not configured — skipping report email to %s", to_email)
+        return False
 
     # Load branding for template
     branding = await _get_branding(db)
@@ -195,8 +197,15 @@ async def send_intake_email(
         logger.debug("[EMAIL-INTAKE] Using env SMTP settings: host=%s port=%s", smtp["smtp_host"], smtp["smtp_port"])
 
     if not smtp["smtp_host"]:
-        logger.error("[EMAIL-INTAKE] SMTP not configured — cannot send intake email to %s", to_email)
-        raise ValueError("SMTP not configured. Set SMTP_HOST in settings.")
+        # Graceful no-op when SMTP is unconfigured (e.g. the DEMO instance, which
+        # MUST NOT send real email). Returning False instead of raising stops the
+        # error-portal noise (GlitchTip 2169/2170 + the caller's "Email delivery
+        # failed" 500) without enabling email where it must stay off. Matches the
+        # existing TOS-SIGNED / DEPOSIT / PAYMENT skip pattern in this module. On
+        # any instance where SMTP *is* configured (e.g. public, via Brevo env) this
+        # branch never runs, so real intake email is unchanged.
+        logger.warning("[EMAIL-INTAKE] SMTP not configured — skipping intake email to %s", to_email)
+        return False
 
     # Load branding for template
     branding = await _get_branding(db)
@@ -281,8 +290,12 @@ async def send_client_portal_email(
         }
 
     if not smtp["smtp_host"]:
-        logger.error("[EMAIL-PORTAL] SMTP not configured — cannot send portal email to %s", to_email)
-        raise ValueError("SMTP not configured. Set SMTP_HOST in settings.")
+        # Graceful no-op on unconfigured SMTP (DEMO must never send real email).
+        # See the matching note in send_intake_email above. Stops GlitchTip
+        # 2264/2265/2318 without enabling email where it must stay off; public
+        # (Brevo env) is unaffected.
+        logger.warning("[EMAIL-PORTAL] SMTP not configured — skipping portal email to %s", to_email)
+        return False
 
     branding = await _get_branding(db)
 
@@ -671,7 +684,10 @@ async def _send_html_email(to_email: str, subject: str, html_body: str, db=None)
             "smtp_use_tls": settings.smtp_use_tls,
         }
     if not smtp["smtp_host"]:
-        raise ValueError("SMTP not configured. Set SMTP_HOST in settings.")
+        # Graceful no-op on unconfigured SMTP (DEMO never sends real email).
+        # Consistent with the intake/portal/deposit/payment skip pattern.
+        logger.warning("[EMAIL] SMTP not configured — skipping email '%s' to %s", subject, to_email)
+        return False
 
     msg = MIMEMultipart()
     msg["From"] = f"{smtp['smtp_from_name']} <{smtp['smtp_from_email']}>"

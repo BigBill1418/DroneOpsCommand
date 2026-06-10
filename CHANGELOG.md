@@ -4,6 +4,30 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-06-10 — fix(email/tos): graceful no-op when SMTP/TOS-template unconfigured — v2.68.4
+
+* **SMTP-not-configured email paths no longer raise (GlitchTip 2169/2170/2171/2264/2265/2318).**
+  `send_intake_email`, `send_portal_email`, `send_report_email`, and the shared
+  `_send_html_email` helper previously `raise ValueError("SMTP not configured")`
+  when `smtp_host` was empty, which the intake/portal routers re-raised as
+  `HTTPException(500, "Email delivery failed")`. The errors originate on the
+  **DEMO** instance, which has empty SMTP env *by design* — the demo must NEVER
+  send real email (its worker/beat stay stopped for exactly this reason). These
+  four functions now log at WARNING and `return False` (graceful skip), matching
+  the pre-existing TOS-SIGNED / DEPOSIT / PAYMENT skip pattern in the same
+  module. **No SMTP creds were added to demo.** The public instance already has
+  working Brevo SMTP (`SMTP_HOST=smtp-relay.brevo.com` in env), where this branch
+  never executes — real intake/portal/report email is unchanged. The WARNING
+  level keeps these out of GlitchTip (the SDK `LoggingIntegration` captures
+  `ERROR` and above).
+* **Missing-TOS-template path logs at WARNING, not ERROR (GlitchTip 2172/2173).**
+  `POST /api/tos/accept` with no active template (the demo state, seen with
+  test customer `f748c3d5…` / `…@qq.com`) is an expected client-facing config
+  response, not a server crash. It now logs at WARNING so the GlitchTip
+  LoggingIntegration does not capture it; the `HTTPException(503, "No TOS
+  template configured")` is preserved so a *real* instance still surfaces the
+  misconfiguration to the caller and the operator can seed the template.
+
 ## 2026-06-10 — fix(llm+obs): drop deprecated `temperature`; filter OTel/event-loop noise — v2.68.3
 
 * **AI report generation no longer 400s (GlitchTip 2243-2245).** `claude_llm.generate_report`

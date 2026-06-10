@@ -174,7 +174,14 @@ async def accept_terms(
 
     tpl = get_active_tos_template(payload.customer_id)
     if tpl is None:
-        logger.error("[TOS-ACCEPT-POST] No TOS template available for customer_id=%s", payload.customer_id)
+        # Expected client-facing config state (e.g. the DEMO instance has no TOS
+        # template seeded), NOT a server bug. Log at WARNING so the GlitchTip
+        # LoggingIntegration (event_level=ERROR) does not capture it as an error
+        # (was droneops GlitchTip 2172/2173). The 503 still informs the caller —
+        # on a real instance a missing template is a genuine misconfiguration the
+        # operator must fix, but it is surfaced to the client, not reported as a
+        # crash.
+        logger.warning("[TOS-ACCEPT-POST] No TOS template available for customer_id=%s", payload.customer_id)
         raise HTTPException(503, "No TOS template configured")
 
     client = ClientIdentity(
