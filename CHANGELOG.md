@@ -4,7 +4,20 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
-## 2026-06-07 — fix(auth): single-flight token refresh — stop the dashboard "cycling" on token expiry — v2.68.2
+## 2026-06-10 — fix(llm+obs): drop deprecated `temperature`; filter OTel/event-loop noise — v2.68.3
+
+* **AI report generation no longer 400s (GlitchTip 2243-2245).** `claude_llm.generate_report`
+  removed the `temperature=0.3` parameter and the brittle `_supports_temperature` per-model
+  gate. The configured model (`claude-sonnet-4-6`) returns
+  `400 "temperature is deprecated for this model"` when the param is sent — the prior gate
+  wrongly assumed Sonnet still honored it. `temperature` is an optional tuning knob, not
+  load-bearing for report quality, so it is dropped unconditionally (no current Claude model
+  requires it). Regression test asserts the kwarg never reaches `messages.create`.
+* **GlitchTip/Sentry noise filter (droneops 1789/2201 + event-loop-closed tail).**
+  `observability/sentry._before_send` now drops OTel exporter transport failures
+  (`Failed to export traces`, `StatusCode.UNAVAILABLE`, OTLP) and
+  `RuntimeError: Event loop is closed` shutdown noise before PII scrubbing, so collector
+  blips don't become GlitchTip issues. Real errors still flow to the sanitizer. Tests added.
 
 The operator dashboard visibly blanked → re-authenticated → repopulated in one "blink" roughly every 30 minutes (the reported "portal cycling"). Root cause: when the 30-minute access token expired, the dashboard's parallel polls (missions, customers, batteries, weather, maintenance ×2, flight-library) all 401'd in the same tick, and the axios response interceptor (`frontend/src/api/client.ts`) fired a **separate** `/api/auth/refresh` for *each* 401 — a 7-way refresh storm — before retrying each request.
 
