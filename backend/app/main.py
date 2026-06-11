@@ -402,15 +402,20 @@ async def lifespan(app: FastAPI):
 
 limiter = Limiter(key_func=get_remote_address)
 
-# Raise Starlette's default multipart file-size limit (1 MB) so DJI flight logs,
-# mission images, and backup restores can upload without being silently rejected.
-MultiPartParser.max_file_size = 200 * 1024 * 1024  # 200 MB
-logger.info("MultiPartParser max_file_size set to 200 MB")
+# Multipart SPOOL threshold — NOT a size cap. Starlette backs each file part
+# with SpooledTemporaryFile(max_size=max_file_size): parts beyond it roll over
+# to a disk temp file and are never rejected (formparsers.py:204). v2.39.3 set
+# this to 200 MB believing it was a hard limit, which silently pinned every
+# upload fully in RAM and OOM-killed the backend (1 GiB cgroup) during 45 MB
+# DJI mission-image uploads on 2026-06-11. Keep it small so big uploads spool
+# to disk; per-route size caps live in the routers (e.g. missions.py 60 MB).
+MultiPartParser.max_file_size = 4 * 1024 * 1024  # 4 MB spool-to-disk threshold
+logger.info("MultiPartParser spool threshold set to 4 MB (large uploads spool to disk)")
 
 app = FastAPI(
     title="D.O.C — Drone Operations Command",
     description="Self-hosted mission management, flight log analysis, AI report generation, invoicing, telemetry visualization, and real-time airspace monitoring for commercial drone operators.",
-    version="2.68.6",
+    version="2.68.7",
     lifespan=lifespan,
 )
 

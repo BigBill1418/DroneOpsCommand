@@ -4,6 +4,39 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-06-11 — fix(missions): memory-safe image uploads, 60 MB cap, working previews — v2.68.7
+
+* **Mission-editor image uploads no longer kill the backend; the cap is now
+  60 MB (was 50 MB).** Operator uploaded a batch of 40–46 MB DJI stills at
+  02:28 UTC; the kernel cgroup OOM-killer killed uvicorn twice (02:29:14,
+  02:31:34 — `dmesg`, `CONSTRAINT_MEMCG`, anon-rss ≈ 1 GiB), failing every
+  in-flight upload and restarting the backend (RestartCount=5). Same 1 GiB
+  worker OOM class as v2.68.5/v2.68.6, third code path. Three compounding
+  causes, all fixed:
+  * **Multipart spool pinned uploads in RAM.** v2.39.3 set
+    `MultiPartParser.max_file_size = 200 MB` believing it was a size cap; in
+    Starlette it is the `SpooledTemporaryFile` roll-to-disk threshold and file
+    parts are never rejected on size (`formparsers.py:204`). Now 4 MB — big
+    uploads spool to disk during parse.
+  * **Route buffered + decoded full-resolution.** `await file.read()` held the
+    whole file as bytes, then PIL decoded the full 48 MP image (~150 MB) plus
+    an EXIF-transpose copy. The route now streams from the spooled temp file,
+    uses JPEG **draft-mode decode** (scale ≥2× the 1920 px target → ~35 MB),
+    and bounds concurrent decodes with a 2-slot semaphore. Per-upload transient
+    drops from ~400 MB to <40 MB.
+  * **Headroom:** backend `mem_limit` 1g → 1536m (RSS ratchets under malloc
+    fragmentation; BOS-HQ has >20 GiB available).
+  * **Thumbnails after upload were 404.** The editor built `/uploads/<basename>`
+    but mission images are stored at `<upload_dir>/<mission_id>/<file>`; the
+    static route joins its path arg onto `upload_dir`. URL now includes the
+    mission-id segment.
+  * Cheap rejections (content-type, size) now run **before** any byte
+    processing; a 413 leaves nothing on disk.
+  * Tests: `backend/tests/test_mission_image_upload.py` — 8 cases through the
+    full ASGI stack incl. a 55 MB accept (old cap regression), 61 MB → 413,
+    EXIF orientation, raw-copy fallback, and a guard that fails if anyone
+    reintroduces a whole-file `UploadFile.read()`.
+
 ## 2026-06-11 — fix(reports): simplify GPS tracks before buffering — stops "Generate Report → Cloudflare 520" OOM — v2.68.6
 
 * **Clicking "Generate Report" no longer OOM-kills the backend worker; the

@@ -54,10 +54,12 @@ function basename(p: string): string {
   return p.split('/').pop() || p;
 }
 
-function imageThumbUrl(img: MissionImage): string {
-  // backend returns absolute disk path; the static /uploads route serves
-  // by basename (matches AircraftCard + Maintenance patterns).
-  return `/uploads/${basename(img.file_path)}`;
+function imageThumbUrl(missionId: string, img: MissionImage): string {
+  // Backend returns the absolute disk path; mission images live under
+  // <upload_dir>/<mission_id>/<file>, and the static /uploads route joins
+  // its path arg onto upload_dir — so the URL must include the mission id
+  // segment (basename-only 404s; fixed 2026-06-11).
+  return `/uploads/${missionId}/${basename(img.file_path)}`;
 }
 
 export default function MissionImagesEdit() {
@@ -79,7 +81,7 @@ export default function MissionImagesEdit() {
         const initial: RowState[] = resp.data.images.map((img) => ({
           imageId: img.id,
           name: basename(img.file_path),
-          thumbUrl: imageThumbUrl(img),
+          thumbUrl: imageThumbUrl(id, img),
           status: 'done' as const,
         }));
         setRows(initial);
@@ -151,7 +153,7 @@ export default function MissionImagesEdit() {
             copy[idx] = {
               imageId: resp.data.id,
               name: basename(resp.data.file_path),
-              thumbUrl: imageThumbUrl(resp.data),
+              thumbUrl: imageThumbUrl(id, resp.data),
               status: 'done',
             };
             return copy;
@@ -264,11 +266,11 @@ export default function MissionImagesEdit() {
               console.warn('[MissionImagesEdit] drop rejected', files);
               notifications.show({
                 title: 'Rejected',
-                message: 'Some files were rejected (must be images, max 50MB)',
+                message: 'Some files were rejected (must be images, max 60MB)',
                 color: 'yellow',
               });
             }}
-            maxSize={50 * 1024 * 1024}
+            maxSize={60 * 1024 * 1024}
             accept={IMAGE_MIME_TYPE}
             loading={uploading}
             aria-label="Drop image files here"
@@ -291,7 +293,7 @@ export default function MissionImagesEdit() {
                   Drag images here or click to browse
                 </Text>
                 <Text c="#5a6478" size="sm" mt={4} inline>
-                  JPG, PNG, WebP, TIFF — up to 50MB each
+                  JPG, PNG, WebP, TIFF — up to 60MB each
                 </Text>
               </Box>
             </Group>

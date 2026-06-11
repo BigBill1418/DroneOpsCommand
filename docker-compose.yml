@@ -136,7 +136,10 @@ services:
     restart: unless-stopped
     # BOS-HQ 2026-06-05 sweep: FastAPI API, steady ~325 MiB → 1G. Health
     # interval kept at 30s (customer-facing API).
-    mem_limit: 1g
+    # 2026-06-11: raised 1g → 1536m after the kernel OOM-killed uvicorn twice
+    # during 45 MB DJI image uploads (RSS ratchets under malloc fragmentation
+    # even after the streaming-upload fix; host has >20 GiB headroom).
+    mem_limit: 1536m
     # tini reaps orphan curl/subprocesses spawned by FastAPI handlers so
     # they never accumulate as <defunct> (matches worker service; observed
     # uvicorn zombies 2026-04-19 during HSH-HQ high-load incident).

@@ -1,7 +1,7 @@
 import asyncio
-import io
 import logging
 import os
+import shutil
 import uuid as uuid_mod
 from datetime import datetime, timedelta
 from uuid import UUID
@@ -546,37 +546,63 @@ async def remove_flight(
 # --- Mission Images ---
 
 MAX_IMAGE_DIMENSION = 1920  # Max width or height for report images
+MAX_IMAGE_UPLOAD_BYTES = 60 * 1024 * 1024  # 60 MB — DJI stills routinely run 40–55 MB
+ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp", "image/tiff"}
+
+# Bound concurrent decodes: even draft-downscaled, a 48 MP still costs tens
+# of MB of pixel buffer; the backend runs under a 1 GiB cgroup cap and was
+# OOM-killed on 2026-06-11 when the old whole-file-in-RAM path stacked up.
+_image_decode_sem = asyncio.Semaphore(2)
 
 
-def _write_file(path: str, content: bytes):
-    """Write bytes to disk (runs in executor to avoid blocking)."""
-    with open(path, "wb") as f:
-        f.write(content)
+def _upload_size_bytes(file: UploadFile) -> int:
+    """Size of an already-parsed multipart upload without reading it into RAM."""
+    if file.size is not None:
+        return file.size
+    f = file.file
+    pos = f.tell()
+    f.seek(0, os.SEEK_END)
+    size = f.tell()
+    f.seek(pos)
+    return size
 
 
-def _resize_image(content: bytes, max_dim: int = MAX_IMAGE_DIMENSION) -> tuple[bytes, str]:
-    """Resize image if it exceeds max dimensions. Returns (bytes, extension)."""
+def _process_image_upload(src, dest_dir: str, fallback_ext: str) -> str:
+    """Decode, downscale, and persist an uploaded image. Runs in a worker thread.
+
+    Reads straight from the (disk-spooled) multipart temp file — the full
+    original is never materialized as one bytes object. JPEG draft mode
+    decodes at a reduced scale ≥2× the target so LANCZOS keeps its quality
+    headroom while a 48 MP decode drops from ~150 MB to ~35 MB.
+    Unparseable files fall back to a raw streamed copy (previous behavior).
+    """
+    name = uuid_mod.uuid4()
+    src.seek(0)
     try:
-        img = PILImage.open(io.BytesIO(content))
-        # Preserve orientation from EXIF
+        img = PILImage.open(src)
+        img.draft("RGB", (MAX_IMAGE_DIMENSION * 2, MAX_IMAGE_DIMENSION * 2))
         try:
             from PIL import ImageOps
             img = ImageOps.exif_transpose(img)
         except Exception:
             pass
 
-        if img.width > max_dim or img.height > max_dim:
-            img.thumbnail((max_dim, max_dim), PILImage.LANCZOS)
+        if img.width > MAX_IMAGE_DIMENSION or img.height > MAX_IMAGE_DIMENSION:
+            img.thumbnail((MAX_IMAGE_DIMENSION, MAX_IMAGE_DIMENSION), PILImage.LANCZOS)
 
-        # Save as JPEG for consistency and smaller file size
-        buf = io.BytesIO()
         if img.mode in ("RGBA", "P"):
             img = img.convert("RGB")
-        img.save(buf, format="JPEG", quality=82, optimize=True)
-        return buf.getvalue(), ".jpg"
+        dest = os.path.join(dest_dir, f"{name}.jpg")
+        img.save(dest, format="JPEG", quality=82, optimize=True)
+        img.close()
+        return dest
     except Exception as exc:
-        logger.warning("Image resize failed, using original: %s", exc)
-        return content, ""
+        logger.warning("Image resize failed, storing original: %s", exc)
+        src.seek(0)
+        dest = os.path.join(dest_dir, f"{name}{fallback_ext or '.jpg'}")
+        with open(dest, "wb") as out:
+            shutil.copyfileobj(src, out, 1024 * 1024)
+        return dest
 
 
 @router.post("/{mission_id}/images", response_model=MissionImageResponse, status_code=status.HTTP_201_CREATED)
@@ -591,26 +617,23 @@ async def upload_image(
     if not result.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Mission not found")
 
-    # Save file
+    # Cheap rejections first — before any byte processing or disk writes.
+    if file.content_type and file.content_type not in ALLOWED_IMAGE_TYPES:
+        raise HTTPException(status_code=400, detail="Only JPEG, PNG, WebP, and TIFF images are allowed")
+    size = _upload_size_bytes(file)
+    if size > MAX_IMAGE_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="Image too large (60MB max)")
+    logger.info("Image upload for mission %s: %s (%d bytes)", mission_id, file.filename, size)
+
     upload_dir = os.path.join(settings.upload_dir, str(mission_id))
     os.makedirs(upload_dir, exist_ok=True)
 
-    content = await file.read()
-    if len(content) > 50_000_000:
-        raise HTTPException(status_code=413, detail="Image too large (50MB max)")
-    ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp", "image/tiff"}
-    if file.content_type and file.content_type not in ALLOWED_IMAGE_TYPES:
-        raise HTTPException(status_code=400, detail="Only JPEG, PNG, WebP, and TIFF images are allowed")
-    logger.info("Image upload for mission %s: %s (%d bytes)", mission_id, file.filename, len(content))
-
-    # Resize large images in thread executor to avoid blocking
+    fallback_ext = os.path.splitext(file.filename)[1] if file.filename else ".jpg"
     loop = asyncio.get_running_loop()
-    resized_content, forced_ext = await loop.run_in_executor(None, _resize_image, content)
-    ext = forced_ext or (os.path.splitext(file.filename)[1] if file.filename else ".jpg")
-    filename = f"{uuid_mod.uuid4()}{ext}"
-    file_path = os.path.join(upload_dir, filename)
-
-    await loop.run_in_executor(None, _write_file, file_path, resized_content)
+    async with _image_decode_sem:
+        file_path = await loop.run_in_executor(
+            None, _process_image_upload, file.file, upload_dir, fallback_ext
+        )
 
     # Get sort order using COUNT instead of loading all images
     count_result = await db.execute(
