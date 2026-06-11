@@ -1,10 +1,13 @@
 """Flight library — native flight management with upload, CRUD, and export."""
 
+import asyncio
 import hashlib
 import json
 import logging
 import math
 import os
+import shutil
+import tempfile
 import time
 import traceback
 from collections import Counter, defaultdict
@@ -146,6 +149,189 @@ def _get_stored_file_path(file_hash: str) -> Path | None:
         if f.stem == file_hash:
             return f
     return None
+
+
+def _stream_spool_to_temp(src, dest_path: str) -> tuple[str, int]:
+    """Stream a spooled multipart upload to *dest_path* in 1 MiB chunks,
+    hashing incrementally. Runs in a worker thread. Returns (sha256, size).
+
+    The multipart spool threshold is 4 MB, so ``src`` (``UploadFile.file``)
+    is a disk-backed temp file for any real flight log — the upload is never
+    materialized as a single ``bytes`` object. Replaces the old
+    ``await upload.read()`` whole-dump-in-RAM path that is the same OOM class
+    that killed image uploads (missions.py v2.68.7) and backup uploads
+    (backup.py ``_save_upload_to_disk``) — flight-log upload is the operator's
+    primary field workflow (audit 2026-06-11, finding #9).
+    """
+    sha256 = hashlib.sha256()
+    size = 0
+    src.seek(0)
+    with open(dest_path, "wb") as out:
+        while chunk := src.read(1024 * 1024):
+            sha256.update(chunk)
+            out.write(chunk)
+            size += len(chunk)
+    return sha256.hexdigest(), size
+
+
+def _store_original_from_path(file_hash: str, src_path: str, filename: str) -> None:
+    """Copy an already-spooled flight log into the original-file store.
+
+    Streaming-disk equivalent of :func:`_save_original_file` — same
+    hash-named destination, same idempotent "write only if absent" behaviour,
+    same fail-soft logging — but copies from a temp file instead of holding
+    the whole upload in a ``bytes`` object.
+    """
+    try:
+        _FLIGHT_LOGS_DIR.mkdir(parents=True, exist_ok=True)
+        ext = Path(filename).suffix.lower() if filename else ".bin"
+        dest = _FLIGHT_LOGS_DIR / f"{file_hash}{ext}"
+        if not dest.exists():
+            shutil.copyfile(src_path, dest)
+            logger.debug("Saved original flight log: %s", dest.name)
+    except Exception as e:
+        logger.warning("Failed to save original flight log %s: %s", file_hash, e)
+
+
+class _SpooledUpload:
+    """A flight-log upload streamed to a disk temp file with its hash known.
+
+    Replaces the old ``content = await upload.read()`` whole-dump-in-RAM step.
+    The original file is persisted to the hash-named store on construction
+    (same idempotent semantics as ``_save_original_file``). :meth:`parse`
+    POSTs the temp file to the flight-parser service, streaming it (never a
+    whole-file ``bytes`` in this process). :meth:`close` removes the temp file.
+
+    Used as an async context manager so each caller's ordering — hash, then
+    its own duplicate check, then (only if needed) parse — is preserved
+    exactly, just as the three inline handlers did.
+    """
+
+    def __init__(self, tmp_path: str, file_hash: str, size_bytes: int, filename: str | None) -> None:
+        self.tmp_path = tmp_path
+        self.file_hash = file_hash
+        self.size_bytes = size_bytes
+        self.filename = filename
+
+    async def parse(self, parser_headers: dict) -> tuple[int, dict | None]:
+        """POST the spooled file to the parser. Returns ``(status_code, data)``;
+        ``data`` is ``None`` on a non-200 status (caller appends the same
+        ``"<name>: parser returned <code>"`` error). Raises ``httpx.ConnectError``
+        and JSON-decode errors exactly as the inline code did."""
+        async with httpx.AsyncClient(timeout=120) as client:
+            with open(self.tmp_path, "rb") as parse_src:
+                resp = await client.post(
+                    f"{PARSER_URL}/parse",
+                    files={"file": (self.filename or "upload.txt", parse_src)},
+                    headers=parser_headers,
+                )
+        if resp.status_code != 200:
+            return resp.status_code, None
+        return resp.status_code, resp.json()
+
+    def close(self) -> None:
+        try:
+            os.unlink(self.tmp_path)
+        except OSError:
+            pass
+
+    async def __aenter__(self) -> "_SpooledUpload":
+        return self
+
+    async def __aexit__(self, *exc) -> None:
+        self.close()
+
+
+async def _spool_upload(upload: UploadFile) -> _SpooledUpload:
+    """Stream a disk-spooled multipart upload to a temp file (incremental
+    SHA-256, in a worker thread) and persist the original to the hash-named
+    store — the OOM-safe replacement for ``await upload.read()`` (audit #9).
+
+    The multipart spool threshold is 4 MB, so for any real flight log the
+    upload is already a disk-backed temp file; this never materializes it as
+    a single ``bytes`` object.
+    """
+    loop = asyncio.get_running_loop()
+    fd, tmp_path = tempfile.mkstemp(prefix="flight_upload_")
+    os.close(fd)
+    try:
+        file_hash, size_bytes = await loop.run_in_executor(
+            None, _stream_spool_to_temp, upload.file, tmp_path
+        )
+        await loop.run_in_executor(
+            None, _store_original_from_path, file_hash, tmp_path,
+            upload.filename or "upload.bin",
+        )
+    except BaseException:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+    return _SpooledUpload(tmp_path, file_hash, size_bytes, upload.filename)
+
+
+async def _build_flight_from_parsed(
+    db: AsyncSession, parsed: dict, file_hash: str, upload_filename: str | None
+) -> Flight:
+    """Construct, persist, and battery-track a new :class:`Flight` from a
+    parser-emitted dict.
+
+    The identical ~25-line builder used by ``/upload``, ``/device-upload``
+    and ``/reprocess`` for newly-imported flights. Resolves fleet attribution,
+    generates the display name, persists the row (flush + refresh), logs an
+    auto-match line when matched, and best-effort tracks the battery via a
+    savepoint so battery failures never roll back the flight import. Behaviour
+    is byte-for-byte what the three inline blocks did.
+    """
+    ph = parsed.get("file_hash", file_hash)
+    parsed_start = _parse_datetime(parsed.get("start_time"))
+    fleet_match = await _match_fleet_aircraft(
+        db, parsed.get("drone_serial"), parsed.get("drone_model")
+    )
+    flight_name = await _generate_flight_name(
+        db, parsed.get("drone_model"), fleet_match, parsed_start
+    )
+
+    flight = Flight(
+        name=flight_name,
+        drone_model=fleet_match.model_name if fleet_match else parsed.get("drone_model"),
+        drone_serial=parsed.get("drone_serial"),
+        battery_serial=parsed.get("battery_serial"),
+        start_time=parsed_start,
+        duration_secs=parsed.get("duration_secs", 0),
+        total_distance=parsed.get("total_distance", 0),
+        max_altitude=parsed.get("max_altitude", 0),
+        max_speed=parsed.get("max_speed", 0),
+        home_lat=parsed.get("home_lat"),
+        home_lon=parsed.get("home_lon"),
+        point_count=parsed.get("point_count", 0),
+        gps_track=parsed.get("gps_track"),
+        telemetry=parsed.get("telemetry"),
+        raw_metadata=parsed.get("raw_metadata"),
+        source=parsed.get("source", "dji_txt"),
+        source_file_hash=ph,
+        original_filename=parsed.get("original_filename", upload_filename),
+        aircraft_id=fleet_match.id if fleet_match else None,
+    )
+    if fleet_match:
+        logger.info("Auto-matched flight to fleet aircraft: %s (serial=%s)",
+                    fleet_match.model_name, fleet_match.serial_number)
+    db.add(flight)
+    await db.flush()
+    await db.refresh(flight)
+
+    # Auto-track battery — best-effort via savepoint so failures
+    # don't rollback the flight import
+    battery_data = parsed.get("battery_data")
+    if battery_data and battery_data.get("serial"):
+        try:
+            async with db.begin_nested():
+                await _track_battery(db, flight, battery_data)
+        except Exception as bat_exc:
+            logger.warning("Battery tracking failed for flight %s: %s", flight.id, bat_exc)
+
+    return flight
 
 
 import re as _re
@@ -833,31 +1019,22 @@ async def device_upload_flights(
 
     for upload in files:
         try:
-            content = await upload.read()
-            total_bytes += len(content)
-            file_hash = hashlib.sha256(content).hexdigest()
+            async with await _spool_upload(upload) as spooled:
+                total_bytes += spooled.size_bytes
+                file_hash = spooled.file_hash
 
-            # Save original file for future re-processing
-            _save_original_file(file_hash, content, upload.filename or "upload.bin")
-
-            existing = await db.execute(
-                select(Flight).where(Flight.source_file_hash == file_hash)
-            )
-            if existing.scalar_one_or_none():
-                skipped += 1
-                continue
-
-            async with httpx.AsyncClient(timeout=120) as client:
-                resp = await client.post(
-                    f"{PARSER_URL}/parse",
-                    files={"file": (upload.filename or "upload.txt", content)},
-                    headers=parser_headers,
+                existing = await db.execute(
+                    select(Flight).where(Flight.source_file_hash == file_hash)
                 )
-                if resp.status_code != 200:
-                    errors.append(f"{upload.filename}: parser returned {resp.status_code}")
+                if existing.scalar_one_or_none():
+                    skipped += 1
                     continue
 
-                data = resp.json()
+                status_code, data = await spooled.parse(parser_headers)
+                if data is None:
+                    errors.append(f"{upload.filename}: parser returned {status_code}")
+                    continue
+
                 if data.get("errors"):
                     errors.extend(data["errors"])
 
@@ -868,50 +1045,10 @@ async def device_upload_flights(
                         skipped += 1
                         continue
 
-                    parsed_start = _parse_datetime(parsed.get("start_time"))
-                    fleet_match = await _match_fleet_aircraft(
-                        db, parsed.get("drone_serial"), parsed.get("drone_model")
+                    flight = await _build_flight_from_parsed(
+                        db, parsed, file_hash, upload.filename
                     )
-                    flight_name = await _generate_flight_name(
-                        db, parsed.get("drone_model"), fleet_match, parsed_start
-                    )
-
-                    flight = Flight(
-                        name=flight_name,
-                        drone_model=fleet_match.model_name if fleet_match else parsed.get("drone_model"),
-                        drone_serial=parsed.get("drone_serial"),
-                        battery_serial=parsed.get("battery_serial"),
-                        start_time=parsed_start,
-                        duration_secs=parsed.get("duration_secs", 0),
-                        total_distance=parsed.get("total_distance", 0),
-                        max_altitude=parsed.get("max_altitude", 0),
-                        max_speed=parsed.get("max_speed", 0),
-                        home_lat=parsed.get("home_lat"),
-                        home_lon=parsed.get("home_lon"),
-                        point_count=parsed.get("point_count", 0),
-                        gps_track=parsed.get("gps_track"),
-                        telemetry=parsed.get("telemetry"),
-                        raw_metadata=parsed.get("raw_metadata"),
-                        source=parsed.get("source", "dji_txt"),
-                        source_file_hash=ph,
-                        original_filename=parsed.get("original_filename", upload.filename),
-                        aircraft_id=fleet_match.id if fleet_match else None,
-                    )
-                    if fleet_match:
-                        logger.info("Auto-matched flight to fleet aircraft: %s (serial=%s)",
-                                    fleet_match.model_name, fleet_match.serial_number)
-                    db.add(flight)
-                    await db.flush()
-                    await db.refresh(flight)
                     imported.append(flight)
-
-                    battery_data = parsed.get("battery_data")
-                    if battery_data and battery_data.get("serial"):
-                        try:
-                            async with db.begin_nested():
-                                await _track_battery(db, flight, battery_data)
-                        except Exception as bat_exc:
-                            logger.warning("Battery tracking failed for flight %s: %s", flight.id, bat_exc)
 
         except httpx.ConnectError:
             errors.append(f"{upload.filename}: flight-parser service unavailable")
@@ -1166,23 +1303,16 @@ async def reprocess_flights(
 
     for upload in files:
         try:
-            content = await upload.read()
-            file_hash = hashlib.sha256(content).hexdigest()
+            # Stream/overwrite original file off the disk spool (audit #9);
+            # reprocess always parses, so there is no pre-parser dedup here.
+            async with await _spool_upload(upload) as spooled:
+                file_hash = spooled.file_hash
 
-            # Save/overwrite original file
-            _save_original_file(file_hash, content, upload.filename or "upload.bin")
-
-            async with httpx.AsyncClient(timeout=120) as client:
-                resp = await client.post(
-                    f"{PARSER_URL}/parse",
-                    files={"file": (upload.filename or "upload.txt", content)},
-                    headers=parser_headers,
-                )
-                if resp.status_code != 200:
-                    errors.append(f"{upload.filename}: parser returned {resp.status_code}")
+                status_code, data = await spooled.parse(parser_headers)
+                if data is None:
+                    errors.append(f"{upload.filename}: parser returned {status_code}")
                     continue
 
-                data = resp.json()
                 if data.get("errors"):
                     errors.extend(data["errors"])
 
@@ -1485,35 +1615,27 @@ async def upload_flights(
     if dji_key:
         parser_headers["X-DJI-Api-Key"] = dji_key
 
-    # Send files to the parser service
+    # Send files to the parser service — streamed off the disk-spooled
+    # multipart temp file, never the whole upload in RAM (audit #9).
     for upload in files:
         try:
-            content = await upload.read()
-            file_hash = hashlib.sha256(content).hexdigest()
+            async with await _spool_upload(upload) as spooled:
+                file_hash = spooled.file_hash
 
-            # Save original file for future re-processing
-            _save_original_file(file_hash, content, upload.filename or "upload.bin")
-
-            # Check for duplicate
-            existing = await db.execute(
-                select(Flight).where(Flight.source_file_hash == file_hash)
-            )
-            if existing.scalar_one_or_none():
-                skipped += 1
-                continue
-
-            # Call parser service
-            async with httpx.AsyncClient(timeout=120) as client:
-                resp = await client.post(
-                    f"{PARSER_URL}/parse",
-                    files={"file": (upload.filename or "upload.txt", content)},
-                    headers=parser_headers,
+                # Check for duplicate
+                existing = await db.execute(
+                    select(Flight).where(Flight.source_file_hash == file_hash)
                 )
-                if resp.status_code != 200:
-                    errors.append(f"{upload.filename}: parser returned {resp.status_code}")
+                if existing.scalar_one_or_none():
+                    skipped += 1
                     continue
 
-                data = resp.json()
+                # Call parser service
+                status_code, data = await spooled.parse(parser_headers)
+                if data is None:
+                    errors.append(f"{upload.filename}: parser returned {status_code}")
+                    continue
+
                 if data.get("errors"):
                     errors.extend(data["errors"])
 
@@ -1525,52 +1647,10 @@ async def upload_flights(
                         skipped += 1
                         continue
 
-                    parsed_start = _parse_datetime(parsed.get("start_time"))
-                    fleet_match = await _match_fleet_aircraft(
-                        db, parsed.get("drone_serial"), parsed.get("drone_model")
+                    flight = await _build_flight_from_parsed(
+                        db, parsed, file_hash, upload.filename
                     )
-                    flight_name = await _generate_flight_name(
-                        db, parsed.get("drone_model"), fleet_match, parsed_start
-                    )
-
-                    flight = Flight(
-                        name=flight_name,
-                        drone_model=fleet_match.model_name if fleet_match else parsed.get("drone_model"),
-                        drone_serial=parsed.get("drone_serial"),
-                        battery_serial=parsed.get("battery_serial"),
-                        start_time=parsed_start,
-                        duration_secs=parsed.get("duration_secs", 0),
-                        total_distance=parsed.get("total_distance", 0),
-                        max_altitude=parsed.get("max_altitude", 0),
-                        max_speed=parsed.get("max_speed", 0),
-                        home_lat=parsed.get("home_lat"),
-                        home_lon=parsed.get("home_lon"),
-                        point_count=parsed.get("point_count", 0),
-                        gps_track=parsed.get("gps_track"),
-                        telemetry=parsed.get("telemetry"),
-                        raw_metadata=parsed.get("raw_metadata"),
-                        source=parsed.get("source", "dji_txt"),
-                        source_file_hash=ph,
-                        original_filename=parsed.get("original_filename", upload.filename),
-                        aircraft_id=fleet_match.id if fleet_match else None,
-                    )
-                    if fleet_match:
-                        logger.info("Auto-matched flight to fleet aircraft: %s (serial=%s)",
-                                    fleet_match.model_name, fleet_match.serial_number)
-                    db.add(flight)
-                    await db.flush()
-                    await db.refresh(flight)
                     imported.append(flight)
-
-                    # Auto-track battery — best-effort via savepoint so failures
-                    # don't rollback the flight import
-                    battery_data = parsed.get("battery_data")
-                    if battery_data and battery_data.get("serial"):
-                        try:
-                            async with db.begin_nested():
-                                await _track_battery(db, flight, battery_data)
-                        except Exception as bat_exc:
-                            logger.warning("Battery tracking failed for flight %s: %s", flight.id, bat_exc)
 
         except httpx.ConnectError:
             errors.append(f"{upload.filename}: flight-parser service unavailable")

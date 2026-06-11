@@ -4,6 +4,42 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-06-11 — feat(resilience): standby-safe startup + hot-path indexes + streaming flight ingest — v2.69.0
+
+Phases 2–3 of the 2026-06-11 ground-up audit (findings #4 FAILOVER-SENSITIVE,
+#7, #9). ADR-0021.
+
+* **Backend no longer crash-loops when its database is a standby (ADR-0021,
+  failover-hardening).** Schema DDL + seed + backfill previously ran on
+  EVERY boot with no replica guard — booting against a read-only standby
+  (mid-failover, or standby-first blue-green) died on "cannot execute … in
+  a read-only transaction" during the exact window an outage is least
+  acceptable. The lifespan now probes `pg_is_in_recovery()` first: on a
+  standby it skips all writes with a WARNING and serves read traffic; on a
+  primary it runs the sync as before (probe failure fails safe to
+  primary). Restart-after-promotion re-runs the sync (documented).
+  Filesystem-only steps still run regardless. 8 new tests.
+* **Four hot-path indexes** (`CREATE INDEX IF NOT EXISTS`, primary-only via
+  the same guard, WAL-replicates to the standby): `mission_flights.
+  mission_id`, `flights.aircraft_id`, `customers.email` (login lookup),
+  `line_items.invoice_id`. Each justified against a real query pattern in
+  ADR-0021; candidates already covered by unique constraints rejected.
+  CONCURRENTLY trade-off documented (revisit past ~1M rows).
+* **Flight-log uploads stream to disk instead of buffering whole logs in
+  RAM** — the operator's primary field workflow shared the OOM class fixed
+  for images (v2.68.7) and backups (v2.68.8). `/upload`, `/device-upload`,
+  and `/reprocess` now spool→stream with incremental SHA-256, and the
+  parser POST sends a file object (httpx chunks it). ~480 lines of drifted
+  duplication consolidated into shared helpers (`_spool_upload`,
+  `_build_flight_from_parsed`, `_store_original_from_path`) with route
+  contracts byte-identical — dedup-before-parse ordering, response shapes,
+  error strings, audit logs, and `/reprocess`'s divergent update-in-place
+  branch all preserved (the latter deliberately left inline rather than
+  risk a log-line change). Audit's "4th duplicate handler" was a
+  misread — `/import/opendronelog` takes no upload; untouched. 9 new
+  tests incl. a load-bearing whole-file-read guard.
+* Suite: **364 passed, 0 failed** (+17 from v2.68.8).
+
 ## 2026-06-11 — perf(stack): event-loop unblocking sweep + eager-load fixes from the ground-up audit — v2.68.8
 
 Phase 1 of the 2026-06-11 ground-up audit (`docs/plans/2026-06-11-ground-up-audit.md`,

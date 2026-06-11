@@ -253,6 +253,200 @@ def _add_missing_columns(conn):
         raise
 
 
+def _create_hot_indexes(conn):
+    """Create hot-path indexes idempotently (ADR-0021).
+
+    NOTE: synchronous — runs via ``conn.run_sync()`` inside the same
+    primary-only guarded block as ``_add_missing_columns``. Do NOT make
+    this async or the body will never execute.
+
+    Each index is ``CREATE INDEX IF NOT EXISTS`` so a re-run on a DB that
+    already has it is a no-op. The guard in the lifespan ensures this only
+    runs on a writable primary — the created indexes replicate to the
+    CHAD-HQ failback standby via WAL, which is exactly why this is
+    failover-safe (the standby never issues the DDL itself; it receives
+    the index through replication).
+
+    Trade-off — plain ``CREATE INDEX`` (NOT ``CONCURRENTLY``):
+    A non-concurrent ``CREATE INDEX`` takes a ``SHARE`` lock that blocks
+    writes (not reads) on the target table for the build duration. At the
+    current table sizes (single-operator fleet; thousands of rows, not
+    millions) each build is sub-second, so the brief write-lock is
+    acceptable and lets us run inside the existing transactional startup
+    block alongside ``create_all``/``_add_missing_columns``.
+    ``CREATE INDEX CONCURRENTLY`` would avoid the write-lock but CANNOT
+    run inside a transaction block and cannot be combined with other DDL
+    in one ``engine.begin()`` — it would require its own autocommit
+    connection and leaves an ``INVALID`` index behind on failure that must
+    be dropped manually. Revisit (move to CONCURRENTLY, or to Alembic —
+    see ADR-0021) if any of these tables grows past ~1M rows.
+
+    Indexes (each justified against a real query pattern — see ADR-0021):
+      - mission_flights.mission_id : Mission.flights selectin + business
+        signals join (models/mission.py, business_signals.py:107). FK col;
+        PG does NOT auto-index FKs.
+      - flights.aircraft_id        : GROUP BY in maintenance dashboard
+        /status (maintenance.py:505). FK col.
+      - customers.email            : client-portal login lookup
+        (client_portal.py:159). Plain column, login-path full scan.
+      - line_items.invoice_id      : Invoice.line_items selectin on every
+        invoice load (models/invoice.py:97). FK col.
+    """
+    import logging
+    from sqlalchemy import text
+
+    logger = logging.getLogger("doc.migrations")
+
+    hot_indexes = (
+        ("ix_mission_flights_mission_id", "mission_flights", "mission_id"),
+        ("ix_flights_aircraft_id", "flights", "aircraft_id"),
+        ("ix_customers_email", "customers", "email"),
+        ("ix_line_items_invoice_id", "line_items", "invoice_id"),
+    )
+
+    for index_name, table, column in hot_indexes:
+        try:
+            logger.info("Ensuring index %s on %s(%s)", index_name, table, column)
+            conn.execute(
+                text(f"CREATE INDEX IF NOT EXISTS {index_name} ON {table} ({column})")
+            )
+        except Exception as exc:
+            # Best-effort per-index: a missing table (fresh DB mid-create_all
+            # ordering, or a table that legitimately doesn't exist yet) must
+            # not abort the whole startup. create_all + _add_missing_columns
+            # ran first in the same block, so the table normally exists.
+            logger.warning("Could not create index %s on %s(%s): %s", index_name, table, column, exc)
+
+    logger.info("Hot-path index check complete")
+
+
+async def _is_in_recovery() -> bool:
+    """Return True if the connected PostgreSQL is a read-only standby.
+
+    Runs ``SELECT pg_is_in_recovery()`` on a fresh connection. On a
+    promoted primary this returns ``False``; on a streaming standby (or a
+    node still replaying WAL after a crash) it returns ``True``.
+
+    ADR-0021 — this is the failover guard. If the backend boots while its
+    ``DATABASE_URL`` points at a standby/recovering node (mid-failover or
+    misconfiguration), the startup DDL/seed/backfill block would raise
+    *"cannot execute … in a read-only transaction"* and crash-loop the
+    container during the exact window a customer-facing outage is least
+    acceptable. By detecting recovery first and skipping all writes, the
+    backend instead comes up serving READ traffic against the standby.
+
+    Promotion behaviour (documented, intentional): if this node is later
+    promoted to primary, this already-running backend will NOT
+    retroactively run the skipped DDL/seed — the guard is evaluated once
+    at startup. A container restart after promotion (which the blue-green
+    deploy flow performs, and which an operator can trigger) re-evaluates
+    the guard, sees ``pg_is_in_recovery() = false``, and runs the schema
+    sync normally. Restart-after-promotion is the accepted recovery path.
+
+    Fail-safe: if the probe itself errors (driver hiccup, transient
+    network), we return ``False`` (assume primary) so a healthy primary is
+    never wrongly treated as a standby and left un-migrated. A genuine
+    standby would have already failed ``_wait_for_db``'s ``SELECT 1`` if
+    truly unreachable; a reachable standby answers ``pg_is_in_recovery()``
+    cleanly.
+    """
+    from sqlalchemy import text
+
+    try:
+        async with engine.connect() as conn:
+            result = await conn.execute(text("SELECT pg_is_in_recovery()"))
+            return bool(result.scalar())
+    except Exception as exc:
+        logger.warning(
+            "STARTUP: pg_is_in_recovery() probe failed (%s) — assuming primary, "
+            "schema sync will proceed", exc,
+        )
+        return False
+
+
+async def _run_startup_schema_and_seed():
+    """Run all schema DDL, seed, and backfill writes (primary-only).
+
+    ADR-0021 — extracted verbatim from the lifespan so the
+    ``pg_is_in_recovery()`` guard can skip the ENTIRE write block in one
+    place, and so the skip/run decision is unit-testable. Every statement
+    in here mutates the database and therefore MUST NOT run against a
+    read-only standby.
+    """
+    # Create tables + sync schema + hot-path indexes (ADR-0021).
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(_add_missing_columns)
+        await conn.run_sync(_create_hot_indexes)
+
+    # Seed data
+    from app.seed import seed_database
+    async with async_session() as session:
+        await seed_database(session)
+
+    # Demo mode: seed sample data for the demo instance
+    if settings.demo_mode:
+        from app.demo_seed import seed_demo_data
+        async with async_session() as demo_session:
+            await seed_demo_data(demo_session)
+        logger.info("STARTUP: Demo data seeded")
+
+    # Post-seed: log setup status (no auto-repair — credentials managed via UI)
+    from app.models.user import User
+    async with async_session() as verify_session:
+        result = await verify_session.execute(select(User))
+        user_count = len(result.scalars().all())
+        if user_count == 0:
+            # Managed instance: auto-create admin from env vars instead of setup wizard
+            if settings.managed_instance and settings.admin_username and settings.admin_password:
+                from app.auth.jwt import hash_password
+                admin = User(
+                    username=settings.admin_username,
+                    hashed_password=hash_password(settings.admin_password),
+                )
+                verify_session.add(admin)
+                await verify_session.commit()
+                logger.info("STARTUP: Managed instance — admin user '%s' created from env vars", settings.admin_username)
+            else:
+                logger.info("STARTUP: No users in database — setup wizard will appear on first visit")
+        else:
+            logger.info("STARTUP: %d user(s) in database — login ready", user_count)
+
+    # Auto-backfill: link UNATTACHED flights to fleet aircraft (Phase 1 only).
+    #
+    # v2.63.15 (ADR-0007 follow-up): Phase 2 — normalizing `drone_model` on
+    # already-linked flights to the canonical fleet `model_name` — was
+    # removed from this startup path. It used to run on every container
+    # restart and would silently overwrite operator-curated `drone_model`
+    # values (e.g. a flight manually attached to a fleet aircraft where
+    # the operator left the parsed model string verbatim). The same logic
+    # remains available on demand via the manual POST `/api/flight-library/backfill-aircraft`
+    # endpoint, which is the right place for "renamed an aircraft, sync
+    # all linked flights" workflows.
+    try:
+        from app.models.flight import Flight
+        from app.routers.flight_library import _match_fleet_aircraft
+        async with async_session() as backfill_session:
+            result = await backfill_session.execute(
+                select(Flight).where(Flight.aircraft_id.is_(None))
+            )
+            unlinked = result.scalars().all()
+            matched = 0
+            for flight in unlinked:
+                fleet_match = await _match_fleet_aircraft(backfill_session, flight.drone_serial, flight.drone_model)
+                if fleet_match:
+                    flight.aircraft_id = fleet_match.id
+                    flight.drone_model = fleet_match.model_name
+                    matched += 1
+
+            if matched > 0:
+                await backfill_session.commit()
+            logger.info("STARTUP: Aircraft backfill — %d/%d unlinked matched (Phase 2 normalize moved to manual endpoint)",
+                        matched, len(unlinked))
+    except Exception as e:
+        logger.warning("STARTUP: Aircraft backfill failed: %s", e)
+
+
 async def _wait_for_db(max_retries: int = 10, delay: float = 3.0):
     """Retry DB connection on startup — handles race conditions after restart."""
     from sqlalchemy import text
@@ -298,43 +492,29 @@ async def lifespan(app: FastAPI):
     await _wait_for_db()
     await _wait_for_redis()
 
-    # Create tables
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-        await conn.run_sync(_add_missing_columns)
+    # ── Failover guard (ADR-0021) ────────────────────────────────────────
+    # If the connected Postgres is a read-only standby (mid-failover or a
+    # misconfigured DATABASE_URL), SKIP every schema-DDL / seed / backfill
+    # write and come up serving READ traffic only. Running create_all /
+    # ALTER / seed against a standby raises "cannot execute … in a
+    # read-only transaction" and crash-loops the container during the exact
+    # window a customer-facing outage is least acceptable. See ADR-0021 and
+    # `_is_in_recovery` for the documented promotion behaviour
+    # (restart-after-promotion re-runs the sync).
+    if await _is_in_recovery():
+        logger.warning(
+            "STARTUP: PostgreSQL is in recovery (read-only standby) — "
+            "SKIPPING all schema DDL, seed, and backfill. Serving READ "
+            "traffic only. Restart this backend after the DB is promoted "
+            "to primary to run the schema sync (ADR-0021)."
+        )
+    else:
+        logger.info("STARTUP: PostgreSQL is a writable primary — running schema sync + seed (ADR-0021)")
+        await _run_startup_schema_and_seed()
 
-    # Seed data
-    from app.seed import seed_database
-    async with async_session() as session:
-        await seed_database(session)
-
-    # Demo mode: seed sample data for the demo instance
-    if settings.demo_mode:
-        from app.demo_seed import seed_demo_data
-        async with async_session() as demo_session:
-            await seed_demo_data(demo_session)
-        logger.info("STARTUP: Demo data seeded")
-
-    # Post-seed: log setup status (no auto-repair — credentials managed via UI)
-    from app.models.user import User
-    async with async_session() as verify_session:
-        result = await verify_session.execute(select(User))
-        user_count = len(result.scalars().all())
-        if user_count == 0:
-            # Managed instance: auto-create admin from env vars instead of setup wizard
-            if settings.managed_instance and settings.admin_username and settings.admin_password:
-                from app.auth.jwt import hash_password
-                admin = User(
-                    username=settings.admin_username,
-                    hashed_password=hash_password(settings.admin_password),
-                )
-                verify_session.add(admin)
-                await verify_session.commit()
-                logger.info("STARTUP: Managed instance — admin user '%s' created from env vars", settings.admin_username)
-            else:
-                logger.info("STARTUP: No users in database — setup wizard will appear on first visit")
-        else:
-            logger.info("STARTUP: %d user(s) in database — login ready", user_count)
+    # ── The remaining startup steps below are filesystem-only (no DB
+    # writes) and run regardless of recovery state so a read-replica
+    # backend still serves bundled assets and has its upload dirs. ───────
 
     # Ensure upload/report directories exist
     os.makedirs(settings.upload_dir, exist_ok=True)
@@ -361,40 +541,6 @@ async def lifespan(app: FastAPI):
                     "(will serve from /static/aircraft/ instead)", fname, e
                 )
 
-    # Auto-backfill: link UNATTACHED flights to fleet aircraft (Phase 1 only).
-    #
-    # v2.63.15 (ADR-0007 follow-up): Phase 2 — normalizing `drone_model` on
-    # already-linked flights to the canonical fleet `model_name` — was
-    # removed from this startup path. It used to run on every container
-    # restart and would silently overwrite operator-curated `drone_model`
-    # values (e.g. a flight manually attached to a fleet aircraft where
-    # the operator left the parsed model string verbatim). The same logic
-    # remains available on demand via the manual POST `/api/flight-library/backfill-aircraft`
-    # endpoint, which is the right place for "renamed an aircraft, sync
-    # all linked flights" workflows.
-    try:
-        from app.models.flight import Flight
-        from app.routers.flight_library import _match_fleet_aircraft
-        async with async_session() as backfill_session:
-            result = await backfill_session.execute(
-                select(Flight).where(Flight.aircraft_id.is_(None))
-            )
-            unlinked = result.scalars().all()
-            matched = 0
-            for flight in unlinked:
-                fleet_match = await _match_fleet_aircraft(backfill_session, flight.drone_serial, flight.drone_model)
-                if fleet_match:
-                    flight.aircraft_id = fleet_match.id
-                    flight.drone_model = fleet_match.model_name
-                    matched += 1
-
-            if matched > 0:
-                await backfill_session.commit()
-            logger.info("STARTUP: Aircraft backfill — %d/%d unlinked matched (Phase 2 normalize moved to manual endpoint)",
-                        matched, len(unlinked))
-    except Exception as e:
-        logger.warning("STARTUP: Aircraft backfill failed: %s", e)
-
     yield
 
     await engine.dispose()
@@ -415,7 +561,7 @@ logger.info("MultiPartParser spool threshold set to 4 MB (large uploads spool to
 app = FastAPI(
     title="D.O.C — Drone Operations Command",
     description="Self-hosted mission management, flight log analysis, AI report generation, invoicing, telemetry visualization, and real-time airspace monitoring for commercial drone operators.",
-    version="2.68.8",
+    version="2.69.0",
     lifespan=lifespan,
 )
 
