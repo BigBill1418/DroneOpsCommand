@@ -264,3 +264,29 @@ rationale.
 - **Trigger.** Bill rotated M4TD in-place 2026-04-24 AM; operator had to manually paste new key on RC Pro Settings. v1.3.24's preflight gate surfaced the invalid-key state correctly, but eliminating the paste step was the real goal.
 - **Deliverable.** ADR-0003 (`docs/adr/0003-zero-touch-device-key-rotation.md`) + plan (`docs/plans/2026-04-24-zero-touch-key-rotation.md`) + migration + endpoint + Celery task + tests. Remote routine `trig_01KiBK88vqs6vtRf75rkxcw8` initially shipped an empty branch; aegis re-ran and produced both PRs.
 - **Owner.** aegis (scaffold); Bill (review + merge).
+
+### FU-8 — Ground-up audit residuals (2026-06-11 multi-agent pass)
+
+- **Status.** Open. Phases 1–3 of the audit SHIPPED (v2.68.7 image-upload OOM
+  fix, v2.68.8 event-loop unblocking sweep + eager-load scoping, v2.69.0
+  standby-safe startup + hot-path indexes + streaming flight ingest).
+  Full findings: `docs/plans/2026-06-11-ground-up-audit.md`; ADR-0021.
+- **Remaining items (deliberately deferred, in priority order):**
+  1. Mission Hub list payload is still O(track) — `flight_data_cache`
+     duplicates the GPS track in every list row; needs a lean list schema or
+     pagination (contract change → frontend work in the same pass).
+  2. Adopt Alembic for schema migrations; move the startup
+     `create_all`/`_add_missing_columns`/index block into versioned
+     migrations (ADR-0021 future-work section).
+  3. Stripe: migrate module-global `stripe.api_key` to per-call
+     `StripeClient` instances (closes the key-rotation interleave window
+     noted in the v2.68.8 verification).
+  4. Backup/restore as a Celery job with progress polling (currently
+     executor-offloaded in-request; contract change).
+  5. `/reprocess` new-flight branch could reuse `_build_flight_from_parsed`
+     if its divergent log lines are acceptable; delete now-unused
+     `_save_original_file`.
+  6. Audit P2/P3 index candidates (e.g. `flights.start_time`) once Alembic
+     lands.
+- **Trigger to act.** Operator-driven, or the next perf session.
+- **Owner.** TBD.
