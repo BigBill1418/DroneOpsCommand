@@ -1,5 +1,7 @@
 """Stripe Checkout integration — creates hosted checkout sessions for invoice payment."""
 
+import asyncio
+import functools
 import logging
 
 import stripe
@@ -16,6 +18,25 @@ STRIPE_KEYS = [
     "stripe_webhook_secret",
     "stripe_publishable_key",
 ]
+
+
+async def _stripe_call(fn, *args, **kwargs):
+    """Run a network-touching Stripe SDK call off the event loop.
+
+    The synchronous `stripe` SDK makes a blocking HTTPS round-trip to
+    api.stripe.com (100 ms–several s); calling it inline in an async
+    handler freezes every concurrent request for the duration (audit
+    2026-06-11, P1-3). Offload to the default thread-pool executor —
+    same pattern as the image-resize offload in missions.py/aircraft.py.
+
+    Exceptions propagate unchanged, so callers keep their existing
+    retry/error semantics (e.g. `except stripe.StripeError`).
+
+    NOTE: `stripe.Webhook.construct_event` is CPU-only (HMAC signature
+    check, no network) and intentionally stays inline at its call site.
+    """
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, functools.partial(fn, *args, **kwargs))
 
 
 async def get_stripe_settings(db: AsyncSession) -> dict:
@@ -134,7 +155,9 @@ async def create_checkout_session(
     )
 
     try:
-        session = stripe.checkout.Session.create(
+        # Offloaded — blocking HTTPS round-trip must not stall the loop.
+        session = await _stripe_call(
+            stripe.checkout.Session.create,
             payment_method_types=["card", "us_bank_account"],
             line_items=checkout_line_items,
             mode="payment",

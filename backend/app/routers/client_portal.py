@@ -489,14 +489,16 @@ async def _reuse_existing_checkout_session(
     if not session_id:
         return None
     try:
-        from app.services.stripe_service import get_stripe_settings
+        from app.services.stripe_service import get_stripe_settings, _stripe_call
         import stripe as _stripe
         cfg = await get_stripe_settings(db)
         secret = cfg.get("stripe_secret_key")
         if not secret:
             return None
         _stripe.api_key = secret
-        existing = _stripe.checkout.Session.retrieve(session_id)
+        # Offloaded via _stripe_call — sync SDK round-trip must not
+        # block the event loop on every Pay click (audit P1-3).
+        existing = await _stripe_call(_stripe.checkout.Session.retrieve, session_id)
     except Exception as exc:
         logger.warning(
             "%s could not retrieve existing session=%s for reuse check: %s",

@@ -15,7 +15,6 @@ crashing one).
 
 from __future__ import annotations
 
-import asyncio
 import json
 
 import pytest
@@ -35,10 +34,6 @@ def _reset_module_state(monkeypatch):
     monkeypatch.setattr(cache_mod, "_conn", lambda: fake_client)
     yield
     # fakeredis cleans up automatically, no aclose needed.
-
-
-def _run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
 
 
 @pytest.mark.asyncio

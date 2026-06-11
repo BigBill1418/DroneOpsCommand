@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import defer, raiseload, selectinload
 
 from app.auth.jwt import get_current_user
 from app.database import get_db
@@ -12,6 +12,40 @@ from app.models.mission import Mission, MissionFlight
 from app.models.user import User
 
 router = APIRouter(prefix="/api/financials", tags=["financials"])
+
+
+def _billable_mission_load_options():
+    """Loader options for the billable-mission graph (2026-06-11 audit P0-1).
+
+    CRITICAL (same OOM class as ADR-0019): ``MissionFlight.flight`` is
+    ``lazy="selectin"`` at the mapper level, so a bare
+    ``selectinload(Mission.flights)`` cascades into loading every attached
+    ``Flight`` row IN FULL — gps_track (~19k points per flight), telemetry
+    time-series and raw_metadata included. This endpoint loads ALL billable
+    missions with no limit and only ever reads ``mf.aircraft.model_name``,
+    so that cascade decompressed the entire TOASTed track history on every
+    Financials dashboard load — an unbounded blow-up under the 1 GiB cgroup
+    cap as flight history grows.
+
+    Scoped per-query (NOT a mapper-level lazy="raise"):
+      * ``raiseload(MissionFlight.flight)`` — never needed here; raises
+        loudly if a future change starts touching it instead of silently
+        re-introducing the OOM.
+      * ``defer(MissionFlight.flight_data_cache)`` — the cache JSON holds a
+        duplicated GPS track per attached flight; the summary never reads it.
+      * ``raiseload(Mission.images)`` — gallery rows are never referenced by
+        the aggregation loop; skip the per-mission selectin query entirely.
+    """
+    return (
+        selectinload(Mission.customer),
+        selectinload(Mission.flights).options(
+            defer(MissionFlight.flight_data_cache),
+            raiseload(MissionFlight.flight),
+            selectinload(MissionFlight.aircraft),
+        ),
+        raiseload(Mission.images),
+        selectinload(Mission.invoice).selectinload(Invoice.line_items),
+    )
 
 
 @router.get("/summary")
@@ -23,11 +57,7 @@ async def financials_summary(
     result = await db.execute(
         select(Mission)
         .where(Mission.is_billable == True)
-        .options(
-            selectinload(Mission.customer),
-            selectinload(Mission.flights).selectinload(MissionFlight.aircraft),
-            selectinload(Mission.invoice).selectinload(Invoice.line_items),
-        )
+        .options(*_billable_mission_load_options())
     )
     missions = result.scalars().all()
 

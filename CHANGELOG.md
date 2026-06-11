@@ -4,6 +4,48 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-06-11 — perf(stack): event-loop unblocking sweep + eager-load fixes from the ground-up audit — v2.68.8
+
+Phase 1 of the 2026-06-11 ground-up audit (`docs/plans/2026-06-11-ground-up-audit.md`,
+findings #1/#2/#3/#5/#6/#8 + test hygiene). Root cause of "slow and
+unresponsive at times": specific operations froze or OOM-killed the single
+uvicorn worker. All fixes are runtime-only (failover guard: clean).
+
+* **Backups no longer freeze the whole API (P0).** `pg_dump` / `pg_restore` /
+  `pg_restore --list` / SHA-256 hashing ran synchronously inside async
+  handlers — up to **600 s of total event-loop freeze** (every request,
+  including healthchecks, stalled). All offloaded to worker threads with
+  identical timeout/exception semantics. Backup **uploads** also read the
+  entire dump into RAM (`await file.read()`) — now streamed to disk in
+  1 MiB chunks with incremental hashing (same OOM class as the v2.68.7
+  image fix). 6 new tests incl. an event-loop-violation detector.
+* **Financials dashboard + Mission Hub stop loading GPS tracks they never
+  display (P0/P1).** The mapper-level `lazy="selectin"` on
+  `MissionFlight.flight` made `selectinload(Mission.flights)` cascade into
+  full `Flight` rows — gps_track (~19k points/flight), telemetry,
+  raw_metadata — on `GET /api/financials/summary` (ALL billable missions,
+  unbounded) and every `GET /api/missions` list/detail. `MissionResponse`
+  never serializes `flight` (display data comes from `flight_data_cache`),
+  so the graph is now scoped per-query: `raiseload(MissionFlight.flight)`
+  (fails loudly if ever re-touched) + `defer(flight_data_cache)` /
+  `raiseload(Mission.images)` where unused. Response shapes byte-identical;
+  16 new tests incl. AST guard + booby-trapped serializer test.
+* **Stripe SDK calls no longer block the event loop (P1).** Every payment
+  and webhook made synchronous HTTPS round-trips to api.stripe.com on the
+  loop thread (checkout create, session retrieve, PaymentIntent/
+  PaymentMethod retrieve). New `_stripe_call()` executor helper wraps all
+  four network sites; `Webhook.construct_event` stays inline (CPU-only
+  HMAC). 9 new tests.
+* **Logo upload (PIL) + signed-TOS PDF render offloaded (P1)** — the last
+  two inline CPU-bound blocks in async handlers, now matching the
+  missions.py/aircraft.py executor pattern. 5 new tests.
+* **Test suite: 347 passed, 0 failed (was 14 failing).** Py3.12
+  event-loop pollution fixed at source (`asyncio.get_event_loop()` →
+  `asyncio.run()` in flight-attribution/weather tests; one earlier
+  `asyncio.run()` anywhere poisoned `get_event_loop` suite-wide), and the
+  stripe health-probe tests patched a stale target (`app.config.settings`
+  → `app.main.settings`) — the app's env fallback was always correct.
+
 ## 2026-06-11 — fix(missions): memory-safe image uploads, 60 MB cap, working previews — v2.68.7
 
 * **Mission-editor image uploads no longer kill the backend; the cap is now

@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import io
 import logging
@@ -480,46 +481,19 @@ async def submit_intake_form(
     return {"message": "Thank you! Your information has been submitted successfully."}
 
 
-@router.get("/{customer_id}/signed-tos")
-async def get_signed_tos(
-    customer_id: UUID,
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
-):
-    """Admin endpoint: Serve the TOS PDF with the customer's signature composited onto it."""
-    from fastapi.responses import StreamingResponse
+def _render_signed_tos(tos_path: str, signature_data: str, signer_label: str, signed_at_dt) -> io.BytesIO:
+    """Composite the customer's signature onto the TOS PDF. Runs in a worker
+    thread via run_in_executor — PIL decode, reportlab canvas, and pypdf
+    merge are all CPU-bound and must not block the event loop (same offload
+    pattern as missions.py/aircraft.py).
+    """
     from PIL import Image
     from pypdf import PdfReader, PdfWriter
-    from reportlab.lib.pagesizes import letter
     from reportlab.lib.utils import ImageReader
     from reportlab.pdfgen import canvas
 
-    client_ip = _client_ip(request)
-    logger.info("[SIGNED-TOS] Requested for customer_id=%s from ip=%s", customer_id, client_ip)
-
-    result = await db.execute(select(Customer).where(Customer.id == customer_id))
-    customer = result.scalar_one_or_none()
-    if not customer:
-        raise HTTPException(status_code=404, detail="Customer not found")
-
-    if not customer.tos_signed or not customer.signature_data:
-        raise HTTPException(status_code=404, detail="Customer has not signed the TOS")
-
-    # Find the TOS PDF
-    tos_path = None
-    if customer.tos_pdf_path and os.path.exists(customer.tos_pdf_path):
-        tos_path = customer.tos_pdf_path
-    else:
-        default_path = os.path.join(settings.upload_dir, "tos", "default_tos.pdf")
-        if os.path.exists(default_path):
-            tos_path = default_path
-
-    if not tos_path:
-        raise HTTPException(status_code=404, detail="TOS PDF not found on disk")
-
     # Decode the signature from base64 data URL
-    sig_data = customer.signature_data
+    sig_data = signature_data
     if "," in sig_data:
         sig_data = sig_data.split(",", 1)[1]
     sig_bytes = base64.b64decode(sig_data)
@@ -577,8 +551,8 @@ async def get_signed_tos(
             # Add signed date text below the line
             c.setFont("Helvetica", 8)
             c.setFillColorRGB(0.4, 0.4, 0.4)
-            signed_at = customer.tos_signed_at.strftime("%B %d, %Y at %I:%M %p") if customer.tos_signed_at else "Date unknown"
-            c.drawString(line_x, sig_y - 14, f"Digitally signed by {customer.name or customer.email} — {signed_at}")
+            signed_at = signed_at_dt.strftime("%B %d, %Y at %I:%M %p") if signed_at_dt else "Date unknown"
+            c.drawString(line_x, sig_y - 14, f"Digitally signed by {signer_label} — {signed_at}")
 
             c.save()
             overlay_buf.seek(0)
@@ -593,6 +567,53 @@ async def get_signed_tos(
     output_buf = io.BytesIO()
     writer.write(output_buf)
     output_buf.seek(0)
+    return output_buf
+
+
+@router.get("/{customer_id}/signed-tos")
+async def get_signed_tos(
+    customer_id: UUID,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """Admin endpoint: Serve the TOS PDF with the customer's signature composited onto it."""
+    from fastapi.responses import StreamingResponse
+
+    client_ip = _client_ip(request)
+    logger.info("[SIGNED-TOS] Requested for customer_id=%s from ip=%s", customer_id, client_ip)
+
+    result = await db.execute(select(Customer).where(Customer.id == customer_id))
+    customer = result.scalar_one_or_none()
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+
+    if not customer.tos_signed or not customer.signature_data:
+        raise HTTPException(status_code=404, detail="Customer has not signed the TOS")
+
+    # Find the TOS PDF
+    tos_path = None
+    if customer.tos_pdf_path and os.path.exists(customer.tos_pdf_path):
+        tos_path = customer.tos_pdf_path
+    else:
+        default_path = os.path.join(settings.upload_dir, "tos", "default_tos.pdf")
+        if os.path.exists(default_path):
+            tos_path = default_path
+
+    if not tos_path:
+        raise HTTPException(status_code=404, detail="TOS PDF not found on disk")
+
+    # Render in a worker thread — all needed customer columns are plain
+    # values read here, so no lazy-loads can fire off the event loop.
+    loop = asyncio.get_running_loop()
+    output_buf = await loop.run_in_executor(
+        None,
+        _render_signed_tos,
+        tos_path,
+        customer.signature_data,
+        customer.name or customer.email,
+        customer.tos_signed_at,
+    )
 
     filename = f"TOS_Signed_{(customer.name or 'customer').replace(' ', '_')}.pdf"
     logger.info("[SIGNED-TOS] Serving signed TOS for customer %s (%s)", customer.id, customer.email)

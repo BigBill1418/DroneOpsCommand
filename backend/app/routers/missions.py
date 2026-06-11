@@ -11,7 +11,7 @@ from pydantic import BaseModel, ValidationError
 from PIL import Image as PILImage
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import raiseload, selectinload
 
 from app.auth.client_auth import create_client_token, hash_token
 from app.auth.jwt import get_current_user
@@ -35,6 +35,35 @@ from app.services.opendronelog import opendronelog_client
 logger = logging.getLogger("doc.missions")
 
 router = APIRouter(prefix="/api/missions", tags=["missions"])
+
+
+def _mission_graph_options():
+    """Loader options for every query whose rows feed ``MissionResponse``.
+
+    CRITICAL (2026-06-11 audit P1-2 — same OOM class as ADR-0019): the
+    ``MissionFlight.flight`` relationship is ``lazy="selectin"`` at the
+    mapper level, so a bare ``selectinload(Mission.flights)`` cascades into
+    loading every attached ``Flight`` row IN FULL — gps_track (~19k points
+    per flight), telemetry time-series and raw_metadata included — even
+    though ``MissionFlightResponse`` never serializes ``flight`` (the
+    display fields, including the track, come from ``flight_data_cache``).
+    Under the 1 GiB cgroup cap that decompressed the TOASTed track history
+    twice over on every Mission Hub list load. ``raiseload`` is scoped
+    per-query here (NOT a mapper-level lazy="raise") and fails loudly if a
+    future change starts touching ``mf.flight`` on these paths instead of
+    silently re-introducing the OOM.
+    """
+    return (
+        selectinload(Mission.flights).options(
+            raiseload(MissionFlight.flight),
+            # aircraft IS serialized (MissionFlightResponse.aircraft) —
+            # keep it eagerly loaded, explicitly rather than via the
+            # mapper-level selectin default.
+            selectinload(MissionFlight.aircraft),
+        ),
+        selectinload(Mission.images),
+        selectinload(Mission.customer),
+    )
 
 
 async def _send_portal_email_for_mission(mission_id: UUID, customer_id: UUID, db: AsyncSession) -> None:
@@ -90,11 +119,7 @@ async def list_missions(
     result = await db.execute(
         select(Mission)
         .order_by(Mission.created_at.desc())
-        .options(
-            selectinload(Mission.flights),
-            selectinload(Mission.images),
-            selectinload(Mission.customer),
-        )
+        .options(*_mission_graph_options())
     )
     return result.scalars().all()
 
@@ -193,11 +218,7 @@ async def create_mission(
         )
         # Re-query with explicit eager loads so relationships are populated for response
         result = await db.execute(
-            select(Mission).where(Mission.id == mission.id).options(
-                selectinload(Mission.flights),
-                selectinload(Mission.images),
-                selectinload(Mission.customer),
-            )
+            select(Mission).where(Mission.id == mission.id).options(*_mission_graph_options())
         )
         mission = result.scalar_one()
 
@@ -220,11 +241,7 @@ async def get_mission(
     _user: User = Depends(get_current_user),
 ):
     result = await db.execute(
-        select(Mission).where(Mission.id == mission_id).options(
-            selectinload(Mission.flights),
-            selectinload(Mission.images),
-            selectinload(Mission.customer),
-        )
+        select(Mission).where(Mission.id == mission_id).options(*_mission_graph_options())
     )
     mission = result.scalar_one_or_none()
     if not mission:
@@ -261,11 +278,7 @@ async def update_mission(
         await db.flush()
         # Re-query with explicit eager loads so relationships are populated for response
         result = await db.execute(
-            select(Mission).where(Mission.id == mission_id).options(
-                selectinload(Mission.flights),
-                selectinload(Mission.images),
-                selectinload(Mission.customer),
-            )
+            select(Mission).where(Mission.id == mission_id).options(*_mission_graph_options())
         )
         mission = result.scalar_one()
 
@@ -363,11 +376,7 @@ async def patch_mission_status(
     await db.flush()
     # Re-query with eager loads so the response is consistent with PUT.
     result = await db.execute(
-        select(Mission).where(Mission.id == mission_id).options(
-            selectinload(Mission.flights),
-            selectinload(Mission.images),
-            selectinload(Mission.customer),
-        )
+        select(Mission).where(Mission.id == mission_id).options(*_mission_graph_options())
     )
     return result.scalar_one()
 

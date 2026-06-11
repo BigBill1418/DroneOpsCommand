@@ -66,7 +66,13 @@ def _session(*results):
 
 
 def _run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
+    # asyncio.run (fresh loop per call), NOT asyncio.get_event_loop():
+    # on Python 3.12, any earlier test that used asyncio.run() leaves the
+    # event-loop policy with set_event_loop(None) (Runner.close() does
+    # this), after which get_event_loop() raises RuntimeError. That made
+    # all 12 tests here fail in full-suite order while passing in
+    # isolation (test-hygiene fix, 2026-06-11).
+    return asyncio.run(coro)
 
 
 # ── Serial branch ──────────────────────────────────────────────────────

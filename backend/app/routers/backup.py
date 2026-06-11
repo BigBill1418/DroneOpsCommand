@@ -1,5 +1,6 @@
 """Database backup, restore, and integrity verification API."""
 
+import asyncio
 import hashlib
 import logging
 import os
@@ -36,15 +37,32 @@ def _pg_conn_args() -> dict:
 
 
 def _run_pg_command(cmd: list[str], env: dict, timeout: int = 300) -> subprocess.CompletedProcess:
-    """Run a PostgreSQL command with proper environment."""
+    """Run a PostgreSQL command with proper environment.
+
+    Synchronous — must only be called from a worker thread (see
+    ``_run_pg_command_async``), never directly from an async handler:
+    a pg_dump/pg_restore can run for up to 600 s and would freeze the
+    single uvicorn event loop for the duration (audit 2026-06-11, P0-2).
+    """
     return subprocess.run(
         cmd, env={**os.environ, **env},
         capture_output=True, text=True, timeout=timeout,
     )
 
 
+async def _run_pg_command_async(cmd: list[str], env: dict, timeout: int = 300) -> subprocess.CompletedProcess:
+    """Run a PostgreSQL command in a worker thread so the event loop stays live.
+
+    Same exceptions as ``_run_pg_command`` (TimeoutExpired, FileNotFoundError)
+    propagate to the awaiting handler unchanged.
+    """
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, _run_pg_command, cmd, env, timeout)
+
+
 def _compute_sha256(filepath: str) -> str:
-    """Compute SHA-256 hash of a file."""
+    """Compute SHA-256 hash of a file. Sync — call via ``_compute_sha256_async``
+    from async handlers (a multi-hundred-MB dump takes seconds to hash)."""
     sha256 = hashlib.sha256()
     with open(filepath, "rb") as f:
         for chunk in iter(lambda: f.read(8192), b""):
@@ -52,8 +70,17 @@ def _compute_sha256(filepath: str) -> str:
     return sha256.hexdigest()
 
 
+async def _compute_sha256_async(filepath: str) -> str:
+    """Hash a file in a worker thread without blocking the event loop."""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, _compute_sha256, filepath)
+
+
 def _validate_archive(filepath: str, env: dict) -> tuple[bool, int]:
-    """Validate a pg_dump archive. Returns (valid, toc_entry_count)."""
+    """Validate a pg_dump archive. Returns (valid, toc_entry_count).
+
+    Sync — call via ``_validate_archive_async`` from async handlers.
+    """
     try:
         result = _run_pg_command(["pg_restore", "--list", filepath], env, timeout=60)
         valid = result.returncode == 0
@@ -63,6 +90,35 @@ def _validate_archive(filepath: str, env: dict) -> tuple[bool, int]:
         raise HTTPException(status_code=500, detail="pg_restore not found — postgresql-client not installed")
     except subprocess.TimeoutExpired:
         return False, 0
+
+
+async def _validate_archive_async(filepath: str, env: dict) -> tuple[bool, int]:
+    """Validate a pg_dump archive in a worker thread (pg_restore --list can
+    take up to 60 s on a large dump). HTTPException from the sync helper
+    propagates unchanged."""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, _validate_archive, filepath, env)
+
+
+def _save_upload_to_disk(src, filepath: str) -> tuple[str, int]:
+    """Stream a spooled multipart upload to *filepath* in 1 MiB chunks,
+    hashing incrementally. Runs in a worker thread. Returns (sha256, size).
+
+    The multipart spool threshold is 4 MB, so ``src`` (``UploadFile.file``)
+    is a disk-backed temp file for any real dump — the upload is never
+    materialized as a single bytes object. Replaces the old
+    ``await file.read()`` whole-dump-in-RAM path that OOM-killed the worker
+    under the 1 GiB cgroup cap (audit 2026-06-11, P0-3).
+    """
+    sha256 = hashlib.sha256()
+    size = 0
+    src.seek(0)
+    with open(filepath, "wb") as out:
+        while chunk := src.read(1024 * 1024):
+            sha256.update(chunk)
+            out.write(chunk)
+            size += len(chunk)
+    return sha256.hexdigest(), size
 
 
 @router.post("/create-and-download")
@@ -95,7 +151,7 @@ async def create_and_download(
     ]
 
     try:
-        result = _run_pg_command(cmd, env, timeout=600)
+        result = await _run_pg_command_async(cmd, env, timeout=600)
     except subprocess.TimeoutExpired:
         raise HTTPException(status_code=504, detail="Backup timed out")
     except FileNotFoundError:
@@ -106,14 +162,14 @@ async def create_and_download(
         raise HTTPException(status_code=500, detail=f"Backup failed: {result.stderr[:500]}")
 
     # Validate the archive before sending to user
-    archive_valid, toc_entries = _validate_archive(filepath, env)
+    archive_valid, toc_entries = await _validate_archive_async(filepath, env)
     if not archive_valid:
         os.unlink(filepath)
         os.rmdir(tmpdir)
         raise HTTPException(status_code=500, detail="Backup archive failed validation — file is corrupt")
 
     # Compute SHA-256 checksum
-    checksum = _compute_sha256(filepath)
+    checksum = await _compute_sha256_async(filepath)
     file_size = os.path.getsize(filepath)
 
     logger.info(
@@ -161,20 +217,19 @@ async def validate_upload(
     conn = _pg_conn_args()
     env = {"PGPASSWORD": conn["password"]}
 
-    # Save to temp file for validation
+    # Save to temp file for validation — streamed in chunks off the multipart
+    # spool file with an incremental hash; never the whole dump in RAM.
     tmpdir = tempfile.mkdtemp(prefix="doc_restore_")
     safe_name = os.path.basename(file.filename or "uploaded_backup.dump")
     filepath = os.path.join(tmpdir, safe_name)
 
-    content = await file.read()
-    with open(filepath, "wb") as f:
-        f.write(content)
-
-    # Compute checksum
-    checksum = hashlib.sha256(content).hexdigest()
+    loop = asyncio.get_running_loop()
+    checksum, size_bytes = await loop.run_in_executor(
+        None, _save_upload_to_disk, file.file, filepath
+    )
 
     # Validate archive structure
-    archive_valid, toc_entries = _validate_archive(filepath, env)
+    archive_valid, toc_entries = await _validate_archive_async(filepath, env)
 
     if not archive_valid:
         # Clean up
@@ -188,7 +243,7 @@ async def validate_upload(
 
     logger.info(
         "Upload validated: %s (%d bytes, sha256=%s, %d objects)",
-        safe_name, len(content), checksum, toc_entries,
+        safe_name, size_bytes, checksum, toc_entries,
     )
 
     return {
@@ -196,7 +251,7 @@ async def validate_upload(
         "filename": safe_name,
         "temp_path": filepath,
         "sha256": checksum,
-        "size_bytes": len(content),
+        "size_bytes": size_bytes,
         "toc_entries": toc_entries,
     }
 
@@ -214,20 +269,19 @@ async def restore_from_upload(
     conn = _pg_conn_args()
     env = {"PGPASSWORD": conn["password"]}
 
-    # Save to temp file
+    # Save to temp file — streamed in chunks off the multipart spool file
+    # with an incremental hash; never the whole dump in RAM.
     tmpdir = tempfile.mkdtemp(prefix="doc_restore_")
     safe_name = os.path.basename(file.filename or "uploaded_backup.dump")
     filepath = os.path.join(tmpdir, safe_name)
 
-    content = await file.read()
-    with open(filepath, "wb") as f:
-        f.write(content)
-
-    # Compute checksum
-    checksum = hashlib.sha256(content).hexdigest()
+    loop = asyncio.get_running_loop()
+    checksum, size_bytes = await loop.run_in_executor(
+        None, _save_upload_to_disk, file.file, filepath
+    )
 
     # Validate archive BEFORE restoring
-    archive_valid, toc_entries = _validate_archive(filepath, env)
+    archive_valid, toc_entries = await _validate_archive_async(filepath, env)
     if not archive_valid:
         os.unlink(filepath)
         os.rmdir(tmpdir)
@@ -256,7 +310,7 @@ async def restore_from_upload(
     ]
 
     try:
-        result = _run_pg_command(cmd, env, timeout=600)
+        result = await _run_pg_command_async(cmd, env, timeout=600)
     except subprocess.TimeoutExpired:
         os.unlink(filepath)
         os.rmdir(tmpdir)
@@ -280,7 +334,7 @@ async def restore_from_upload(
             )
 
     # Post-restore validation: verify key tables exist and are accessible
-    verify_result = _run_pg_command(
+    verify_result = await _run_pg_command_async(
         [
             "psql",
             "-h", conn["host"],
@@ -309,7 +363,7 @@ async def restore_from_upload(
         "restored": True,
         "filename": safe_name,
         "sha256": checksum,
-        "size_bytes": len(content),
+        "size_bytes": size_bytes,
         "toc_entries": toc_entries,
         "table_count": table_count,
         "warnings": result.stderr[:1000] if result.stderr else None,
@@ -427,7 +481,9 @@ async def get_backup_history(
             stat = os.stat(filepath)
             size_bytes = stat.st_size
             modified_at = datetime.utcfromtimestamp(stat.st_mtime).isoformat() + "Z"
-            checksum = _compute_sha256(filepath)
+            # Hashing a multi-hundred-MB dump takes seconds — keep it off
+            # the event loop (same P0-2 class as the subprocess calls).
+            checksum = await _compute_sha256_async(filepath)
             entries.append({
                 "filename": filename,
                 "size_bytes": size_bytes,
@@ -475,7 +531,7 @@ async def run_backup_now(
 
     logger.info("Running pg_dump to %s", filepath)
     try:
-        result = _run_pg_command(cmd, env, timeout=600)
+        result = await _run_pg_command_async(cmd, env, timeout=600)
     except subprocess.TimeoutExpired:
         logger.error("Scheduled backup timed out for %s", filename)
         raise HTTPException(status_code=504, detail="Backup timed out")
@@ -488,7 +544,7 @@ async def run_backup_now(
         raise HTTPException(status_code=500, detail=f"Backup failed: {result.stderr[:500]}")
 
     # Validate archive integrity
-    archive_valid, toc_entries = _validate_archive(filepath, env)
+    archive_valid, toc_entries = await _validate_archive_async(filepath, env)
     if not archive_valid:
         try:
             os.unlink(filepath)
@@ -497,7 +553,7 @@ async def run_backup_now(
         logger.error("Scheduled backup archive failed validation: %s", filename)
         raise HTTPException(status_code=500, detail="Backup archive failed validation — file is corrupt")
 
-    checksum = _compute_sha256(filepath)
+    checksum = await _compute_sha256_async(filepath)
     size_bytes = os.path.getsize(filepath)
 
     logger.info(

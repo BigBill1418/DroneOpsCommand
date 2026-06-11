@@ -168,6 +168,34 @@ MAX_LOGO_SIZE = 5_000_000  # 5 MB
 ALLOWED_LOGO_TYPES = {"image/jpeg", "image/png", "image/webp", "image/svg+xml"}
 
 
+def _resize_logo(content: bytes, ext: str) -> bytes:
+    """Resize a non-SVG logo to max 400px width for PDFs. Runs in a worker
+    thread via run_in_executor — PIL decode/encode is CPU-bound and must not
+    block the event loop (same offload pattern as missions.py/aircraft.py).
+    Unparseable images fall back to the original bytes (previous behavior).
+    """
+    try:
+        img = PILImage.open(io.BytesIO(content))
+        if img.width > 400:
+            ratio = 400 / img.width
+            img = img.resize((400, int(img.height * ratio)), PILImage.LANCZOS)
+        buf = io.BytesIO()
+        if img.mode in ("RGBA", "P") and ext not in (".png", ".webp"):
+            img = img.convert("RGB")
+        fmt = "PNG" if ext == ".png" else "WEBP" if ext == ".webp" else "JPEG"
+        img.save(buf, format=fmt, quality=90, optimize=True)
+        return buf.getvalue()
+    except Exception as exc:
+        logger.warning("Logo resize failed, using original: %s", exc)
+        return content
+
+
+def _write_file(path: str, content: bytes) -> None:
+    """Write bytes to disk (runs in executor to avoid blocking)."""
+    with open(path, "wb") as f:
+        f.write(content)
+
+
 @router.post("/branding/logo")
 async def upload_company_logo(
     file: UploadFile = File(...),
@@ -193,30 +221,19 @@ async def upload_company_logo(
         except OSError:
             pass
 
-    # Resize non-SVG logos to max 400px width for PDFs
+    # Resize non-SVG logos to max 400px width for PDFs — offloaded to a
+    # worker thread so the CPU-bound PIL work never blocks the event loop.
     ext = os.path.splitext(file.filename)[1].lower() if file.filename else ".png"
+    loop = asyncio.get_running_loop()
     if file.content_type != "image/svg+xml":
-        try:
-            img = PILImage.open(io.BytesIO(content))
-            if img.width > 400:
-                ratio = 400 / img.width
-                img = img.resize((400, int(img.height * ratio)), PILImage.LANCZOS)
-            buf = io.BytesIO()
-            if img.mode in ("RGBA", "P") and ext not in (".png", ".webp"):
-                img = img.convert("RGB")
-            fmt = "PNG" if ext == ".png" else "WEBP" if ext == ".webp" else "JPEG"
-            img.save(buf, format=fmt, quality=90, optimize=True)
-            content = buf.getvalue()
-        except Exception as exc:
-            logger.warning("Logo resize failed, using original: %s", exc)
+        content = await loop.run_in_executor(None, _resize_logo, content, ext)
 
     # Save to uploads/branding/
     logo_dir = os.path.join(app_settings.upload_dir, "branding")
     os.makedirs(logo_dir, exist_ok=True)
     filename = f"logo_{uuid_mod.uuid4()}{ext}"
     file_path = os.path.join(logo_dir, filename)
-    with open(file_path, "wb") as f:
-        f.write(content)
+    await loop.run_in_executor(None, _write_file, file_path, content)
 
     # Store relative path in DB
     relative_path = os.path.join("branding", filename)

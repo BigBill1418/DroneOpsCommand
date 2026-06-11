@@ -53,7 +53,12 @@ async def test_stripe_probe_reads_from_system_settings_when_db_has_key(db: Async
         captured_key["value"] = _stripe.api_key
         return None  # noop Account.retrieve
 
-    with patch("app.config.settings") as mock_settings:
+    # Patch the name the probe actually reads: app/main.py binds
+    # `from app.config import settings` at import time, so patching
+    # `app.config.settings` (the old target) never reached
+    # `_probe_stripe_cached` — the env-fallback assertions were testing a
+    # no-op patch (test-hygiene fix, 2026-06-11; same target used below).
+    with patch("app.main.settings") as mock_settings:
         mock_settings.stripe_secret_key = ""  # env says nothing
         with patch("stripe.Account.retrieve", side_effect=_capture_api_key):
             from app.main import _probe_stripe_cached
@@ -78,7 +83,7 @@ async def test_stripe_probe_falls_back_to_env_when_db_empty(db: AsyncSession):
         captured_key["value"] = _stripe.api_key
         return None
 
-    with patch("app.config.settings") as mock_settings:
+    with patch("app.main.settings") as mock_settings:
         mock_settings.stripe_secret_key = "sk_test_FROM_ENV_yyyyyyyyyyyyyyyyyy"
         with patch("stripe.Account.retrieve", side_effect=_capture_api_key):
             from app.main import _probe_stripe_cached
@@ -92,7 +97,7 @@ async def test_stripe_probe_falls_back_to_env_when_db_empty(db: AsyncSession):
 async def test_stripe_probe_unconfigured_when_neither_db_nor_env_has_key(db: AsyncSession):
     """Both empty → 'unconfigured'."""
     _reset_health_cache()
-    with patch("app.config.settings") as mock_settings:
+    with patch("app.main.settings") as mock_settings:
         mock_settings.stripe_secret_key = ""
         from app.main import _probe_stripe_cached
         status, err = await _probe_stripe_cached(db)
@@ -108,7 +113,7 @@ async def test_stripe_probe_db_lookup_failure_falls_back_to_env(db: AsyncSession
     _reset_health_cache()
     with patch("app.services.stripe_service.get_stripe_settings",
                side_effect=RuntimeError("simulated DB blip")):
-        with patch("app.config.settings") as mock_settings:
+        with patch("app.main.settings") as mock_settings:
             mock_settings.stripe_secret_key = "sk_test_ENV_FALLBACK_zzzzzzzzzzzzzzz"
             with patch("stripe.Account.retrieve", return_value=None):
                 from app.main import _probe_stripe_cached
