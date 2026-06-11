@@ -520,18 +520,30 @@ async def maintenance_status(
         schedules_by_aircraft.setdefault(aid, []).append(sched)
 
     # ── Load last maintenance record per (aircraft_id, maintenance_type) ─
-    # Used to know flight_hours_at time of last maintenance
+    # Used to know flight_hours_at time of last maintenance.
+    #
+    # Postgres DISTINCT ON returns only the first row of each
+    # (aircraft_id, maintenance_type) group; the leading ORDER BY columns
+    # must match the DISTINCT ON tuple, with performed_at DESC selecting
+    # the most-recent record per group. This replaces loading the whole
+    # MaintenanceRecord table and de-duplicating in Python (audit P2-3) —
+    # the de-dup now happens in PG and only one row per group crosses the
+    # wire, so the cost no longer grows with maintenance history.
     last_records_query = (
         select(MaintenanceRecord)
-        .order_by(MaintenanceRecord.performed_at.desc())
+        .distinct(MaintenanceRecord.aircraft_id, MaintenanceRecord.maintenance_type)
+        .order_by(
+            MaintenanceRecord.aircraft_id,
+            MaintenanceRecord.maintenance_type,
+            MaintenanceRecord.performed_at.desc(),
+        )
     )
     last_records_result = await db.execute(last_records_query)
-    # Build lookup: (aircraft_id, type) -> most recent record
+    # Build lookup: (aircraft_id, type) -> most recent record. Each group
+    # now appears exactly once, so no in-Python "first wins" filtering.
     last_record_map: dict[tuple[str, str], MaintenanceRecord] = {}
     for rec in last_records_result.scalars().all():
-        key = (str(rec.aircraft_id), rec.maintenance_type)
-        if key not in last_record_map:  # first = most recent due to desc order
-            last_record_map[key] = rec
+        last_record_map[(str(rec.aircraft_id), rec.maintenance_type)] = rec
 
     # ── Build status for each aircraft ───────────────────────────────
     output = []

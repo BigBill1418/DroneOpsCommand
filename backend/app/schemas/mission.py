@@ -95,3 +95,49 @@ class MissionResponse(BaseModel):
     images: list[MissionImageResponse] = []
 
     model_config = {"from_attributes": True}
+
+
+class MissionListItemResponse(BaseModel):
+    """Lean row shape for GET /api/missions (list) — FU-8 #1.
+
+    The Mission Hub list (frontend ``Missions.tsx``) renders ONLY the
+    scalar mission columns below: title, type, location, date, status,
+    is_billable. It never touches ``flights`` or ``images``. The full
+    ``MissionResponse`` shape dragged ``flights[].flight_data_cache`` into
+    every list row, and that cache duplicates the entire GPS track
+    (~19k points per flight) — so the list payload was O(track) instead
+    of O(rows). v2.69.0 already raiseload-ed ``MissionFlight.flight``
+    (the relationship → ``Flight.gps_track`` cascade); this schema closes
+    the remaining leg by dropping the cache-column copy from the list
+    contract entirely.
+
+    Detail (``GET /api/missions/{id}``) and all write re-queries keep the
+    full ``MissionResponse`` shape byte-identical — ``MissionDetail.tsx``
+    reads ``flights[].flight_data_cache.duration_secs`` and the flight /
+    image counts, so the Hub still gets everything it needs.
+
+    Drops ``flights`` and ``images`` relative to ``MissionResponse``;
+    every scalar field is preserved verbatim so existing list consumers
+    that read any of them are unaffected.
+    """
+
+    id: UUID
+    customer_id: UUID | None
+    title: str
+    mission_type: MissionType
+    description: str | None
+    mission_date: date | None
+    location_name: str | None
+    area_coordinates: dict | None
+    status: MissionStatus
+    is_billable: bool
+    source: MissionSource | None = None
+    source_ref: str | None = None
+    unas_folder_path: str | None = None
+    download_link_url: str | None = None
+    download_link_expires_at: datetime | None = None
+    client_notes: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}

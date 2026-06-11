@@ -50,6 +50,36 @@ export interface MissionImage {
   sort_order: number;
 }
 
+// Lean row shape for GET /api/missions (list) — FU-8 #1.
+// The Mission Hub list (Missions.tsx) renders ONLY these scalar columns.
+// The list payload deliberately OMITS `flights` and `images`: the full
+// shape dragged `flights[].flight_data_cache` — which duplicates the
+// entire GPS track per attached flight — into every row, making the list
+// O(track points). The detail endpoint (GET /api/missions/{id}) still
+// returns the full `Mission` shape below. Keep this a strict subset of
+// `Mission` so a list row is always assignable where a partial mission is
+// expected; never read `.flights`/`.images` off a list row.
+export interface MissionListItem {
+  id: string;
+  customer_id: string | null;
+  title: string;
+  mission_type: string;
+  description: string | null;
+  mission_date: string | null;
+  location_name: string | null;
+  area_coordinates: Record<string, any> | null;
+  status: string;
+  is_billable: boolean;
+  source: string | null;
+  source_ref: string | null;
+  unas_folder_path: string | null;
+  download_link_url: string | null;
+  download_link_expires_at: string | null;
+  client_notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Mission {
   id: string;
   customer_id: string | null;

@@ -30,6 +30,17 @@ class _NoopDB:
         return _R()
 
 
+def _fake_stripe_client(session_retrieve):
+    """FU-8 #3 — `_reuse_existing_checkout_session` now builds a per-call
+    `stripe.StripeClient` via `stripe_service.stripe_client(secret)` and
+    calls the instance method `client.checkout.sessions.retrieve`, not the
+    legacy `stripe.checkout.Session.retrieve` global static. Patch the
+    factory to return this fake."""
+    sessions = SimpleNamespace(retrieve=session_retrieve)
+    checkout = SimpleNamespace(sessions=sessions)
+    return SimpleNamespace(checkout=checkout)
+
+
 @pytest.mark.asyncio
 async def test_reuse_returns_url_when_session_recent_and_unpaid():
     from app.routers.client_portal import _reuse_existing_checkout_session
@@ -41,11 +52,12 @@ async def test_reuse_returns_url_when_session_recent_and_unpaid():
     )
 
     fake_settings = {"stripe_secret_key": "sk_test_x"}
+    fake_client = _fake_stripe_client(lambda session_id: fake_session)
 
     with patch(
         "app.services.stripe_service.get_stripe_settings",
         new=AsyncMock(return_value=fake_settings),
-    ), patch("stripe.checkout.Session.retrieve", return_value=fake_session):
+    ), patch("app.services.stripe_service.stripe_client", return_value=fake_client):
         url = await _reuse_existing_checkout_session(
             session_id="cs_recent",
             db=_NoopDB(),
@@ -68,11 +80,12 @@ async def test_reuse_returns_none_when_session_paid():
     )
 
     fake_settings = {"stripe_secret_key": "sk_test_x"}
+    fake_client = _fake_stripe_client(lambda session_id: fake_session)
 
     with patch(
         "app.services.stripe_service.get_stripe_settings",
         new=AsyncMock(return_value=fake_settings),
-    ), patch("stripe.checkout.Session.retrieve", return_value=fake_session):
+    ), patch("app.services.stripe_service.stripe_client", return_value=fake_client):
         url = await _reuse_existing_checkout_session(
             session_id="cs_paid",
             db=_NoopDB(),
@@ -95,11 +108,12 @@ async def test_reuse_returns_none_when_session_too_old():
     )
 
     fake_settings = {"stripe_secret_key": "sk_test_x"}
+    fake_client = _fake_stripe_client(lambda session_id: fake_session)
 
     with patch(
         "app.services.stripe_service.get_stripe_settings",
         new=AsyncMock(return_value=fake_settings),
-    ), patch("stripe.checkout.Session.retrieve", return_value=fake_session):
+    ), patch("app.services.stripe_service.stripe_client", return_value=fake_client):
         url = await _reuse_existing_checkout_session(
             session_id="cs_old",
             db=_NoopDB(),
@@ -128,13 +142,15 @@ async def test_reuse_returns_none_on_stripe_retrieve_failure():
 
     fake_settings = {"stripe_secret_key": "sk_test_x"}
 
+    def _boom(session_id):
+        raise Exception("network down")
+
+    fake_client = _fake_stripe_client(_boom)
+
     with patch(
         "app.services.stripe_service.get_stripe_settings",
         new=AsyncMock(return_value=fake_settings),
-    ), patch(
-        "stripe.checkout.Session.retrieve",
-        side_effect=Exception("network down"),
-    ):
+    ), patch("app.services.stripe_service.stripe_client", return_value=fake_client):
         url = await _reuse_existing_checkout_session(
             session_id="cs_unreachable",
             db=_NoopDB(),

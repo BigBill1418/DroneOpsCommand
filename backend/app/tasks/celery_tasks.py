@@ -515,3 +515,218 @@ def send_payment_reminders_task() -> dict:
             async with make_session() as db:
                 return await run_dunning_sweep(db)
         return loop.run_until_complete(_run())
+
+
+# ── FU-8 #4 — backup create/restore as Celery jobs with progress polling ──
+@celery_app.task(name="run_backup_job", bind=True)
+def run_backup_job_task(self, kind: str, temp_path: str | None = None) -> dict:
+    """Run a backup ``create`` or ``restore`` off the request path.
+
+    Reuses the thread-safe synchronous helpers in ``app.routers.backup``
+    (``_run_pg_command`` / ``_validate_archive`` / ``_compute_sha256`` etc.)
+    — the same code the in-request endpoints offload to an executor — and
+    streams ``{phase, progress}`` to Redis via ``backup_jobs.write_job_state``
+    keyed by this task's id so the poll route can report mid-flight progress.
+
+    ``kind="restore"`` operates on ``temp_path`` — an already-uploaded-and-
+    validated dump (the ``temp_path`` returned by ``/api/backup/validate-upload``),
+    the same artifact the synchronous ``restore-from-upload`` flow restores.
+    The router validates that ``temp_path`` lives under the restore-spool dir
+    before enqueuing; the task re-validates the archive before touching the DB.
+
+    Returns the same result dict shape as the corresponding synchronous
+    endpoint so a caller can treat job-result and direct-call identically.
+    """
+    import os
+    import subprocess
+    from datetime import datetime, timedelta
+
+    from app.routers import backup as backup_mod
+    from app.tasks.backup_jobs import (
+        STATUS_COMPLETE,
+        STATUS_FAILED,
+        STATUS_RUNNING,
+        write_job_state,
+    )
+
+    job_id = self.request.id
+
+    def _progress(phase: str, progress: int) -> None:
+        write_job_state(job_id, status=STATUS_RUNNING, phase=phase, progress=progress)
+
+    conn = backup_mod._pg_conn_args()
+    env = {"PGPASSWORD": conn["password"]}
+
+    try:
+        if kind == "create":
+            _progress("starting", 5)
+            os.makedirs(backup_mod.BACKUP_DIR, exist_ok=True)
+            timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+            filename = f"doc_backup_{timestamp}.dump"
+            filepath = os.path.join(backup_mod.BACKUP_DIR, filename)
+
+            _progress("dumping", 20)
+            cmd = [
+                "pg_dump", "-h", conn["host"], "-p", conn["port"],
+                "-U", conn["user"], "-Fc", "-f", filepath, conn["dbname"],
+            ]
+            result = backup_mod._run_pg_command(cmd, env, timeout=600)
+            if result.returncode != 0:
+                raise RuntimeError(f"Backup failed: {result.stderr[:500]}")
+
+            _progress("validating", 70)
+            archive_valid, toc_entries = backup_mod._validate_archive(filepath, env)
+            if not archive_valid:
+                try:
+                    os.unlink(filepath)
+                except OSError:
+                    pass
+                raise RuntimeError("Backup archive failed validation — file is corrupt")
+
+            _progress("hashing", 85)
+            checksum = backup_mod._compute_sha256(filepath)
+            size_bytes = os.path.getsize(filepath)
+            backup_mod._write_sidecar(filepath, checksum)
+
+            _progress("retention", 95)
+            removed = _prune_backups(backup_mod, keep=filename)
+
+            payload = {
+                "kind": "create",
+                "filename": filename,
+                "filepath": filepath,
+                "size_bytes": size_bytes,
+                "sha256": checksum,
+                "toc_entries": toc_entries,
+                "removed_old_backups": removed,
+            }
+            write_job_state(job_id, status=STATUS_COMPLETE, phase="done", progress=100, result=payload)
+            logger.info("Backup job %s complete: %s (%d bytes)", job_id, filename, size_bytes)
+            return payload
+
+        if kind == "restore":
+            if not temp_path or not os.path.isfile(temp_path):
+                raise FileNotFoundError("Uploaded backup file not found — re-upload and retry")
+            safe_name = os.path.basename(temp_path)
+
+            _progress("validating", 15)
+            archive_valid, toc_entries = backup_mod._validate_archive(temp_path, env)
+            if not archive_valid:
+                raise RuntimeError(
+                    "Invalid backup file — archive validation failed. Restore aborted to protect existing data."
+                )
+
+            _progress("restoring", 40)
+            cmd = [
+                "pg_restore", "-h", conn["host"], "-p", conn["port"],
+                "-U", conn["user"], "-d", conn["dbname"],
+                "--clean", "--if-exists", "--no-owner", "--no-privileges", temp_path,
+            ]
+            result = backup_mod._run_pg_command(cmd, env, timeout=600)
+            if result.returncode != 0 and result.stderr:
+                errors = [l for l in result.stderr.splitlines() if "ERROR" in l]
+                if errors:
+                    raise RuntimeError(f"Restore had errors: {errors[0][:200]}")
+
+            _progress("verifying", 85)
+            verify = backup_mod._run_pg_command(
+                [
+                    "psql", "-h", conn["host"], "-p", conn["port"],
+                    "-U", conn["user"], "-d", conn["dbname"],
+                    "-c", "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';",
+                    "-t", "-A",
+                ],
+                env, timeout=15,
+            )
+            table_count = 0
+            if verify.returncode == 0:
+                try:
+                    table_count = int(verify.stdout.strip())
+                except ValueError:
+                    pass
+
+            # Clean up the uploaded spool now that the restore consumed it.
+            try:
+                os.unlink(temp_path)
+                os.rmdir(os.path.dirname(temp_path))
+            except OSError:
+                pass
+
+            payload = {
+                "kind": "restore",
+                "restored": True,
+                "filename": safe_name,
+                "toc_entries": toc_entries,
+                "table_count": table_count,
+                "warnings": result.stderr[:1000] if result.stderr else None,
+            }
+            write_job_state(job_id, status=STATUS_COMPLETE, phase="done", progress=100, result=payload)
+            logger.info("Restore job %s complete: %s (%d tables)", job_id, safe_name, table_count)
+            return payload
+
+        raise ValueError(f"Unknown backup job kind: {kind!r}")
+
+    except subprocess.TimeoutExpired:
+        write_job_state(job_id, status=STATUS_FAILED, phase="timeout", progress=100,
+                        error=f"{kind} timed out")
+        logger.error("Backup job %s (%s) timed out", job_id, kind)
+        raise
+    except FileNotFoundError as exc:
+        write_job_state(job_id, status=STATUS_FAILED, phase="error", progress=100, error=str(exc))
+        logger.error("Backup job %s (%s) failed: %s", job_id, kind, exc)
+        raise
+    except Exception as exc:
+        write_job_state(job_id, status=STATUS_FAILED, phase="error", progress=100, error=str(exc))
+        logger.error("Backup job %s (%s) failed: %s", job_id, kind, exc)
+        raise
+
+
+def _prune_backups(backup_mod, *, keep: str) -> list[str]:
+    """Delete dumps older than the configured retention window, plus their
+    ``.sha256`` sidecars. Mirrors the cleanup in the synchronous
+    ``run_backup_now`` endpoint but reads retention from a fresh sync session
+    so the task carries no async DB state."""
+    import os
+    from datetime import datetime, timedelta
+
+    from sqlalchemy import create_engine, select
+    from sqlalchemy.orm import Session
+
+    from app.models.system_settings import SystemSetting
+
+    retention_days = 30
+    try:
+        engine = create_engine(settings.database_url_sync)
+        with Session(engine) as db:
+            row = db.execute(
+                select(SystemSetting).where(SystemSetting.key == "backup_retention_days")
+            ).scalar_one_or_none()
+            if row is not None:
+                try:
+                    retention_days = int(row.value)
+                except (ValueError, TypeError):
+                    retention_days = 30
+        engine.dispose()
+    except Exception as exc:  # pragma: no cover - default applies
+        logger.warning("Backup job: could not read retention setting, using 30d: %s", exc)
+
+    cutoff = datetime.utcnow() - timedelta(days=retention_days)
+    removed: list[str] = []
+    try:
+        for fname in os.listdir(backup_mod.BACKUP_DIR):
+            if not fname.endswith(".dump") or fname == keep:
+                continue
+            fpath = os.path.join(backup_mod.BACKUP_DIR, fname)
+            try:
+                if datetime.utcfromtimestamp(os.path.getmtime(fpath)) < cutoff:
+                    os.unlink(fpath)
+                    try:
+                        os.unlink(backup_mod._sidecar_path(fpath))
+                    except OSError:
+                        pass
+                    removed.append(fname)
+            except OSError as exc:
+                logger.warning("Backup job: could not remove old backup %s: %s", fpath, exc)
+    except OSError as exc:
+        logger.warning("Backup job: could not list backup dir for cleanup: %s", exc)
+    return removed

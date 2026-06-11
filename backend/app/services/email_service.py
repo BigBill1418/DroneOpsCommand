@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 from email.mime.application import MIMEApplication
@@ -126,18 +127,24 @@ async def send_report_email(
 
     msg.attach(MIMEText(html_body, "html"))
 
-    # Attach PDF
+    # Attach PDF — read the file off the event loop. Attachments are small,
+    # but a synchronous ``open().read()`` on the loop still blocks every
+    # concurrent request for the duration of the disk read (audit P3-5b).
     if pdf_path:
-        try:
+        def _read_pdf() -> bytes:
             with open(pdf_path, "rb") as f:
-                pdf_attachment = MIMEApplication(f.read(), _subtype="pdf")
-                pdf_filename = os.path.basename(pdf_path)
-                pdf_attachment.add_header("Content-Disposition", "attachment", filename=pdf_filename)
-                msg.attach(pdf_attachment)
-                logger.info("PDF attached: %s", pdf_filename)
+                return f.read()
+
+        try:
+            pdf_bytes = await asyncio.get_running_loop().run_in_executor(None, _read_pdf)
         except FileNotFoundError:
             logger.error("PDF file not found for email attachment: %s", pdf_path)
             raise ValueError(f"PDF file not found: {pdf_path}")
+        pdf_attachment = MIMEApplication(pdf_bytes, _subtype="pdf")
+        pdf_filename = os.path.basename(pdf_path)
+        pdf_attachment.add_header("Content-Disposition", "attachment", filename=pdf_filename)
+        msg.attach(pdf_attachment)
+        logger.info("PDF attached: %s", pdf_filename)
 
     try:
         smtp_port = int(smtp["smtp_port"])

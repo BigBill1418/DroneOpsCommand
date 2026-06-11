@@ -108,6 +108,16 @@ Migrated from droneops during the 2026-04-20 6-stack migration night. NOC config
 
 PG streaming: promoted standby (droneops-standby-db) is now primary. Compose override neutralizes duplicate 'db' service and routes backend/worker/flight-parser DATABASE_URL to droneops-standby-db:5432. CHAD-HQ is failback standby.
 
+**The BOS override is versioned** (audit 2026-06-11 P3-2): the live mechanism is
+`~/droneops/docker-compose.override.yml` on BOS-HQ (auto-loaded, inlines the real
+DB credential), and `docker-compose.bos-prod.yml` in this repo is the reviewed
+secret-free source of truth (credential via `${BOS_PROMOTED_DATABASE_URL}` from
+the host `.env`). Keep them in sync — the drift-check command is in the file
+header. **Host port map:** base `db` 5434 (neutralized on BOS) ·
+`droneops-standby-db` 5434 (the real primary) · demo-standby 5437. If the
+override is ever absent, base `db` tries to bind 5434 and collides with the
+running primary → stack bring-up fails. That's the foot-gun this guards.
+
 Deployer: managed by NOC Master Control (`~/noc-master`) — all per-repo autopull scripts are disabled (`.deployer-disabled` marker in repo root).
 
 ## Notifications (ADR-0036 + ADR-0006 addendum, 2026-04-26)

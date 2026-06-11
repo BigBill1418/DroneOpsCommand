@@ -17,8 +17,8 @@ from slowapi.util import get_remote_address
 from starlette.formparsers import MultiPartParser
 
 from app.config import settings
-from app.database import Base, async_session, engine, get_db
-import app.models  # noqa: F401 — ensure all models registered with Base before create_all
+from app.database import async_session, engine, get_db
+import app.models  # noqa: F401 — register all models on Base.metadata (Alembic + legacy helpers read it)
 from app.routers import auth, customers, aircraft, missions, flights, maps, reports, invoices, rate_templates, llm, system_settings, financials, weather, intake, flight_library, batteries, maintenance, backup, device_keys, pilots, client_portal, stripe_webhook, business_signals, admin_device_rotation, tos
 
 
@@ -372,12 +372,24 @@ async def _run_startup_schema_and_seed():
     place, and so the skip/run decision is unit-testable. Every statement
     in here mutates the database and therefore MUST NOT run against a
     read-only standby.
+
+    ADR-0022 — the schema step is now a real **Alembic** migration run
+    (``run_migrations_sync``) instead of the legacy ``create_all`` +
+    ``_add_missing_columns`` + ``_create_hot_indexes`` triple. The legacy
+    helpers are RETAINED (imported by the baseline migration 0001, which
+    reproduces the exact pre-Alembic schema) but no longer drive startup.
+    The migration runner is SYNCHRONOUS (psycopg2) and is dispatched to a
+    thread via ``run_in_executor`` so it never blocks the event loop — the
+    same house discipline applied to backup/Stripe/PIL offloads. It detects
+    a brownfield prod DB (schema present, no ``alembic_version``) and stamps
+    the baseline before upgrading; a fresh DB builds from 0001. See ADR-0022.
     """
-    # Create tables + sync schema + hot-path indexes (ADR-0021).
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-        await conn.run_sync(_add_missing_columns)
-        await conn.run_sync(_create_hot_indexes)
+    # Run Alembic migrations to head (ADR-0022). Synchronous Alembic +
+    # psycopg2 → offload to a thread so the async event loop stays free.
+    from app.db_migrations import run_migrations_sync
+    loop = asyncio.get_running_loop()
+    action = await loop.run_in_executor(None, run_migrations_sync)
+    logger.info("STARTUP: Alembic migrations applied (%s) — ADR-0022", action)
 
     # Seed data
     from app.seed import seed_database
@@ -561,7 +573,7 @@ logger.info("MultiPartParser spool threshold set to 4 MB (large uploads spool to
 app = FastAPI(
     title="D.O.C — Drone Operations Command",
     description="Self-hosted mission management, flight log analysis, AI report generation, invoicing, telemetry visualization, and real-time airspace monitoring for commercial drone operators.",
-    version="2.69.0",
+    version="2.70.0",
     lifespan=lifespan,
 )
 
@@ -752,10 +764,15 @@ async def health_check(db: AsyncSession = Depends(get_db)):
       - Redis: `PING`.
       - Stripe: cached `Account.retrieve` (30s TTL) IF a key is configured.
 
-    Returns 200 + `{"status":"healthy", ...}` when everything is reachable.
-    Returns 503 + `{"status":"degraded", ...}` on any probe failure so
-    Docker / NOC / Watchtower see an explicit unhealthy signal (see
-    `docker-compose.yml` healthcheck — `curl -sf` treats 5xx as fail).
+    Returns 200 + `{"status":"healthy", ...}` when DB + Redis are reachable.
+    Returns 503 + `{"status":"degraded", ...}` on a **DB or Redis** probe
+    failure so Docker / NOC / Watchtower see an explicit unhealthy signal
+    (see `docker-compose.yml` healthcheck — `curl -sf` treats 5xx as fail).
+
+    ADR-0022 (audit P3-1): Stripe is probed and reported in the body for
+    observability but is EXCLUDED from the 503 gate — a third-party Stripe
+    outage must not restart a healthy API. Only DB + Redis gate container
+    health.
     """
     from sqlalchemy import text as sa_text
     import redis.asyncio as aioredis
@@ -794,12 +811,20 @@ async def health_check(db: AsyncSession = Depends(get_db)):
         degraded = True
         logger.error("[HEALTH] Redis probe failed: %s", exc)
 
-    # Stripe (cached, only if configured)
+    # Stripe (cached, only if configured).
+    #
+    # ADR-0022 (audit P3-1) — Stripe status is reported in the body for
+    # observability but does NOT drive the `degraded` flag / 503. Only DB +
+    # Redis gate CONTAINER health. Coupling liveness to Stripe meant a
+    # third-party Stripe outage or a bad API key returned 503 → the Docker
+    # healthcheck (`curl -sf` treats 5xx as fail) marked the container
+    # unhealthy → `restart: unless-stopped` recreated a perfectly-serving
+    # API because *Stripe* was down. A payment provider must never be able
+    # to restart the API.
     stripe_status, stripe_err = await _probe_stripe_cached(db)
     body["stripe"] = stripe_status
     if stripe_status == "error":
         body["stripe_error"] = stripe_err
-        degraded = True
 
     if degraded:
         body["status"] = "degraded"

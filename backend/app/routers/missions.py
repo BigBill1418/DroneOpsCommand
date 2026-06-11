@@ -11,7 +11,7 @@ from pydantic import BaseModel, ValidationError
 from PIL import Image as PILImage
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import raiseload, selectinload
+from sqlalchemy.orm import noload, raiseload, selectinload
 
 from app.auth.client_auth import create_client_token, hash_token
 from app.auth.jwt import get_current_user
@@ -27,6 +27,7 @@ from app.schemas.mission import (
     MissionFlightCreate,
     MissionFlightResponse,
     MissionImageResponse,
+    MissionListItemResponse,
     MissionResponse,
     MissionUpdate,
 )
@@ -63,6 +64,37 @@ def _mission_graph_options():
         ),
         selectinload(Mission.images),
         selectinload(Mission.customer),
+    )
+
+
+def _mission_list_options():
+    """Loader options for GET /api/missions (list) — FU-8 #1 lean list.
+
+    The list serializes ``MissionListItemResponse``, which carries ONLY
+    scalar mission columns — no ``flights``, no ``images`` (see
+    ``Missions.tsx``, which renders title/type/location/date/status/
+    is_billable and nothing else). The ``flights`` and ``images``
+    relationships are ``lazy="selectin"`` at the mapper level, so a bare
+    ``select(Mission)`` would STILL eager-load them on the list path —
+    dragging ``MissionFlight.flight_data_cache`` (which duplicates the
+    full ~19k-point GPS track per attached flight) into every list row.
+    That made the list payload O(track points) instead of O(rows).
+
+    These ``noload`` options suppress the relationship loads on the list
+    query, so the work is one ``SELECT`` over the scalar mission columns —
+    strictly O(rows). ``noload`` (not ``raiseload``) is intentional: the
+    lean schema never accesses them, but if some future list-path code
+    peeks at ``m.flights`` it gets an empty list rather than a 500 — the
+    list contract has no flight/image/customer data to be wrong about.
+    ``customer`` is suppressed too: ``MissionListItemResponse`` doesn't
+    serialize it, so the mapper-level ``lazy="selectin"`` default would be
+    a wasted extra round-trip. Detail and write re-queries keep
+    ``_mission_graph_options()`` (full shape) untouched.
+    """
+    return (
+        noload(Mission.flights),
+        noload(Mission.images),
+        noload(Mission.customer),
     )
 
 
@@ -111,15 +143,25 @@ async def _send_portal_email_for_mission(mission_id: UUID, customer_id: UUID, db
         logger.error("Failed to auto-send portal email for mission=%s: %s", mission_id, exc, exc_info=True)
 
 
-@router.get("", response_model=list[MissionResponse])
+@router.get("", response_model=list[MissionListItemResponse])
 async def list_missions(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
+    """Mission Hub list — lean rows (FU-8 #1).
+
+    Returns ``MissionListItemResponse`` (scalar columns only), NOT the
+    full ``MissionResponse``: the list UI renders no flight/image data,
+    and the full shape dragged ``flight_data_cache`` — which duplicates
+    the entire GPS track per attached flight — into every row, making the
+    payload O(track points). ``_mission_list_options()`` ``noload``s the
+    flights/images/customer relationships so the query is O(rows). The
+    detail route (``GET /api/missions/{id}``) keeps the full shape.
+    """
     result = await db.execute(
         select(Mission)
         .order_by(Mission.created_at.desc())
-        .options(*_mission_graph_options())
+        .options(*_mission_list_options())
     )
     return result.scalars().all()
 

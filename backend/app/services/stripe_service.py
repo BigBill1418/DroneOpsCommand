@@ -39,6 +39,26 @@ async def _stripe_call(fn, *args, **kwargs):
     return await loop.run_in_executor(None, functools.partial(fn, *args, **kwargs))
 
 
+def stripe_client(secret_key: str) -> stripe.StripeClient:
+    """Build a per-call `StripeClient` bound to `secret_key`.
+
+    FU-8 #3 (audit 2026-06-11) — replaces the module-global
+    `stripe.api_key = X` assignment pattern. That pattern carried a
+    key-rotation interleave race: in an async handler, an `await`
+    between `stripe.api_key = X` and the SDK call let a concurrent
+    request overwrite the process-wide global, so the first request
+    could fire against the second request's key. A `StripeClient`
+    instance binds the key to the call chain, closing that window.
+
+    The returned client's resource methods (`client.checkout.sessions.
+    create`, `client.payment_intents.retrieve`, …) are still synchronous
+    blocking HTTPS calls — every call site continues to wrap them in
+    `_stripe_call` so the event loop is never stalled (do not regress
+    the v2.68.8 / P1-3 offload).
+    """
+    return stripe.StripeClient(api_key=secret_key)
+
+
 async def get_stripe_settings(db: AsyncSession) -> dict:
     """Load Stripe settings from DB, falling back to env-based config."""
     result = await db.execute(
@@ -85,7 +105,9 @@ async def create_checkout_session(
         logger.error("[STRIPE] No Stripe secret key configured — cannot create checkout session")
         raise ValueError("Stripe is not configured. Set the Stripe Secret Key in Settings.")
 
-    stripe.api_key = secret_key
+    # FU-8 #3 — per-call client (key bound to this call chain, no
+    # process-global mutation; closes the rotation interleave window).
+    client = stripe_client(secret_key)
 
     if amount_override is not None:
         # Single consolidated line item for the deposit or balance.
@@ -154,25 +176,29 @@ async def create_checkout_session(
         invoice.id, payment_phase, billed_total, len(checkout_line_items), customer_email,
     )
 
+    # StripeClient service methods (v11) take a single `params` dict
+    # positionally — unlike the legacy `stripe.checkout.Session.create`
+    # global-resource form which took **kwargs. Payload values unchanged.
+    create_params = {
+        "payment_method_types": ["card", "us_bank_account"],
+        "line_items": checkout_line_items,
+        "mode": "payment",
+        "success_url": success_url,
+        "cancel_url": cancel_url,
+        "customer_email": customer_email,
+        "metadata": {
+            "invoice_id": str(invoice.id),
+            "mission_id": str(invoice.mission_id),
+            # ADR-0009 — webhook handler keys off this. Absent =
+            # legacy path (existing checkout sessions in flight at
+            # cutover continue to work).
+            "payment_phase": payment_phase,
+        },
+    }
+
     try:
         # Offloaded — blocking HTTPS round-trip must not stall the loop.
-        session = await _stripe_call(
-            stripe.checkout.Session.create,
-            payment_method_types=["card", "us_bank_account"],
-            line_items=checkout_line_items,
-            mode="payment",
-            success_url=success_url,
-            cancel_url=cancel_url,
-            customer_email=customer_email,
-            metadata={
-                "invoice_id": str(invoice.id),
-                "mission_id": str(invoice.mission_id),
-                # ADR-0009 — webhook handler keys off this. Absent =
-                # legacy path (existing checkout sessions in flight at
-                # cutover continue to work).
-                "payment_phase": payment_phase,
-            },
-        )
+        session = await _stripe_call(client.checkout.sessions.create, create_params)
     except stripe.StripeError as exc:
         logger.error("[STRIPE] Failed to create checkout session for invoice=%s: %s", invoice.id, exc)
         raise

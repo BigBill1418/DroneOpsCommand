@@ -28,7 +28,7 @@ from sqlalchemy.orm import selectinload
 
 from app.database import get_db
 from app.models.invoice import Invoice
-from app.services.stripe_service import get_stripe_settings, _stripe_call
+from app.services.stripe_service import get_stripe_settings, _stripe_call, stripe_client
 
 logger = logging.getLogger("doc.stripe")
 
@@ -133,13 +133,15 @@ async def _resolve_payment_method(payment_intent_id: str | None, payment_method_
         return payment_method
     try:
         stripe_cfg = await get_stripe_settings(db)
-        stripe.api_key = stripe_cfg["stripe_secret_key"]
+        # FU-8 #3 — per-call client instead of mutating the process
+        # global `stripe.api_key`; closes the rotation interleave window.
+        client = stripe_client(stripe_cfg["stripe_secret_key"])
         # Offloaded via _stripe_call — these are blocking HTTPS calls to
         # api.stripe.com and webhook retry storms compound the freeze
         # (audit P1-3). Same except-Exception fallback as before.
-        pi = await _stripe_call(stripe.PaymentIntent.retrieve, payment_intent_id)
+        pi = await _stripe_call(client.payment_intents.retrieve, payment_intent_id)
         if pi.payment_method:
-            pm = await _stripe_call(stripe.PaymentMethod.retrieve, pi.payment_method)
+            pm = await _stripe_call(client.payment_methods.retrieve, pi.payment_method)
             if pm.type == "us_bank_account":
                 return "stripe_ach"
             if pm.type == "card":

@@ -40,6 +40,30 @@ _FAKE_STRIPE_CFG = {
 }
 
 
+# FU-8 #3 — call sites now build a per-call `stripe.StripeClient` via
+# `stripe_service.stripe_client(secret)` and invoke INSTANCE resource
+# methods (`client.checkout.sessions.create`, `client.payment_intents.
+# retrieve`, …) rather than the legacy global-resource statics. These
+# helpers build a fake client whose resource methods are the test's
+# fakes, and `stripe_client` is patched per-module to return it.
+def _fake_stripe_client(
+    *,
+    session_create=None,
+    session_retrieve=None,
+    pi_retrieve=None,
+    pm_retrieve=None,
+):
+    sessions = SimpleNamespace(create=session_create, retrieve=session_retrieve)
+    checkout = SimpleNamespace(sessions=sessions)
+    payment_intents = SimpleNamespace(retrieve=pi_retrieve)
+    payment_methods = SimpleNamespace(retrieve=pm_retrieve)
+    return SimpleNamespace(
+        checkout=checkout,
+        payment_intents=payment_intents,
+        payment_methods=payment_methods,
+    )
+
+
 # ── _stripe_call helper ───────────────────────────────────────────────
 async def test_stripe_call_runs_off_the_event_loop_thread():
     """The whole point of the fix: the SDK call must execute in a
@@ -97,15 +121,18 @@ async def test_create_checkout_session_still_works_via_executor():
     loop_thread_id = threading.get_ident()
     seen = {}
 
-    def fake_session_create(**kwargs):
+    # StripeClient service .create takes the params dict positionally.
+    def fake_session_create(params):
         seen["thread_id"] = threading.get_ident()
-        seen["kwargs"] = kwargs
+        seen["params"] = params
         return SimpleNamespace(id="cs_test_offloaded_1", url="https://checkout.stripe.com/c/pay/cs_test_offloaded_1")
+
+    fake_client = _fake_stripe_client(session_create=fake_session_create)
 
     with patch(
         "app.services.stripe_service.get_stripe_settings",
         new=AsyncMock(return_value=dict(_FAKE_STRIPE_CFG)),
-    ), patch.object(stripe.checkout.Session, "create", staticmethod(fake_session_create)):
+    ), patch("app.services.stripe_service.stripe_client", return_value=fake_client):
         url = await create_checkout_session(
             invoice,
             customer,
@@ -119,10 +146,10 @@ async def test_create_checkout_session_still_works_via_executor():
     assert url == "https://checkout.stripe.com/c/pay/cs_test_offloaded_1"
     # Session id stamped on the deposit column exactly as before.
     assert invoice.deposit_checkout_session_id == "cs_test_offloaded_1"
-    # Call payload unchanged by the offload wrapper.
-    assert seen["kwargs"]["mode"] == "payment"
-    assert seen["kwargs"]["metadata"]["payment_phase"] == "deposit"
-    assert seen["kwargs"]["customer_email"] == "customer@example.com"
+    # Call payload unchanged by the offload wrapper or the params-dict shape.
+    assert seen["params"]["mode"] == "payment"
+    assert seen["params"]["metadata"]["payment_phase"] == "deposit"
+    assert seen["params"]["customer_email"] == "customer@example.com"
     # And it ran off the event-loop thread.
     assert seen["thread_id"] != loop_thread_id
 
@@ -134,13 +161,15 @@ async def test_create_checkout_session_stripe_error_still_raises():
 
     invoice, customer = _make_invoice_and_customer()
 
-    def fake_session_create(**kwargs):
+    def fake_session_create(params):
         raise stripe.StripeError("card network down")
+
+    fake_client = _fake_stripe_client(session_create=fake_session_create)
 
     with patch(
         "app.services.stripe_service.get_stripe_settings",
         new=AsyncMock(return_value=dict(_FAKE_STRIPE_CFG)),
-    ), patch.object(stripe.checkout.Session, "create", staticmethod(fake_session_create)):
+    ), patch("app.services.stripe_service.stripe_client", return_value=fake_client):
         with pytest.raises(stripe.StripeError, match="card network down"):
             await create_checkout_session(
                 invoice,
@@ -171,11 +200,12 @@ async def test_resolve_payment_method_ach_via_executor():
         seen["pm_thread_id"] = threading.get_ident()
         return SimpleNamespace(type="us_bank_account")
 
+    fake_client = _fake_stripe_client(pi_retrieve=fake_pi_retrieve, pm_retrieve=fake_pm_retrieve)
+
     with patch(
         "app.routers.stripe_webhook.get_stripe_settings",
         new=AsyncMock(return_value=dict(_FAKE_STRIPE_CFG)),
-    ), patch.object(stripe.PaymentIntent, "retrieve", staticmethod(fake_pi_retrieve)), \
-            patch.object(stripe.PaymentMethod, "retrieve", staticmethod(fake_pm_retrieve)):
+    ), patch("app.routers.stripe_webhook.stripe_client", return_value=fake_client):
         method = await _resolve_payment_method("pi_test_123", ["card", "us_bank_account"], db=object())
 
     assert method == "stripe_ach"
@@ -191,10 +221,12 @@ async def test_resolve_payment_method_fallback_on_stripe_failure():
     def fake_pi_retrieve(payment_intent_id):
         raise stripe.StripeError("api.stripe.com unreachable")
 
+    fake_client = _fake_stripe_client(pi_retrieve=fake_pi_retrieve)
+
     with patch(
         "app.routers.stripe_webhook.get_stripe_settings",
         new=AsyncMock(return_value=dict(_FAKE_STRIPE_CFG)),
-    ), patch.object(stripe.PaymentIntent, "retrieve", staticmethod(fake_pi_retrieve)):
+    ), patch("app.routers.stripe_webhook.stripe_client", return_value=fake_client):
         method = await _resolve_payment_method("pi_test_456", ["us_bank_account"], db=object())
 
     assert method == "stripe_ach"  # inferred from session-level types
@@ -225,10 +257,12 @@ async def test_reuse_existing_checkout_session_via_executor():
             amount_total=50000,
         )
 
+    fake_client = _fake_stripe_client(session_retrieve=fake_session_retrieve)
+
     with patch(
         "app.services.stripe_service.get_stripe_settings",
         new=AsyncMock(return_value=dict(_FAKE_STRIPE_CFG)),
-    ), patch.object(stripe.checkout.Session, "retrieve", staticmethod(fake_session_retrieve)):
+    ), patch("app.services.stripe_service.stripe_client", return_value=fake_client):
         url = await _reuse_existing_checkout_session(
             session_id="cs_reuse_1",
             db=object(),
@@ -248,10 +282,12 @@ async def test_reuse_existing_checkout_session_failure_returns_none():
     def fake_session_retrieve(session_id):
         raise stripe.StripeError("timeout talking to api.stripe.com")
 
+    fake_client = _fake_stripe_client(session_retrieve=fake_session_retrieve)
+
     with patch(
         "app.services.stripe_service.get_stripe_settings",
         new=AsyncMock(return_value=dict(_FAKE_STRIPE_CFG)),
-    ), patch.object(stripe.checkout.Session, "retrieve", staticmethod(fake_session_retrieve)):
+    ), patch("app.services.stripe_service.stripe_client", return_value=fake_client):
         url = await _reuse_existing_checkout_session(
             session_id="cs_gone_1",
             db=object(),

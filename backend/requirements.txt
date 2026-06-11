@@ -6,6 +6,12 @@ python-multipart==0.0.18
 # Database
 sqlalchemy[asyncio]==2.0.36
 asyncpg==0.30.0
+# Alembic — schema migrations. ADOPTED in ADR-0022 as the startup schema
+# mechanism (was previously installed-but-unused). The FastAPI lifespan runs
+# `alembic upgrade head` programmatically (primary-only, ADR-0021 recovery
+# guard) via app/db_migrations.py. Migration runs over a synchronous
+# psycopg2 connection (asyncpg is async-only; Alembic's context is sync),
+# which is why psycopg2-binary below is a runtime — not just dev — dep.
 alembic==1.14.0
 psycopg2-binary==2.9.10
 

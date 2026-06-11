@@ -21,7 +21,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from jose import JWTError, jwt
 from slowapi import Limiter
 from slowapi.util import get_remote_address
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -42,7 +42,7 @@ from app.models.invoice import (
     PAYMENT_PHASE_BALANCE_DUE,
     PAYMENT_PHASE_PAID_IN_FULL,
 )
-from app.models.mission import Mission, MissionStatus
+from app.models.mission import Mission, MissionImage, MissionStatus
 from app.models.user import User
 from app.schemas.client_portal import (
     ClientInvoiceLineItem,
@@ -275,7 +275,15 @@ async def get_client_mission(
         logger.warning("[CLIENT-MISSION] Mission not found: %s", mission_id)
         raise HTTPException(status_code=404, detail="Mission not found")
 
-    image_count = len(mission.images) if mission.images else 0
+    # Audit P3-6 — scalar COUNT instead of lazy-loading the `images`
+    # relationship across the await boundary. The `select(Mission)`
+    # above carries no selectinload options, so `len(mission.images)`
+    # triggered a lazy load on an async session and raised MissingGreenlet
+    # under the async greenlet bridge (house pattern: missions.py count).
+    count_result = await db.execute(
+        select(func.count()).select_from(MissionImage).where(MissionImage.mission_id == mission_id)
+    )
+    image_count = count_result.scalar() or 0
 
     elapsed = time.perf_counter() - start
     logger.info("[CLIENT-MISSION] Served mission=%s for customer=%s (%.3fs)", mission_id, client.customer_id, elapsed)
@@ -489,16 +497,17 @@ async def _reuse_existing_checkout_session(
     if not session_id:
         return None
     try:
-        from app.services.stripe_service import get_stripe_settings, _stripe_call
-        import stripe as _stripe
+        from app.services.stripe_service import get_stripe_settings, _stripe_call, stripe_client
         cfg = await get_stripe_settings(db)
         secret = cfg.get("stripe_secret_key")
         if not secret:
             return None
-        _stripe.api_key = secret
+        # FU-8 #3 — per-call client instead of mutating the process
+        # global `stripe.api_key`; closes the rotation interleave window.
+        client = stripe_client(secret)
         # Offloaded via _stripe_call — sync SDK round-trip must not
         # block the event loop on every Pay click (audit P1-3).
-        existing = await _stripe_call(_stripe.checkout.Session.retrieve, session_id)
+        existing = await _stripe_call(client.checkout.sessions.retrieve, session_id)
     except Exception as exc:
         logger.warning(
             "%s could not retrieve existing session=%s for reuse check: %s",

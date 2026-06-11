@@ -1,0 +1,81 @@
+# docker-compose.bos-prod.yml — VERSIONED source of truth for the BOS-HQ
+# production override (audit 2026-06-11, P3-2).
+#
+# THE LIVE MECHANISM is ~/droneops/docker-compose.override.yml on BOS-HQ
+# (compose auto-loads that name). Before 2026-06-11 that file existed ONLY
+# on the host — the db-neutralization + DATABASE_URL reroute that prevent a
+# same-host port-5434 collision during blue-green/failback lived in
+# un-versioned tribal knowledge. This file is the reviewed, secret-free
+# copy. Drift check (run on BOS-HQ):
+#
+#   diff <(sed 's|postgresql+asyncpg://[^@]*@|postgresql+asyncpg://${DOC_DB_CREDENTIALS}@|' \
+#         ~/droneops/docker-compose.override.yml) docker-compose.bos-prod.yml
+#
+# The ONLY intended difference: the live file inlines the real credentials;
+# this copy interpolates ${BOS_PROMOTED_DATABASE_URL} from the host .env
+# (chmod 600, untracked). To (re)materialize the live override on a fresh
+# BOS host:  set BOS_PROMOTED_DATABASE_URL in .env, then either
+# `cp docker-compose.bos-prod.yml docker-compose.override.yml` (compose
+# interpolates at up-time) or run compose with `-f docker-compose.yml
+# -f docker-compose.bos-prod.yml`.
+#
+# Why each piece exists (2026-04-20 HSH→BOS migration):
+#   1. `db` neutralized to a sleeping alpine: a plain `docker compose up`
+#      must NOT start a second Postgres that fights droneops-standby-db for
+#      host port 5434 (base compose binds 127.0.0.1:5434 + 10.99.0.1:5434).
+#   2. backend/worker/flight-parser DATABASE_URL rerouted to the promoted
+#      primary (droneops-standby-db on droneops_default).
+#   3. db-standby inlined so `docker compose up -d` manages the promoted
+#      primary (volume has no standby.signal → runs read-write).
+# Port map: base db 5434 (neutralized on BOS) · droneops-standby-db 5434 ·
+# demo-standby 5437. See CLAUDE.md "Deployment topology".
+#
+# Teardown: remove the override + restart stack when droneops moves off BOS.
+
+services:
+  db:
+    image: alpine:3
+    entrypoint: ["sh", "-c", "echo 'db service neutralized on BOS-HQ — app routes to droneops-standby-db'; sleep infinity"]
+    restart: "no"
+    healthcheck:
+      test: ["CMD", "true"]
+      interval: 30s
+      timeout: 1s
+      retries: 1
+      start_period: 1s
+      start_interval: 1s
+    ports: !reset []
+    volumes: !reset []
+    environment: !reset []
+    command: !reset null
+
+  backend:
+    environment:
+      DATABASE_URL: "${BOS_PROMOTED_DATABASE_URL:?set in .env — postgresql+asyncpg://droneops:<pw>@droneops-standby-db:5432/droneops}"
+
+  worker:
+    environment:
+      DATABASE_URL: "${BOS_PROMOTED_DATABASE_URL:?set in .env — postgresql+asyncpg://droneops:<pw>@droneops-standby-db:5432/droneops}"
+
+  flight-parser:
+    environment:
+      DATABASE_URL: "${BOS_PROMOTED_DATABASE_URL:?set in .env — postgresql+asyncpg://droneops:<pw>@droneops-standby-db:5432/droneops}"
+
+  # Promoted primary (no standby.signal in the volume → read-write).
+  db-standby:
+    container_name: droneops-standby-db
+    image: postgres:16-alpine
+    restart: unless-stopped
+    # BOS-HQ 2026-06-05 sweep: BOS-promoted droneops primary; postgres DB
+    # floor 1G (steady ~43 MiB).
+    mem_limit: 1g
+    environment:
+      PGDATA: /var/lib/postgresql/data
+    volumes:
+      - droneops_standby_pgdata:/var/lib/postgresql/data
+    ports: ["5434:5432"]
+
+volumes:
+  droneops_standby_pgdata:
+    external: true
+    name: droneops_standby_pgdata

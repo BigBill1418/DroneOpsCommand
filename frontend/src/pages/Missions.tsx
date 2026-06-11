@@ -25,12 +25,18 @@ import { IconPlus, IconSearch, IconTrash } from '@tabler/icons-react';
 import { notifications } from '@mantine/notifications';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
-import { Mission } from '../api/types';
+import { MissionListItem } from '../api/types';
 import { statusColors } from '../components/shared/styles';
 import MissionCreateModal from '../components/MissionCreateModal';
 
 export default function Missions() {
-  const [missions, setMissions] = useState<Mission[]>([]);
+  // FU-8 #1 — GET /api/missions returns the lean MissionListItem shape
+  // (scalar columns only, no flights[]/images[]). The list renders only
+  // these scalars, so the full Mission payload — which duplicated the GPS
+  // track per attached flight via flight_data_cache — is intentionally
+  // not fetched here. Use the Hub (MissionDetail, GET /api/missions/{id})
+  // for anything that needs flight/image data.
+  const [missions, setMissions] = useState<MissionListItem[]>([]);
   const [search, setSearch] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
   const navigate = useNavigate();

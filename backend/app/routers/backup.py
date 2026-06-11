@@ -76,6 +76,53 @@ async def _compute_sha256_async(filepath: str) -> str:
     return await loop.run_in_executor(None, _compute_sha256, filepath)
 
 
+def _sidecar_path(filepath: str) -> str:
+    """Path of the ``.sha256`` checksum sidecar for a dump file."""
+    return filepath + ".sha256"
+
+
+def _write_sidecar(filepath: str, checksum: str) -> None:
+    """Persist a dump's checksum next to it so the history page never has to
+    re-hash hundreds of MB on every load (audit P3-5a). Best-effort: a failed
+    sidecar write must not fail the backup it describes — the history read
+    falls back to hashing on a missing/unreadable sidecar."""
+    try:
+        with open(_sidecar_path(filepath), "w", encoding="ascii") as f:
+            f.write(checksum)
+    except OSError as exc:  # pragma: no cover - best-effort
+        logger.warning("Could not write checksum sidecar for %s: %s", filepath, exc)
+
+
+def _read_sidecar(filepath: str) -> str | None:
+    """Return the cached checksum from the ``.sha256`` sidecar, or ``None`` if
+    it is missing, unreadable, or not a well-formed 64-char hex digest (a
+    truncated/corrupt sidecar must trigger a re-hash, not serve a bad value)."""
+    sidecar = _sidecar_path(filepath)
+    try:
+        if os.path.getmtime(sidecar) < os.path.getmtime(filepath):
+            # Sidecar predates the dump it claims to describe — stale, re-hash.
+            return None
+        with open(sidecar, "r", encoding="ascii") as f:
+            value = f.read().strip()
+    except OSError:
+        return None
+    if len(value) == 64 and all(c in "0123456789abcdef" for c in value.lower()):
+        return value.lower()
+    return None
+
+
+async def _checksum_with_sidecar(filepath: str) -> str:
+    """Resolve a dump's checksum from its sidecar, hashing on a miss and
+    backfilling the sidecar so the next read is cheap. The hash falls back to
+    ``_compute_sha256_async`` so it stays off the event loop (audit P3-5a)."""
+    cached = await asyncio.get_running_loop().run_in_executor(None, _read_sidecar, filepath)
+    if cached is not None:
+        return cached
+    checksum = await _compute_sha256_async(filepath)
+    await asyncio.get_running_loop().run_in_executor(None, _write_sidecar, filepath, checksum)
+    return checksum
+
+
 def _validate_archive(filepath: str, env: dict) -> tuple[bool, int]:
     """Validate a pg_dump archive. Returns (valid, toc_entry_count).
 
@@ -126,6 +173,12 @@ async def create_and_download(
     _user: User = Depends(get_current_user),
 ):
     """Create a PostgreSQL backup, verify it, then stream it as a download.
+
+    DEPRECATED (FU-8 #4): the dump/validate/hash work runs in-request (offloaded
+    to a worker thread, so the event loop stays live, but the HTTP connection is
+    held open for the full dump). Prefer the job API — ``POST /api/backup/jobs``
+    with ``kind="create"`` + poll ``GET /api/backup/jobs/{job_id}``. Kept working
+    unchanged until the frontend switches over.
 
     The backup is created in a temp file, validated for integrity, then
     streamed directly to the client browser as a file download (Save As).
@@ -262,6 +315,12 @@ async def restore_from_upload(
     _user: User = Depends(get_current_user),
 ):
     """Upload a backup file and restore the database from it.
+
+    DEPRECATED (FU-8 #4): the restore runs in-request. Prefer ``POST
+    /api/backup/validate-upload`` (to spool + validate the dump) followed by
+    ``POST /api/backup/jobs`` with ``kind="restore"`` + that ``temp_path``, then
+    poll ``GET /api/backup/jobs/{job_id}``. Kept working unchanged until the
+    frontend switches over.
 
     Validates the archive first, then performs the restore.
     This replaces ALL current database contents.
@@ -481,9 +540,10 @@ async def get_backup_history(
             stat = os.stat(filepath)
             size_bytes = stat.st_size
             modified_at = datetime.utcfromtimestamp(stat.st_mtime).isoformat() + "Z"
-            # Hashing a multi-hundred-MB dump takes seconds — keep it off
-            # the event loop (same P0-2 class as the subprocess calls).
-            checksum = await _compute_sha256_async(filepath)
+            # Read the cached checksum from the ``.sha256`` sidecar written at
+            # creation time; only re-hash (off the event loop) on a sidecar
+            # miss, backfilling it so the next page load is cheap (P3-5a).
+            checksum = await _checksum_with_sidecar(filepath)
             entries.append({
                 "filename": filename,
                 "size_bytes": size_bytes,
@@ -556,6 +616,10 @@ async def run_backup_now(
     checksum = await _compute_sha256_async(filepath)
     size_bytes = os.path.getsize(filepath)
 
+    # Persist the checksum sidecar so the history page reads it instead of
+    # re-hashing this dump on every load (audit P3-5a).
+    await asyncio.get_running_loop().run_in_executor(None, _write_sidecar, filepath, checksum)
+
     logger.info(
         "Scheduled backup saved: %s (%d bytes, sha256=%s, %d objects)",
         filename, size_bytes, checksum, toc_entries,
@@ -579,6 +643,11 @@ async def run_backup_now(
                 mtime = datetime.utcfromtimestamp(os.path.getmtime(fpath))
                 if mtime < cutoff:
                     os.unlink(fpath)
+                    # Drop the orphaned checksum sidecar too, if present.
+                    try:
+                        os.unlink(_sidecar_path(fpath))
+                    except OSError:
+                        pass
                     removed.append(fname)
                     logger.info("Removed expired backup: %s (mtime=%s, cutoff=%s)", fname, mtime.isoformat(), cutoff.isoformat())
             except OSError as exc:
@@ -598,6 +667,137 @@ async def run_backup_now(
         "retention_days": retention_days,
         "removed_old_backups": removed,
     }
+
+
+# ---------------------------------------------------------------------------
+# FU-8 #4 — backup create/restore as Celery jobs with progress polling
+# ---------------------------------------------------------------------------
+#
+# ADDITIVE: the synchronous create/restore endpoints above keep working
+# unchanged (they are marked deprecated in their docstrings and will be
+# retired once the frontend switches to the job API). These two routes move
+# the dump/restore off the request path entirely: POST returns 202 + a job
+# id immediately; the worker runs the job and streams {phase, progress} to
+# Redis; GET polls that progress. Same admin auth dependency as every other
+# backup route (``get_current_user``).
+
+
+class BackupJobRequest(BaseModel):
+    kind: str  # "create" | "restore"
+    # For kind="restore": the temp_path returned by /validate-upload — an
+    # already-uploaded-and-validated dump. Ignored for kind="create".
+    temp_path: str | None = None
+
+
+def _restore_spool_root() -> str:
+    """Directory under which /validate-upload writes its disk-spooled dumps.
+
+    Restore-by-job may only reference a file beneath this root with the
+    ``doc_restore_`` mkdtemp prefix — the same artifact the synchronous
+    upload flow produced. This prevents a caller from pointing a restore at
+    an arbitrary path on the backend filesystem.
+    """
+    return tempfile.gettempdir()
+
+
+def _validate_restore_temp_path(temp_path: str) -> str:
+    """Resolve and authorize a restore temp_path; raise 400 on anything that
+    is not a real file under the restore-spool root with the expected prefix."""
+    if not temp_path:
+        raise HTTPException(status_code=400, detail="temp_path is required for a restore job")
+    resolved = os.path.realpath(temp_path)
+    root = os.path.realpath(_restore_spool_root())
+    # Must live directly inside a ``doc_restore_*`` mkdtemp dir under the spool
+    # root — reject path traversal, symlinks pointing elsewhere, and stray dirs.
+    # ``commonpath`` raises ValueError on mixed/relative anchors → treat as invalid.
+    parent = os.path.dirname(resolved)
+    try:
+        under_root = os.path.commonpath([resolved, root]) == root
+    except ValueError:
+        under_root = False
+    if not under_root or not os.path.basename(parent).startswith("doc_restore_"):
+        logger.warning("Rejected restore temp_path outside spool root: %r", temp_path)
+        raise HTTPException(status_code=400, detail="Invalid temp_path — not an uploaded backup spool file")
+    if not os.path.isfile(resolved):
+        raise HTTPException(status_code=404, detail="Uploaded backup file not found — re-upload and retry")
+    return resolved
+
+
+@router.post("/jobs", status_code=202)
+async def create_backup_job(
+    payload: BackupJobRequest,
+    _user: User = Depends(get_current_user),
+):
+    """Enqueue a backup ``create`` or ``restore`` as a background Celery job.
+
+    Returns ``202`` + ``{job_id, kind, status}`` immediately. Poll
+    ``GET /api/backup/jobs/{job_id}`` for ``{status, phase, progress, result, error}``.
+    """
+    from app.tasks.backup_jobs import STATUS_QUEUED, write_job_state
+    from app.tasks.celery_tasks import run_backup_job_task
+
+    kind = (payload.kind or "").strip().lower()
+    if kind not in {"create", "restore"}:
+        raise HTTPException(status_code=400, detail="kind must be 'create' or 'restore'")
+
+    temp_path: str | None = None
+    if kind == "restore":
+        temp_path = _validate_restore_temp_path(payload.temp_path or "")
+
+    task = run_backup_job_task.delay(kind, temp_path)
+    # Seed the queued state so a poll before the first task tick is meaningful
+    # rather than a bare Celery PENDING.
+    write_job_state(task.id, status=STATUS_QUEUED, phase="queued", progress=0)
+    logger.info("Backup job enqueued: id=%s kind=%s", task.id, kind)
+    return {"job_id": task.id, "kind": kind, "status": STATUS_QUEUED}
+
+
+@router.get("/jobs/{job_id}")
+async def get_backup_job(
+    job_id: str,
+    _user: User = Depends(get_current_user),
+):
+    """Poll a backup job's status, phase, progress, and terminal result/error.
+
+    Reads the rich progress overlay from Redis; falls back to the Celery
+    ``AsyncResult`` terminal state if the Redis record has expired or was
+    never written (e.g. the worker died before its first state write).
+    """
+    from app.tasks.backup_jobs import (
+        STATUS_COMPLETE,
+        STATUS_FAILED,
+        STATUS_QUEUED,
+        STATUS_RUNNING,
+        read_job_state,
+    )
+    from app.tasks.celery_tasks import celery_app
+
+    state = read_job_state(job_id)
+    if state is not None:
+        return {
+            "job_id": job_id,
+            "status": state.get("status"),
+            "phase": state.get("phase"),
+            "progress": state.get("progress"),
+            "result": state.get("result"),
+            "error": state.get("error"),
+        }
+
+    # No Redis overlay — derive from the Celery result backend.
+    result = celery_app.AsyncResult(job_id)
+    if result.state == "SUCCESS":
+        payload = result.result if isinstance(result.result, dict) else None
+        return {"job_id": job_id, "status": STATUS_COMPLETE, "phase": "done",
+                "progress": 100, "result": payload, "error": None}
+    if result.state == "FAILURE":
+        return {"job_id": job_id, "status": STATUS_FAILED, "phase": "error",
+                "progress": 100, "result": None, "error": str(result.result)}
+    if result.state == "PENDING":
+        # Unknown id or not-yet-started — report queued (cannot distinguish).
+        return {"job_id": job_id, "status": STATUS_QUEUED, "phase": "queued",
+                "progress": 0, "result": None, "error": None}
+    return {"job_id": job_id, "status": STATUS_RUNNING, "phase": result.state.lower(),
+            "progress": 50, "result": None, "error": None}
 
 
 @router.delete("/history/{filename}")
@@ -623,6 +823,12 @@ async def delete_backup_file(
     except OSError as exc:
         logger.error("Failed to delete backup file %s: %s", filepath, exc)
         raise HTTPException(status_code=500, detail=f"Could not delete backup file: {exc}")
+
+    # Remove the orphaned checksum sidecar too, if present.
+    try:
+        os.unlink(_sidecar_path(filepath))
+    except OSError:
+        pass
 
     logger.info("Backup file deleted: %s", safe_name)
     return {"deleted": True, "filename": safe_name}

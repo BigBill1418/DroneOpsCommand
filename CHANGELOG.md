@@ -4,6 +4,60 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-06-11 — feat(platform): Alembic migrations, async backup jobs, lean mission list, Stripe client isolation — v2.70.0
+
+Finish-all pass over every remaining audit finding (FU-8 #1-#6, P2-2/-3/-6,
+P3-1/-2/-3/-5/-6). ADR-0022. Backend suite: **409 passed, 0 failed**.
+
+* **Alembic adopted (ADR-0022).** Startup schema management moved from
+  `create_all` + ad-hoc ALTERs to versioned migrations run programmatically
+  in the lifespan (executor-offloaded, still inside the ADR-0021
+  primary-only recovery guard). Baseline `0001` reproduces the exact legacy
+  schema by construction; brownfield prod DBs (schema present, no
+  `alembic_version`) are auto-stamped then upgraded; fresh DBs build from
+  scratch. **Validated against a real Postgres 16 container in both modes —
+  empty autogenerate diff each way.** Migration `0002` adds 7 more
+  query-justified indexes (`flights.start_time`, `flights.created_at`,
+  `missions.customer_id`, `missions.status`, `mission_images.mission_id`,
+  `maintenance_records.aircraft_id`, `maintenance_schedules.aircraft_id`);
+  unjustifiable candidates rejected in the ADR.
+* **Backups became background jobs (additive).** `POST /api/backup/jobs`
+  (202 + job_id) + `GET /api/backup/jobs/{id}` with phase/progress in Redis,
+  executed by the Celery worker — a 600 s pg_dump no longer occupies an API
+  request at all. Old sync endpoints kept working (deprecated). Restore
+  temp-path hardened against traversal/symlink escape. Backup history now
+  reads `.sha256` sidecars instead of re-hashing every dump per page view.
+* **Mission list payload went from O(track points) to O(rows).** The list
+  endpoint returned every mission's `flights[].flight_data_cache` — each a
+  ~19k-point GPS track copy — that the list page never rendered (verified:
+  sole consumer reads only scalars; client portal + DroneOpsSync confirmed
+  non-consumers). New `MissionListItemResponse` + `noload` options; detail
+  endpoint byte-identical.
+* **Stripe key isolation.** Per-call `StripeClient` (SDK 11.4.1) replaces
+  module-global `stripe.api_key` mutation — closes the key-rotation
+  interleave window; executor offload (v2.68.8) preserved.
+* **Health gate (P3-1):** `/api/health` 503s only on DB/Redis now — a
+  Stripe outage can no longer restart a healthy API (status still reported
+  in the body).
+* **maintenance `/status` (P2-3):** latest-per-(aircraft,type) via PG
+  `DISTINCT ON` instead of loading the whole table into Python.
+* **flight_library finish:** `/reprocess` reuses the shared flight builder
+  (unified import log line), dead `_save_original_file` deleted, stored-log
+  lookup is a direct glob instead of an O(N) dir scan, and per-file batch
+  isolation is pinned by tests (a parser timeout on file N can't lose
+  files N+1…M).
+* **client_portal (P3-6):** image_count via scalar COUNT — removes a latent
+  MissingGreenlet lazy-load.
+* **email service (P3-5b):** PDF attachment reads offloaded.
+* **Compose (P2-6/P3-3):** `cpus: 2.0` fences on backend + worker;
+  backend healthcheck `start_period` 45s → 90s.
+* **BOS-HQ override versioned (P3-2, failover-sensitive).** The db-
+  neutralization + DATABASE_URL reroute that prevent a same-host port-5434
+  collision lived only on the host; now committed secret-free as
+  `docker-compose.bos-prod.yml` (credential via `${BOS_PROMOTED_DATABASE_URL}`
+  in the host .env, seeded) with a drift-check command; port map documented
+  in CLAUDE.md.
+
 ## 2026-06-11 — feat(resilience): standby-safe startup + hot-path indexes + streaming flight ingest — v2.69.0
 
 Phases 2–3 of the 2026-06-11 ground-up audit (findings #4 FAILOVER-SENSITIVE,

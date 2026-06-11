@@ -128,26 +128,25 @@ PARSER_URL = "http://flight-parser:8100"
 _FLIGHT_LOGS_DIR = Path(settings.upload_dir) / "flight_logs"
 
 
-def _save_original_file(file_hash: str, content: bytes, filename: str) -> None:
-    """Persist the original uploaded flight log to disk for future re-processing."""
-    try:
-        _FLIGHT_LOGS_DIR.mkdir(parents=True, exist_ok=True)
-        ext = Path(filename).suffix.lower() if filename else ".bin"
-        dest = _FLIGHT_LOGS_DIR / f"{file_hash}{ext}"
-        if not dest.exists():
-            dest.write_bytes(content)
-            logger.debug("Saved original flight log: %s (%d bytes)", dest.name, len(content))
-    except Exception as e:
-        logger.warning("Failed to save original flight log %s: %s", file_hash, e)
-
-
 def _get_stored_file_path(file_hash: str) -> Path | None:
-    """Find a stored original file by its hash (any extension)."""
+    """Find a stored original file by its hash (any extension).
+
+    Original logs are persisted as ``{file_hash}{ext}`` where ``ext`` is the
+    upload's single-component suffix (or ``.bin``). A filesystem glob on the
+    hash stem resolves the one matching file directly — the directory index
+    does the lookup — instead of an O(N) ``iterdir()`` scan that listed every
+    stored log to find one hash (audit P3-5c). ``glob('<hash>.*')`` covers all
+    single-extension names; the bare ``<hash>`` (extensionless) form is checked
+    separately so the result is identical to the old ``f.stem == file_hash``
+    predicate for every name the store can produce.
+    """
     if not _FLIGHT_LOGS_DIR.exists():
         return None
-    for f in _FLIGHT_LOGS_DIR.iterdir():
-        if f.stem == file_hash:
-            return f
+    for match in _FLIGHT_LOGS_DIR.glob(f"{file_hash}.*"):
+        return match
+    bare = _FLIGHT_LOGS_DIR / file_hash
+    if bare.exists():
+        return bare
     return None
 
 
@@ -177,10 +176,9 @@ def _stream_spool_to_temp(src, dest_path: str) -> tuple[str, int]:
 def _store_original_from_path(file_hash: str, src_path: str, filename: str) -> None:
     """Copy an already-spooled flight log into the original-file store.
 
-    Streaming-disk equivalent of :func:`_save_original_file` — same
-    hash-named destination, same idempotent "write only if absent" behaviour,
-    same fail-soft logging — but copies from a temp file instead of holding
-    the whole upload in a ``bytes`` object.
+    Persists to the hash-named destination (``{file_hash}{ext}``) idempotently
+    ("write only if absent") with fail-soft logging, copying from the temp
+    spool file instead of holding the whole upload in a ``bytes`` object.
     """
     try:
         _FLIGHT_LOGS_DIR.mkdir(parents=True, exist_ok=True)
@@ -198,7 +196,7 @@ class _SpooledUpload:
 
     Replaces the old ``content = await upload.read()`` whole-dump-in-RAM step.
     The original file is persisted to the hash-named store on construction
-    (same idempotent semantics as ``_save_original_file``). :meth:`parse`
+    (idempotent "write only if absent"). :meth:`parse`
     POSTs the temp file to the flight-parser service, streaming it (never a
     whole-file ``bytes`` in this process). :meth:`close` removes the temp file.
 
@@ -272,17 +270,25 @@ async def _spool_upload(upload: UploadFile) -> _SpooledUpload:
 
 
 async def _build_flight_from_parsed(
-    db: AsyncSession, parsed: dict, file_hash: str, upload_filename: str | None
+    db: AsyncSession, parsed: dict, file_hash: str, upload_filename: str | None,
+    *, log_prefix: str = "Imported",
 ) -> Flight:
     """Construct, persist, and battery-track a new :class:`Flight` from a
     parser-emitted dict.
 
-    The identical ~25-line builder used by ``/upload``, ``/device-upload``
-    and ``/reprocess`` for newly-imported flights. Resolves fleet attribution,
-    generates the display name, persists the row (flush + refresh), logs an
-    auto-match line when matched, and best-effort tracks the battery via a
-    savepoint so battery failures never roll back the flight import. Behaviour
-    is byte-for-byte what the three inline blocks did.
+    The single ~25-line builder used by ``/upload``, ``/device-upload`` and
+    ``/reprocess`` for newly-imported flights. Resolves fleet attribution,
+    generates the display name, persists the row (flush + refresh), logs a
+    per-flight import line (``log_prefix`` distinguishes the caller — e.g.
+    "Imported" vs "Reprocess: imported"), and best-effort tracks the battery
+    via a savepoint so battery failures never roll back the flight import.
+
+    Log-line normalization (FU-8 #5a): all three callers now emit one
+    structured per-flight import line through this builder —
+    ``"<prefix> new flight <id> (<name>) aircraft=<model|unmatched>"`` — plus
+    the existing fleet auto-match line when a fleet aircraft is matched. This
+    replaces the ``/reprocess`` branch's hand-rolled, verbatim-duplicated
+    builder.
     """
     ph = parsed.get("file_hash", file_hash)
     parsed_start = _parse_datetime(parsed.get("start_time"))
@@ -320,6 +326,8 @@ async def _build_flight_from_parsed(
     db.add(flight)
     await db.flush()
     await db.refresh(flight)
+    logger.info("%s new flight %s (%s) aircraft=%s", log_prefix, flight.id,
+                flight.name, fleet_match.model_name if fleet_match else "unmatched")
 
     # Auto-track battery — best-effort via savepoint so failures
     # don't rollback the flight import
@@ -1340,50 +1348,15 @@ async def reprocess_flights(
                                     existing_flight.id, existing_flight.name,
                                     parsed.get("point_count", 0))
                     else:
-                        parsed_start = _parse_datetime(parsed.get("start_time"))
-                        fleet_match = await _match_fleet_aircraft(
-                            db, parsed.get("drone_serial"), parsed.get("drone_model")
+                        # Same builder /upload and /device-upload use — fleet
+                        # attribution, name, persist, battery-track. The
+                        # "Reprocess: imported" prefix keeps the per-flight log
+                        # line caller-distinguishable (FU-8 #5a consolidation).
+                        await _build_flight_from_parsed(
+                            db, parsed, file_hash, upload.filename,
+                            log_prefix="Reprocess: imported",
                         )
-                        flight_name = await _generate_flight_name(
-                            db, parsed.get("drone_model"), fleet_match, parsed_start
-                        )
-
-                        flight = Flight(
-                            name=flight_name,
-                            drone_model=fleet_match.model_name if fleet_match else parsed.get("drone_model"),
-                            drone_serial=parsed.get("drone_serial"),
-                            battery_serial=parsed.get("battery_serial"),
-                            start_time=parsed_start,
-                            duration_secs=parsed.get("duration_secs", 0),
-                            total_distance=parsed.get("total_distance", 0),
-                            max_altitude=parsed.get("max_altitude", 0),
-                            max_speed=parsed.get("max_speed", 0),
-                            home_lat=parsed.get("home_lat"),
-                            home_lon=parsed.get("home_lon"),
-                            point_count=parsed.get("point_count", 0),
-                            gps_track=parsed.get("gps_track"),
-                            telemetry=parsed.get("telemetry"),
-                            raw_metadata=parsed.get("raw_metadata"),
-                            source=parsed.get("source", "dji_txt"),
-                            source_file_hash=ph,
-                            original_filename=parsed.get("original_filename", upload.filename),
-                            aircraft_id=fleet_match.id if fleet_match else None,
-                        )
-                        db.add(flight)
-                        await db.flush()
-                        await db.refresh(flight)
                         imported_count += 1
-                        logger.info("Reprocess: imported new flight %s (%s) aircraft=%s",
-                                    flight.id, flight.name,
-                                    fleet_match.model_name if fleet_match else "unmatched")
-
-                        battery_data = parsed.get("battery_data")
-                        if battery_data and battery_data.get("serial"):
-                            try:
-                                async with db.begin_nested():
-                                    await _track_battery(db, flight, battery_data)
-                            except Exception as bat_exc:
-                                logger.warning("Battery tracking failed for flight %s: %s", flight.id, bat_exc)
 
         except httpx.ConnectError:
             errors.append(f"{upload.filename}: flight-parser service unavailable")

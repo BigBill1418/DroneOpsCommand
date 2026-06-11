@@ -19,6 +19,17 @@ loudly instead of silently re-introducing the OOM), plus — financials only —
 ``defer(MissionFlight.flight_data_cache)`` and ``raiseload(Mission.images)``
 since the aggregation loop reads neither.
 
+FU-8 #1 (2026-06-11) goes one leg further on the LIST path specifically.
+``flight_data_cache`` ITSELF duplicates the full GPS track per attached
+flight (the ``track`` key holds the same ~19k points), and the Mission Hub
+list (``Missions.tsx``) renders ZERO flight/image data — only scalar mission
+columns. So GET /api/missions now serializes a lean ``MissionListItemResponse``
+(scalars only) and runs ``_mission_list_options()``, which ``noload``s the
+flights/images/customer relationships — the list query is one SELECT over the
+mission columns, strictly O(rows), never O(track points). Detail
+(``GET /api/missions/{id}``) and every write re-query keep the full
+``MissionResponse`` + ``_mission_graph_options()`` shape byte-identical.
+
 These tests assert against the ACTUAL production loader options (both
 routers build their queries from the helpers imported here) and exercise the
 list route through the full ASGI stack with a stub that booby-traps
@@ -42,7 +53,7 @@ from fastapi.testclient import TestClient
 
 from app.models.mission import Mission, MissionFlight
 from app.routers.financials import _billable_mission_load_options
-from app.routers.missions import _mission_graph_options
+from app.routers.missions import _mission_graph_options, _mission_list_options
 
 
 # ── Loader-option introspection ──────────────────────────────────────
@@ -83,6 +94,70 @@ def test_mission_graph_still_loads_serialized_relationships():
     assert strategies.get(("flights", "aircraft")) == {"lazy": "selectin"}
     assert strategies.get(("images",)) == {"lazy": "selectin"}
     assert strategies.get(("customer",)) == {"lazy": "selectin"}
+
+
+def test_mission_list_options_noload_heavy_relationships():
+    """FU-8 #1: the LIST query must NOT load flights/images — those
+    relationships are lazy='selectin' at the mapper level, so a bare
+    select(Mission) would eager-load flight_data_cache (the per-flight
+    GPS-track copy) into every list row. _mission_list_options() noloads
+    them so the list payload is O(rows), not O(track points)."""
+    strategies = _strategy_map(_mission_list_options())
+    assert strategies.get(("flights",)) == {"lazy": "noload"}, (
+        "GET /api/missions must noload Mission.flights — the lazy='selectin' "
+        "mapper default drags flight_data_cache (duplicated gps_track) into "
+        "every list row (FU-8 #1)."
+    )
+    assert strategies.get(("images",)) == {"lazy": "noload"}, (
+        "GET /api/missions must noload Mission.images — the lean list schema "
+        "doesn't serialize the gallery."
+    )
+    assert strategies.get(("customer",)) == {"lazy": "noload"}, (
+        "GET /api/missions must noload Mission.customer — the lean list schema "
+        "doesn't serialize it, so the mapper-level selectin default is a "
+        "wasted round-trip."
+    )
+
+
+def test_mission_list_options_never_touches_flight_or_cache():
+    """The lean list path must never reach MissionFlight.flight OR the
+    flight_data_cache column — noload(Mission.flights) short-circuits the
+    whole leg before either can be materialized, so neither appears in the
+    strategy map at all (no flights load = no nested options)."""
+    strategies = _strategy_map(_mission_list_options())
+    assert ("flights", "flight") not in strategies
+    assert ("flights", "flight_data_cache") not in strategies
+    assert ("flights", "aircraft") not in strategies
+
+
+def test_mission_list_item_schema_drops_heavy_fields():
+    """The list response model must carry the scalar columns the Hub list
+    renders and DROP flights/images (the heavy legs). Detail keeps them."""
+    from app.schemas.mission import MissionListItemResponse, MissionResponse
+
+    list_fields = set(MissionListItemResponse.model_fields)
+    detail_fields = set(MissionResponse.model_fields)
+
+    # Heavy relationship payloads are gone from the list contract.
+    assert "flights" not in list_fields, (
+        "MissionListItemResponse must not carry flights — that's the O(track) "
+        "payload FU-8 #1 removes from the list."
+    )
+    assert "images" not in list_fields
+    # Detail still carries the full shape (unchanged contract).
+    assert "flights" in detail_fields
+    assert "images" in detail_fields
+    # Every scalar the list UI (Missions.tsx) reads is preserved.
+    for col in (
+        "id", "title", "mission_type", "location_name",
+        "mission_date", "status", "is_billable",
+    ):
+        assert col in list_fields, f"list schema dropped scalar the UI reads: {col}"
+    # The lean list is a strict subset of detail (no new/renamed fields).
+    assert list_fields < detail_fields, (
+        "MissionListItemResponse must be a strict subset of MissionResponse — "
+        "no field may drift between list and detail."
+    )
 
 
 def test_financials_graph_blocks_flight_and_defers_cache():
@@ -266,10 +341,14 @@ def _build_app(rows: list[Any]) -> FastAPI:
     return app
 
 
-def test_list_missions_serializes_without_touching_flight_relationship():
-    """Proves the route contract is unchanged by the raiseload: the list
-    response keeps flight_data_cache (the Hub's display source) and never
-    needs MissionFlight.flight — accessing it trips the stub's trap."""
+def test_list_missions_returns_lean_rows_without_heavy_payload():
+    """FU-8 #1: the list response is the lean shape — scalar mission
+    columns only, NO flights/images. Even though the stub mission carries
+    a flight whose .flight relationship is booby-trapped, the lean
+    serializer never reaches it: MissionListItemResponse doesn't emit
+    flights at all, so the cache (and its duplicated GPS track) never
+    crosses the wire. This is the byte-level proof the O(track) payload
+    is gone from the list."""
     mission = _MissionStub(flights=[_MissionFlightStub()])
     client = TestClient(_build_app([mission]))
 
@@ -278,9 +357,18 @@ def test_list_missions_serializes_without_touching_flight_relationship():
     assert resp.status_code == 200, f"got {resp.status_code} body={resp.text}"
     body = resp.json()
     assert len(body) == 1
-    flights = body[0]["flights"]
-    assert len(flights) == 1
-    # Response shape preserved: cache + aircraft emitted, no `flight` key.
-    assert flights[0]["flight_data_cache"]["track"] == [{"lat": 44.0, "lng": -123.0}]
-    assert "aircraft" in flights[0]
-    assert "flight" not in flights[0]
+    row = body[0]
+    # Heavy legs are gone — no flights array, no images array, hence no
+    # flight_data_cache / track anywhere in the list payload.
+    assert "flights" not in row, (
+        "GET /api/missions leaked flights[] — the lean list contract drops "
+        "the O(track) flight_data_cache copy (FU-8 #1)."
+    )
+    assert "images" not in row
+    # Scalar columns the Hub list renders are all present and correct.
+    assert row["title"] == "Lean list mission"
+    assert row["status"] == "draft"
+    assert row["mission_type"] == "other"
+    assert row["is_billable"] is False
+    # No part of the response references the duplicated GPS track.
+    assert "track" not in resp.text

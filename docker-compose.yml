@@ -140,6 +140,10 @@ services:
     # during 45 MB DJI image uploads (RSS ratchets under malloc fragmentation
     # even after the streaming-upload fix; host has >20 GiB headroom).
     mem_limit: 1536m
+    # 2026-06-11 audit P2-6: CPU fence — without it a busy-looping handler
+    # can starve PG/redis on the same 8-core host (2026-04-19 incident
+    # class). 2.0 cores is ~4x the steady-state API load.
+    cpus: 2.0
     # tini reaps orphan curl/subprocesses spawned by FastAPI handlers so
     # they never accumulate as <defunct> (matches worker service; observed
     # uvicorn zombies 2026-04-19 during HSH-HQ high-load incident).
@@ -203,7 +207,11 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 45s
+      # 2026-06-11 audit P3-3: 45s was tighter than the worst-case lifespan
+      # (_wait_for_db ≤30s + _wait_for_redis ≤30s + schema sync + seed) on a
+      # cold/slow standby promotion — first checks burned retries. 90s
+      # covers the dependency-wait window with margin.
+      start_period: 90s
     labels:
       <<: *barnardhq-labels
       com.barnardhq.service: "droneops-api"
@@ -217,6 +225,9 @@ services:
     # BOS-HQ 2026-06-05 sweep: celery worker, steady ~547 MiB → 1.5G
     # (2.5x, headroom for report/email task bursts). Health kept at 30s.
     mem_limit: 1536m
+    # 2026-06-11 audit P2-6: CPU fence — a runaway report task must not
+    # monopolize the host's cores (see backend cpus note).
+    cpus: 2.0
     # PID 1 init reaper — without this, celery prefork children that exit
     # become zombies if the master loses a SIGCHLD reap. The 2026-04-19
     # high-load incident found 33 defunct celery children of the worker

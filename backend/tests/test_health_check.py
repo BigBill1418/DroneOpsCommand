@@ -100,9 +100,12 @@ async def test_health_returns_503_when_redis_fails():
 
 
 @pytest.mark.asyncio
-async def test_health_returns_503_when_stripe_fails():
+async def test_health_stays_healthy_when_stripe_fails():
+    """ADR-0022 (audit P3-1) — a Stripe probe ERROR must NOT degrade the
+    overall status or return 503. A third-party Stripe outage / bad key
+    must never restart a healthy API. Stripe status + error stay in the
+    body for observability; only DB + Redis gate container health."""
     from app.main import health_check
-    from fastapi.responses import JSONResponse
 
     _reset_health_cache()
 
@@ -113,10 +116,16 @@ async def test_health_returns_503_when_stripe_fails():
     with patch("redis.asyncio.from_url", return_value=fake_redis), \
          patch("app.main._probe_stripe_cached",
                new=AsyncMock(return_value=("error", "AuthenticationError"))):
-        resp = await health_check(db=_OkDB())
+        body = await health_check(db=_OkDB())
 
-    assert isinstance(resp, JSONResponse)
-    assert resp.status_code == 503
+    # 200 path returns the dict directly (not a JSONResponse).
+    assert isinstance(body, dict)
+    assert body["status"] == "healthy"
+    assert body["db"] == "ok"
+    assert body["redis"] == "ok"
+    # Stripe error still reported in the body for observability.
+    assert body["stripe"] == "error"
+    assert body["stripe_error"] == "AuthenticationError"
 
 
 @pytest.mark.asyncio
