@@ -122,11 +122,6 @@ services:
     deploy:
       replicas: 0
 
-  # Disable watchtower in demo
-  watchtower:
-    deploy:
-      replicas: 0
-
   # BOS-HQ 2026-06-05 sweep: demo redis ~3 MiB -> 256M floor.
   redis:
     mem_limit: 256m

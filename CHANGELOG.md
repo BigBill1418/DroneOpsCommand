@@ -4,6 +4,16 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-06-11 — fix(demo): drop obsolete watchtower override from demo compose
+
+The v2.70.x audit removed the `watchtower` service from the base
+`docker-compose.yml`, but `docker-compose.demo.yml` still carried its
+`deploy: replicas: 0` disable-override. With no base definition left, the
+merged demo project contained a `watchtower` service with neither an image
+nor a build context, and `docker compose up` for the demo stack failed with
+"invalid compose project" — blocking the demo's update to v2.70.1. Removed
+the dead override; demo stack composes and deploys again.
+
 ## 2026-06-11 — perf(frontend): Settings split into lazy tabs, async backup UI, cache rollout — v2.70.1
 
 Audit findings P2-4, P2-5, P3-4 (the last open items). Frontend suite:
