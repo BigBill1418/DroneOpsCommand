@@ -40,6 +40,7 @@ import {
   IconCalendarDue,
 } from '@tabler/icons-react';
 import api from '../api/client';
+import { useApiCache } from '../hooks/useApiCache';
 import { Aircraft, MaintenanceRecordType, MaintenanceAlert } from '../api/types';
 import StatCard from '../components/shared/StatCard';
 import { cardStyle, inputStyles, monoFont } from '../components/shared/styles';
@@ -73,6 +74,17 @@ export default function Maintenance() {
   } | null>(null);
   const [aircraft, setAircraft] = useState<Aircraft[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // FIX-4 (P2-4): aircraft fleet is shared reference data that rarely
+  // changes — cache it client-side (30 s TTL) and share the round-trip
+  // with Dashboard / Flights / Batteries instead of re-fetching on every
+  // mount. Records / due / next-due stay on the imperative loadData()
+  // path below because they're mutated locally and gated by the page's
+  // single loading spinner.
+  const { data: aircraftRaw } = useApiCache<Aircraft[]>('/aircraft');
+  useEffect(() => {
+    if (Array.isArray(aircraftRaw)) setAircraft(aircraftRaw);
+  }, [aircraftRaw]);
   const [addOpen, setAddOpen] = useState(false);
   const [selectedRecord, setSelectedRecord] = useState<MaintenanceRecordType | null>(null);
   const [editing, setEditing] = useState(false);
@@ -104,15 +116,13 @@ export default function Maintenance() {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [recordsResp, alertsResp, aircraftResp, nextDueResp] = await Promise.all([
+      const [recordsResp, alertsResp, nextDueResp] = await Promise.all([
         api.get('/maintenance/records'),
         api.get('/maintenance/due'),
-        api.get('/aircraft'),
         api.get('/maintenance/next-due').catch(() => ({ data: null })),
       ]);
       setRecords(recordsResp.data);
       setAlerts(alertsResp.data);
-      setAircraft(aircraftResp.data);
       setNextServiceDue(nextDueResp.data);
     } catch {
       // Silent fail — pages may not have data yet

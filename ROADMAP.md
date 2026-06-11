@@ -265,9 +265,21 @@ rationale.
 - **Deliverable.** ADR-0003 (`docs/adr/0003-zero-touch-device-key-rotation.md`) + plan (`docs/plans/2026-04-24-zero-touch-key-rotation.md`) + migration + endpoint + Celery task + tests. Remote routine `trig_01KiBK88vqs6vtRf75rkxcw8` initially shipped an empty branch; aegis re-ran and produced both PRs.
 - **Owner.** aegis (scaffold); Bill (review + merge).
 
-### FU-8 — Ground-up audit residuals (2026-06-11 multi-agent pass)
+### FU-8 — Ground-up audit residuals (2026-06-11 multi-agent pass) — **CLOSED 2026-06-11** (v2.70.0/v2.70.1)
 
-- **Status.** Open. Phases 1–3 of the audit SHIPPED (v2.68.7 image-upload OOM
+- **Status.** CLOSED. All six residuals + every remaining P2/P3 audit finding
+  shipped across v2.70.0 (Alembic ADR-0022, async backup jobs, lean mission
+  list, Stripe per-call client, DISTINCT ON maintenance, health-gate trim,
+  cpus fences, versioned BOS override) and v2.70.1 (Settings lazy-tab split,
+  backup-jobs UI, useApiCache rollout, Airspace visibility guard).
+  Consciously NOT done (new follow-ups, operator-triggered):
+  * Device-upload Celery decoupling (audit P2-2 full leg) — requires a
+    DroneOpsSync client release; backend per-file batch isolation is pinned
+    by tests in the meantime.
+  * Trigram (pg_trgm) indexes for the leading-wildcard ILIKE searches —
+    rejected from 0002 as B-tree can't serve them; revisit if flight search
+    slows at scale.
+- **Original scope (for the record).** Was: Phases 1–3 of the audit SHIPPED (v2.68.7 image-upload OOM
   fix, v2.68.8 event-loop unblocking sweep + eager-load scoping, v2.69.0
   standby-safe startup + hot-path indexes + streaming flight ingest).
   Full findings: `docs/plans/2026-06-11-ground-up-audit.md`; ADR-0021.

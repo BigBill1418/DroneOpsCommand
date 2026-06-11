@@ -23,6 +23,7 @@ import { notifications } from '@mantine/notifications';
 import { IconPlus, IconEdit, IconTrash, IconSearch, IconMapPin, IconSend, IconCheck, IconCopy, IconSignature, IconMail, IconHistory } from '@tabler/icons-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
+import { useApiCache, invalidate as invalidateCache } from '../hooks/useApiCache';
 import { Customer, NominatimResult } from '../api/types';
 import PdfViewer from '../components/PDFPreview/PdfViewer';
 import { inputStyles } from '../components/shared/styles';
@@ -129,11 +130,21 @@ export default function Customers() {
     setAddressPopover(false);
   };
 
-  const loadCustomers = () => {
-    api.get('/customers').then((r) => setCustomers(r.data)).catch(() => setCustomers([]));
-  };
+  // FIX-4 (P2-4): /customers is shared reference data (also read by the
+  // Dashboard) — cache it client-side (30 s TTL) and share the round-trip
+  // instead of re-fetching on every mount. Mirror the cached payload into
+  // local state so the existing render path is unchanged. After a mutation,
+  // reloadCustomers() invalidates the shared cache and forces a refetch so
+  // both this page AND the Dashboard pick up the change.
+  const { data: customersRaw, refetch: refetchCustomers } = useApiCache<Customer[]>('/customers');
+  useEffect(() => {
+    if (Array.isArray(customersRaw)) setCustomers(customersRaw);
+  }, [customersRaw]);
 
-  useEffect(() => { loadCustomers(); }, []);
+  const loadCustomers = useCallback(() => {
+    invalidateCache('/customers');
+    refetchCustomers();
+  }, [refetchCustomers]);
 
   const handleSubmit = async (values: typeof form.values) => {
     try {

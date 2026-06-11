@@ -4,6 +4,34 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-06-11 — perf(frontend): Settings split into lazy tabs, async backup UI, cache rollout — v2.70.1
+
+Audit findings P2-4, P2-5, P3-4 (the last open items). Frontend suite:
+**52 passed, 0 failed** (incl. one stale test fixed); build clean.
+
+* **Settings.tsx: 2715-line monolith → 134-line shell + 11 lazy per-tab
+  subtrees** (`src/pages/settings/`). Mount burst drops from ~19 parallel
+  GETs + 13 simultaneously-mounted forms to **1 GET** (active tab only,
+  `keepMounted={false}`); every tab is its own lazy chunk. Tab list,
+  labels, fields, and submit payloads preserved exactly.
+* **Backup UI uses the v2.70.0 job API**: start job → poll every 2s with
+  phase/progress bar → fetch result; restore passes the validated
+  temp_path. Graceful fallback to the old sync endpoints on 404 so deploy
+  version-skew can never break backups.
+* **useApiCache rollout (P2-4):** shared reference reads (`/customers`,
+  `/aircraft`, `/rate-templates`, `/settings/weather`) now cached +
+  deduped across Dashboard/Flights/Customers/Maintenance/Batteries/
+  Airspace/Settings-Fleet, with write-then-invalidate audited on every
+  mutating handler. Primary list payloads that pages mutate locally were
+  deliberately left imperative (loading/refresh semantics unchanged).
+* **Airspace poll (P3-4):** tab-visibility guard added (house pattern from
+  MissionDetail) + interval backed off 10s → 15s; UI labels updated.
+* **Test fix:** `MissionInvoiceEdit.test.tsx` mocked the long-gone
+  per-item POST/DELETE loop; the editor has used atomic
+  `PUT /invoice/items` since the non-transactional loop was replaced.
+  Mocks updated to the real contract — the save-then-cancel guard test
+  now actually exercises the save path.
+
 ## 2026-06-11 — feat(platform): Alembic migrations, async backup jobs, lean mission list, Stripe client isolation — v2.70.0
 
 Finish-all pass over every remaining audit finding (FU-8 #1-#6, P2-2/-3/-6,

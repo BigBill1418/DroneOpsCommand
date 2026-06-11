@@ -31,6 +31,7 @@ import { MapContainer, TileLayer, CircleMarker, Circle, Marker, Popup, LayersCon
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import api from '../api/client';
+import { useApiCache } from '../hooks/useApiCache';
 import { cardStyle, monoFont } from '../components/shared/styles';
 
 const heading = { fontFamily: "'Bebas Neue', sans-serif" };
@@ -105,17 +106,21 @@ export default function Airspace() {
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isMobile = useMediaQuery('(max-width: 768px)');
 
-  // Load home location from Settings > Home Location
+  // Load home location from Settings > Home Location.
+  // FIX-4 (P2-4): the weather-settings lookup is a static reference read
+  // (home lat/lon, mount-only) — cache it client-side (30 s TTL) instead
+  // of re-fetching every time the operator opens this page. The live
+  // aircraft poll below is intentionally NOT cached.
+  const { data: weatherSettings } = useApiCache<{ weather_lat?: string; weather_lon?: string }>('/settings/weather');
   useEffect(() => {
-    api.get('/settings/weather').then((r) => {
-      const lat = parseFloat(r.data.weather_lat);
-      const lon = parseFloat(r.data.weather_lon);
-      if (!isNaN(lat) && !isNaN(lon) && lat !== 0) {
-        setHomeLat(lat);
-        setHomeLon(lon);
-      }
-    }).catch(() => {});
-  }, []);
+    if (!weatherSettings) return;
+    const lat = parseFloat(weatherSettings.weather_lat ?? '');
+    const lon = parseFloat(weatherSettings.weather_lon ?? '');
+    if (!isNaN(lat) && !isNaN(lon) && lat !== 0) {
+      setHomeLat(lat);
+      setHomeLon(lon);
+    }
+  }, [weatherSettings]);
 
   // GPS tracking
   useEffect(() => {
@@ -176,7 +181,14 @@ export default function Airspace() {
     fetchAircraft();
 
     if (polling) {
-      intervalRef.current = setInterval(fetchAircraft, 10000);
+      // P3-4: skip the poll while the tab is hidden (no point burning the
+      // OpenSky rate budget when nobody's looking — house pattern from
+      // MissionDetail.tsx) and back the interval off 10s -> 15s.
+      const tick = () => {
+        if (document.visibilityState !== 'visible') return;
+        fetchAircraft();
+      };
+      intervalRef.current = setInterval(tick, 15000);
     }
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
@@ -310,7 +322,7 @@ export default function Airspace() {
                   <Text c="#e8edf2" fw={700} style={heading} size="sm">REFRESH</Text>
                 </Group>
                 <Switch
-                  label="Auto 10s"
+                  label="Auto 15s"
                   checked={polling}
                   onChange={(e) => setPolling(e.currentTarget.checked)}
                   color="cyan"
@@ -502,7 +514,7 @@ export default function Airspace() {
                 <Text c="#e8edf2" fw={700} style={heading} size="md">AUTO-REFRESH</Text>
               </Group>
               <Switch
-                label="Poll every 10s"
+                label="Poll every 15s"
                 checked={polling}
                 onChange={(e) => setPolling(e.currentTarget.checked)}
                 color="cyan"

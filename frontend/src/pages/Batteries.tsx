@@ -36,7 +36,8 @@ import {
   IconTrash,
 } from '@tabler/icons-react';
 import api from '../api/client';
-import { BatteryRecord, BatteryLogRecord } from '../api/types';
+import { useApiCache } from '../hooks/useApiCache';
+import { Aircraft, BatteryRecord, BatteryLogRecord } from '../api/types';
 import StatCard from '../components/shared/StatCard';
 import { cardStyle, inputStyles, monoFont } from '../components/shared/styles';
 
@@ -82,21 +83,22 @@ export default function Batteries() {
     }
   };
 
-  const loadDroneModels = async () => {
-    try {
-      const resp = await api.get('/aircraft');
-      // Dedupe: a fleet can hold multiple aircraft of the same model_name; the
-      // model dropdowns expect unique values (Mantine v7 throws on duplicates).
-      const models = Array.from(new Set(
-        (resp.data as { model_name: string }[]).map((a) => a.model_name).filter(Boolean)
-      ));
-      setDroneModels(models);
-    } catch {
-      setDroneModels([]);
+  // FIX-4 (P2-4): aircraft fleet is shared reference data — cache it
+  // client-side (30 s TTL) and share the round-trip with Dashboard /
+  // Flights / Maintenance instead of re-fetching on every mount. Derive
+  // the deduped drone-model list from the cached payload.
+  // Dedupe: a fleet can hold multiple aircraft of the same model_name; the
+  // model dropdowns expect unique values (Mantine v7 throws on duplicates).
+  const { data: aircraftRaw } = useApiCache<Aircraft[]>('/aircraft');
+  useEffect(() => {
+    if (Array.isArray(aircraftRaw)) {
+      setDroneModels(Array.from(new Set(
+        aircraftRaw.map((a) => a.model_name).filter(Boolean)
+      )));
     }
-  };
+  }, [aircraftRaw]);
 
-  useEffect(() => { loadBatteries(); loadDroneModels(); }, []);
+  useEffect(() => { loadBatteries(); }, []);
 
   const loadLogs = async (batteryId: string) => {
     setLogsLoading(true);

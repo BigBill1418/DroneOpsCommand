@@ -78,11 +78,10 @@ const server = setupServer(
     putInvoiceCount++;
     return HttpResponse.json(baseInvoice);
   }),
-  http.post(`*/api/missions/${MISSION_ID}/invoice/items`, () =>
-    HttpResponse.json({ id: 'li-new', sort_order: 0 }),
-  ),
-  http.delete(`*/api/missions/${MISSION_ID}/invoice/items/:itemId`, () =>
-    new HttpResponse(null, { status: 204 }),
+  // v2.67.x atomic line-item replace — the editor PUTs the full item list
+  // in one request (the old per-item POST/DELETE loop is gone).
+  http.put(`*/api/missions/${MISSION_ID}/invoice/items`, () =>
+    HttpResponse.json(baseInvoice),
   ),
   // CONTRACT TRIPWIRE: Invoice editor MUST NEVER POST /api/missions.
   http.post('*/api/missions', () => {
@@ -101,11 +100,8 @@ afterEach(() => {
       putInvoiceCount++;
       return HttpResponse.json(baseInvoice);
     }),
-    http.post(`*/api/missions/${MISSION_ID}/invoice/items`, () =>
-      HttpResponse.json({ id: 'li-new', sort_order: 0 }),
-    ),
-    http.delete(`*/api/missions/${MISSION_ID}/invoice/items/:itemId`, () =>
-      new HttpResponse(null, { status: 204 }),
+    http.put(`*/api/missions/${MISSION_ID}/invoice/items`, () =>
+      HttpResponse.json(baseInvoice),
     ),
     http.post('*/api/missions', () => {
       postMissionsCallCount++;

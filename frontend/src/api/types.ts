@@ -324,3 +324,26 @@ export interface MaintenanceAlert {
   days_until: number;
   overdue: boolean;
 }
+
+// ── Settings page support types (P2-5 incremental tab extraction) ──────────
+// ADDITIVE: shared shapes lifted out of the old monolithic Settings.tsx so
+// the per-tab subtree components (src/pages/settings/*) can type their local
+// state. None of these change a request payload or field name.
+
+export interface DeviceKey {
+  id: string;
+  label: string;
+  is_active: boolean;
+  created_at: string;
+  last_used_at: string | null;
+}
+
+/** Status returned by GET /api/backup/jobs/{id} (FU-8 #4 job API). */
+export interface BackupJobStatus {
+  job_id: string;
+  status: string; // queued | running | complete | failed
+  phase?: string | null;
+  progress?: number | null;
+  result?: Record<string, unknown> | null;
+  error?: string | null;
+}
