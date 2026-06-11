@@ -4,7 +4,7 @@ import os
 import uuid
 
 from pyproj import Transformer
-from shapely.geometry import MultiPoint, MultiLineString, LineString
+from shapely.geometry import MultiPoint, LineString
 from shapely.ops import unary_union
 
 from app.config import settings
@@ -13,6 +13,35 @@ logger = logging.getLogger("doc.map_renderer")
 
 # Convert square meters to acres
 SQ_METERS_TO_ACRES = 0.000247105
+
+# Douglas-Peucker tolerance (in projected UTM metres) applied to every flight
+# track before any geometry work. Survey patterns log a GPS point roughly every
+# few centimetres of travel — a single 30-minute mapping flight is ~19k points.
+# Buffering a MultiLineString of tens of thousands of near-collinear vertices
+# makes GEOS allocate >900 MB and OOM-kills the 1 GiB backend worker mid-request
+# (the 2026-06-11 "Generate Report → Cloudflare 520" incident, ADR-0020).
+# At 2 m the computed coverage acreage is stable to <1% (convergence verified
+# live: 68.51 ac @5 m → 69.11 ac @0.5 m) while collapsing ~33.8k points to
+# ~170 vertices, so the buffer stays cheap and bounded.
+GEO_SIMPLIFY_TOLERANCE_M = 2.0
+
+# Hard ceiling on the number of vertices fed to the static-map rasteriser, as a
+# defence-in-depth backstop so a single pathological track can never blow memory
+# even if simplification under-reduces. Tracks above this are decimated by
+# strided sampling (keeps endpoints).
+MAX_RENDER_VERTICES_PER_TRACK = 2000
+
+
+def _decimate(track: list, max_points: int) -> list:
+    """Strided downsample preserving first and last point. Cheap O(n) backstop."""
+    n = len(track)
+    if n <= max_points:
+        return track
+    step = math.ceil(n / max_points)
+    sampled = track[::step]
+    if sampled[-1] != track[-1]:
+        sampled.append(track[-1])
+    return sampled
 
 
 def extract_gps_tracks(flights: list[dict]) -> list[list[tuple[float, float]]]:
@@ -76,21 +105,37 @@ def calculate_area_acres(tracks: list[list[tuple[float, float]]], buffer_meters:
         # Transform to UTM for accurate area calculation
         transformer = Transformer.from_crs("EPSG:4326", f"EPSG:{epsg_code}", always_xy=True)
 
-        lines = []
+        # Simplify EACH track in projected space before buffering. A raw survey
+        # track is tens of thousands of near-collinear points; buffering that
+        # MultiLineString makes GEOS allocate >900 MB and OOM-kills the worker
+        # (ADR-0020). Douglas-Peucker at GEO_SIMPLIFY_TOLERANCE_M removes the
+        # redundant vertices with sub-1% area impact. We buffer each simplified
+        # line independently and union the resulting polygons, which keeps every
+        # intermediate geometry small and bounded.
+        raw_vertices = 0
+        kept_vertices = 0
+        buffered_polys = []
         for track in tracks:
             if len(track) < 2:
                 continue
-            utm_coords = [transformer.transform(lng, lat) for lat, lng in track]
-            lines.append(LineString(utm_coords))
+            raw_vertices += len(track)
+            line = LineString([transformer.transform(lng, lat) for lat, lng in track])
+            line = line.simplify(GEO_SIMPLIFY_TOLERANCE_M, preserve_topology=False)
+            kept_vertices += len(line.coords)
+            buffered_polys.append(line.buffer(buffer_meters))
 
-        if not lines:
+        if not buffered_polys:
             return 0.0
 
-        multi_line = MultiLineString(lines)
-        buffered = multi_line.buffer(buffer_meters)
-        area_sq_meters = buffered.area
+        coverage = unary_union(buffered_polys)
+        area_sq_meters = coverage.area
         acres = area_sq_meters * SQ_METERS_TO_ACRES
-        logger.info("Area calculation: %.2f acres (%.0f sq m, buffer=%.0fm)", acres, area_sq_meters, buffer_meters)
+        logger.info(
+            "Area calculation: %.2f acres (%.0f sq m, buffer=%.0fm); "
+            "simplified %d→%d vertices @ %.1fm tolerance",
+            acres, area_sq_meters, buffer_meters,
+            raw_vertices, kept_vertices, GEO_SIMPLIFY_TOLERANCE_M,
+        )
         return acres
     except Exception as exc:
         logger.error("Area calculation failed: %s", exc, exc_info=True)
@@ -193,14 +238,30 @@ def render_static_map(flights: list[dict], width: int = 800, height: int = 600) 
     colors = ["#003d99", "#ff6b1a", "#00ff88", "#ff4444", "#ffaa00", "#aa44ff"]
 
     try:
-        m = StaticMap(width, height, url_template="https://tile.openstreetmap.org/{z}/{x}/{y}.png")
+        # Bound the per-tile fetch. staticmap defaults to NO timeout, so a slow
+        # or unreachable tile.openstreetmap.org would hang render() — and the
+        # report request with it — past Cloudflare's ~100s edge window → 524.
+        # 10s/tile is generous for OSM; on failure the map is skipped (caught
+        # below), the report still generates without it (ADR-0020).
+        m = StaticMap(
+            width, height,
+            url_template="https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+            tile_request_timeout=10,
+        )
 
         for i, track in enumerate(tracks):
             color = colors[i % len(colors)]
 
+            # Cap the vertices drawn per track. On an 800x600 PNG the full ~19k
+            # raw points are vastly sub-pixel; staticmap still iterates every
+            # segment, wasting CPU/memory for no visual gain. Decimating to
+            # MAX_RENDER_VERTICES_PER_TRACK keeps the rendered path identical to
+            # the eye and bounds the cost (ADR-0020).
+            render_track = _decimate(track, MAX_RENDER_VERTICES_PER_TRACK)
+
             # Draw the flight path line — staticmap uses (lng, lat) order
-            if len(track) >= 2:
-                line_coords = [(lng, lat) for lat, lng in track]
+            if len(render_track) >= 2:
+                line_coords = [(lng, lat) for lat, lng in render_track]
                 m.add_line(Line(line_coords, color, 3))
 
             # Start marker (green tint)

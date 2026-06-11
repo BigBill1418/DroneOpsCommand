@@ -4,6 +4,39 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-06-11 — fix(reports): simplify GPS tracks before buffering — stops "Generate Report → Cloudflare 520" OOM — v2.68.6
+
+* **Clicking "Generate Report" no longer OOM-kills the backend worker; the
+  Cloudflare 520 origin-error page is gone (ADR-0020).**
+  `POST /api/missions/{id}/report/generate` runs the GPS-geometry pipeline
+  synchronously before dispatching the Celery job. `calculate_area_acres`
+  (`backend/app/services/map_renderer.py`) built one `MultiLineString` from the
+  raw flight tracks and `.buffer(30)`-ed it. A real mission had 3 flights /
+  **33,830 GPS points**; buffering that many near-collinear vertices makes GEOS
+  allocate **>900 MB**, which — on top of the live worker baseline — blew the
+  **1 GiB** container cgroup and the kernel OOM-killed uvicorn mid-response.
+  Cloudflare received an incomplete response → 520, surfaced to the operator as
+  a red "Generation Failed" notification. Same failure class as the v2.68.5
+  mission-picker OOM (heavy GPS data + 1 GiB worker), different code path.
+  * **Fix:** Douglas-Peucker-simplify each track in projected UTM space at a 2 m
+    tolerance, then buffer each line independently and `unary_union` the result —
+    every intermediate geometry stays small. Acreage is stable to **<1%**
+    (live convergence: 68.51 ac @5 m → 69.11 ac @0.5 m) while collapsing ~33.8k
+    points to ~170 vertices. Peak RSS for the geo pipeline dropped from
+    **>1 GiB (OOM)** to **136 MB** in **0.05 s**.
+  * **Secondary hardening:** `render_static_map` now decimates each track to a
+    2000-vertex cap before drawing (raw points are sub-pixel on an 800×600 PNG)
+    and passes `tile_request_timeout=10` to `StaticMap` so a slow/blocked
+    `tile.openstreetmap.org` can no longer hang the request past Cloudflare's
+    ~100 s edge window (a latent 524 risk). Map render still fails soft.
+  * Regression guard: `backend/tests/test_report_geo_bounded.py` runs the real
+    shapely geometry on a synthetic ~34k-point survey track and asserts the
+    pipeline adds <150 MB (vs ~900 MB pre-fix) and returns a sane acreage.
+  * Live evidence before the fix: `dmesg` — `Memory cgroup out of memory:
+    Killed process … (uvicorn) … anon-rss:1043MB`; in-container repro of the old
+    `.buffer(30)` over 33,830 vertices → `EXIT=137` (SIGKILL). After the fix the
+    same mission generates a report against the live origin without OOM.
+
 ## 2026-06-10 — fix(flights): defer heavy JSON columns in flight-library list — restores mission-picker visibility — v2.68.5
 
 * **Mission picker can see uploaded flights again; API no longer OOM-crash-loops (ADR-0019).**
