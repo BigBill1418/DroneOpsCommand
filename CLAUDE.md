@@ -120,6 +120,24 @@ running primary → stack bring-up fails. That's the foot-gun this guards.
 
 Deployer: managed by NOC Master Control (`~/noc-master`) — all per-repo autopull scripts are disabled (`.deployer-disabled` marker in repo root).
 
+**Public hostnames:** prod is **`https://droneops.barnardhq.com`**. Despite
+older docs, `command.barnardhq.com` has **no DNS record** — it resolves only
+via the zone wildcard and returns CF 530 (ADR-0010 documents the correction).
+Demo is `https://command-demo.barnardhq.com`.
+
+**Demo stack (updated 2026-06-11):** separate clone `~/droneops-demo` on
+BOS-HQ, **NOT deployer-managed** — the NOC deployer only targets prod, so the
+demo must be updated manually:
+`cd ~/droneops-demo && git pull --ff-only && docker compose -p droneops-demo
+-f docker-compose.yml -f docker-compose.demo.yml --env-file .env.demo up -d --build`.
+Known recreate gotchas (all hit on the 2026-06-11 v2.70.1 update — see
+`docs/incidents/2026-06-11-deploy-rename-conflicts-demo-bringup.md`):
+containers created outside compose carry no compose labels and cause name
+conflicts on recreate (`docker rm -f` them first), and a recreated cloudflared
+re-reads `.env.demo` — if the tunnel token rotated since the container was
+created, registration fails with "Invalid tunnel secret" (fix per
+`docs/cloudflare-tunnel-setup.md` troubleshooting).
+
 ## Notifications (ADR-0036 + ADR-0006 addendum, 2026-04-26)
 
 **Transport:** self-hosted ntfy at `https://ntfy.barnardhq.com` (BOS-HQ).

@@ -14,6 +14,23 @@ nor a build context, and `docker compose up` for the demo stack failed with
 "invalid compose project" — blocking the demo's update to v2.70.1. Removed
 the dead override; demo stack composes and deploys again.
 
+**Demo deployed to v2.70.1 the same night** (`~/droneops-demo` on BOS-HQ,
+v2.68.4 → v2.70.1). Two further blockers cleared during the bring-up, both
+recorded in `docs/incidents/2026-06-11-deploy-rename-conflicts-demo-bringup.md`:
+a label-less legacy `droneops-demo-backend-1` (created outside compose) had to
+be removed before compose could own the name, and recreating the cloudflared
+sidecar exposed a stale `CLOUDFLARE_TUNNEL_TOKEN` in `.env.demo` ("Invalid
+tunnel secret" → public 530); refreshed from the Cloudflare API. Verified:
+all 6 services healthy, migrations brownfield-stamped + upgraded per ADR-0022
+with data preserved, `https://command-demo.barnardhq.com` → 200.
+
+**Prod post-deploy cleanup:** the v2.70.0/v2.70.1 prod deploys were reported
+"failed" by the NOC deployer because `compose up` hit container-rename
+conflicts mid-recreate — the new images actually went live (verified by image
+build timestamps + in-container checks). The two leftover rename-prefixed
+containers (`<hex>_droneops-worker-1`, `<hex>_droneops-flight-parser-1`) were
+`docker rename`d back to canonical so the next deploy doesn't re-conflict.
+
 ## 2026-06-11 — perf(frontend): Settings split into lazy tabs, async backup UI, cache rollout — v2.70.1
 
 Audit findings P2-4, P2-5, P3-4 (the last open items). Frontend suite:
