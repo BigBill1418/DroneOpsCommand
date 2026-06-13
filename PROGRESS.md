@@ -536,3 +536,5 @@ Unset = no-op. Nothing in the app code fails if these are absent.
 ### Next
 - Wait for `trig_01KiBK88vqs6vtRf75rkxcw8`; review + squash-merge PRs when they arrive.
 - No backend changes land until those PRs merge. Current HEAD is production-stable.
+
+<!-- ADR-0121 autosync verification probe 2026-06-13 — docs-only, no code impact -->
