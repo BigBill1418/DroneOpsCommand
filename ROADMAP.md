@@ -275,7 +275,11 @@ rationale.
   Consciously NOT done (new follow-ups, operator-triggered):
   * Device-upload Celery decoupling (audit P2-2 full leg) — requires a
     DroneOpsSync client release; backend per-file batch isolation is pinned
-    by tests in the meantime.
+    by tests in the meantime. **DESIGNED 2026-06-15** — ADR-0023 + DroneOpsSync
+    ADR-0008 + staged plan `docs/plans/2026-06-15-device-upload-async-decoupling.md`.
+    Recommended: ship the DroneOpsSync socket-timeout-is-per-file fix as a
+    standalone fast-follow (one-line, backend-independent) ahead of the full
+    async route. Implementation not yet started.
   * Trigram (pg_trgm) indexes for the leading-wildcard ILIKE searches —
     rejected from 0002 as B-tree can't serve them; revisit if flight search
     slows at scale.

@@ -13,7 +13,7 @@ import traceback
 from collections import Counter, defaultdict
 from datetime import datetime as _dt
 from pathlib import Path
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import httpx
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
@@ -976,6 +976,11 @@ async def device_health(
         "device_label": device.label,
         "parser_available": parser_ok,
         "upload_endpoint": "/api/flight-library/device-upload",
+        # ADR-0023 §2.3 — additive hint: a new client can confirm the async
+        # ingest pair exists before using it. Old clients ignore the field
+        # (Gson/forward-compat tolerates unknown keys). The route's existence
+        # is the real contract; this is a convenience signal, not a gate.
+        "async_upload_available": True,
     }
 
     # ADR-0003 hint emission. The auth dep tagged the row with
@@ -1004,6 +1009,14 @@ async def device_upload_flights(
     _device: DeviceApiKey = Depends(validate_device_api_key),
 ):
     """Upload flight logs from a field controller using a static device API key.
+
+    DEPRECATED (ADR-0023 / P2-2): this route parses each file synchronously
+    inside the request, holding the HTTP connection open for the full parse.
+    Prefer the async pair — ``POST /api/flight-library/device-upload/async``
+    (202 + ``{batch_id, files}``) then poll
+    ``GET /api/flight-library/device-upload/status/{batch_id}``. Kept working
+    UNCHANGED forever for old field APKs (no OTA channel; backwards compat is
+    the gating requirement).
 
     Identical processing to /upload but authenticates via X-Device-Api-Key header
     instead of a user JWT, allowing automated sync from DroneOpsSync without
@@ -1083,6 +1096,167 @@ async def device_upload_flights(
         errors=errors,
         flights=imported,
     )
+
+
+# ── Async device upload (ADR-0023 / P2-2) — 202 + poll ───────────────
+@router.post("/device-upload/async", status_code=202)
+async def device_upload_flights_async(
+    files: list[UploadFile] = File(...),
+    db: AsyncSession = Depends(get_db),
+    _device: DeviceApiKey = Depends(validate_device_api_key),
+):
+    """Asynchronous device upload — return immediately, parse off-request.
+
+    ADR-0023 §2.1. Same auth (``X-Device-Api-Key``) and same OOM-safe
+    ``_spool_upload`` streaming as the legacy route. The connection is held
+    only for the byte-stream; the expensive parse runs in a Celery job
+    (``parse_device_flight_task``). Per-file flow:
+
+    1. Stream the file to disk via ``_spool_upload`` (persists original bytes +
+       computes SHA-256 — unchanged path).
+    2. **Pre-parse dedup short-circuit** (ADR-0023 §2.1 step 2): if the hash
+       already exists, mark the file ``skipped`` with NO job enqueued — the
+       common "already synced" case stays instant.
+    3. Otherwise enqueue one parse job per file and record it ``queued``.
+
+    Seeds a batch Redis record (``STATUS_QUEUED``) keyed by a server-minted
+    ``batch_id`` and returns ``202 + {batch_id, files: [{name, state}]}``.
+    Backwards-compatible: old APKs keep hitting the legacy synchronous route.
+    """
+    from app.tasks.celery_tasks import parse_device_flight_task
+    from app.tasks.device_upload_jobs import STATUS_QUEUED, write_batch_state
+
+    batch_id = str(uuid4())
+
+    dji_key = await _get_dji_api_key(db)
+    parser_headers: dict = {}
+    if dji_key:
+        parser_headers["X-DJI-Api-Key"] = dji_key
+
+    per_file: list[dict] = []
+    total_bytes = 0
+    enqueued = 0
+
+    for upload in files:
+        try:
+            # Spool to disk (original bytes persisted to the hash store inside).
+            # We keep the temp file for the worker rather than closing it here —
+            # the task unlinks it after parse. On a duplicate (no job), we close
+            # it immediately.
+            spooled = await _spool_upload(upload)
+            total_bytes += spooled.size_bytes
+            file_hash = spooled.file_hash
+
+            existing = await db.execute(
+                select(Flight).where(Flight.source_file_hash == file_hash)
+            )
+            if existing.scalar_one_or_none():
+                # Pre-parse dedup short-circuit — no job, instant skip.
+                spooled.close()
+                per_file.append({"name": upload.filename, "state": "skipped"})
+                continue
+
+            parse_device_flight_task.delay(
+                batch_id, spooled.tmp_path, upload.filename, file_hash, parser_headers
+            )
+            enqueued += 1
+            per_file.append({"name": upload.filename, "state": "pending"})
+        except Exception as e:
+            # Spooling itself failed (disk, oversized, etc.) — record per-file
+            # and continue; never fail the whole batch on one file.
+            logger.warning("Async device upload spool failed for %s: %s", upload.filename, e)
+            per_file.append({"name": upload.filename, "state": "error"})
+
+    write_batch_state(
+        batch_id, status=STATUS_QUEUED, phase="queued", progress=0, per_file=per_file,
+    )
+
+    logger.info(
+        "device_upload_async",
+        extra={
+            "event": "device_upload_async",
+            "device_label": _device.label,
+            "device_id": str(_device.id),
+            "batch_id": batch_id,
+            "file_count": len(files),
+            "total_bytes": total_bytes,
+            "enqueued": enqueued,
+        },
+    )
+
+    return {"batch_id": batch_id, "files": per_file}
+
+
+@router.get("/device-upload/status/{batch_id}")
+async def device_upload_status(
+    batch_id: str,
+    _device: DeviceApiKey = Depends(validate_device_api_key),
+):
+    """Poll an async device-upload batch (ADR-0023 §2.1 envelope).
+
+    Two-tier read, mirroring ``get_backup_job`` (backup.py): the rich per-file
+    overlay from Redis when present; otherwise the Celery ``AsyncResult``
+    terminal fallback (a Redis-evicted but completed batch still reports a
+    sensible terminal state).
+    """
+    from app.tasks.celery_tasks import celery_app
+    from app.tasks.device_upload_jobs import (
+        STATUS_COMPLETE,
+        STATUS_FAILED,
+        STATUS_QUEUED,
+        STATUS_RUNNING,
+        read_batch_state,
+    )
+
+    state = read_batch_state(batch_id)
+    if state is not None:
+        per_file = state.get("per_file") or []
+        return {
+            "batch_id": batch_id,
+            "status": state.get("status"),
+            "phase": state.get("phase"),
+            "progress": state.get("progress"),
+            "per_file": per_file,
+        }
+
+    # No Redis overlay — derive from the Celery result backend. The task id is
+    # not the batch_id (one batch may fan out to several file tasks), so we can
+    # only report a coarse terminal rollup here; the Redis overlay is the rich
+    # source and is the common case while a client is actively polling.
+    result = celery_app.AsyncResult(batch_id)
+    if result.state == "SUCCESS":
+        payload = result.result if isinstance(result.result, dict) else {}
+        return {
+            "batch_id": batch_id,
+            "status": STATUS_COMPLETE,
+            "phase": "done",
+            "progress": 100,
+            "per_file": payload.get("per_file", []),
+        }
+    if result.state == "FAILURE":
+        return {
+            "batch_id": batch_id,
+            "status": STATUS_FAILED,
+            "phase": "error",
+            "progress": 100,
+            "per_file": [],
+        }
+    if result.state == "PENDING":
+        # Unknown id or not-yet-started — report queued (cannot distinguish).
+        return {
+            "batch_id": batch_id,
+            "status": STATUS_QUEUED,
+            "phase": "queued",
+            "progress": 0,
+            "per_file": [],
+        }
+    return {
+        "batch_id": batch_id,
+        "status": STATUS_RUNNING,
+        "phase": result.state.lower(),
+        "progress": 50,
+        "per_file": [],
+    }
 
 
 # ── Backfill fleet attribution for existing flights ──────────────

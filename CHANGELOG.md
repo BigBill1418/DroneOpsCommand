@@ -4,6 +4,47 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-06-15 — feat(flight-ingest): async device-upload (202 + Celery parse + poll) — v2.71.0
+
+Backend leg of the device-upload async decoupling (audit P2-2, the last open
+FU-8 item; ADR-0023, plan `docs/plans/2026-06-15-device-upload-async-decoupling.md`).
+**Backwards-compatible and additive — the legacy synchronous route is
+byte-for-byte unchanged**, so every existing DroneOpsSync APK keeps working.
+
+* **The problem it removes:** the legacy `POST /api/flight-library/device-upload`
+  parses each DJI flight log *synchronously inside the HTTP request* (holds the
+  connection open while POSTing to the flight-parser with a 120s timeout). On
+  field cellular/wifi a long parse trips the client's matching 120s read-timeout,
+  and the old client then aborts the rest of the sortie's batch. The connection
+  was doing the waiting.
+* **New async pair (ADR-0023):**
+  * `POST /api/flight-library/device-upload/async` — streams each file to disk
+    via the existing OOM-safe `_spool_upload`, runs the SHA-256 dedup
+    short-circuit inline (already-present files return `skipped` with no job),
+    enqueues a Celery `parse_device_flight_task` per new file, seeds a Redis
+    batch record, and returns **`202 + {batch_id, files:[{name,state}]}`
+    immediately** — the connection is held only for the byte-stream.
+  * `GET /api/flight-library/device-upload/status/{batch_id}` — two-tier read
+    (Redis overlay → Celery `AsyncResult` fallback) returning
+    `{batch_id, status, phase, progress, per_file:[{name,state,imported,skipped,error}]}`.
+  * `device-health` gains an additive `async_upload_available: true` so new
+    clients self-detect and old clients are unaffected.
+* **Pattern reuse:** `parse_device_flight_task` runs the route's existing async
+  parse/dedup/`_build_flight_from_parsed` helpers verbatim inside a fresh
+  `task_event_loop()` (NullPool engine) — same sync-Celery-context idiom as
+  `send_payment_reminders_task`; no parse-logic re-implementation, no code-path
+  drift. A parser-down/parse error records `state=error` for that file and never
+  fails the batch.
+* New `backend/app/tasks/device_upload_jobs.py` (Redis batch-state, 24h TTL,
+  mirrors `backup_jobs.py`). Tests: `test_device_upload_jobs.py` (10) +
+  `test_device_upload_async.py` (10). Suite **429 passed, 0 failed**.
+* Failover: runtime-only; Celery+Redis already in the stack (proved on the
+  backup-job leg across CHAD/BOS); legacy route + `FlightUploadResponse`
+  unchanged, so standby-first deploys serving old APKs are unaffected.
+* **Client leg ships separately** as a DroneOpsSync APK (async adoption +
+  the per-file socket-timeout fix); until operators update, they keep using the
+  unchanged synchronous route.
+
 ## 2026-06-11 — fix(demo): drop obsolete watchtower override from demo compose
 
 The v2.70.x audit removed the `watchtower` service from the base

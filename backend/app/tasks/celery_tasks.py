@@ -730,3 +730,159 @@ def _prune_backups(backup_mod, *, keep: str) -> list[str]:
     except OSError as exc:
         logger.warning("Backup job: could not list backup dir for cleanup: %s", exc)
     return removed
+
+
+# ── P2-2 / ADR-0023 — device flight-log parse as a Celery job ─────────
+@celery_app.task(name="parse_device_flight", bind=True)
+def parse_device_flight_task(
+    self,
+    batch_id: str,
+    tmp_path: str,
+    filename: str,
+    file_hash: str,
+    parser_headers: dict,
+) -> dict:
+    """Parse one device-uploaded flight log off the request path (ADR-0023).
+
+    The async route (``device_upload_flights_async``) has already streamed the
+    upload to ``tmp_path`` (via the existing OOM-safe ``_spool_upload``, which
+    also persisted the original bytes to the hash-named store) and run the cheap
+    pre-parse SHA-256 dedup short-circuit. This task does the *expensive* half —
+    the parser POST + flight construction — that the legacy synchronous route
+    holds the HTTP connection open for. The connection is now released after the
+    byte-stream; this work runs here.
+
+    Sync-context pattern (chosen to match the ``celery_tasks.py`` house style):
+    a Celery task is a synchronous worker context and cannot reuse the request's
+    async DB session, and the parse logic the route uses (``_SpooledUpload.parse``,
+    the per-flight dedup ``db.execute``, and ``_build_flight_from_parsed``) is
+    *async*. Rather than re-implementing those DB writes synchronously (which
+    would let the two code paths drift — the exact failure ADR-0023 §3.2 warns
+    against), we run the existing async helpers verbatim inside
+    ``task_event_loop()`` — the same fresh-loop + NullPool pattern
+    ``send_payment_reminders_task`` uses (``async_db.py`` documents why the
+    module-global pooled session would raise a cross-loop error here). One
+    file == one task == one ``per_file`` entry; the contract's ``per_file``
+    array is plural so a future multi-file submit needs no backend change.
+
+    Failure posture mirrors the route's per-file ``except`` (flight_library.py
+    ~:1061): a parser-down / parse error records that file ``state=error`` and
+    completes the batch — it does NOT raise the whole batch (so a Celery
+    AsyncResult FAILURE is reserved for an *unexpected* crash before any per-file
+    result, matching ADR-0023 §2.4's "failed vs complete-with-error" split).
+    """
+    import os
+
+    import httpx
+    from sqlalchemy import select
+
+    from app.models.flight import Flight
+    from app.routers import flight_library as fl
+    from app.tasks.async_db import task_event_loop
+    from app.tasks.device_upload_jobs import (
+        STATUS_COMPLETE,
+        STATUS_FAILED,
+        STATUS_RUNNING,
+        write_batch_state,
+    )
+
+    # The single per-file overlay entry. Mutated in place as we make progress so
+    # every Redis write reflects the latest known state of this file.
+    entry: dict = {
+        "name": filename,
+        "state": "parsing",
+        "imported": 0,
+        "skipped": 0,
+        "error": None,
+    }
+
+    write_batch_state(
+        batch_id, status=STATUS_RUNNING, phase="parsing", progress=10,
+        per_file=[entry],
+    )
+
+    try:
+        # Reuse the route's exact parse + persist logic under a task-local loop.
+        with task_event_loop() as (loop, make_session):
+
+            async def _run() -> None:
+                # Mirror _SpooledUpload.parse — POST the spooled file to the
+                # parser sidecar. Same client/timeout/shape the route uses.
+                async with httpx.AsyncClient(timeout=120) as client:
+                    with open(tmp_path, "rb") as parse_src:
+                        resp = await client.post(
+                            f"{fl.PARSER_URL}/parse",
+                            files={"file": (filename or "upload.txt", parse_src)},
+                            headers=parser_headers,
+                        )
+                if resp.status_code != 200:
+                    # Same text the synchronous route appends (ADR-0023 §2.4),
+                    # so the client's existing error rendering is reused verbatim.
+                    entry["state"] = "error"
+                    entry["error"] = f"{filename}: parser returned {resp.status_code}"
+                    return
+                data = resp.json()
+
+                parse_errors = data.get("errors") or []
+
+                async with make_session() as db:
+                    imported = 0
+                    skipped = 0
+                    for parsed in data.get("flights", []):
+                        ph = parsed.get("file_hash", file_hash)
+                        dup = await db.execute(
+                            select(Flight).where(Flight.source_file_hash == ph)
+                        )
+                        if dup.scalar_one_or_none():
+                            skipped += 1
+                            continue
+                        # The SAME builder the route + /upload + /reprocess use.
+                        await fl._build_flight_from_parsed(db, parsed, file_hash, filename)
+                        imported += 1
+                    await db.commit()
+
+                entry["imported"] = imported
+                entry["skipped"] = skipped
+                if imported:
+                    entry["state"] = "imported"
+                elif skipped:
+                    entry["state"] = "skipped"
+                elif parse_errors:
+                    entry["state"] = "error"
+                    entry["error"] = "; ".join(str(e) for e in parse_errors)
+                else:
+                    # Parser returned 200 with no flights and no errors — nothing
+                    # to import; treat as a no-op skip rather than an error.
+                    entry["state"] = "skipped"
+
+            loop.run_until_complete(_run())
+
+    except httpx.ConnectError:
+        entry["state"] = "error"
+        entry["error"] = f"{filename}: flight-parser service unavailable"
+    except Exception as exc:  # noqa: BLE001 - mirror the route's broad per-file except
+        entry["state"] = "error"
+        entry["error"] = f"{filename}: {exc}"
+
+    # Batch completes regardless of per-file state (ADR-0023 §2.4): the rollup
+    # is "all jobs terminal", not "all succeeded". A file in `error` lives
+    # inside a `complete` batch.
+    write_batch_state(
+        batch_id, status=STATUS_COMPLETE, phase="done", progress=100,
+        per_file=[entry],
+        error=(entry["error"] if entry["state"] == "error" else None),
+    )
+
+    # Best-effort cleanup of the spool temp file now the parse consumed it. The
+    # original bytes were already persisted to the hash store at spool time, so
+    # losing this temp file costs nothing.
+    try:
+        os.unlink(tmp_path)
+    except OSError:
+        pass
+
+    logger.info(
+        "device flight parse job %s complete: file=%s state=%s imported=%d skipped=%d",
+        batch_id, filename, entry["state"], entry["imported"], entry["skipped"],
+    )
+    return {"batch_id": batch_id, "per_file": [entry]}

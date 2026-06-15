@@ -4,6 +4,43 @@ Maintained alongside `CHANGELOG.md` and `docs/adr/`. `CHANGELOG.md` is
 the ledger of shipped changes; this file tracks what's in-flight or
 blocked.
 
+## 2026-06-15 — Device-upload async decoupling (audit P2-2) — DESIGNED (not started)
+
+The last open item from the 2026-06-11 ground-up audit (P2-2 full leg) is now
+designed. Analysis + docs only; no application code touched.
+
+- **Decision (ADR-0023):** add a **separate** async route
+  `POST /api/flight-library/device-upload/async` (202 + `{batch_id}`) + a poll
+  route `GET .../device-upload/status/{batch_id}`, mirroring the v2.70.0
+  backup-job pattern (`backup_jobs.py` + `run_backup_job_task` +
+  `/api/backup/jobs`). The legacy synchronous `device-upload` route stays
+  unchanged forever (native APK = no OTA, so old field devices must keep
+  working). Separate route chosen over a capability header because the
+  response shape/status code differ — two clean contracts beat one URL with
+  two behaviours.
+- **batch_id granularity:** keep one-file-per-request (one `batch_id` per
+  file); the contract also supports multi-file submit but the first client
+  release won't use it (per-file = better field reliability + 1:1 onto the
+  existing `UploadStatus`).
+- **Client (DroneOpsSync ADR-0008):** the **socket-timeout-is-per-file** fix
+  (`MainViewModel.kt:721-725` — drop `aborted = true`) is a one-line,
+  backend-independent reliability win recommended as a **standalone fast-follow
+  APK** ahead of the async leg. `UnknownHostException` + 401/403 keep
+  `aborted = true` (correctly batch-wide). Timeout retune deferred to the
+  async-adopting release (lowering it before the parse moves off-request would
+  amplify the hang).
+- **Plan:** `docs/plans/2026-06-15-device-upload-async-decoupling.md` —
+  Stage A (redis module) → B (route+task+poll, ships backend-first) → C (client
+  fast-follow, parallel) → D (client async adopt, after B) → E (docs).
+- **Verification of audit claims:** all file:line claims confirmed against
+  current source. One nuance: `performUpload` also sets `aborted=true` on HTTP
+  401/403 (`:690`) — that one is correct and is left in place.
+- **No data-loss risk today:** SHA-256 server-side dedup already makes every
+  path idempotent; the brittleness costs bandwidth + a confusing half-failed
+  sync UX, not lost flights.
+- **Owner:** aegis (backend leg) + fleet-mobile-engineer/aegis (client leg).
+  Not started.
+
 ## 2026-06-02 — Flight date timezone fix + deploy-path correction — SHIPPED (live)
 
 **Flight date bug (v2.68.1, ADR-0017).** An evening flight flown 2026-06-01
