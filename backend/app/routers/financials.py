@@ -150,6 +150,13 @@ async def financials_summary(
             "mission_date": str(mission.mission_date) if mission.mission_date else None,
             "location": mission.location_name,
             "customer_name": mission.customer.name if mission.customer else None,
+            # Contact fields for the marketing review-request engine (ADR-0024).
+            # PII leaving the ops boundary — minimal (only the two contact
+            # fields) and never logged here; opt-out is honored downstream by
+            # the marketing engine before any review request is sent. Null when
+            # no customer record is attached or the field is not on file.
+            "customer_email": mission.customer.email if mission.customer else None,
+            "customer_phone": mission.customer.phone if mission.customer else None,
             "source": mission.source,
             "invoice_total": inv_total,
             "paid": inv.paid_in_full,

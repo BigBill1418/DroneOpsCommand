@@ -4,6 +4,29 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-06-20 — feat(financials): customer contact on summary missions[] for marketing review engine — v2.72.0
+
+Additive: `GET /api/financials/summary` mission detail rows now carry
+`customer_email` and `customer_phone` alongside the existing `customer_name`
+(ADR-0024, extends ADR-0016).
+
+* **Why:** the marketing service-revenue bridge
+  (`marketing/api/droneops-financials.js`) consumes `summary.missions[]` and
+  needs a way to reach the customer to send a **post-job Google review
+  request**. The rows carried `customer_name` but no contact handle.
+* **Source:** pulled straight off the already eager-loaded `Mission.customer`
+  relationship (`Customer.email` / `Customer.phone`). No new data source, no
+  extra query, no migration, no loader change — the ADR-0019/P0-1 OOM-safe
+  loader contract is untouched.
+* **PII posture (ADR-0024):** minimal (only the two contact fields), not
+  logged at the endpoint, opt-out honored downstream by the marketing review
+  engine. Same JWT-gated trust boundary the bridge already uses.
+* **Gotcha:** a billable mission with no attached customer record — or a
+  customer with no email/phone on file — emits `null` for the field (never
+  raises). Marketing must skip null-`customer_email` rows.
+* Backwards-compatible: unknown-key-tolerant consumers (Financials dashboard,
+  revenue bridge) are unaffected.
+
 ## 2026-06-15 — feat(flight-ingest): async device-upload (202 + Celery parse + poll) — v2.71.0
 
 Backend leg of the device-upload async decoupling (audit P2-2, the last open

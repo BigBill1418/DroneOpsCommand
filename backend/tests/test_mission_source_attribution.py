@@ -134,17 +134,36 @@ class _Invoice:
         self.line_items = [_LineItem(total)]
 
 
+class _Customer:
+    """Quacks like an eager-loaded Customer (ADR-0024 contact fields)."""
+
+    def __init__(self, *, name: str, email: str | None, phone: str | None) -> None:
+        self.id = uuid.uuid4()
+        self.name = name
+        self.email = email
+        self.phone = phone
+        self.company = ""
+
+
 class _MissionRow:
     """Quacks like an eager-loaded billable Mission for financials_summary."""
 
-    def __init__(self, *, title: str, source: str | None, paid: bool, total: float) -> None:
+    def __init__(
+        self,
+        *,
+        title: str,
+        source: str | None,
+        paid: bool,
+        total: float,
+        customer: "_Customer | None" = None,
+    ) -> None:
         self.id = uuid.uuid4()
         self.title = title
         self.source = source
         self.mission_type = MissionType.LOST_PET
         self.mission_date = date(2026, 5, 23)
         self.location_name = "Washington County, Oregon"
-        self.customer = None
+        self.customer = customer
         self.flights = []
         self.invoice = _Invoice(
             paid=paid, total=total, number=f"INV-{title[:4]}"
@@ -240,3 +259,67 @@ def test_summary_mission_row_carries_source():
     resp = client.get("/api/financials/summary")
     body = resp.json()
     assert body["missions"][0]["source"] == "website"
+
+
+# ── ADR-0024: customer contact fields for the marketing review engine ──
+
+
+def test_summary_mission_row_carries_customer_contact():
+    """A mission with a customer surfaces customer_email + customer_phone so
+    the marketing review-request engine can reach the customer post-job."""
+    client = _build_financials_app(
+        [
+            _MissionRow(
+                title="Banks Missing Dog",
+                source="website",
+                paid=True,
+                total=1216.36,
+                customer=_Customer(
+                    name="Jane Doe",
+                    email="jane@example.com",
+                    phone="+1-541-555-0100",
+                ),
+            )
+        ]
+    )
+    resp = client.get("/api/financials/summary")
+    row = resp.json()["missions"][0]
+    assert row["customer_name"] == "Jane Doe"
+    assert row["customer_email"] == "jane@example.com"
+    assert row["customer_phone"] == "+1-541-555-0100"
+
+
+def test_summary_mission_row_null_customer_yields_null_contact():
+    """Gotcha: a billable mission with NO customer record (or a customer
+    with no email on file) emits null contact fields, never raises."""
+    client = _build_financials_app(
+        [
+            # No customer record at all.
+            _MissionRow(title="No Customer Job", source=None, paid=True, total=200.0),
+            # Customer present but email/phone not on file.
+            _MissionRow(
+                title="Partial Contact",
+                source="referral",
+                paid=True,
+                total=300.0,
+                customer=_Customer(name="No Email Co", email=None, phone=None),
+            ),
+        ]
+    )
+    rows = {r["title"]: r for r in resp_json(client)}
+
+    no_cust = rows["No Customer Job"]
+    assert no_cust["customer_name"] is None
+    assert no_cust["customer_email"] is None
+    assert no_cust["customer_phone"] is None
+
+    partial = rows["Partial Contact"]
+    assert partial["customer_name"] == "No Email Co"
+    assert partial["customer_email"] is None
+    assert partial["customer_phone"] is None
+
+
+def resp_json(client: TestClient) -> list[dict]:
+    resp = client.get("/api/financials/summary")
+    assert resp.status_code == 200, resp.text
+    return resp.json()["missions"]
