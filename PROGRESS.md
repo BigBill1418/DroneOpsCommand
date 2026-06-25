@@ -30,10 +30,14 @@ the container boundary the old harness mocked away. Full suite green
 - ✅ DJI v13+ AES decryption path (`dji_api_key` → `X-DJI-Api-Key`) confirmed
   working — the import succeeded, so the parser decrypted the log.
 
-**Open follow-up (non-blocking):**
-- `_store_original_from_path` is fail-soft. The async path now depends on that
-  store write; consider hard-failing the spool (no 202) if the shared-store
-  write fails, so a 202 is never returned for a file the worker can't read.
+**Closed follow-up:**
+- ✅ **v2.72.2** — hardened: the async route verifies the original is resolvable
+  on the shared store before enqueueing; if not, the file is `error` in the 202
+  body and no job is enqueued (no 202 for a file the worker can't read).
+  `_spool_upload`'s fail-soft contract unchanged (legacy sync route unaffected).
+  See CHANGELOG 2026-06-24 + ADR-0023 §6.
+
+_No open follow-ups remain for the async device-upload work._
 
 ## 2026-06-15 — Device-upload async decoupling (audit P2-2) — DESIGNED (not started)
 

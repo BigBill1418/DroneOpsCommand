@@ -54,7 +54,8 @@ class _FakeSpooled:
 
 def _build_app(monkeypatch, *, captured: dict, redis_store: dict,
                existing_hashes: set | None = None,
-               spool_hash: str = "hash-new") -> FastAPI:
+               spool_hash: str = "hash-new",
+               stored_ok: bool = True) -> FastAPI:
     """Mount the flight_library router with Celery dispatch + Redis + spool faked."""
     import app.routers.flight_library as fl
     import app.tasks.celery_tasks as celery_tasks
@@ -75,6 +76,15 @@ def _build_app(monkeypatch, *, captured: dict, redis_store: dict,
         return _FakeSpooled(spool_hash)
 
     monkeypatch.setattr(fl, "_spool_upload", fake_spool)
+
+    # Fake the shared-store resolution. The async route verifies the original is
+    # durably stored (on the app_data volume) before enqueueing — return a path
+    # when the store write "succeeded", None to simulate a fail-soft store-write
+    # failure (ADR-0023 §6 hardening).
+    def fake_stored(file_hash):  # noqa: ARG001
+        return Path(f"/data/uploads/flight_logs/{file_hash}.txt") if stored_ok else None
+
+    monkeypatch.setattr(fl, "_get_stored_file_path", fake_stored)
 
     # Fake the dedup DB query: db.execute(...) → result with scalar_one_or_none.
     class _FakeResult:
@@ -176,6 +186,30 @@ def test_async_upload_duplicate_short_circuits_to_skipped_no_delay(monkeypatch):
     # No job enqueued for the already-present file (pre-parse dedup short-circuit).
     assert captured.get("delays", []) == []
     assert redis_store[body["batch_id"]]["status"] == "queued"
+
+
+def test_async_upload_store_write_failure_errors_and_skips_enqueue(monkeypatch):
+    """Hardening (ADR-0023 §6 follow-up): _store_original_from_path is fail-soft,
+    so a store-write failure must NOT yield a 202 'pending' for a file the worker
+    could never read from the shared store. The route verifies the original is
+    durably stored before enqueueing; if not, the file is reported `error` in the
+    202 body and NO job is enqueued — failing fast instead of deferring an
+    unserviceable parse to the worker."""
+    captured: dict = {}
+    redis_store: dict = {}
+    app = _build_app(
+        monkeypatch, captured=captured, redis_store=redis_store,
+        stored_ok=False,
+    )
+    client = TestClient(app)
+
+    resp = client.post("/api/flight-library/device-upload/async", files=_file_part())
+
+    assert resp.status_code == 202, resp.text
+    body = resp.json()
+    assert body["files"] == [{"name": "DJIFlightRecord_x.txt", "state": "error"}]
+    # The unreadable file was never enqueued — no deferred ENOENT in the worker.
+    assert captured.get("delays", []) == []
 
 
 # ── GET /device-upload/status/{batch_id} ─────────────────────────────

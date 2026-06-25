@@ -1160,6 +1160,24 @@ async def device_upload_flights_async(
                 per_file.append({"name": upload.filename, "state": "skipped"})
                 continue
 
+            # Hardening (ADR-0023 §6): the worker reads the original from the
+            # shared hash store, so do NOT accept (no 202 'pending', no enqueued
+            # job) any file whose original did not durably land there.
+            # _store_original_from_path is fail-soft (logs + swallows), so verify
+            # the post-condition explicitly here rather than trusting it didn't
+            # throw — failing fast in-request beats deferring an ENOENT the
+            # worker can never service.
+            if _get_stored_file_path(file_hash) is None:
+                spooled.close()
+                logger.error(
+                    "Async device upload: original not persisted to shared store "
+                    "for %s (hash=%s) — refusing to enqueue an unreadable parse; "
+                    "check the app_data volume / disk on the backend container",
+                    upload.filename, file_hash,
+                )
+                per_file.append({"name": upload.filename, "state": "error"})
+                continue
+
             # Enqueue first, then release the ephemeral /tmp spool (the worker
             # resolves the file from the shared hash store by file_hash). tmp_path
             # is still passed for signature stability + same-container fallback.
