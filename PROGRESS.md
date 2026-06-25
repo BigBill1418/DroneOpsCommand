@@ -4,6 +4,29 @@ Maintained alongside `CHANGELOG.md` and `docs/adr/`. `CHANGELOG.md` is
 the ledger of shipped changes; this file tracks what's in-flight or
 blocked.
 
+## 2026-06-24 — Async device-upload cross-container temp-handoff fix — SHIPPED (v2.72.1)
+
+The shipped ADR-0023 async path failed for every real upload: the API
+container handed the worker a `/tmp` spool **path**, but the worker runs in a
+**separate container** and can't see that `/tmp` (`[Errno 2] … '/tmp/flight_upload_*'`).
+Field-reported on a DJI Mavic 4 Pro log (2026-06-24). Fixed by having the
+worker read the original from the **shared `app_data` hash store**
+(`_get_stored_file_path`), plus closing the now-redundant `/tmp` spool in the
+route (it was leaking on the backend). Two regression tests added that cross
+the container boundary the old harness mocked away. Full suite green
+(433 passed, 3 skipped). Detail: CHANGELOG 2026-06-24 + **ADR-0023 §6**.
+
+**Open follow-up (non-blocking):**
+- `_store_original_from_path` is fail-soft. The async path now depends on that
+  store write; consider hard-failing the spool (no 202) if the shared-store
+  write fails, so a 202 is never returned for a file the worker can't read.
+- Once a fixed build is live on BOS-HQ, **verify end-to-end on the controller**
+  with a real M4P upload (this is the operator-confirmation gate from ADR-0023
+  §5 that was never reached because the first real upload hit this bug).
+- The DJI v13+ AES decryption dependency (`dji_api_key` SystemSetting →
+  `X-DJI-Api-Key` on `flight-parser`) is the **next** thing to confirm now that
+  files actually reach the parser — it was never exercised before this fix.
+
 ## 2026-06-15 — Device-upload async decoupling (audit P2-2) — DESIGNED (not started)
 
 The last open item from the 2026-06-11 ground-up audit (P2-2 full leg) is now

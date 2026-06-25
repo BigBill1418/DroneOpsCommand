@@ -801,15 +801,52 @@ def parse_device_flight_task(
         per_file=[entry],
     )
 
+    # Resolve the upload on the SHARED volume — not the cross-container /tmp path.
+    # The original bytes were persisted to the hash-named store
+    # (flight_library._store_original_from_path) at spool time; that store lives
+    # under UPLOAD_DIR (/data/uploads/flight_logs) on the app_data:/data volume
+    # mounted by BOTH the `backend` and `worker` containers. The `tmp_path`
+    # spool, by contrast, is on the *backend* container's private /tmp and is
+    # invisible here — opening it raised FileNotFoundError and failed every
+    # async device upload (ADR-0023 cross-container temp-handoff regression,
+    # field-reported on the Mavic 4 Pro 2026-06-24: ENOENT '/tmp/flight_upload_*').
+    # Prefer the shared store; fall back to tmp_path only when it actually exists
+    # (same-container/dev, or a legacy in-flight task message).
+    stored = fl._get_stored_file_path(file_hash)
+    if stored is not None:
+        parse_path: str | None = str(stored)
+    elif tmp_path and os.path.exists(tmp_path):
+        parse_path = tmp_path
+    else:
+        parse_path = None
+
+    if parse_path is None:
+        entry["state"] = "error"
+        entry["error"] = (
+            f"{filename}: upload artifact not found on shared store "
+            f"(hash={file_hash}); /tmp spool not visible to worker container"
+        )
+        logger.error(
+            "device flight parse job %s: artifact missing for file=%s hash=%s "
+            "(tmp_path=%s absent on worker, hash store has no match) — "
+            "check app_data volume is mounted on both backend and worker",
+            batch_id, filename, file_hash, tmp_path,
+        )
+        write_batch_state(
+            batch_id, status=STATUS_COMPLETE, phase="done", progress=100,
+            per_file=[entry], error=entry["error"],
+        )
+        return {"batch_id": batch_id, "per_file": [entry]}
+
     try:
         # Reuse the route's exact parse + persist logic under a task-local loop.
         with task_event_loop() as (loop, make_session):
 
             async def _run() -> None:
-                # Mirror _SpooledUpload.parse — POST the spooled file to the
+                # Mirror _SpooledUpload.parse — POST the resolved file to the
                 # parser sidecar. Same client/timeout/shape the route uses.
                 async with httpx.AsyncClient(timeout=120) as client:
-                    with open(tmp_path, "rb") as parse_src:
+                    with open(parse_path, "rb") as parse_src:
                         resp = await client.post(
                             f"{fl.PARSER_URL}/parse",
                             files={"file": (filename or "upload.txt", parse_src)},

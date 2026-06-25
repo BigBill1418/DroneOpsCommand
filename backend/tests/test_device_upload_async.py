@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import io
 import uuid
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -284,10 +285,22 @@ class _FakeHttpClient:
         return self._response
 
 
-def _run_task(monkeypatch, *, http_response, build_calls, dup_hashes) -> tuple[list[dict], dict]:
+def _run_task(monkeypatch, *, http_response, build_calls, dup_hashes,
+              tmp_exists=True, use_shared_store=False) -> tuple[list[dict], dict]:
     """Drive parse_device_flight_task.run(...) with the parser + DB + spool faked.
 
     Returns (states, result) where states is the list of write_batch_state kwargs.
+
+    ``tmp_exists`` / ``use_shared_store`` reproduce the production *file
+    topology*, which the default same-process harness hides. In prod the
+    backend container spools the upload to its private ``/tmp`` AND persists the
+    original to the hash store at ``/data/uploads/flight_logs`` (on the
+    ``app_data`` volume both containers mount). The Celery worker runs in a
+    *different* container, so the ``/tmp`` spool is NOT visible to it — only the
+    shared store is. ``tmp_exists=False`` makes the handed ``tmp_path`` point at
+    a file that does not exist on this container (the cross-container symptom);
+    ``use_shared_store=True`` materializes the file in the shared hash store
+    instead.
     """
     import app.routers.flight_library as fl
     import app.tasks.celery_tasks as celery_tasks
@@ -367,13 +380,32 @@ def _run_task(monkeypatch, *, http_response, build_calls, dup_hashes) -> tuple[l
     # Drive dedup decisions: set _next_is_dup before each run via the session.
     session._next_is_dup = dup_hashes
 
-    # The task opens tmp_path to stream to the parser, then unlinks it — use a
-    # real temp file so the open() succeeds (the parser POST itself is faked).
-    import tempfile
-    fd, spool_path = tempfile.mkstemp(prefix="test_spool_")
+    # Materialize the file topology the worker will resolve against.
     import os
-    with os.fdopen(fd, "wb") as f:
-        f.write(b"flight bytes")
+    import tempfile
+    cleanup_paths: list[str] = []
+
+    if use_shared_store:
+        # The shared hash store (/data/uploads/flight_logs) — visible to the
+        # worker container because app_data is mounted in both.
+        store_dir = tempfile.mkdtemp(prefix="test_share_")
+        monkeypatch.setattr(fl, "_FLIGHT_LOGS_DIR", Path(store_dir))
+        stored = Path(store_dir) / "hash-x.txt"
+        stored.write_bytes(b"flight bytes")
+        cleanup_paths.append(str(stored))
+
+    if tmp_exists:
+        # The backend container's /tmp spool — present only in the same-process
+        # / same-container case.
+        fd, spool_path = tempfile.mkstemp(prefix="test_spool_")
+        with os.fdopen(fd, "wb") as f:
+            f.write(b"flight bytes")
+        cleanup_paths.append(spool_path)
+    else:
+        # Cross-container symptom: the handed /tmp path does NOT exist here.
+        spool_path = os.path.join(
+            tempfile.gettempdir(), f"nonexistent_spool_{uuid.uuid4().hex}"
+        )
 
     try:
         result = celery_tasks.parse_device_flight_task.run(
@@ -381,8 +413,9 @@ def _run_task(monkeypatch, *, http_response, build_calls, dup_hashes) -> tuple[l
             {"X-DJI-Api-Key": "k"},
         )
     finally:
-        if os.path.exists(spool_path):
-            os.unlink(spool_path)
+        for _p in cleanup_paths:
+            if os.path.exists(_p):
+                os.unlink(_p)
     return states, result
 
 
@@ -446,4 +479,42 @@ def test_task_parser_connecterror_records_service_unavailable(monkeypatch):
     entry = states[-1]["per_file"][0]
     assert entry["state"] == "error"
     assert "flight-parser service unavailable" in entry["error"]
+    assert states[-1]["status"] == "complete"
+
+
+def test_task_reads_shared_store_when_tmp_spool_absent(monkeypatch):
+    """Regression (ADR-0023 cross-container temp-handoff): the worker runs in a
+    different container than the API, so the API's /tmp spool is invisible. The
+    worker MUST resolve the upload from the shared hash store instead. With the
+    /tmp path absent but the file present in the store, the parse must succeed —
+    exactly the M4P field failure (2026-06-24, `/tmp/flight_upload_*` ENOENT)."""
+    build_calls: list[dict] = []
+    resp = _FakeHttpResponse(200, {"flights": [{"file_hash": "hash-x"}], "errors": []})
+    states, result = _run_task(
+        monkeypatch, http_response=resp, build_calls=build_calls,
+        dup_hashes=False, tmp_exists=False, use_shared_store=True,
+    )
+    # The worker read the shared store, parsed, and imported — no ENOENT error.
+    assert build_calls == [{"file_hash": "hash-x"}]
+    entry = states[-1]["per_file"][0]
+    assert entry["state"] == "imported", f"unexpected error: {entry.get('error')!r}"
+    assert entry["imported"] == 1
+    assert states[-1]["status"] == "complete"
+    assert states[-1]["progress"] == 100
+
+
+def test_task_errors_clearly_when_artifact_missing_everywhere(monkeypatch):
+    """If neither the /tmp spool nor the shared store has the file, the worker
+    must record a clear, diagnosable per-file error and still complete the batch
+    (ADR-0023 §2.4 failed-vs-complete-with-error split) — never a bare ENOENT."""
+    build_calls: list[dict] = []
+    resp = _FakeHttpResponse(200, {"flights": [{"file_hash": "hash-x"}], "errors": []})
+    states, result = _run_task(
+        monkeypatch, http_response=resp, build_calls=build_calls,
+        dup_hashes=False, tmp_exists=False, use_shared_store=False,
+    )
+    entry = states[-1]["per_file"][0]
+    assert entry["state"] == "error"
+    assert "not found" in entry["error"].lower()
+    assert build_calls == []  # never reached the parser
     assert states[-1]["status"] == "complete"
