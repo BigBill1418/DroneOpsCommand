@@ -4,6 +4,24 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-06-24 — fix(device-upload): async route fails fast if original not on shared store before 202 — v2.72.2
+
+Hardening follow-up to v2.72.1 (ADR-0023 §6). `_store_original_from_path` is
+fail-soft, so the async route could return `202` (file `pending`) even when the
+original never landed in the shared hash store — deferring an unserviceable
+ENOENT to the worker.
+
+* **Fix:** the route now verifies `_get_stored_file_path(file_hash)` resolves a
+  file on the shared store **before** enqueueing. If not, the file is reported
+  `state=error` in the `202` body and **no job is enqueued**, with an
+  operator-actionable log (`check the app_data volume / disk`). The in-request
+  fail-fast counterpart to the worker's defensive guard.
+* **Scope:** `_spool_upload`'s fail-soft contract is unchanged — the legacy
+  synchronous route parses in-process and is unaffected.
+* **Tests:** `test_async_upload_store_write_failure_errors_and_skips_enqueue`.
+  Full backend suite green (434 passed, 3 skipped).
+* No DB/replication/blue-green/failover impact.
+
 ## 2026-06-24 — fix(device-upload): async parse worker reads shared hash store, not cross-container /tmp — v2.72.1
 
 Bugfix: the async device-upload path (ADR-0023) failed for **every** real

@@ -413,10 +413,20 @@ Reading from the persistent `app_data` volume instead of ephemeral `/tmp` is
 **strictly more** resilient to container recreation. No change to PostgreSQL
 replication, port bindings, the blue-green swap, or the failover engine.
 
-### Follow-up (not blocking)
+### Follow-up — RESOLVED in v2.72.2
 
 `_store_original_from_path` is fail-soft (logs + swallows on error). With the
-worker now depending on that store for the async path, a store-write failure
-surfaces as the new "artifact not found" error rather than silently. Consider
-making the async path's store-write hard-fail the spool so the 202 is never
-returned for a file the worker can't later read. Tracked in PROGRESS.
+worker now depending on that store for the async path, the original ADR-0023
+implementation would return `202` (file `pending`) even when the store write
+failed — deferring an unserviceable ENOENT to the worker.
+
+**Hardened in v2.72.2:** the async route now verifies the post-condition
+explicitly — `_get_stored_file_path(file_hash)` must resolve a file on the
+shared store *before* the file is enqueued. If it does not, the route records
+that file `state=error` in the `202` body and **skips the enqueue** (no job for
+a file the worker can never read), with an operator-actionable log
+(`original not persisted to shared store … check the app_data volume / disk`).
+This is the in-request, fail-fast counterpart to the worker's defensive
+"artifact not found" guard. `_spool_upload`'s fail-soft contract is unchanged
+(the legacy synchronous route still parses in-process and is unaffected).
+Regression test: `test_async_upload_store_write_failure_errors_and_skips_enqueue`.
