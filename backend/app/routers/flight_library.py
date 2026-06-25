@@ -1139,10 +1139,14 @@ async def device_upload_flights_async(
 
     for upload in files:
         try:
-            # Spool to disk (original bytes persisted to the hash store inside).
-            # We keep the temp file for the worker rather than closing it here —
-            # the task unlinks it after parse. On a duplicate (no job), we close
-            # it immediately.
+            # Spool to disk — original bytes are persisted to the SHARED hash
+            # store (/data/uploads/flight_logs on the app_data volume) inside
+            # _spool_upload. The worker reads the original from THAT store, not
+            # from this /tmp spool: the worker runs in a separate container and
+            # never sees our private /tmp (ADR-0023 cross-container temp-handoff
+            # regression). So the /tmp spool is now redundant for the async path
+            # and we close it on every branch instead of leaking it (the worker
+            # could never unlink a file in a different container's /tmp).
             spooled = await _spool_upload(upload)
             total_bytes += spooled.size_bytes
             file_hash = spooled.file_hash
@@ -1156,9 +1160,13 @@ async def device_upload_flights_async(
                 per_file.append({"name": upload.filename, "state": "skipped"})
                 continue
 
+            # Enqueue first, then release the ephemeral /tmp spool (the worker
+            # resolves the file from the shared hash store by file_hash). tmp_path
+            # is still passed for signature stability + same-container fallback.
             parse_device_flight_task.delay(
                 batch_id, spooled.tmp_path, upload.filename, file_hash, parser_headers
             )
+            spooled.close()
             enqueued += 1
             per_file.append({"name": upload.filename, "state": "pending"})
         except Exception as e:

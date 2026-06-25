@@ -335,3 +335,88 @@ tests green) → DroneOpsSync fast-follow fix §2.5a (JVM tests green) →
 DroneOpsSync async-client adoption + timeout tightening (JVM tests green,
 operator confirms end-to-end on a controller). No stage may regress the
 synchronous route while any field device runs an old APK.
+
+---
+
+## 6. Amendment (2026-06-24) — cross-container temp-file handoff regression (v2.72.1)
+
+**Status of the decision:** shipped (the async route + Celery task are live).
+This amendment records a **production defect in the shipped implementation** and
+its fix. The architecture stands; the bug was an implementation detail of the
+file handoff between the API and the worker.
+
+### Symptom
+
+The first real-world async device upload (a **DJI Mavic 4 Pro** flight log,
+field-reported **2026-06-24 21:43 PDT**) failed. The DroneOpsSync diagnostic
+showed the full client path succeeding — SAF scan OK, `POST .../device-upload/async`
+→ **202**, status poll → `complete / done / 100` — then a per-file error:
+
+```
+async per-file error: FlightRecord_..._.txt: [Errno 2] No such file or directory: '/tmp/flight_upload_bj_i2gq7'
+```
+
+### Root cause
+
+The async route spools the upload to a **local `/tmp` file**
+(`_spool_upload` → `tempfile.mkstemp(prefix="flight_upload_")`) and passed that
+**path string** to `parse_device_flight_task.delay(...)`. The Celery **`worker`
+runs in a different container** than the **`backend`** (both `build: ./backend`,
+but distinct services in `docker-compose.yml`). `/tmp` is each container's own
+ephemeral layer — **not** a shared volume — so the worker's `open(tmp_path)`
+raised `FileNotFoundError`. The task caught it, recorded the file `state=error`,
+and **completed the batch** (the §2.4 "complete-with-error" split), which is why
+the client saw `complete/100` *and* a red row.
+
+This is **not** Mavic-4-Pro-specific — it was the first async upload to cross the
+API→worker process/container boundary at all. Any aircraft would have hit it.
+The DJI v13+ AES decryption dependency (`X-DJI-Api-Key` from the `dji_api_key`
+SystemSetting) is real but downstream: **the file never reached the parser.**
+
+A secondary latent defect: because the worker's `os.unlink(tmp_path)` ran in the
+wrong container, the backend's `/tmp` spool **leaked forever** on the API
+container (a slow disk-fill).
+
+### Why the tests didn't catch it
+
+`tests/test_device_upload_async.py::_run_task` created a **real local temp file
+in the same process** and drove `parse_device_flight_task.run(...)` against it —
+the cross-container filesystem boundary was never exercised, so the suite was
+green while production was broken.
+
+### Fix (v2.72.1)
+
+The original bytes are **already** persisted at spool time to the hash-named
+store `/data/uploads/flight_logs/{hash}{ext}`, which lives on the **shared
+`app_data:/data` volume** both containers mount. So:
+
+1. **Worker** (`parse_device_flight_task`): resolve the file via
+   `flight_library._get_stored_file_path(file_hash)` on the shared store; fall
+   back to `tmp_path` only when it actually exists (same-container/dev, or a
+   legacy in-flight message); if **neither** exists, record a clear, diagnosable
+   per-file error (`"upload artifact not found on shared store …"`) and still
+   complete the batch — never a bare ENOENT. The canonical stored original is
+   **never** unlinked.
+2. **Route** (`device_upload_flights_async`): `spooled.close()` immediately
+   after enqueue (not just on the dedup short-circuit), releasing the redundant
+   `/tmp` spool on the backend instead of leaking it. `tmp_path` is still passed
+   for signature stability + the same-container fallback.
+3. **Regression tests:** `test_task_reads_shared_store_when_tmp_spool_absent`
+   (proves the worker reads the shared store when `/tmp` is absent — the exact
+   cross-container reality) and `test_task_errors_clearly_when_artifact_missing_everywhere`
+   (clear error, batch still completes). The `_run_task` harness gained
+   `tmp_exists` / `use_shared_store` knobs that model the real file topology.
+
+### Failover & Resilience Guard
+
+Reading from the persistent `app_data` volume instead of ephemeral `/tmp` is
+**strictly more** resilient to container recreation. No change to PostgreSQL
+replication, port bindings, the blue-green swap, or the failover engine.
+
+### Follow-up (not blocking)
+
+`_store_original_from_path` is fail-soft (logs + swallows on error). With the
+worker now depending on that store for the async path, a store-write failure
+surfaces as the new "artifact not found" error rather than silently. Consider
+making the async path's store-write hard-fail the spool so the 202 is never
+returned for a file the worker can't later read. Tracked in PROGRESS.

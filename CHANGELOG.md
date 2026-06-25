@@ -4,6 +4,38 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-06-24 — fix(device-upload): async parse worker reads shared hash store, not cross-container /tmp — v2.72.1
+
+Bugfix: the async device-upload path (ADR-0023) failed for **every** real
+upload because the API container spooled the file to its private `/tmp` and
+handed the **path** to the Celery `worker`, which runs in a **separate
+container** that cannot see that `/tmp`. Field-reported on a **DJI Mavic 4
+Pro** flight log (2026-06-24): client got `202` + poll `complete/100`, then
+`[Errno 2] No such file or directory: '/tmp/flight_upload_*'`.
+
+* **Root cause:** `/tmp` is per-container ephemeral, not a shared volume; the
+  worker's `open(tmp_path)` raised `FileNotFoundError`. Not Mavic-4-Pro-specific
+  — it was the first async upload to cross the API→worker container boundary.
+  (See ADR-0023 §6 amendment.)
+* **Fix:** the worker now resolves the file from the **shared hash store**
+  (`/data/uploads/flight_logs/{hash}`, on the `app_data:/data` volume both
+  containers mount) via `_get_stored_file_path(file_hash)` — where the original
+  bytes were already persisted at spool time — falling back to `tmp_path` only
+  when present, and emitting a clear diagnosable error if neither exists (never
+  a bare ENOENT). The route now closes the redundant `/tmp` spool immediately
+  (it was also **leaking** on the backend, since the worker's `unlink` ran in
+  the wrong container). The canonical stored original is never deleted.
+* **Tests:** two regression tests reproduce the cross-container topology the
+  old hermetic harness hid (`test_task_reads_shared_store_when_tmp_spool_absent`,
+  `test_task_errors_clearly_when_artifact_missing_everywhere`). Full backend
+  suite green (433 passed, 3 skipped).
+* **Resilience:** reads from the persistent `app_data` volume instead of
+  ephemeral `/tmp` — strictly more recreation-safe. No DB/replication/blue-green/
+  failover impact.
+* **Client:** DroneOpsSync needs **no change** — it behaved correctly end to end.
+* **Next (non-blocking):** consider hard-failing the async spool if the
+  shared-store write fails, so a 202 is never returned for an unreadable file.
+
 ## 2026-06-20 — feat(financials): customer contact on summary missions[] for marketing review engine — v2.72.0
 
 Additive: `GET /api/financials/summary` mission detail rows now carry
