@@ -4,6 +4,42 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-06-29 — fix(flights): DJI duration from authoritative header airtime + unique, start-ordered names — v2.75.0
+
+The "Savannah Bananas Games" report showed an **impossible single-airframe
+overlap** (one Mavic airborne on two overlapping intervals). DB evidence
+**inverted** the "start_time is wrong" premise — `start_time` is correct (matches
+the DJI filename token + 7 h PDT→UTC). Two other bugs were the cause. See
+**ADR-0027**.
+
+* **Duration (root cause #1):** the Rust parser (`flight-parser/src/dji.rs`)
+  discarded DJI's authoritative airtime (`details.total_time`,
+  `raw_metadata->>'header_duration'`) and estimated `frames.len() / 10.0` — a
+  hard-coded 10 Hz divisor. Mavic 4 Pro logs at **15 Hz** → durations inflated
+  exactly **×1.5**; DJI FPV ~5 Hz → **halved**. The parser now prefers the header
+  whenever present, falling back only when absent to a model-agnostic estimate
+  derived from **actual frame timestamps** (`osd.fly_time` / `custom.date_time`),
+  never a constant. Extracted as a unit-tested pure `choose_duration()`.
+* **Data re-stamp (migration 0004, idempotent):** `flights.duration_secs` ←
+  header for **59** `dji_txt` flights diverging > 1 % (36 Mavic 4 Pro, 13 Mavic 3
+  Pro, 4 Matrice 4TD, 2 Matrice 30T, 2 DJI FPV, 2 Avata 2). Also re-stamps **26**
+  `mission_flights.flight_data_cache` durations — the report sums that snapshot,
+  not live `duration_secs`. `start_time` and distance are untouched.
+* **Names (root cause #2):** `_generate_flight_name` counted by `created_at`
+  inside a `start_time`-day window, fleet-wide — collapsing to `_0001`
+  collisions and descending junk sequences. Now the sequence is the **start-time
+  rank within the (label, operator-local day) group** with a conflict-bump;
+  migration 0004 recomputes the **69** existing auto names that need it and adds
+  a partial UNIQUE index `uq_flights_autoname`. Operator-typed names
+  (`Batt Maint`, `Maintenance Check Flight`) are left alone.
+* **Ingest guard (new):** every import now flags (never rejects) implausible
+  `point_count/duration` cadence and single-airframe time overlaps, paging ntfy
+  `high` on `droneops-flight-overlap`. Would have caught the inflated durations
+  at upload.
+* **Savannah result:** airtime corrects **11.59 h → 8.54 h** (Mavic 9.15→6.10,
+  Matrice 2.44 unchanged); distance 62.29 mi, start_time, flight count 27 all
+  unchanged; report left unsent for review.
+
 ## 2026-06-29 — fix(reports): de-duplicate flights + accurate, unit-correct metrics — v2.74.0
 
 The AI mission report for **"Savannah Bananas Games"** showed badly inflated

@@ -43,7 +43,7 @@ def _script_dir():
 def test_migration_tree_has_single_linear_head():
     script = _script_dir()
     heads = script.get_heads()
-    assert heads == ["0003_mission_flight_dedup_unique"], heads
+    assert heads == ["0004_dji_duration_and_flight_name_restamp"], heads
 
 
 def test_baseline_is_the_root_revision():
@@ -57,6 +57,7 @@ def test_revision_chain_is_baseline_then_indexes():
     # Walk from head back to base; expect exactly the revisions, in order.
     revs = [r.revision for r in script.walk_revisions()]
     assert revs == [
+        "0004_dji_duration_and_flight_name_restamp",
         "0003_mission_flight_dedup_unique",
         "0002_p2_p3_indexes",
         "0001_baseline_schema",
@@ -336,7 +337,7 @@ def test_brownfield_stamp_and_upgrade_matches_base_metadata():
     with eng.connect() as c:
         head = c.execute(text("SELECT version_num FROM alembic_version")).scalar()
     eng.dispose()
-    assert head == "0003_mission_flight_dedup_unique", head
+    assert head == "0004_dji_duration_and_flight_name_restamp", head
 
     # Idempotent: a second run is a no-op.
     assert run_migrations_sync() == "noop"

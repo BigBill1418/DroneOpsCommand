@@ -190,11 +190,27 @@ pub fn parse_dji_log(
     // ── Use frame data when available, fall back to header summary ───────
     let has_frames = !frames.is_empty();
 
-    let final_duration = if has_frames {
-        frames.len() as f64 / 10.0 // ~10 frames/sec typical
+    // Duration (airtime). The authoritative value is the DJI log header's
+    // `details.total_time` (`header_duration`). The previous implementation
+    // discarded it and estimated `frames.len() / 10.0` — a hard-coded 10 Hz
+    // divisor that inflated 15 Hz airframes (Mavic 4 Pro) by exactly 1.5× and
+    // halved ~5 Hz airframes (DJI FPV). See ADR-0027. We now prefer the header
+    // whenever present/positive, and only fall back to a frames-based estimate
+    // derived from ACTUAL frame timestamps (model-agnostic), never a constant.
+    let (fly_time_span, datetime_span) = if frames.len() >= 2 {
+        let first = &frames[0];
+        let last = &frames[frames.len() - 1];
+        // DJI's own elapsed flight-time counter (seconds).
+        let fly = (last.osd.fly_time - first.osd.fly_time) as f64;
+        // Wall-clock span between the first and last decoded frame (seconds).
+        let dt = (last.custom.date_time - first.custom.date_time)
+            .num_milliseconds() as f64
+            / 1000.0;
+        (Some(fly), Some(dt))
     } else {
-        header_duration
+        (None, None)
     };
+    let final_duration = choose_duration(header_duration, fly_time_span, datetime_span);
     let final_distance = if has_frames && total_distance > 0.0 {
         total_distance
     } else {
@@ -288,6 +304,38 @@ pub fn parse_dji_log(
     })
 }
 
+/// Choose the flight's airtime in seconds (ADR-0027).
+///
+/// `header_duration` is the DJI log header's `details.total_time` — the
+/// airframe's own recorded airtime, and the authoritative source. It is
+/// preferred whenever present and positive.
+///
+/// Only when the header is absent/zero do we fall back to a frames-based
+/// estimate, and that estimate is derived from ACTUAL frame timestamps —
+/// DJI's `osd.fly_time` elapsed-flight-time counter first, then the wall-clock
+/// span of `custom.date_time` — never a hard-coded sample rate. This makes the
+/// fallback model-agnostic: it does not assume any particular frame cadence.
+fn choose_duration(
+    header_duration: f64,
+    fly_time_span: Option<f64>,
+    datetime_span: Option<f64>,
+) -> f64 {
+    if header_duration > 0.0 {
+        return header_duration;
+    }
+    if let Some(s) = fly_time_span {
+        if s > 0.0 {
+            return s;
+        }
+    }
+    if let Some(s) = datetime_span {
+        if s > 0.0 {
+            return s;
+        }
+    }
+    header_duration // 0.0 — nothing better is available
+}
+
 /// Haversine distance in meters between two lat/lon points
 fn haversine(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
     let r = 6371000.0;
@@ -297,4 +345,49 @@ fn haversine(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
         + lat1.to_radians().cos() * lat2.to_radians().cos() * (dlon / 2.0).sin().powi(2);
     let c = 2.0 * a.sqrt().atan2((1.0 - a).sqrt());
     r * c
+}
+
+#[cfg(test)]
+mod tests {
+    use super::choose_duration;
+
+    // Mavic 4 Pro logs at 15 Hz. A real 580.7s flight produces 8708 frames;
+    // the OLD code returned 8708/10 = 870.8s — a 1.500× inflation. The header
+    // value must win regardless of frame count.
+    #[test]
+    fn header_preferred_no_15hz_inflation() {
+        let header = 580.7;
+        // Frame-derived spans agree with the header here; header still wins.
+        assert_eq!(choose_duration(header, Some(580.7), Some(580.7)), 580.7);
+        // Even if a frames-based estimate were wildly off (the old 870.8 bug),
+        // it is never consulted while the header is present.
+        assert_eq!(choose_duration(header, Some(870.8), Some(870.8)), 580.7);
+    }
+
+    // DJI FPV logs at ~5 Hz. The OLD code returned frames/10 ≈ 0.5× — halving
+    // the airtime. The header must win and restore the true duration.
+    #[test]
+    fn header_preferred_no_5hz_undercount() {
+        assert_eq!(choose_duration(300.0, Some(150.0), Some(150.0)), 300.0);
+    }
+
+    // No header → derive from DJI's own elapsed flight-time counter.
+    #[test]
+    fn fallback_uses_fly_time_span() {
+        assert_eq!(choose_duration(0.0, Some(123.4), Some(999.0)), 123.4);
+    }
+
+    // fly_time flat/degenerate → fall back to the wall-clock frame span.
+    #[test]
+    fn fallback_uses_datetime_span_when_fly_time_degenerate() {
+        assert_eq!(choose_duration(0.0, Some(0.0), Some(245.0)), 245.0);
+        assert_eq!(choose_duration(0.0, None, Some(245.0)), 245.0);
+    }
+
+    // Nothing usable → 0.0 (no fabricated duration).
+    #[test]
+    fn no_header_no_frames_yields_zero() {
+        assert_eq!(choose_duration(0.0, None, None), 0.0);
+        assert_eq!(choose_duration(0.0, Some(0.0), Some(0.0)), 0.0);
+    }
 }

@@ -35,6 +35,7 @@ from app.models.user import User
 from app.schemas.flight import (
     FlightCreate, FlightDetailResponse, FlightResponse, FlightUpdate, FlightUploadResponse,
 )
+from app.services.ntfy import send_alert
 from app.utils.timezone import iso_utc, local_date_compact
 
 logger = logging.getLogger("doc.flights")
@@ -269,6 +270,101 @@ async def _spool_upload(upload: UploadFile) -> _SpooledUpload:
     return _SpooledUpload(tmp_path, file_hash, size_bytes, upload.filename)
 
 
+# Plausible DJI frame-cadence band (Hz). DJI airframes log telemetry between
+# ~5 Hz (FPV) and ~15 Hz (Mavic 4 Pro). A resolved point_count/duration outside
+# a generous band signals a mis-parsed duration (ADR-0027, e.g. the hard-coded
+# /10 divisor that this release removes). Generous bounds → flag only the clearly
+# wrong, never a legitimate edge case.
+_INGEST_HZ_MIN = 0.2
+_INGEST_HZ_MAX = 60.0
+
+
+async def _check_ingest_anomalies(db: AsyncSession, flight: Flight) -> None:
+    """Defense-in-depth ingest validation (ADR-0027) — *flag, never reject*.
+
+    DJI logs are authoritative, so a suspicious flight is still imported; we
+    surface the anomaly so an operator can review rather than silently trusting
+    a possibly mis-parsed duration. Two checks:
+
+    1. **Cadence sanity** — ``point_count / duration_secs`` must resolve to a
+       plausible Hz. A wildly off rate is the fingerprint of a duration parsed
+       with the wrong sample-rate assumption (the bug this release fixes).
+    2. **Single-airframe interval overlap** — no two flights of the same
+       physical airframe can be airborne at once. Overlapping
+       ``[start, start+duration)`` intervals for one serial mean at least one
+       flight's duration (or start) is wrong. Had this existed, the inflated
+       Savannah Mavic durations would have been caught at upload.
+
+    Best-effort: any failure here is logged and swallowed so it can never roll
+    back or block a flight import.
+    """
+    try:
+        dur = float(flight.duration_secs or 0.0)
+        pts = int(flight.point_count or 0)
+        if dur > 1.0 and pts > 0:
+            hz = pts / dur
+            if hz < _INGEST_HZ_MIN or hz > _INGEST_HZ_MAX:
+                logger.warning(
+                    "ingest-guard: flight %s (%s) implausible cadence %.2f Hz "
+                    "(point_count=%d / duration=%.1fs) — possible duration mis-parse",
+                    flight.id, flight.name, hz, pts, dur,
+                )
+
+        if not flight.drone_serial or not flight.start_time or dur <= 0:
+            return
+
+        from datetime import timedelta
+        new_start = flight.start_time
+        new_end = new_start + timedelta(seconds=dur)
+
+        rows = await db.execute(
+            select(Flight.id, Flight.name, Flight.start_time, Flight.duration_secs).where(
+                Flight.drone_serial == flight.drone_serial,
+                Flight.id != flight.id,
+                Flight.start_time.isnot(None),
+            )
+        )
+        overlaps = []
+        for oid, oname, ostart, odur in rows.all():
+            if ostart is None or not odur or odur <= 0:
+                continue
+            oend = ostart + timedelta(seconds=float(odur))
+            # Half-open intervals overlap iff each starts before the other ends.
+            if new_start < oend and ostart < new_end:
+                overlaps.append((oid, oname, ostart, float(odur)))
+
+        if not overlaps:
+            return
+
+        first = overlaps[0]
+        logger.warning(
+            "ingest-guard: flight %s (%s) serial=%s [%s +%.0fs] overlaps %d existing "
+            "flight(s) for the same airframe — first: %s (%s +%.0fs). A single airframe "
+            "cannot be airborne twice; a duration is likely mis-parsed.",
+            flight.id, flight.name, flight.drone_serial, iso_utc(new_start), dur,
+            len(overlaps), first[1], iso_utc(first[2]), first[3],
+        )
+        # Page operator (ADR-0036/0037 high). Dedup per airframe+local-day so a
+        # bulk import of a contaminated set fires once, not once per flight.
+        await send_alert(
+            f"[DroneOps] Flight overlap on {flight.drone_serial}",
+            (
+                f"Airframe {flight.drone_serial}: flight '{flight.name}' "
+                f"({iso_utc(new_start)}, {dur:.0f}s) overlaps {len(overlaps)} other "
+                f"flight(s) of the same airframe — e.g. '{first[1]}'. A single airframe "
+                f"cannot fly two overlapping intervals; review for a mis-parsed duration."
+            ),
+            priority=1,
+            topic="droneops-flight-overlap",
+            tags=("warning", "flight"),
+            dedup_key=f"flight-overlap:{flight.drone_serial}:{local_date_compact(new_start)}",
+            dedup_ttl_seconds=3600,
+        )
+    except Exception as exc:  # never let the guard break an import
+        logger.warning("ingest-guard check failed for flight %s: %s",
+                       getattr(flight, "id", "?"), exc)
+
+
 async def _build_flight_from_parsed(
     db: AsyncSession, parsed: dict, file_hash: str, upload_filename: str | None,
     *, log_prefix: str = "Imported",
@@ -328,6 +424,10 @@ async def _build_flight_from_parsed(
     await db.refresh(flight)
     logger.info("%s new flight %s (%s) aircraft=%s", log_prefix, flight.id,
                 flight.name, fleet_match.model_name if fleet_match else "unmatched")
+
+    # Defense-in-depth ingest validation (ADR-0027) — flags implausible cadence
+    # and single-airframe time overlaps. Never rejects; never rolls back.
+    await _check_ingest_anomalies(db, flight)
 
     # Auto-track battery — best-effort via savepoint so failures
     # don't rollback the flight import
@@ -471,38 +571,71 @@ async def _match_fleet_aircraft(db: AsyncSession, drone_serial: str | None, dron
 
 
 async def _generate_flight_name(db: AsyncSession, drone_model: str | None, fleet_aircraft: Aircraft | None, start_time: _dt | None) -> str:
-    """Generate a standardized flight name: DroneName_YYYYMMDD_XXXX.
+    """Generate a standardized flight name: ``<Label>_YYYYMMDD_XXXX`` (ADR-0027).
 
-    Uses fleet aircraft model_name if matched, falls back to drone_model, then 'Flight'.
-    Date comes from start_time if available, otherwise today.
-    XXXX is a sequential number based on how many flights already exist for that day.
+    - ``<Label>`` — the fleet aircraft ``model_name`` if matched, else the
+      parsed ``drone_model``, else ``Flight`` (spaces → hyphens).
+    - ``YYYYMMDD`` — the flight's calendar date in the **operator's local**
+      timezone, NOT the UTC date (ADR-0017). An evening Pacific flight whose
+      stored UTC instant rolls past midnight is still named for the local day.
+    - ``XXXX`` — the flight's **start-time rank within its own
+      (label, operator-local day) group**, zero-padded to 4 digits.
+
+    The pre-ADR-0027 implementation was broken three ways: it counted by
+    ``created_at`` (ingest time) inside a window built from ``start_time``'s day
+    — so when start-day ≠ ingest-day the count returned 0 and every flight
+    collided on ``_0001``; it was a fleet-wide "created today" tally rather than
+    per-aircraft and start-ordered; and it used a UTC day boundary for the
+    window against a Pacific date token (off-by-one). The result was duplicate
+    and garbage-ordered names.
+
+    The sequence is the start-time rank: ``1 + (flights in the same group with an
+    earlier start_time)``. A trailing **conflict-bump** loop plus the partial
+    unique index ``uq_flights_autoname`` (migration 0004) guarantee the name is
+    unique even under out-of-order imports or two airframes sharing a model
+    label on the same day. The group key is the *name prefix* (label + local
+    day) because that is exactly what must be unique on the wire.
     """
     # Pick the best drone identifier — fleet aircraft name takes priority
     aircraft_label = (fleet_aircraft.model_name if fleet_aircraft else None) or drone_model or "Flight"
     # Clean it up for a filename-friendly label
     aircraft_label = aircraft_label.replace(" ", "-").strip()
 
-    # Date portion — the flight's calendar date in the operator's local
-    # timezone, NOT the UTC date (ADR-0017). An evening Pacific flight whose
-    # stored UTC instant rolls past midnight must still be named for the
-    # local day it was flown.
     flight_date = start_time if start_time else _dt.utcnow()
     date_str = local_date_compact(flight_date)
+    prefix = f"{aircraft_label}_{date_str}_"
 
-    # Count existing flights for this date to generate a sequential number
-    day_start = flight_date.replace(hour=0, minute=0, second=0, microsecond=0)
-    from datetime import timedelta
-    day_end = day_start + timedelta(days=1)
-    count_result = await db.execute(
-        select(func.count(Flight.id)).where(
-            Flight.created_at >= day_start,
-            Flight.created_at < day_end,
+    # Start-time rank within the (label, operator-local day) group. The group is
+    # every existing flight whose generated name shares this prefix; the rank is
+    # how many of them started strictly before this flight. Flights with no
+    # start_time (rare) sort last and are simply appended.
+    if start_time is not None:
+        rank_result = await db.execute(
+            select(func.count(Flight.id)).where(
+                Flight.name.like(f"{prefix}%"),
+                Flight.start_time.isnot(None),
+                Flight.start_time < start_time,
+            )
         )
-    )
-    existing_count = count_result.scalar() or 0
-    seq = str(existing_count + 1).zfill(4)
+    else:
+        rank_result = await db.execute(
+            select(func.count(Flight.id)).where(Flight.name.like(f"{prefix}%"))
+        )
+    seq_num = (rank_result.scalar() or 0) + 1
 
-    return f"{aircraft_label}_{date_str}_{seq}"
+    # Conflict-bump: advance the sequence past any name already taken in this
+    # group so a collision can never persist (defence-in-depth alongside the DB
+    # unique index). Bounded by the group size + 1 to avoid an unbounded loop.
+    taken_result = await db.execute(
+        select(Flight.name).where(Flight.name.like(f"{prefix}%"))
+    )
+    taken = {row[0] for row in taken_result.all()}
+    candidate = f"{prefix}{seq_num:04d}"
+    while candidate in taken:
+        seq_num += 1
+        candidate = f"{prefix}{seq_num:04d}"
+
+    return candidate
 
 
 async def _get_dji_api_key(db: AsyncSession) -> str | None:
