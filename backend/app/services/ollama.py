@@ -137,11 +137,21 @@ pilot. Use third person throughout. Do not include pilot coaching."""
                     "stream": False,
                     "options": {
                         "temperature": 0.3,
-                        "num_predict": 1024,
+                        # ADR-0030 — output cap. A full client after-action report
+                        # runs ~1.5–2.5k tokens; 1024 truncated every report
+                        # mid-sentence (~2,895 chars). 4096 leaves clear headroom.
+                        "num_predict": 4096,
                         # Use 4 of 6 threads — leaves headroom for other services
                         "num_thread": 4,
-                        # Llama 3.1 benefits from slightly larger context
-                        "num_ctx": 2048,
+                        # ADR-0030 — context window MUST hold system prompt +
+                        # flight data + narrative (input) PLUS the full output, or
+                        # ollama squeezes/truncates the generation. The savannah
+                        # report alone is ~3.4k input tokens; 2048 was far too
+                        # small. 8192 = input + num_predict (4096) with headroom.
+                        # The deployed model (llama3.1:8b) supports 131072 ctx, so
+                        # 8192 is well within range and ~1 GB KV cache (host has
+                        # >20 GB free) — verified safe.
+                        "num_ctx": 8192,
                         # Balanced batch size for throughput vs CPU load
                         "num_batch": 256,
                     },

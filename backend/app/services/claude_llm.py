@@ -79,7 +79,12 @@ pilot. Use third person throughout. Do not include pilot coaching."""
         # model — no current Claude model requires it.
         create_kwargs = dict(
             model=model,
-            max_tokens=1024,
+            # ADR-0030 — output cap. 1024 truncated every client report
+            # mid-sentence (the savannah report stopped at exactly 1024 output
+            # tokens / ~2,895 chars). A full after-action report runs ~1.5–2.5k
+            # tokens; 4096 gives clear headroom. Claude's context is 200k, so the
+            # input side is never the constraint here.
+            max_tokens=4096,
             system=SYSTEM_PROMPT_TEMPLATE.format(company_name=company_name),
             messages=[{"role": "user", "content": user_prompt}],
         )

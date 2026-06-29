@@ -4,6 +4,36 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-06-29 — fix(reports): raise LLM output-token caps so full after-action reports complete (no more mid-sentence truncation) — v2.76.2
+
+Reports were truncating mid-sentence in the client portal preview — every
+report died at ~2,895 characters. Root cause: a 1024-token **output cap** on the
+report-generation LLM calls. See **ADR-0030**.
+
+The live BOS-HQ instance runs the Claude path; the worker log proved the cap was
+the cause: `Claude report generated: 2895 chars, 3426 input tokens, 1024 output
+tokens` — cut off exactly at the cap. The savannah report
+(`e5f3aedf-…`) stored `final_content`==`llm_generated_content`==exactly 2,895
+chars, ending mid-word ("…wide-establ").
+
+* **Claude path (`backend/app/services/claude_llm.py`).** `max_tokens`
+  1024 → **4096**.
+* **Ollama path (`backend/app/services/ollama.py`).** `num_predict` (output)
+  1024 → **4096**; `num_ctx` (window) 2048 → **8192**. The 2048 window was
+  smaller than the input alone (~3.4k tokens), compounding the truncation. The
+  deployed self-hosted model `llama3.1:8b-instruct-q4_K_M` has a 131,072 native
+  context length, so 8192 is well within range (~1 GB KV cache; host has >20 GB
+  free — verified safe).
+* **No other truncation exists** (audited): `final_content` /
+  `llm_generated_content` are unbounded `Text` columns; there is no `[:N]` slice,
+  `.truncate()`, length limit, or frontend content line-clamp in the report path.
+* **ADR-0029 preserved.** The altitude-limit / Part-107-exceedance prohibition
+  (prompt + runtime guard) is intact; the regenerated full report re-scanned
+  clean (zero exceed / 400 ft / Part 107 / altitude-limit matches).
+* **Regression test** (`backend/tests/test_report_output_token_caps_adr0030.py`)
+  asserts both output caps ≥ 4096 and Ollama `num_ctx` ≥ 8192 (> num_predict) so
+  this cannot silently regress.
+
 ## 2026-06-29 — fix(reports): mission reports are client deliverables, not compliance audits — remove altitude-limit / Part-107 exceedance commentary — v2.76.1
 
 Reverses the **H1** portion of ADR-0028. See **ADR-0029**. A client-facing
