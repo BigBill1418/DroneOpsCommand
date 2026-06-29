@@ -4,6 +4,16 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-06-29 — fix(migrations): shorten 0004 revision id to fit alembic_version(32) — v2.75.1
+
+Hotfix making v2.75.0 deployable. The migration revision id
+`0004_dji_duration_and_flight_name_restamp` (41 chars) exceeded
+`alembic_version.version_num varchar(32)`. The migration body ran fine but the
+final alembic stamp raised `value too long for type character varying(32)`,
+rolling the whole transaction back on every startup → backend crash-loop. Renamed
+to `0004_dji_duration_name_restamp` (30 chars). No behavioural change to the data
+fix. Lesson recorded in the migration docstring: keep revision ids ≤ 32 chars.
+
 ## 2026-06-29 — fix(flights): DJI duration from authoritative header airtime + unique, start-ordered names — v2.75.0
 
 The "Savannah Bananas Games" report showed an **impossible single-airframe

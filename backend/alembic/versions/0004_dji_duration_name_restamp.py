@@ -1,8 +1,13 @@
 """ADR-0027 — re-stamp DJI durations to authoritative header airtime + fix auto flight names
 
-Revision ID: 0004_dji_duration_and_flight_name_restamp
+Revision ID: 0004_dji_duration_name_restamp
 Revises: 0003_mission_flight_dedup_unique
 Create Date: 2026-06-29
+
+NOTE on the revision id: ``alembic_version.version_num`` is ``varchar(32)``; the
+id below is 30 chars. An earlier 41-char id rolled the entire migration back at
+the version stamp (``value too long for type character varying(32)``), which
+manifested as a backend crash-loop on deploy. Keep future revision ids ≤ 32.
 
 Two data corrections + one storage guard, all idempotent and safe on the live
 primary (ADR-0027). None of this touches port bindings, connection strings,
@@ -62,7 +67,7 @@ from typing import Sequence, Union
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = "0004_dji_duration_and_flight_name_restamp"
+revision: str = "0004_dji_duration_name_restamp"
 down_revision: Union[str, None] = "0003_mission_flight_dedup_unique"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
