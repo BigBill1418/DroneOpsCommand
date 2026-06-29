@@ -21,6 +21,7 @@ from app.models.report import Report
 from app.models.user import User
 from app.schemas.report import ReportGenerateRequest, ReportResponse, ReportUpdateRequest
 from app.services.map_renderer import calculate_area_acres, extract_gps_tracks, render_static_map
+from app.services.mission_tracks import load_bounded_flight_tracks
 from app.services.pdf_generator import generate_pdf
 
 logger = logging.getLogger("doc.reports")
@@ -43,22 +44,6 @@ async def _load_mission_with_flights(db: AsyncSession, mission_id: UUID) -> Miss
     if not mission:
         raise HTTPException(status_code=404, detail="Mission not found")
     return mission
-
-
-def _flights_to_dicts(mission: Mission) -> list[dict]:
-    flights = []
-    for f in mission.flights:
-        flight_dict = {
-            "opendronelog_flight_id": f.opendronelog_flight_id,
-            "flight_data_cache": f.flight_data_cache,
-        }
-        if f.aircraft:
-            flight_dict["aircraft"] = {
-                "model_name": f.aircraft.model_name,
-                "manufacturer": f.aircraft.manufacturer,
-            }
-        flights.append(flight_dict)
-    return flights
 
 
 def _build_flight_summaries(mission: Mission) -> list[dict]:
@@ -104,8 +89,13 @@ async def generate_report(
     mission = await _load_mission_with_flights(db, mission_id)
     logger.info("Mission %s loaded: %d flights", mission_id, len(mission.flights))
 
-    # Pre-compute geo data in thread executor to avoid blocking event loop
-    flights = _flights_to_dicts(mission)
+    # ADR-0025: load each flight's GPS track ON DEMAND, one at a time, and
+    # decimate it immediately. The previous path packed every full
+    # flight_data_cache (each with ~19k raw points) into a list at once and
+    # ran GEOS over it — O(N_flights × track) memory that OOM-killed the
+    # worker on a large mission. `load_bounded_flight_tracks` never holds more
+    # than one raw track simultaneously, so this is O(rows × vertex_cap).
+    flights = await load_bounded_flight_tracks(db, mission)
     loop = asyncio.get_running_loop()
 
     try:

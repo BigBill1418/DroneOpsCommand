@@ -19,6 +19,7 @@ from app.services.map_renderer import (
     generate_map_geojson,
     render_static_map,
 )
+from app.services.mission_tracks import load_bounded_flight_tracks
 
 logger = logging.getLogger("doc.maps")
 
@@ -26,51 +27,26 @@ router = APIRouter(prefix="/api/missions", tags=["maps"])
 
 
 async def _load_mission(db: AsyncSession, mission_id: UUID) -> Mission:
-    """Load a mission with flights, aircraft, and linked flight records eagerly loaded."""
+    """Load a mission with flights + aircraft (ADR-0025).
+
+    Deliberately does NOT eager-load ``MissionFlight.flight`` — that
+    cascaded into loading every linked ``Flight`` IN FULL (gps_track +
+    telemetry + raw_metadata) for ALL flights at once, an O(N × track)
+    blow-up that OOMs on a large mission. ``load_bounded_flight_tracks``
+    instead pulls each ``Flight.gps_track`` on demand, one at a time, and
+    decimates it.
+    """
     result = await db.execute(
         select(Mission)
         .where(Mission.id == mission_id)
         .options(
             selectinload(Mission.flights).selectinload(MissionFlight.aircraft),
-            selectinload(Mission.flights).selectinload(MissionFlight.flight),
         )
     )
     mission = result.scalar_one_or_none()
     if not mission:
         raise HTTPException(status_code=404, detail="Mission not found")
     return mission
-
-
-def _flights_to_dicts(mission: Mission) -> list[dict]:
-    """Convert mission flights to dict format for map services.
-
-    Falls back to the linked Flight record's gps_track if the cache
-    doesn't contain GPS data (handles flights added before cache enrichment).
-    """
-    flights = []
-    for f in mission.flights:
-        cache = f.flight_data_cache or {}
-
-        # If cache has no GPS track, pull from the linked Flight record
-        has_track = any(
-            key in cache and isinstance(cache[key], list) and len(cache[key]) > 0
-            for key in ("track", "gps_data", "coordinates")
-        )
-        if not has_track and f.flight and f.flight.gps_track:
-            cache = dict(cache)  # don't mutate the original
-            cache["track"] = f.flight.gps_track
-
-        flight_dict = {
-            "opendronelog_flight_id": f.opendronelog_flight_id,
-            "flight_data_cache": cache,
-        }
-        if f.aircraft:
-            flight_dict["aircraft"] = {
-                "model_name": f.aircraft.model_name,
-                "manufacturer": f.aircraft.manufacturer,
-            }
-        flights.append(flight_dict)
-    return flights
 
 
 @router.get("/{mission_id}/map")
@@ -88,7 +64,7 @@ async def get_map_data(
     """
     start = time.perf_counter()
     mission = await _load_mission(db, mission_id)
-    flights = _flights_to_dicts(mission)
+    flights = await load_bounded_flight_tracks(db, mission)
     loop = asyncio.get_running_loop()
 
     try:
@@ -133,7 +109,7 @@ async def get_coverage(
     """Calculate area coverage in acres."""
     start = time.perf_counter()
     mission = await _load_mission(db, mission_id)
-    flights = _flights_to_dicts(mission)
+    flights = await load_bounded_flight_tracks(db, mission)
 
     loop = asyncio.get_running_loop()
     try:
@@ -165,7 +141,7 @@ async def render_map(
     """Render a static map image for PDF inclusion."""
     start = time.perf_counter()
     mission = await _load_mission(db, mission_id)
-    flights = _flights_to_dicts(mission)
+    flights = await load_bounded_flight_tracks(db, mission)
     loop = asyncio.get_running_loop()
     try:
         map_path = await loop.run_in_executor(None, render_static_map, flights)

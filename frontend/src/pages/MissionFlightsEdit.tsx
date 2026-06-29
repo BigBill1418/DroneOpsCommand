@@ -12,13 +12,19 @@
  *
  * Endpoints:
  * - GET /api/missions/{id}                        — load attached flights
- * - GET /api/flight-library                       — load available flights
+ * - GET /api/flight-library?limit=2000            — load available flights
  *   (falls back to GET /api/flights for legacy ODL data)
- * - POST /api/missions/{id}/flights               — attach flight
+ * - POST /api/missions/{id}/flights/bulk          — attach many flights (ADR-0025)
  * - DELETE /api/missions/{id}/flights/{flight_id} — detach flight
  *
+ * v2.73.0 (ADR-0025): adding flights is now multi-select. Tick the
+ * checkboxes (or "select all") and press "ADD SELECTED (N)" to attach many
+ * flights in ONE request — the old one-POST-per-click flow made building a
+ * large mission ("savannah") painfully slow. The per-row ADD button is
+ * preserved and routes through the same bulk endpoint with a single item.
+ *
  * NEVER calls POST /api/missions — see constraint comment on
- * `handleAddFlight()` below.
+ * `attachFlights()` below.
  */
 import { useCallback, useEffect, useState } from 'react';
 import {
@@ -26,6 +32,7 @@ import {
   Badge,
   Button,
   Card,
+  Checkbox,
   Group,
   Loader,
   ScrollArea,
@@ -38,8 +45,13 @@ import { notifications } from '@mantine/notifications';
 import { IconRefresh, IconTrash } from '@tabler/icons-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import api from '../api/client';
-import type { Aircraft, Mission } from '../api/types';
+import type { Aircraft, Mission, MissionFlight } from '../api/types';
 import { cardStyle } from '../components/shared/styles';
+
+/** Stable identity for an available flight row (native UUID or ODL id). */
+function availKey(f: AvailableFlight): string {
+  return String(f.id ?? f.flight_id ?? '');
+}
 
 interface AttachedFlight {
   /** mission_flight row id */
@@ -108,8 +120,10 @@ export default function MissionFlightsEdit() {
 
   const [loading, setLoading] = useState(true);
   const [flightsLoading, setFlightsLoading] = useState(false);
+  const [adding, setAdding] = useState(false);
   const [availableFlights, setAvailableFlights] = useState<AvailableFlight[]>([]);
   const [attached, setAttached] = useState<AttachedFlight[]>([]);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
 
   const loadMission = useCallback(async () => {
     if (!id) return;
@@ -124,10 +138,17 @@ export default function MissionFlightsEdit() {
       }));
       setAttached(rows);
     } catch (err) {
-      console.error('[MissionFlightsEdit] mission load failed', err);
+      // Surface the REAL HTTP status per the repo logging standard — the old
+      // generic "Could not load mission flights" masked the 502/520 that the
+      // detail-GET OOM produced (ADR-0025), making the failure undiagnosable
+      // from the operator's screen alone.
+      const status = (err as { response?: { status?: number } })?.response?.status;
+      console.error('[MissionFlightsEdit] mission load failed', { status, err });
       notifications.show({
         title: 'Load failed',
-        message: 'Could not load mission flights — returning to mission list.',
+        message: status
+          ? `Could not load mission flights — server returned HTTP ${status}. Returning to mission list.`
+          : 'Could not load mission flights — network error or timeout. Returning to mission list.',
         color: 'red',
       });
       navigate('/missions');
@@ -139,7 +160,10 @@ export default function MissionFlightsEdit() {
     try {
       let flights: AvailableFlight[] = [];
       try {
-        const resp = await api.get('/flight-library');
+        // Request the full library (backend caps at 2000) so >500 flights are
+        // reachable from the editor — the old call passed no limit and the
+        // backend default of 500 silently hid the rest (ADR-0025 §C).
+        const resp = await api.get('/flight-library', { params: { limit: 2000 } });
         flights = Array.isArray(resp.data) ? resp.data : [];
       } catch {
         const resp = await api.get('/flights');
@@ -183,44 +207,64 @@ export default function MissionFlightsEdit() {
     };
   }, [loadMission, loadFlights]);
 
-  const handleAddFlight = async (flight: AvailableFlight) => {
+  const attachFlights = async (flightsToAdd: AvailableFlight[]) => {
     // CONSTRAINT: this page edits an EXISTING mission only.
     // POST /missions is forbidden here per ADR-0013 / spec §2.
-    // Only the per-mission flights subresource is touched.
-    if (!id) return;
-    const isNativeFlight =
-      typeof flight.id === 'string' && flight.id.includes('-') && Boolean(flight.source);
-    try {
-      const resp = await api.post(`/missions/${id}/flights`, {
-        flight_id: isNativeFlight ? flight.id : null,
+    // Only the per-mission flights subresource is touched — and now via the
+    // single-request bulk endpoint (ADR-0025) for both the per-row ADD and
+    // the multi-select "Add selected" action.
+    if (!id || flightsToAdd.length === 0) return;
+    const items = flightsToAdd.map((flight) => {
+      const isNativeFlight =
+        typeof flight.id === 'string' && flight.id.includes('-') && Boolean(flight.source);
+      return {
+        flight_id: isNativeFlight ? (flight.id as string) : null,
         opendronelog_flight_id: isNativeFlight
           ? null
           : String(flight.id ?? flight.flight_id ?? ''),
         flight_data_cache: flight,
-      });
-      const newRow: AttachedFlight = {
-        ...(flight as Record<string, unknown>),
-        _flightId: resp.data.id,
-        _aircraft: resp.data.aircraft ?? null,
-        flight_id:
-          (typeof flight.id === 'string' || typeof flight.id === 'number')
-            ? String(flight.id)
-            : flight.flight_id ?? null,
       };
-      setAttached((prev) => [...prev, newRow]);
-      notifications.show({ title: 'Flight added', message: flightName(flight), color: 'cyan' });
+    });
+    setAdding(true);
+    try {
+      const resp = await api.post(`/missions/${id}/flights/bulk`, { flights: items });
+      const created: MissionFlight[] = Array.isArray(resp.data) ? resp.data : [];
+      const newRows: AttachedFlight[] = created.map((f) => ({
+        ...((f.flight_data_cache as Record<string, unknown>) || {}),
+        _flightId: f.id,
+        _aircraft: f.aircraft ?? null,
+        flight_id:
+          f.opendronelog_flight_id || (f.flight_data_cache?.id as string | undefined) || null,
+      }));
+      setAttached((prev) => [...prev, ...newRows]);
+      setSelected(new Set());
+      const n = newRows.length;
+      const req = items.length;
+      notifications.show({
+        title: n > 0 ? 'Flights added' : 'Nothing to add',
+        message:
+          n === req
+            ? `${n} flight${n === 1 ? '' : 's'} added.`
+            : `${n} added · ${req - n} already attached (skipped).`,
+        color: n > 0 ? 'cyan' : 'yellow',
+      });
     } catch (err) {
-      console.error('[MissionFlightsEdit] add failed', err);
+      const status = (err as { response?: { status?: number } })?.response?.status;
+      console.error('[MissionFlightsEdit] bulk add failed', { status, count: items.length, err });
       notifications.show({
         title: 'Error',
-        message: 'Failed to add flight',
+        message: `Failed to add flight${items.length === 1 ? '' : 's'}${
+          status ? ` — server returned HTTP ${status}` : ' — network error or timeout'
+        }.`,
         color: 'red',
       });
+    } finally {
+      setAdding(false);
     }
   };
 
   const handleRemoveFlight = async (flightRowId: string) => {
-    // CONSTRAINT: see handleAddFlight above — no POST /missions here either.
+    // CONSTRAINT: see attachFlights above — no POST /missions here either.
     if (!id) return;
     try {
       await api.delete(`/missions/${id}/flights/${flightRowId}`);
@@ -255,9 +299,26 @@ export default function MissionFlightsEdit() {
       .filter((v): v is string => Boolean(v)),
   );
   const availableNotYetAttached = availableFlights.filter((f) => {
-    const key = String(f.id ?? f.flight_id ?? '');
+    const key = availKey(f);
     return key && !attachedKeys.has(key);
   });
+
+  // Multi-select state (ADR-0025). Keys are availKey() of available rows.
+  const visibleKeys = availableNotYetAttached.map(availKey).filter(Boolean);
+  const selectedCount = visibleKeys.filter((k) => selected.has(k)).length;
+  const allSelected = visibleKeys.length > 0 && selectedCount === visibleKeys.length;
+  const someSelected = selectedCount > 0 && !allSelected;
+
+  const toggleOne = (key: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  const toggleAll = () => setSelected(() => (allSelected ? new Set() : new Set(visibleKeys)));
+  const handleAddSelected = () =>
+    attachFlights(availableNotYetAttached.filter((f) => selected.has(availKey(f))));
 
   // Distinct aircraft summary, derived from attached flights. The operator
   // doesn't pick this; it's a read-only "what's on this mission" tally.
@@ -412,9 +473,21 @@ export default function MissionFlightsEdit() {
                 <IconRefresh size={14} />
               </ActionIcon>
             </Group>
-            <Badge color="gray" variant="light" size="sm">
-              {availableNotYetAttached.length} available
-            </Badge>
+            <Group gap="xs">
+              <Button
+                size="xs"
+                color="cyan"
+                onClick={handleAddSelected}
+                disabled={selectedCount === 0}
+                loading={adding}
+                styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}
+              >
+                ADD SELECTED ({selectedCount})
+              </Button>
+              <Badge color="gray" variant="light" size="sm">
+                {availableNotYetAttached.length} available
+              </Badge>
+            </Group>
           </Group>
           {flightsLoading ? (
             <Group justify="center" py="md">
@@ -442,6 +515,16 @@ export default function MissionFlightsEdit() {
               >
                 <Table.Thead>
                   <Table.Tr>
+                    <Table.Th w={40}>
+                      <Checkbox
+                        size="xs"
+                        color="cyan"
+                        checked={allSelected}
+                        indeterminate={someSelected}
+                        onChange={toggleAll}
+                        aria-label="Select all flights"
+                      />
+                    </Table.Th>
                     <Table.Th>NAME</Table.Th>
                     <Table.Th>DATE</Table.Th>
                     <Table.Th>DRONE</Table.Th>
@@ -450,8 +533,19 @@ export default function MissionFlightsEdit() {
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
-                  {availableNotYetAttached.map((f, i) => (
-                    <Table.Tr key={String(f.id ?? f.flight_id ?? i)}>
+                  {availableNotYetAttached.map((f, i) => {
+                    const key = availKey(f) || String(i);
+                    return (
+                    <Table.Tr key={key}>
+                      <Table.Td>
+                        <Checkbox
+                          size="xs"
+                          color="cyan"
+                          checked={selected.has(key)}
+                          onChange={() => toggleOne(key)}
+                          aria-label={`Select ${flightName(f)}`}
+                        />
+                      </Table.Td>
                       <Table.Td>{flightName(f)}</Table.Td>
                       <Table.Td style={{ fontFamily: "'Share Tech Mono', monospace" }}>
                         {flightDate(f)}
@@ -465,14 +559,15 @@ export default function MissionFlightsEdit() {
                           size="xs"
                           color="cyan"
                           variant="light"
-                          onClick={() => handleAddFlight(f)}
+                          onClick={() => attachFlights([f])}
                           aria-label={`Add ${flightName(f)}`}
                         >
                           ADD
                         </Button>
                       </Table.Td>
                     </Table.Tr>
-                  ))}
+                    );
+                  })}
                 </Table.Tbody>
               </Table>
             </ScrollArea>

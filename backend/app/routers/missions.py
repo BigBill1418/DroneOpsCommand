@@ -24,6 +24,7 @@ from app.models.mission import Mission, MissionFlight, MissionImage, MissionStat
 from app.models.user import User
 from app.schemas.mission import (
     MissionCreate,
+    MissionFlightBulkAttach,
     MissionFlightCreate,
     MissionFlightResponse,
     MissionImageResponse,
@@ -36,6 +37,82 @@ from app.services.opendronelog import opendronelog_client
 logger = logging.getLogger("doc.missions")
 
 router = APIRouter(prefix="/api/missions", tags=["missions"])
+
+# Heavy per-flight cache keys that duplicate the full GPS track / telemetry.
+# (ADR-0025) They are NEVER read from the mission DETAIL payload by any
+# frontend consumer — MissionDetail.tsx and MissionFlightsEdit.tsx read only
+# scalar cache fields (duration_secs, display_name, drone_model, …). The map
+# and flight-replay views load tracks ON DEMAND (routers/maps.py via
+# Flight.gps_track; FlightReplay via the per-flight detail route). Stripping
+# these keys before serialization makes the detail/write responses O(rows)
+# instead of O(track points) and is the read-side half of the ADR-0025 OOM
+# fix; A2 (not writing the track at attach) is the write-side half.
+_CACHE_HEAVY_KEYS = ("track", "gps_data", "coordinates", "telemetry")
+
+# The scalar display fields lifted from a native Flight onto the cache at
+# attach (ADR-0025). Deliberately excludes the GPS track.
+_FLIGHT_SCALAR_CACHE_KEYS = (
+    "id", "name", "display_name", "drone_model", "drone_serial",
+    "start_time", "duration_secs", "total_distance", "max_altitude",
+    "max_speed", "home_lat", "home_lon", "point_count",
+)
+
+
+def _strip_cache_heavy_keys(cache: dict | None) -> dict | None:
+    """Return a copy of ``cache`` with the heavy track/telemetry keys removed.
+
+    DB-agnostic (pure Python) so it works identically on the Postgres prod
+    path and the SQLite/stubbed test paths. Returns the original object
+    untouched when there is nothing heavy to strip (the common case for
+    go-forward missions, whose caches are already scalar-only per A2).
+    """
+    if not cache or not any(k in cache for k in _CACHE_HEAVY_KEYS):
+        return cache
+    return {k: v for k, v in cache.items() if k not in _CACHE_HEAVY_KEYS}
+
+
+def _scalar_cache_from_flight(local_flight, base: dict | None = None) -> dict:
+    """Build a scalar-only display cache from a native ``Flight`` (ADR-0025).
+
+    No ``track`` key — the GPS track stays once on ``Flight.gps_track`` and is
+    loaded on demand by the map/report paths. ``base`` (the picker's display
+    row) is preserved for any extra display fields but has its heavy keys
+    stripped so a stale client can't smuggle a track back into the cache.
+    """
+    cache = dict(_strip_cache_heavy_keys(base) or {})
+    cache.update({
+        "id": str(local_flight.id),
+        "name": local_flight.name,
+        "display_name": local_flight.name,
+        "drone_model": local_flight.drone_model,
+        "drone_serial": local_flight.drone_serial,
+        "start_time": iso_utc(local_flight.start_time),
+        "duration_secs": local_flight.duration_secs,
+        "total_distance": local_flight.total_distance,
+        "max_altitude": local_flight.max_altitude,
+        "max_speed": local_flight.max_speed,
+        "home_lat": local_flight.home_lat,
+        "home_lon": local_flight.home_lon,
+        "point_count": local_flight.point_count,
+    })
+    return cache
+
+
+def _serialize_mission(mission: Mission) -> MissionResponse:
+    """Serialize a mission to ``MissionResponse`` with heavy cache keys stripped.
+
+    The detail (``GET``) and every write re-query (POST/PUT/PATCH) return the
+    full mission graph. Without stripping, a large mission's response body is
+    O(N_flights × ~19k track points) and OOM-kills the worker mid-serialize
+    (ADR-0025). This strips track/gps_data/coordinates/telemetry from each
+    flight's cache on the OUTBOUND response only — the stored rows are never
+    mutated, so no write is triggered on a read and legacy track data on disk
+    is preserved.
+    """
+    resp = MissionResponse.model_validate(mission)
+    for fr in resp.flights:
+        fr.flight_data_cache = _strip_cache_heavy_keys(fr.flight_data_cache)
+    return resp
 
 
 def _mission_graph_options():
@@ -268,7 +345,7 @@ async def create_mission(
         if mission.customer_id:
             await _send_portal_email_for_mission(mission.id, mission.customer_id, db)
 
-        return mission
+        return _serialize_mission(mission)
     except HTTPException:
         raise
     except Exception as exc:
@@ -288,7 +365,7 @@ async def get_mission(
     mission = result.scalar_one_or_none()
     if not mission:
         raise HTTPException(status_code=404, detail="Mission not found")
-    return mission
+    return _serialize_mission(mission)
 
 
 @router.put("/{mission_id}", response_model=MissionResponse)
@@ -329,7 +406,7 @@ async def update_mission(
         if new_customer_id and new_customer_id != old_customer_id:
             await _send_portal_email_for_mission(mission.id, new_customer_id, db)
 
-        return mission
+        return _serialize_mission(mission)
     except Exception as exc:
         logger.exception("Failed to update mission: %s", exc)
         raise HTTPException(status_code=500, detail="An internal error occurred")
@@ -420,7 +497,7 @@ async def patch_mission_status(
     result = await db.execute(
         select(Mission).where(Mission.id == mission_id).options(*_mission_graph_options())
     )
-    return result.scalar_one()
+    return _serialize_mission(result.scalar_one())
 
 
 @router.delete("/{mission_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -461,24 +538,13 @@ async def add_flight(
         local_flight = flt_result.scalar_one_or_none()
         if local_flight:
             data.aircraft_id = local_flight.aircraft_id
-            cache = data.flight_data_cache or {}
-            cache.update({
-                "id": str(local_flight.id),
-                "name": local_flight.name,
-                "display_name": local_flight.name,
-                "drone_model": local_flight.drone_model,
-                "drone_serial": local_flight.drone_serial,
-                "start_time": iso_utc(local_flight.start_time),
-                "duration_secs": local_flight.duration_secs,
-                "total_distance": local_flight.total_distance,
-                "max_altitude": local_flight.max_altitude,
-                "max_speed": local_flight.max_speed,
-                "home_lat": local_flight.home_lat,
-                "home_lon": local_flight.home_lon,
-                "point_count": local_flight.point_count,
-                "track": local_flight.gps_track or [],
-            })
-            data.flight_data_cache = cache
+            # ADR-0025: store SCALAR display fields only — never the GPS track.
+            # The track stays once on Flight.gps_track and is loaded on demand
+            # by the map/report paths via flight_id. Writing it here duplicated
+            # ~19k points per attach and made every full-mission read O(track).
+            data.flight_data_cache = _scalar_cache_from_flight(
+                local_flight, data.flight_data_cache
+            )
     else:
         # Legacy ODL row — no Flight row to read from. Fleet-match by
         # serial/model out of the cache so reports/financials still see
@@ -524,6 +590,165 @@ async def add_flight(
     await db.flush()
     await db.refresh(flight)
     return flight
+
+
+@router.post(
+    "/{mission_id}/flights/bulk",
+    response_model=list[MissionFlightResponse],
+    status_code=status.HTTP_201_CREATED,
+)
+async def add_flights_bulk(
+    mission_id: UUID,
+    data: MissionFlightBulkAttach,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """Attach many flights to a mission in ONE transaction (ADR-0025).
+
+    Replaces the one-POST-per-click flow that made adding a large mission
+    ("savannah") painfully slow. Behaviour:
+
+    * Single flush — all new ``MissionFlight`` rows commit together.
+    * Idempotent — flights already attached (matched by native ``flight_id``
+      or legacy ``opendronelog_flight_id``) are skipped, and duplicates
+      WITHIN the batch are de-duplicated. Re-submitting the same selection
+      is a safe no-op.
+    * Scalar caches only — for native flights the server derives the display
+      cache + ``aircraft_id`` from ``Flight`` and NEVER stores the GPS track
+      (loaded on demand later). Native flight rows are bulk-loaded with the
+      heavy JSON columns deferred so a 500-flight attach stays O(rows).
+    * Aircraft is always derived server-side (native: ``Flight.aircraft_id``;
+      legacy ODL: fleet-match by serial/model). Client-sent aircraft is
+      ignored — single source of truth is the flight log.
+
+    Returns the rows that were newly created (already-attached skips are not
+    re-returned), each with its derived aircraft.
+    """
+    from app.models.flight import Flight as FlightModel
+    from sqlalchemy.orm import defer
+
+    result = await db.execute(select(Mission).where(Mission.id == mission_id))
+    if not result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Mission not found")
+
+    if not data.flights:
+        return []
+
+    # Existing attachments — for idempotent skip.
+    existing_q = await db.execute(
+        select(MissionFlight.flight_id, MissionFlight.opendronelog_flight_id).where(
+            MissionFlight.mission_id == mission_id
+        )
+    )
+    existing_flight_ids: set[str] = set()
+    existing_odl_ids: set[str] = set()
+    for fid, odl in existing_q.all():
+        if fid is not None:
+            existing_flight_ids.add(str(fid))
+        if odl:
+            existing_odl_ids.add(str(odl))
+
+    # Batch-load native Flight rows (scalars only — defer the heavy JSON so a
+    # large attach never materializes any GPS track / telemetry).
+    native_ids = {item.flight_id for item in data.flights if item.flight_id is not None}
+    flights_by_id: dict[UUID, FlightModel] = {}
+    if native_ids:
+        flt_rows = await db.execute(
+            select(FlightModel)
+            .where(FlightModel.id.in_(native_ids))
+            .options(
+                defer(FlightModel.gps_track),
+                defer(FlightModel.telemetry),
+                defer(FlightModel.raw_metadata),
+            )
+        )
+        flights_by_id = {f.id: f for f in flt_rows.scalars().all()}
+
+    created: list[MissionFlight] = []
+    seen_flight_ids: set[str] = set()
+    seen_odl_ids: set[str] = set()
+    skipped = 0
+
+    for item in data.flights:
+        if item.flight_id is not None:
+            key = str(item.flight_id)
+            if key in existing_flight_ids or key in seen_flight_ids:
+                skipped += 1
+                continue
+            local_flight = flights_by_id.get(item.flight_id)
+            if local_flight is None:
+                # Unknown flight_id — skip rather than insert a dangling row.
+                logger.warning(
+                    "[BULK-ATTACH] skipping unknown flight_id=%s (mission=%s)",
+                    item.flight_id, mission_id,
+                )
+                skipped += 1
+                continue
+            seen_flight_ids.add(key)
+            mf = MissionFlight(
+                mission_id=mission_id,
+                flight_id=item.flight_id,
+                opendronelog_flight_id=None,
+                aircraft_id=local_flight.aircraft_id,
+                flight_data_cache=_scalar_cache_from_flight(
+                    local_flight, item.flight_data_cache
+                ),
+            )
+            created.append(mf)
+        else:
+            # Legacy ODL row — no Flight to load from. Fleet-match by
+            # serial/model out of the cache; keep scalar display fields but
+            # strip any heavy track the client smuggled in (bulk never stores
+            # tracks — the ODL single-add path handles track-bearing rows).
+            odl_key = str(item.opendronelog_flight_id or "")
+            if not odl_key:
+                skipped += 1
+                continue
+            if odl_key in existing_odl_ids or odl_key in seen_odl_ids:
+                skipped += 1
+                continue
+            seen_odl_ids.add(odl_key)
+            cache = _strip_cache_heavy_keys(item.flight_data_cache) or {}
+            aircraft_id = None
+            try:
+                from app.routers.flight_library import _match_fleet_aircraft
+                fleet_match = await _match_fleet_aircraft(
+                    db, cache.get("drone_serial"), cache.get("drone_model")
+                )
+                aircraft_id = fleet_match.id if fleet_match is not None else None
+            except Exception as exc:
+                logger.warning("[BULK-ATTACH] fleet match failed for ODL flight: %s", exc)
+            mf = MissionFlight(
+                mission_id=mission_id,
+                flight_id=None,
+                opendronelog_flight_id=item.opendronelog_flight_id,
+                aircraft_id=aircraft_id,
+                flight_data_cache=cache,
+            )
+            created.append(mf)
+
+    for mf in created:
+        db.add(mf)
+    await db.flush()
+
+    logger.info(
+        "[BULK-ATTACH] mission=%s attached=%d skipped=%d (requested=%d) user=%s",
+        mission_id, len(created), skipped, len(data.flights),
+        getattr(_user, "username", "unknown"),
+    )
+
+    if not created:
+        return []
+
+    # Re-query the created rows with aircraft eagerly loaded for the response
+    # (caches are scalar-only so this stays small even for hundreds of rows).
+    created_ids = [mf.id for mf in created]
+    rows = await db.execute(
+        select(MissionFlight)
+        .where(MissionFlight.id.in_(created_ids))
+        .options(selectinload(MissionFlight.aircraft))
+    )
+    return rows.scalars().all()
 
 
 @router.put("/{mission_id}/flights/{flight_id}", response_model=MissionFlightResponse)

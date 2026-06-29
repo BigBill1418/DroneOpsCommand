@@ -1,15 +1,17 @@
 /**
- * MissionFlightsEdit contract test (v2.67.0 Mission Hub).
+ * MissionFlightsEdit contract test (v2.67.0 Mission Hub; bulk path v2.73.0/ADR-0025).
  *
- * Per ADR-0013 + spec §7: msw at the network boundary asserts:
+ * Per ADR-0013 + spec §7 + ADR-0025: msw at the network boundary asserts:
  *
- *   1. Add → POST /api/missions/{id}/flights with the right body shape.
- *      Body must NOT include aircraft_id — the server derives it from
- *      the flight log (the operator never picks aircraft on this page).
+ *   1. Add (per-row AND multi-select) → POST /api/missions/{id}/flights/bulk
+ *      with body {flights:[...]}. Items must NOT include aircraft_id — the
+ *      server derives it from the flight log.
  *   2. Remove → DELETE /api/missions/{id}/flights/{flight_id}.
  *   3. CONTRACT: POST /api/missions is NEVER fired from this page.
  *   4. CONTRACT: PATCH /api/missions/{id}/flights/{flight_id}/aircraft
  *      is NEVER fired from this page either — that whole concept is gone.
+ *   5. CONTRACT: the per-flight, one-POST-per-click /flights endpoint is no
+ *      longer hit — adds go through the single-request bulk endpoint.
  */
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
@@ -24,11 +26,12 @@ const MISSION_ID = 'abc-123';
 const NATIVE_FLIGHT_ID = 'fac34a12-1111-4111-8111-111111111111';
 const ATTACHED_FLIGHT_ROW_ID = 'mf-77777777-7777-4777-8777-777777777777';
 
-let lastPostFlightUrl: string | null = null;
-let lastPostFlightBody: Record<string, unknown> | null = null;
+let lastBulkUrl: string | null = null;
+let lastBulkBody: Record<string, unknown> | null = null;
 let lastDeleteFlightUrl: string | null = null;
 let postMissionsCallCount = 0;
 let patchAircraftCallCount = 0;
+let singleFlightPostCallCount = 0;
 
 function freshMission() {
   return {
@@ -86,20 +89,27 @@ function buildHandlers() {
         },
       ]),
     ),
-    http.post(`*/api/missions/${MISSION_ID}/flights`, async ({ request }) => {
-      lastPostFlightUrl = request.url;
-      lastPostFlightBody = (await request.json()) as Record<string, unknown>;
+    http.post(`*/api/missions/${MISSION_ID}/flights/bulk`, async ({ request }) => {
+      lastBulkUrl = request.url;
+      lastBulkBody = (await request.json()) as Record<string, unknown>;
+      const items = (lastBulkBody?.flights as Array<Record<string, unknown>>) ?? [];
       return HttpResponse.json(
-        {
-          id: 'mf-newly-attached',
-          opendronelog_flight_id: null,
-          aircraft_id: lastPostFlightBody?.aircraft_id ?? null,
+        items.map((it, i) => ({
+          id: `mf-newly-attached-${i}`,
+          opendronelog_flight_id: (it.opendronelog_flight_id as string | null) ?? null,
+          flight_id: (it.flight_id as string | null) ?? null,
+          aircraft_id: null,
           aircraft: null,
-          flight_data_cache: lastPostFlightBody?.flight_data_cache ?? {},
+          flight_data_cache: (it.flight_data_cache as Record<string, unknown>) ?? {},
           added_at: '2026-05-02T10:30:00Z',
-        },
+        })),
         { status: 201 },
       );
+    }),
+    // TRIPWIRE: the one-POST-per-click endpoint must no longer be hit.
+    http.post(`*/api/missions/${MISSION_ID}/flights`, () => {
+      singleFlightPostCallCount++;
+      return HttpResponse.json({ id: 'should-not-be-used' }, { status: 201 });
     }),
     http.delete(`*/api/missions/${MISSION_ID}/flights/:flightRowId`, ({ request }) => {
       lastDeleteFlightUrl = request.url;
@@ -124,11 +134,12 @@ const server = setupServer(...buildHandlers());
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
 afterEach(() => {
   server.resetHandlers(...buildHandlers());
-  lastPostFlightUrl = null;
-  lastPostFlightBody = null;
+  lastBulkUrl = null;
+  lastBulkBody = null;
   lastDeleteFlightUrl = null;
   postMissionsCallCount = 0;
   patchAircraftCallCount = 0;
+  singleFlightPostCallCount = 0;
 });
 afterAll(() => server.close());
 
@@ -143,7 +154,7 @@ vi.mock('react-router-dom', async () => {
 });
 
 describe('MissionFlightsEdit', () => {
-  it('Add fires POST /api/missions/{id}/flights and NEVER POST /api/missions', async () => {
+  it('Per-row Add fires POST /flights/bulk (one item) and NEVER POST /api/missions', async () => {
     const user = userEvent.setup();
     render(
       <TestProviders>
@@ -157,19 +168,53 @@ describe('MissionFlightsEdit', () => {
     await user.click(addBtn);
 
     await waitFor(() => {
-      expect(lastPostFlightBody).not.toBeNull();
+      expect(lastBulkBody).not.toBeNull();
     });
 
-    expect(lastPostFlightUrl).toMatch(new RegExp(`/api/missions/${MISSION_ID}/flights$`));
+    expect(lastBulkUrl).toMatch(new RegExp(`/api/missions/${MISSION_ID}/flights/bulk$`));
+    const items = lastBulkBody?.flights as Array<Record<string, unknown>>;
+    expect(items).toHaveLength(1);
     // The native-flight branch sets flight_id; opendronelog_flight_id is null.
-    expect(lastPostFlightBody?.flight_id).toBe(NATIVE_FLIGHT_ID);
-    expect(lastPostFlightBody?.opendronelog_flight_id).toBeNull();
-    // aircraft_id must NOT be in the body — the server derives it.
-    expect(lastPostFlightBody).not.toHaveProperty('aircraft_id');
+    expect(items[0].flight_id).toBe(NATIVE_FLIGHT_ID);
+    expect(items[0].opendronelog_flight_id).toBeNull();
+    // aircraft_id must NOT be in the item — the server derives it.
+    expect(items[0]).not.toHaveProperty('aircraft_id');
 
     // Load-bearing invariants.
     expect(postMissionsCallCount).toBe(0);
     expect(patchAircraftCallCount).toBe(0);
+    expect(singleFlightPostCallCount).toBe(0);
+  });
+
+  it('Multi-select "Add selected" attaches the checked flights in ONE bulk request', async () => {
+    const user = userEvent.setup();
+    render(
+      <TestProviders>
+        <MissionFlightsEdit />
+      </TestProviders>,
+    );
+
+    await screen.findByText(/AVAILABLE FLIGHTS/i);
+    // Tick the row checkbox for the available flight.
+    const rowCheckbox = await screen.findByRole('checkbox', {
+      name: /Select New Available Flight/i,
+    });
+    await user.click(rowCheckbox);
+
+    // The "ADD SELECTED (1)" button reflects the count and triggers the bulk add.
+    const addSelected = await screen.findByRole('button', { name: /ADD SELECTED \(1\)/i });
+    await user.click(addSelected);
+
+    await waitFor(() => {
+      expect(lastBulkBody).not.toBeNull();
+    });
+
+    expect(lastBulkUrl).toMatch(new RegExp(`/api/missions/${MISSION_ID}/flights/bulk$`));
+    const items = lastBulkBody?.flights as Array<Record<string, unknown>>;
+    expect(items).toHaveLength(1);
+    expect(items[0].flight_id).toBe(NATIVE_FLIGHT_ID);
+    expect(postMissionsCallCount).toBe(0);
+    expect(singleFlightPostCallCount).toBe(0);
   });
 
   it('Remove fires DELETE /api/missions/{id}/flights/{flight_id} and NEVER POST /api/missions', async () => {
@@ -212,7 +257,7 @@ describe('MissionFlightsEdit', () => {
 
     expect(navigateSpy).toHaveBeenCalledWith(`/missions/${MISSION_ID}`);
     expect(postMissionsCallCount).toBe(0);
-    expect(lastPostFlightBody).toBeNull();
+    expect(lastBulkBody).toBeNull();
     expect(lastDeleteFlightUrl).toBeNull();
   });
 });

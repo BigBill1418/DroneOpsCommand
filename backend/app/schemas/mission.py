@@ -14,6 +14,28 @@ class MissionFlightCreate(BaseModel):
     flight_data_cache: dict | None = None
 
 
+class MissionFlightBulkItem(BaseModel):
+    """One flight to attach in a bulk request (ADR-0025).
+
+    Same identity fields as ``MissionFlightCreate`` (a native ``flight_id``
+    XOR a legacy ``opendronelog_flight_id``); ``flight_data_cache`` is the
+    picker's display row. The server derives aircraft + scalar cache and
+    NEVER stores the GPS track for native flights (the track is loaded on
+    demand from ``Flight.gps_track``). ``aircraft_id`` is intentionally
+    absent — it is always derived server-side from the flight log.
+    """
+
+    opendronelog_flight_id: str | None = None
+    flight_id: UUID | None = None
+    flight_data_cache: dict | None = None
+
+
+class MissionFlightBulkAttach(BaseModel):
+    """Body for POST /api/missions/{id}/flights/bulk (ADR-0025)."""
+
+    flights: list[MissionFlightBulkItem]
+
+
 class MissionFlightResponse(BaseModel):
     id: UUID
     opendronelog_flight_id: str | None

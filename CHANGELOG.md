@@ -4,6 +4,45 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-06-29 — feat(missions): bulletproof large-mission flight handling + bulk attach — v2.73.0
+
+Building a mission with far more flights than ever before ("savannah") errored
+out on open, and adding flights one click at a time was painfully slow. Both
+were the **same OOM class** as ADR-0019/0020: every full-mission read
+serialized the entire GPS track for every attached flight — O(N_flights × ~19k
+points) — which blew past the 1536 MiB backend cgroup cap and OOM-killed
+uvicorn mid-response (502/520). See **ADR-0025** for the full decision record.
+
+* **Root data-model fix (A2):** attaching a native flight now stores **scalar
+  display fields only** in `flight_data_cache` — never the GPS track. The track
+  lives once on `Flight.gps_track` and is loaded on demand. The legacy-ODL
+  attach path (rows with no `Flight`) is unchanged.
+* **Detail read path (A1):** `GET /api/missions/{id}` (and every POST/PUT/PATCH
+  re-query) strips `track`/`gps_data`/`coordinates`/`telemetry` from each
+  flight cache **before serialization** — outbound only, the stored rows are
+  never mutated (no write-on-read, no legacy data loss). The detail payload is
+  now O(rows).
+* **Report + map paths (A3):** a new bounded loader
+  (`services/mission_tracks.load_bounded_flight_tracks`) pulls each flight's
+  track **one at a time** and decimates it to the render vertex cap, so neither
+  `POST /report/generate` nor the `/map*` endpoints ever hold all raw tracks at
+  once. `maps.py` no longer eager-loads every linked `Flight` in full.
+* **Fast multi-add (B):** new `POST /api/missions/{id}/flights/bulk` attaches
+  many flights in **one transaction**, idempotently (skips already-attached by
+  `flight_id`/`opendronelog_flight_id`), deriving aircraft server-side and
+  storing scalar caches. The editor now has **checkboxes + "Select all" +
+  "Add selected (N)"**; the per-row ADD routes through the same bulk endpoint.
+* **Picker scale (C):** the editor requests `/flight-library?limit=2000` so
+  >500 library flights are reachable (was silently capped at the 500 default).
+* **Frontend resilience (D):** `loadMission`/add failures now surface the real
+  HTTP status in the notification instead of a generic message.
+* **Tests:** 7 new backend tests (detail-strip O(rows), no-track-at-attach,
+  bulk one-txn/idempotent/scalar/ODL-preserved, bounded track loader) +
+  updated/added frontend bulk + multi-select tests. Full backend suite green
+  (441 passed, 3 skipped); frontend green; `tsc` clean.
+* **Resilience guard:** no schema change, no port/replication/blue-green
+  impact — app-layer read/write behaviour only; failover-safe.
+
 ## 2026-06-24 — fix(device-upload): async route fails fast if original not on shared store before 202 — v2.72.2
 
 Hardening follow-up to v2.72.1 (ADR-0023 §6). `_store_original_from_path` is
