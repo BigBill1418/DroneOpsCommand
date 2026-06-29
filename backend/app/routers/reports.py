@@ -15,6 +15,7 @@ from sqlalchemy.orm import selectinload
 from app.auth.jwt import get_current_user
 from app.config import settings
 from app.database import get_db
+from app.models.flight import Flight
 from app.models.invoice import Invoice
 from app.models.mission import Mission, MissionFlight
 from app.models.report import Report
@@ -88,6 +89,18 @@ METERS_TO_FEET = 3.28084
 GHOST_MAX_DURATION_S = 30.0
 GHOST_MAX_DISTANCE_M = 10.0
 
+# Part 107 §107.51(b): 400 ft AGL ceiling = 121.92 m. The report engine flags —
+# but never fabricates a waiver claim about — flights whose recorded max
+# altitude exceeds this (ADR-0028 H1). The operator adds any LAANC/waiver
+# context separately.
+PART_107_CEILING_M = 121.92
+
+# Many OpenDroneLog max-altitude values cluster at ~500 m — the DJI configured
+# ceiling limit, not a measured peak. Flag those as ceiling-limited so the
+# narrative does not present them as an achieved altitude (ADR-0028 H1).
+_ODL_CEILING_LOW_M = 495.0
+_ODL_CEILING_HIGH_M = 505.0
+
 
 def _cache_num(cache: dict, *keys) -> float | None:
     """First numeric value among ``keys`` in ``cache``; None if none present."""
@@ -123,30 +136,93 @@ def _format_altitude(alt_m: float | None) -> str:
     return f"{alt_m:.1f} m AGL ({alt_m * METERS_TO_FEET:.0f} ft)"
 
 
-def _build_flight_summaries(mission: Mission) -> list[dict]:
-    """Per-flight summaries for the LLM — deduplicated, unit-correct altitude,
-    aborted launches flagged so they don't pollute altitude ranges (ADR-0026)."""
+async def _load_live_flight_metrics(db: AsyncSession, mission: Mission) -> dict:
+    """Map ``Flight.id`` → live scalar metrics for every native flight on the
+    mission (ADR-0028 H2).
+
+    Reports/PDF/LLM previously read the attach-time ``flight_data_cache``
+    snapshot. Drift is 0 today, but any future live correction (the C1 distance
+    sanitize, a re-stamp) would silently desync every report. We now read the
+    authoritative live ``Flight`` scalars — selecting only scalar COLUMNS so the
+    heavy ``gps_track`` / ``telemetry`` / ``raw_metadata`` JSON is never loaded
+    (ADR-0019). Legacy-ODL rows (``flight_id IS NULL``) keep using the cache.
+    """
+    ids = [mf.flight_id for mf in mission.flights if mf.flight_id is not None]
+    if not ids:
+        return {}
+    rows = await db.execute(
+        select(
+            Flight.id, Flight.duration_secs, Flight.total_distance,
+            Flight.max_altitude, Flight.max_speed, Flight.source, Flight.notes,
+        ).where(Flight.id.in_(ids))
+    )
+    return {r.id: r for r in rows.all()}
+
+
+def _resolve_flight_metrics(mf: MissionFlight, live: dict) -> dict:
+    """Resolve one flight's metrics, preferring live ``Flight`` scalars (H2),
+    falling back to the cache only for legacy-ODL rows. Also derives the M8
+    ghost flag and the H1 altitude flags."""
+    if mf.flight_id is not None and mf.flight_id in live:
+        r = live[mf.flight_id]
+        dur = float(r.duration_secs or 0.0)
+        dist = float(r.total_distance or 0.0)
+        alt = r.max_altitude
+        source = r.source
+        notes = r.notes
+    else:
+        cache = mf.flight_data_cache or {}
+        dur = _cache_duration_secs(cache)
+        dist = _cache_distance_m(cache)
+        alt = _cache_max_altitude_m(cache)
+        source = cache.get("source") or "opendronelog_import"
+        notes = cache.get("notes")
+    is_ghost = dur < GHOST_MAX_DURATION_S and dist < GHOST_MAX_DISTANCE_M
+    over_400 = alt is not None and alt > PART_107_CEILING_M
+    ceiling_limited = (
+        source == "opendronelog_import"
+        and alt is not None
+        and _ODL_CEILING_LOW_M <= alt <= _ODL_CEILING_HIGH_M
+    )
+    return {
+        "duration_secs": dur, "distance_m": dist, "max_altitude_m": alt,
+        "source": source, "notes": notes, "is_ghost": is_ghost,
+        "over_400ft": over_400, "ceiling_limited": ceiling_limited,
+    }
+
+
+def _build_flight_summaries(mission: Mission, live: dict) -> list[dict]:
+    """Per-flight summaries for the LLM — deduplicated, live-scalar metrics
+    (H2), unit-correct altitude, aborted launches flagged so they don't pollute
+    altitude ranges (ADR-0026), and Part-107 / ceiling-limited altitude flags
+    stated factually (ADR-0028 H1)."""
     summaries = []
     for f in _dedup_flights(mission.flights):
-        cache = f.flight_data_cache or {}
+        m = _resolve_flight_metrics(f, live)
         aircraft = f.aircraft.model_name if f.aircraft else "Unknown"
-        if _is_ghost(cache):
+        if m["is_ghost"]:
             summaries.append({
                 "aircraft": aircraft,
                 "max_altitude": "N/A — aborted launch",
                 "aborted": True,
                 "notes": (
-                    f"Aborted launch ({_cache_duration_secs(cache):.0f}s, "
-                    f"{_cache_distance_m(cache):.1f} m travelled) — exclude from altitude ranges."
+                    f"Aborted launch ({m['duration_secs']:.0f}s, "
+                    f"{m['distance_m']:.1f} m travelled) — exclude from altitude ranges."
                 ),
             })
             continue
+        alt_str = _format_altitude(m["max_altitude_m"])
+        if m["ceiling_limited"]:
+            alt_str += " — ceiling-limited (device ceiling artifact; peak unverified)"
+        elif m["over_400ft"]:
+            alt_str += " — exceeds the 400 ft AGL Part 107 limit"
         summary = {
             "aircraft": aircraft,
-            "max_altitude": _format_altitude(_cache_max_altitude_m(cache)),
+            "max_altitude": alt_str,
+            "over_400ft": m["over_400ft"] and not m["ceiling_limited"],
         }
-        if cache.get("notes"):
-            summary["notes"] = cache["notes"]
+        if m["notes"]:
+            summary["notes"] = m["notes"]
         summaries.append(summary)
     return summaries
 
@@ -199,7 +275,9 @@ async def generate_report(
     # 800×600 PNG). ADR-0025: never holds more than one raw track at a time.
     flights = await load_bounded_flight_tracks(db, mission)
 
-    flight_summaries = _build_flight_summaries(mission)
+    # H2: resolve live Flight scalars once; summaries + totals both use them.
+    live_metrics = await _load_live_flight_metrics(db, mission)
+    flight_summaries = _build_flight_summaries(mission, live_metrics)
 
     map_path = None
     if flights:
@@ -211,13 +289,28 @@ async def generate_report(
             logger.error("Mission %s map render failed: %s", mission_id, exc)
 
     # Duration/distance totals — summed over flights uniqued by identity key so
-    # a stray duplicate row can never re-inflate the totals (ADR-0026 RC-1).
+    # a stray duplicate row can never re-inflate the totals (ADR-0026 RC-1),
+    # from LIVE scalars (H2), with aborted launches EXCLUDED uniformly (ADR-0028
+    # M8) so a ghost's near-zero values never enter the totals or flight count.
     total_duration = 0
     total_distance = 0
+    real_flight_count = 0
+    aborted_count = 0
+    over_400ft_count = 0
     for f in _dedup_flights(mission.flights):
-        cache = f.flight_data_cache or {}
-        total_duration += _cache_duration_secs(cache)
-        total_distance += _cache_distance_m(cache)
+        m = _resolve_flight_metrics(f, live_metrics)
+        if m["is_ghost"]:
+            aborted_count += 1
+            continue
+        real_flight_count += 1
+        total_duration += m["duration_secs"]
+        total_distance += m["distance_m"]
+        if m["over_400ft"] and not m["ceiling_limited"]:
+            over_400ft_count += 1
+    logger.info(
+        "Mission %s report metrics: %d flights (%d aborted excluded), %d over 400ft AGL",
+        mission_id, real_flight_count, aborted_count, over_400ft_count,
+    )
 
     # Ensure a report record exists so the frontend can poll GET /report
     existing = await db.execute(select(Report).where(Report.mission_id == mission_id))
@@ -355,13 +448,20 @@ async def generate_report_pdf(
         "customer_company": mission.customer.company if mission.customer else "",
     }
 
+    # M8 (ADR-0028): the PDF flight count must match the report totals — count
+    # only real (non-aborted) flights, using live scalars (H2).
+    pdf_live = await _load_live_flight_metrics(db, mission)
+    real_flights = [
+        f for f in _dedup_flights(mission.flights)
+        if not _resolve_flight_metrics(f, pdf_live)["is_ghost"]
+    ]
     report_dict = {
         "final_content": report.final_content or "",
         "ground_covered_acres": report.ground_covered_acres,
         "flight_duration_total_seconds": report.flight_duration_total_seconds,
         "flight_distance_total_meters": report.flight_distance_total_meters,
         "map_image_path": report.map_image_path,
-        "flight_count": len(_dedup_flights(mission.flights)),
+        "flight_count": len(real_flights),
     }
 
     # Aircraft used

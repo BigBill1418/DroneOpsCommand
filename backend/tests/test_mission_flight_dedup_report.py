@@ -171,7 +171,7 @@ async def test_report_totals_dedup_over_duplicate_rows():
     assert total_duration == 600.0, "duration must not be tripled by duplicate rows"
 
     mission = SimpleNamespace(flights=dup_rows)
-    summaries = _build_flight_summaries(mission)
+    summaries = _build_flight_summaries(mission, {})
     assert len(summaries) == 1, "report shows one flight, not three"
 
 
@@ -249,7 +249,7 @@ async def test_ghost_flights_excluded_from_altitude_stats(db: AsyncSession):
         MissionFlight(id=uuid.uuid4(), mission_id=uuid.uuid4(), flight_id=uuid.uuid4(),
                       flight_data_cache=ghost_cache, aircraft=None),
     ])
-    summaries = _build_flight_summaries(mission)
+    summaries = _build_flight_summaries(mission, {})
     assert len(summaries) == 2, "both flights are listed (count is honest)"
     ghosts = [s for s in summaries if s.get("aborted")]
     reals = [s for s in summaries if not s.get("aborted")]

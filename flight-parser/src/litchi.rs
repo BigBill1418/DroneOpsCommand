@@ -43,6 +43,8 @@ pub fn parse_litchi_csv(
     let mut total_distance: f64 = 0.0;
     let mut prev_lat: Option<f64> = None;
     let mut prev_lon: Option<f64> = None;
+    let mut prev_ts: Option<chrono::NaiveDateTime> = None;
+    let mut dropped_segments: u64 = 0;
     let mut home_lat: Option<f64> = None;
     let mut home_lon: Option<f64> = None;
     let mut start_time: Option<String> = None;
@@ -76,11 +78,22 @@ pub fn parse_litchi_csv(
         }
         last_time = time.clone();
 
+        let cur_ts = time.as_deref().and_then(parse_ts);
         if let (Some(plat), Some(plon)) = (prev_lat, prev_lon) {
-            total_distance += haversine(plat, plon, lat, lon);
+            let d = haversine(plat, plon, lat, lon);
+            let dt = match (prev_ts, cur_ts) {
+                (Some(p), Some(c)) => Some(c.signed_duration_since(p).num_milliseconds() as f64 / 1000.0),
+                _ => None,
+            };
+            if crate::gate::segment_ok(d, dt) {
+                total_distance += d;
+            } else {
+                dropped_segments += 1;
+            }
         }
         prev_lat = Some(lat);
         prev_lon = Some(lon);
+        prev_ts = cur_ts;
 
         if alt > max_alt { max_alt = alt; }
         if speed > max_speed { max_speed = speed; }
@@ -102,6 +115,13 @@ pub fn parse_litchi_csv(
 
     if track.is_empty() {
         return Err(format!("{}: no valid GPS data found in Litchi CSV", filename));
+    }
+
+    if dropped_segments > 0 {
+        tracing::warn!(
+            "{}: C1 outlier gate dropped {} GPS segment(s) from Litchi distance sum",
+            filename, dropped_segments,
+        );
     }
 
     // Estimate duration from timestamps or point count
@@ -146,6 +166,14 @@ pub fn parse_litchi_csv(
     })
 }
 
+fn parse_ts(s: &str) -> Option<chrono::NaiveDateTime> {
+    let trimmed = s.trim();
+    chrono::NaiveDateTime::parse_from_str(trimmed, "%Y-%m-%d %H:%M:%S")
+        .or_else(|_| chrono::NaiveDateTime::parse_from_str(trimmed, "%Y-%m-%dT%H:%M:%S"))
+        .or_else(|_| chrono::NaiveDateTime::parse_from_str(trimmed, "%Y/%m/%d %H:%M:%S"))
+        .ok()
+}
+
 fn haversine(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
     let r = 6371000.0;
     let dlat = (lat2 - lat1).to_radians();
@@ -156,6 +184,11 @@ fn haversine(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
     r * c
 }
 
+/// Estimate flight duration from first/last timestamps, falling back to the
+/// point count. L2 (ADR-0028) caveat: the point-count fallback ASSUMES a ~1 Hz
+/// sample rate, which is the Litchi CSV default but not guaranteed — a
+/// higher-rate export with unparseable timestamps will under-report duration.
+/// Timestamps are therefore always preferred; the fallback is best-effort.
 fn estimate_duration(start: &Option<String>, end: &Option<String>, point_count: usize) -> f64 {
     // Try parsing timestamps to calculate duration
     if let (Some(s), Some(e)) = (start, end) {
@@ -169,6 +202,6 @@ fn estimate_duration(start: &Option<String>, end: &Option<String>, point_count: 
             }
         }
     }
-    // Fallback: assume ~1 second per data point
+    // Fallback: assume ~1 second per data point (see L2 caveat above).
     point_count as f64
 }

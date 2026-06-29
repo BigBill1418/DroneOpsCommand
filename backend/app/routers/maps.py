@@ -1,7 +1,6 @@
 import asyncio
 import logging
 import time
-from functools import partial
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -14,12 +13,14 @@ from app.database import get_db
 from app.models.mission import Mission, MissionFlight
 from app.models.user import User
 from app.services.map_renderer import (
-    calculate_area_acres,
     extract_gps_tracks,
     generate_map_geojson,
     render_static_map,
 )
-from app.services.mission_tracks import load_bounded_flight_tracks
+from app.services.mission_tracks import (
+    calculate_mission_area_acres,
+    load_bounded_flight_tracks,
+)
 
 logger = logging.getLogger("doc.maps")
 
@@ -77,20 +78,23 @@ async def get_map_data(
         logger.info("Map GeoJSON for mission %s: %.2fs", mission_id, time.perf_counter() - start)
         return geojson_result
 
-    # Coverage is best-effort — don't let it break the map
+    # Coverage is best-effort — don't let it break the map. ADR-0028 H5: acreage
+    # is a MEASUREMENT and must be computed on FULL-RESOLUTION geometry (the same
+    # full-res path the PDF report uses), NOT the decimated render tracks — a
+    # strided 2000-vertex decimation distorts the path shape and the buffer, so
+    # /map/coverage and the report would otherwise disagree. num_flights /
+    # total_points remain informational counts off the (cheap) render tracks.
     coverage = None
     try:
         tracks = await loop.run_in_executor(None, extract_gps_tracks, flights)
-        acres = await loop.run_in_executor(
-            None, partial(calculate_area_acres, tracks, buffer_meters=buffer_meters)
-        )
+        acres = await calculate_mission_area_acres(db, mission, buffer_meters=buffer_meters)
         coverage = {
             "acres": round(acres, 2),
             "square_yards": round(acres * 4840, 0) if acres < 1 else None,
             "num_flights": len(tracks),
             "total_points": sum(len(t) for t in tracks),
         }
-        logger.info("Map+coverage for mission %s: %.2f acres (%.2fs)",
+        logger.info("Map+coverage for mission %s: %.2f acres full-res (%.2fs)",
                     mission_id, acres, time.perf_counter() - start)
     except Exception as exc:
         logger.error("Coverage calculation failed for mission %s (map still returned): %s",
@@ -113,15 +117,16 @@ async def get_coverage(
 
     loop = asyncio.get_running_loop()
     try:
+        # ADR-0028 H5: measure acreage on FULL-RESOLUTION geometry (matches the
+        # PDF report), not the decimated render tracks. The render tracks are
+        # still used for the informational num_flights / total_points counts.
         tracks = await loop.run_in_executor(None, extract_gps_tracks, flights)
-        acres = await loop.run_in_executor(
-            None, partial(calculate_area_acres, tracks, buffer_meters=buffer_meters)
-        )
+        acres = await calculate_mission_area_acres(db, mission, buffer_meters=buffer_meters)
     except Exception as exc:
         logger.error("Coverage calculation failed for mission %s: %s", mission_id, exc, exc_info=True)
         raise HTTPException(status_code=500, detail="Coverage calculation failed")
 
-    logger.info("Coverage for mission %s: %.2f acres, %d tracks (%.2fs)",
+    logger.info("Coverage for mission %s: %.2f acres full-res, %d tracks (%.2fs)",
                 mission_id, acres, len(tracks), time.perf_counter() - start)
 
     return {

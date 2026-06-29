@@ -129,6 +129,12 @@ pub fn parse_dji_log(
     let mut total_distance: f64 = 0.0;
     let mut prev_lat: Option<f64> = None;
     let mut prev_lon: Option<f64> = None;
+    // Elapsed flight-time (seconds) of the previous accepted point, used to
+    // derive per-segment Δt for the C1 outlier gate (ADR-0028).
+    let mut prev_fly_time: Option<f64> = None;
+    // Count of haversine segments rejected by the outlier gate (a teleport
+    // would otherwise inflate total_distance by orders of magnitude).
+    let mut dropped_segments: u64 = 0;
     let mut home_lat: Option<f64> = None;
     let mut home_lon: Option<f64> = None;
     let mut start_voltage: Option<f64> = None;
@@ -158,11 +164,23 @@ pub fn parse_dji_log(
                 home_lon = Some(lon);
             }
 
+            let cur_fly_time = osd.fly_time as f64;
             if let (Some(plat), Some(plon)) = (prev_lat, prev_lon) {
-                total_distance += haversine(plat, plon, lat, lon);
+                let d = haversine(plat, plon, lat, lon);
+                // Δt from DJI's elapsed flight-time counter (seconds). It is
+                // coarse (often integer seconds), so when two consecutive
+                // frames share a second the gate falls back to a raw-distance
+                // bound — see crate::gate::segment_ok.
+                let dt = prev_fly_time.map(|pt| cur_fly_time - pt);
+                if crate::gate::segment_ok(d, dt) {
+                    total_distance += d;
+                } else {
+                    dropped_segments += 1;
+                }
             }
             prev_lat = Some(lat);
             prev_lon = Some(lon);
+            prev_fly_time = Some(cur_fly_time);
         }
 
         altitudes.push(alt);
@@ -210,7 +228,11 @@ pub fn parse_dji_log(
     } else {
         (None, None)
     };
-    let final_duration = choose_duration(header_duration, fly_time_span, datetime_span);
+    // M9 (ADR-0028): a corrupt header `total_time` far larger than the actual
+    // wall-clock flight span is rejected in favour of the datetime span before
+    // it is trusted. For sane logs this is a no-op (header within 1.5× span).
+    let bounded_header = crate::gate::sanity_bound_header(header_duration, datetime_span);
+    let final_duration = choose_duration(bounded_header, fly_time_span, datetime_span);
     let final_distance = if has_frames && total_distance > 0.0 {
         total_distance
     } else {
@@ -260,10 +282,18 @@ pub fn parse_dji_log(
         None
     };
 
+    if dropped_segments > 0 {
+        tracing::warn!(
+            "{}: C1 outlier gate dropped {} GPS segment(s) from distance sum — \
+             a teleport/bad-fix would otherwise have inflated total_distance",
+            filename, dropped_segments,
+        );
+    }
+
     tracing::info!(
-        "{}: final → duration={:.0}s distance={:.0}m maxAlt={:.0}m maxSpd={:.1}m/s points={} frames={} (from_frames={})",
+        "{}: final → duration={:.0}s distance={:.0}m maxAlt={:.0}m maxSpd={:.1}m/s points={} frames={} dropped_segs={} (from_frames={})",
         filename, final_duration, final_distance, final_max_alt, final_max_speed,
-        point_count, frames.len(), has_frames,
+        point_count, frames.len(), dropped_segments, has_frames,
     );
 
     Ok(ParsedFlight {
@@ -294,12 +324,14 @@ pub fn parse_dji_log(
             "camera_sn": &details.camera_sn,
             "app_version": &details.app_version,
             "log_version": log.version,
-            "header_duration": header_duration,
+            "header_duration": bounded_header,
+            "header_duration_raw": header_duration,
             "header_distance": header_distance,
             "header_max_height": header_max_height,
             "header_max_hspeed": header_max_hspeed,
             "frames_decoded": has_frames,
             "frame_count": frames.len(),
+            "dropped_segments": dropped_segments,
         })),
     })
 }

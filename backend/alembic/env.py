@@ -68,6 +68,7 @@ _MIGRATION_MANAGED_INDEXES = frozenset({
     "ix_maintenance_records_aircraft_id",    # ADR-0022 (FU-8 #6)
     "ix_maintenance_schedules_aircraft_id",  # ADR-0022 (FU-8 #6)
     "uq_flights_autoname",            # ADR-0027 partial unique on auto names
+    "uq_flights_source_file_hash",    # ADR-0028 H4 partial unique on dedup hash
 })
 
 

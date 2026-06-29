@@ -48,6 +48,16 @@ any reported range or statistic.
 authoritative — restate them as given. Do NOT re-derive, sum, or average flight \
 figures yourself, and do NOT invent or extrapolate any figure not present in the data.
 
+ALTITUDE & PART 107 — STRICT REQUIREMENTS:
+- Some flights' max altitude is annotated "exceeds the 400 ft AGL Part 107 limit". \
+State that altitude truthfully and note factually that it exceeds 400 ft AGL. Do \
+NOT assert that a waiver, LAANC authorization, or exemption was (or was not) held — \
+that context is supplied separately by the operator. Simply report the altitude and \
+the fact of exceedance; never fabricate a compliance claim either way.
+- Some flights' altitude is annotated "ceiling-limited (device ceiling artifact; \
+peak unverified)". Treat that value as a configured device ceiling, NOT a measured \
+peak — do not present it as the altitude actually achieved.
+
 Be professional, concise, and factual. Use specific numbers from the flight data provided. \
 Do not fabricate data — only reference information provided."""
 

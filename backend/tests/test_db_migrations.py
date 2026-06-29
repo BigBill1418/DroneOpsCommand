@@ -43,7 +43,7 @@ def _script_dir():
 def test_migration_tree_has_single_linear_head():
     script = _script_dir()
     heads = script.get_heads()
-    assert heads == ["0004_dji_duration_name_restamp"], heads
+    assert heads == ["0007_strip_legacy_cache_track"], heads
 
 
 def test_baseline_is_the_root_revision():
@@ -57,6 +57,9 @@ def test_revision_chain_is_baseline_then_indexes():
     # Walk from head back to base; expect exactly the revisions, in order.
     revs = [r.revision for r in script.walk_revisions()]
     assert revs == [
+        "0007_strip_legacy_cache_track",
+        "0006_repair_odl_distance",
+        "0005_flight_hash_unique_index",
         "0004_dji_duration_name_restamp",
         "0003_mission_flight_dedup_unique",
         "0002_p2_p3_indexes",
@@ -266,6 +269,10 @@ def _autogenerate_diffs(sync_url: str):
         # ADR-0026 partial unique guards (migration 0003) — created by the
         # migration, not declared in Base.metadata, so excluded from the diff.
         "uq_mission_flights_mission_flight", "uq_mission_flights_mission_odl",
+        # ADR-0027 partial unique on auto-generated flight names (migration 0004).
+        "uq_flights_autoname",
+        # ADR-0028 H4 partial unique on the dedup hash (migration 0005).
+        "uq_flights_source_file_hash",
     }
 
     def _inc(obj, name, type_, reflected, compare_to):
@@ -337,7 +344,7 @@ def test_brownfield_stamp_and_upgrade_matches_base_metadata():
     with eng.connect() as c:
         head = c.execute(text("SELECT version_num FROM alembic_version")).scalar()
     eng.dispose()
-    assert head == "0004_dji_duration_name_restamp", head
+    assert head == "0007_strip_legacy_cache_track", head
 
     # Idempotent: a second run is a no-op.
     assert run_migrations_sync() == "noop"

@@ -58,7 +58,9 @@ class _FlightStub:
         self.aircraft_id = aircraft_id
         self.name = "Test Flight"
         self.drone_model = "Mavic 3 Pro"
+        self.drone_name = "Bird One"          # ADR-0028 L6
         self.drone_serial = "SN-TEST-1"
+        self.battery_serial = "BAT-TEST-1"    # ADR-0028 L6
         self.start_time = datetime.utcnow()
         self.duration_secs = 600.0
         self.total_distance = 1200.0

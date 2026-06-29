@@ -19,6 +19,7 @@ import httpx
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select, func, desc
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import defer
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -35,6 +36,7 @@ from app.models.user import User
 from app.schemas.flight import (
     FlightCreate, FlightDetailResponse, FlightResponse, FlightUpdate, FlightUploadResponse,
 )
+from app.services.flight_metrics import sanitize_odl_distance
 from app.services.ntfy import send_alert
 from app.utils.timezone import iso_utc, local_date_compact
 
@@ -75,6 +77,12 @@ def _parse_datetime(value: object) -> _dt | None:
     if value is None or value == "":
         return None
     if isinstance(value, _dt):
+        # L5 (ADR-0028): the flights.start_time column is naive (UTC). A
+        # tz-aware datetime (e.g. a manual entry parsed from ISO-with-offset)
+        # must be converted to naive UTC, not stored verbatim with its offset.
+        if value.tzinfo is not None:
+            from datetime import timezone
+            return value.astimezone(timezone.utc).replace(tzinfo=None)
         return value
     # Numeric epoch (seconds since 1970)
     if isinstance(value, (int, float)):
@@ -88,16 +96,11 @@ def _parse_datetime(value: object) -> _dt | None:
         cleaned = value.strip()
         if not cleaned:
             return None
-        # Try numeric string
-        try:
-            num = float(cleaned)
-            if num > 1e12:
-                return _dt.utcfromtimestamp(num / 1000)
-            return _dt.utcfromtimestamp(num)
-        except (ValueError, OSError, OverflowError):
-            pass
         # Primary: use fromisoformat — handles all ISO 8601 variants that ODL produces
         # e.g. "2024-01-15T14:30:00", "2024-01-15T14:30:00Z", "2024-01-15T14:30:00+00:00"
+        # L4 (ADR-0028): ISO/date parsing runs BEFORE the numeric-epoch branch.
+        # The old order ran float() first, so a bare year like "2024" parsed as
+        # epoch 2024 → 1970-01-01T00:33:44 instead of failing cleanly.
         try:
             # Python 3.11+ fromisoformat handles trailing Z natively; for 3.10 compat
             # we also replace trailing Z with +00:00
@@ -112,12 +115,23 @@ def _parse_datetime(value: object) -> _dt | None:
             return dt
         except (ValueError, TypeError):
             pass
-        # Fallback: try explicit format strings for non-ISO date formats
+        # Explicit format strings for non-ISO date formats.
         for fmt in _DATE_FORMATS:
             try:
                 return _dt.strptime(cleaned, fmt)
             except ValueError:
                 continue
+        # Last resort: a *pure* numeric string that looks like a real epoch.
+        # Guarded by magnitude so calendar-ish tokens ("2024") are NOT coerced
+        # into a 1970 timestamp — seconds must be ≥ 1e8 (≈ 1973), millis > 1e12.
+        try:
+            num = float(cleaned)
+            if num > 1e12:
+                return _dt.utcfromtimestamp(num / 1000)
+            if num >= 1e8:
+                return _dt.utcfromtimestamp(num)
+        except (ValueError, OSError, OverflowError):
+            pass
         logger.warning("Could not parse date: %r", value)
     return None
 
@@ -276,7 +290,11 @@ async def _spool_upload(upload: UploadFile) -> _SpooledUpload:
 # /10 divisor that this release removes). Generous bounds → flag only the clearly
 # wrong, never a legitimate edge case.
 _INGEST_HZ_MIN = 0.2
-_INGEST_HZ_MAX = 60.0
+# M2 (ADR-0028): DJI airframes log telemetry at ~5–15 Hz. The old 60 Hz ceiling
+# never tripped on the real failure modes (a 15→30 Hz doubling, or a frames/10
+# inflation). 25 Hz keeps generous margin above the fastest real cadence while
+# actually catching a doubled/garbled rate.
+_INGEST_HZ_MAX = 25.0
 
 
 async def _check_ingest_anomalies(db: AsyncSession, flight: Flight) -> None:
@@ -301,13 +319,25 @@ async def _check_ingest_anomalies(db: AsyncSession, flight: Flight) -> None:
     try:
         dur = float(flight.duration_secs or 0.0)
         pts = int(flight.point_count or 0)
-        if dur > 1.0 and pts > 0:
-            hz = pts / dur
+        # M2 (ADR-0028): prefer the parser's true frame_count over point_count
+        # for the cadence sanity check — point_count excludes GPS-filtered
+        # points, so a GPS-denied flight reads as falsely low Hz. frame_count is
+        # the raw sample count and is the honest cadence numerator.
+        raw_meta = getattr(flight, "raw_metadata", None)
+        meta = raw_meta if isinstance(raw_meta, dict) else {}
+        try:
+            frame_count = int(meta.get("frame_count") or 0)
+        except (TypeError, ValueError):
+            frame_count = 0
+        cadence_n = frame_count if frame_count > 0 else pts
+        cadence_src = "frame_count" if frame_count > 0 else "point_count"
+        if dur > 1.0 and cadence_n > 0:
+            hz = cadence_n / dur
             if hz < _INGEST_HZ_MIN or hz > _INGEST_HZ_MAX:
                 logger.warning(
                     "ingest-guard: flight %s (%s) implausible cadence %.2f Hz "
-                    "(point_count=%d / duration=%.1fs) — possible duration mis-parse",
-                    flight.id, flight.name, hz, pts, dur,
+                    "(%s=%d / duration=%.1fs) — possible duration mis-parse",
+                    flight.id, flight.name, hz, cadence_src, cadence_n, dur,
                 )
 
         if not flight.drone_serial or not flight.start_time or dur <= 0:
@@ -365,68 +395,131 @@ async def _check_ingest_anomalies(db: AsyncSession, flight: Flight) -> None:
                        getattr(flight, "id", "?"), exc)
 
 
+def _parsed_is_viable(parsed: dict, parsed_start) -> bool:
+    """Minimal-viability gate (ADR-0028 M6).
+
+    A parse that yields no start_time, no points and no duration is junk —
+    persisting it creates a ``start_time=NULL`` ghost row that pollutes the
+    library and report aggregates. Require at least ONE real signal.
+    """
+    try:
+        pts = int(parsed.get("point_count", 0) or 0)
+    except (TypeError, ValueError):
+        pts = 0
+    try:
+        dur = float(parsed.get("duration_secs", 0) or 0)
+    except (TypeError, ValueError):
+        dur = 0.0
+    return parsed_start is not None or pts > 0 or dur > 0.0
+
+
+# Bounded retries when a concurrent import grabs the same auto-generated name
+# before our flush (ADR-0028 H3). Each retry regenerates the name (the rank +
+# conflict-bump now sees the just-committed sibling) inside a fresh savepoint.
+_AUTONAME_MAX_RETRIES = 5
+
+
 async def _build_flight_from_parsed(
     db: AsyncSession, parsed: dict, file_hash: str, upload_filename: str | None,
     *, log_prefix: str = "Imported",
-) -> Flight:
+) -> Flight | None:
     """Construct, persist, and battery-track a new :class:`Flight` from a
-    parser-emitted dict.
+    parser-emitted dict. Returns the persisted ``Flight``, or ``None`` when the
+    flight was skipped (non-viable parse, or a duplicate ``source_file_hash``).
 
-    The single ~25-line builder used by ``/upload``, ``/device-upload`` and
-    ``/reprocess`` for newly-imported flights. Resolves fleet attribution,
-    generates the display name, persists the row (flush + refresh), logs a
-    per-flight import line (``log_prefix`` distinguishes the caller — e.g.
-    "Imported" vs "Reprocess: imported"), and best-effort tracks the battery
-    via a savepoint so battery failures never roll back the flight import.
+    The single builder used by ``/upload``, ``/device-upload`` and
+    ``/reprocess``. It is now fully self-contained and NEVER leaves the session
+    in a failed state nor propagates ``IntegrityError`` (ADR-0028 C2/H3/H4):
 
-    Log-line normalization (FU-8 #5a): all three callers now emit one
-    structured per-flight import line through this builder —
-    ``"<prefix> new flight <id> (<name>) aircraft=<model|unmatched>"`` — plus
-    the existing fleet auto-match line when a fleet aircraft is matched. This
-    replaces the ``/reprocess`` branch's hand-rolled, verbatim-duplicated
-    builder.
+    * **M6 viability gate** — a parse with no start_time, points or duration is
+      rejected (returns ``None``) instead of creating a junk row.
+    * **H4 dedup** — a pre-check on ``source_file_hash`` plus the partial unique
+      index (migration 0006) makes the dedup race-safe; a losing racer's
+      ``IntegrityError`` is caught and reported as a skip (``None``).
+    * **H3 autoname race** — the flush runs inside a SAVEPOINT; an autoname
+      unique violation rolls back the savepoint, regenerates the name and
+      retries (bounded), so two concurrent imports never wedge the batch.
     """
     ph = parsed.get("file_hash", file_hash)
     parsed_start = _parse_datetime(parsed.get("start_time"))
+
+    # M6 — reject non-viable parses before doing any work.
+    if not _parsed_is_viable(parsed, parsed_start):
+        logger.warning(
+            "%s: skipping non-viable parse (no start_time/points/duration) hash=%s file=%s",
+            log_prefix, ph, parsed.get("original_filename", upload_filename),
+        )
+        return None
+
+    # H4 — fast-path dedup; the unique index is the actual guarantee.
+    dup = await db.execute(select(Flight.id).where(Flight.source_file_hash == ph))
+    if dup.scalar_one_or_none() is not None:
+        logger.info("%s: duplicate source_file_hash %s — skipped", log_prefix, ph)
+        return None
+
     fleet_match = await _match_fleet_aircraft(
         db, parsed.get("drone_serial"), parsed.get("drone_model")
-    )
-    flight_name = await _generate_flight_name(
-        db, parsed.get("drone_model"), fleet_match, parsed_start
-    )
-
-    flight = Flight(
-        name=flight_name,
-        drone_model=fleet_match.model_name if fleet_match else parsed.get("drone_model"),
-        drone_serial=parsed.get("drone_serial"),
-        battery_serial=parsed.get("battery_serial"),
-        start_time=parsed_start,
-        duration_secs=parsed.get("duration_secs", 0),
-        total_distance=parsed.get("total_distance", 0),
-        max_altitude=parsed.get("max_altitude", 0),
-        max_speed=parsed.get("max_speed", 0),
-        home_lat=parsed.get("home_lat"),
-        home_lon=parsed.get("home_lon"),
-        point_count=parsed.get("point_count", 0),
-        gps_track=parsed.get("gps_track"),
-        telemetry=parsed.get("telemetry"),
-        raw_metadata=parsed.get("raw_metadata"),
-        source=parsed.get("source", "dji_txt"),
-        source_file_hash=ph,
-        original_filename=parsed.get("original_filename", upload_filename),
-        aircraft_id=fleet_match.id if fleet_match else None,
     )
     if fleet_match:
         logger.info("Auto-matched flight to fleet aircraft: %s (serial=%s)",
                     fleet_match.model_name, fleet_match.serial_number)
-    db.add(flight)
-    await db.flush()
+
+    flight: Flight | None = None
+    for attempt in range(_AUTONAME_MAX_RETRIES):
+        flight_name = await _generate_flight_name(
+            db, parsed.get("drone_model"), fleet_match, parsed_start
+        )
+        candidate = Flight(
+            name=flight_name,
+            drone_model=fleet_match.model_name if fleet_match else parsed.get("drone_model"),
+            drone_serial=parsed.get("drone_serial"),
+            battery_serial=parsed.get("battery_serial"),
+            start_time=parsed_start,
+            duration_secs=parsed.get("duration_secs", 0),
+            total_distance=parsed.get("total_distance", 0),
+            max_altitude=parsed.get("max_altitude", 0),
+            max_speed=parsed.get("max_speed", 0),
+            home_lat=parsed.get("home_lat"),
+            home_lon=parsed.get("home_lon"),
+            point_count=parsed.get("point_count", 0),
+            gps_track=parsed.get("gps_track"),
+            telemetry=parsed.get("telemetry"),
+            raw_metadata=parsed.get("raw_metadata"),
+            source=parsed.get("source", "dji_txt"),
+            source_file_hash=ph,
+            original_filename=parsed.get("original_filename", upload_filename),
+            aircraft_id=fleet_match.id if fleet_match else None,
+        )
+        try:
+            async with db.begin_nested():
+                db.add(candidate)
+                await db.flush()
+            flight = candidate
+            break
+        except IntegrityError as exc:
+            msg = str(getattr(exc, "orig", exc))
+            if "uq_flights_source_file_hash" in msg or "source_file_hash" in msg:
+                # Lost a dedup race — another import committed this hash first.
+                logger.info("%s: duplicate source_file_hash %s (race) — skipped",
+                            log_prefix, ph)
+                return None
+            if "uq_flights_autoname" in msg and attempt < _AUTONAME_MAX_RETRIES - 1:
+                logger.info("%s: autoname collision on '%s' (attempt %d) — regenerating",
+                            log_prefix, flight_name, attempt + 1)
+                continue
+            # Unknown integrity error, or exhausted name retries — re-raise so the
+            # caller's per-file savepoint records it without poisoning the batch.
+            raise
+
+    if flight is None:
+        return None
+
     await db.refresh(flight)
     logger.info("%s new flight %s (%s) aircraft=%s", log_prefix, flight.id,
                 flight.name, fleet_match.model_name if fleet_match else "unmatched")
 
-    # Defense-in-depth ingest validation (ADR-0027) — flags implausible cadence
-    # and single-airframe time overlaps. Never rejects; never rolls back.
+    # Defense-in-depth ingest validation (ADR-0027/0028) — flags implausible
+    # cadence and single-airframe time overlaps. Never rejects; never rolls back.
     await _check_ingest_anomalies(db, flight)
 
     # Auto-track battery — best-effort via savepoint so failures
@@ -605,6 +698,13 @@ async def _generate_flight_name(db: AsyncSession, drone_model: str | None, fleet
     date_str = local_date_compact(flight_date)
     prefix = f"{aircraft_label}_{date_str}_"
 
+    # M7 (ADR-0028): the prefix contains literal underscores, which are
+    # single-char wildcards in SQL LIKE. Unescaped, ``Mavic-3_20240115_%`` also
+    # matches ``Mavic-3X20240115X0001`` → wrong rank counts and sequence gaps.
+    # Escape the LIKE metacharacters and declare the escape char explicitly.
+    esc_prefix = prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    like_pat = f"{esc_prefix}%"
+
     # Start-time rank within the (label, operator-local day) group. The group is
     # every existing flight whose generated name shares this prefix; the rank is
     # how many of them started strictly before this flight. Flights with no
@@ -612,14 +712,14 @@ async def _generate_flight_name(db: AsyncSession, drone_model: str | None, fleet
     if start_time is not None:
         rank_result = await db.execute(
             select(func.count(Flight.id)).where(
-                Flight.name.like(f"{prefix}%"),
+                Flight.name.like(like_pat, escape="\\"),
                 Flight.start_time.isnot(None),
                 Flight.start_time < start_time,
             )
         )
     else:
         rank_result = await db.execute(
-            select(func.count(Flight.id)).where(Flight.name.like(f"{prefix}%"))
+            select(func.count(Flight.id)).where(Flight.name.like(like_pat, escape="\\"))
         )
     seq_num = (rank_result.scalar() or 0) + 1
 
@@ -627,7 +727,7 @@ async def _generate_flight_name(db: AsyncSession, drone_model: str | None, fleet
     # group so a collision can never persist (defence-in-depth alongside the DB
     # unique index). Bounded by the group size + 1 to avoid an unbounded loop.
     taken_result = await db.execute(
-        select(Flight.name).where(Flight.name.like(f"{prefix}%"))
+        select(Flight.name).where(Flight.name.like(like_pat, escape="\\"))
     )
     taken = {row[0] for row in taken_result.all()}
     candidate = f"{prefix}{seq_num:04d}"
@@ -1193,16 +1293,21 @@ async def device_upload_flights(
                     errors.extend(data["errors"])
 
                 for parsed in data.get("flights", []):
-                    ph = parsed.get("file_hash", file_hash)
-                    dup = await db.execute(select(Flight).where(Flight.source_file_hash == ph))
-                    if dup.scalar_one_or_none():
-                        skipped += 1
+                    # ADR-0028 C2: per-flight SAVEPOINT (see /upload). The
+                    # builder dedups + handles autoname races and returns None
+                    # on skip; a failure here rolls back only this flight.
+                    try:
+                        async with db.begin_nested():
+                            flight = await _build_flight_from_parsed(
+                                db, parsed, file_hash, upload.filename
+                            )
+                    except Exception as fe:
+                        errors.append(f"{upload.filename}: {fe}")
                         continue
-
-                    flight = await _build_flight_from_parsed(
-                        db, parsed, file_hash, upload.filename
-                    )
-                    imported.append(flight)
+                    if flight is not None:
+                        imported.append(flight)
+                    else:
+                        skipped += 1
 
         except httpx.ConnectError:
             errors.append(f"{upload.filename}: flight-parser service unavailable")
@@ -1568,13 +1673,16 @@ async def reprocess_all_from_stored(
             continue
 
         try:
-            content = file_path.read_bytes()
             async with httpx.AsyncClient(timeout=120) as client:
-                resp = await client.post(
-                    f"{PARSER_URL}/parse",
-                    files={"file": (file_path.name, content)},
-                    headers=parser_headers,
-                )
+                # M5 (ADR-0028): stream the stored original from its file handle
+                # instead of read_bytes() — a 20 MB DJI log per iteration across
+                # hundreds of flights was an O(file) RAM spike (OOM regression).
+                with file_path.open("rb") as fh:
+                    resp = await client.post(
+                        f"{PARSER_URL}/parse",
+                        files={"file": (file_path.name, fh)},
+                        headers=parser_headers,
+                    )
                 if resp.status_code != 200:
                     errors.append(f"{flight.name}: parser returned {resp.status_code}")
                     continue
@@ -1589,17 +1697,22 @@ async def reprocess_all_from_stored(
                     continue
 
                 parsed = parsed_flights[0]
-                flight.duration_secs = parsed.get("duration_secs", 0)
-                flight.total_distance = parsed.get("total_distance", 0)
-                flight.max_altitude = parsed.get("max_altitude", 0)
-                flight.max_speed = parsed.get("max_speed", 0)
-                flight.home_lat = parsed.get("home_lat")
-                flight.home_lon = parsed.get("home_lon")
-                flight.point_count = parsed.get("point_count", 0)
-                flight.gps_track = parsed.get("gps_track")
-                flight.telemetry = parsed.get("telemetry")
-                flight.raw_metadata = parsed.get("raw_metadata")
-                await db.flush()
+                # Per-flight SAVEPOINT (ADR-0028 C2) so one bad row can't poison
+                # the rest of a large reprocess sweep.
+                async with db.begin_nested():
+                    flight.duration_secs = parsed.get("duration_secs", 0)
+                    flight.total_distance = parsed.get("total_distance", 0)
+                    flight.max_altitude = parsed.get("max_altitude", 0)
+                    flight.max_speed = parsed.get("max_speed", 0)
+                    flight.home_lat = parsed.get("home_lat")
+                    flight.home_lon = parsed.get("home_lon")
+                    flight.point_count = parsed.get("point_count", 0)
+                    flight.gps_track = parsed.get("gps_track")
+                    flight.telemetry = parsed.get("telemetry")
+                    flight.raw_metadata = parsed.get("raw_metadata")
+                    await db.flush()
+                # Re-run the ingest anomaly guard on the freshly-stamped metrics.
+                await _check_ingest_anomalies(db, flight)
                 updated += 1
                 logger.info("Reprocess all: updated flight %s (%s) — %d points",
                             flight.id, flight.name, parsed.get("point_count", 0))
@@ -1659,37 +1772,49 @@ async def reprocess_flights(
 
                 for parsed in data.get("flights", []):
                     ph = parsed.get("file_hash", file_hash)
-                    existing_result = await db.execute(
-                        select(Flight).where(Flight.source_file_hash == ph)
-                    )
-                    existing_flight = existing_result.scalar_one_or_none()
+                    # ADR-0028 C2: per-flight SAVEPOINT so one failure can't
+                    # poison the batch.
+                    existing_flight = None
+                    new_flight = None
+                    try:
+                        async with db.begin_nested():
+                            existing_result = await db.execute(
+                                select(Flight).where(Flight.source_file_hash == ph)
+                            )
+                            existing_flight = existing_result.scalar_one_or_none()
 
-                    if existing_flight:
-                        existing_flight.duration_secs = parsed.get("duration_secs", 0)
-                        existing_flight.total_distance = parsed.get("total_distance", 0)
-                        existing_flight.max_altitude = parsed.get("max_altitude", 0)
-                        existing_flight.max_speed = parsed.get("max_speed", 0)
-                        existing_flight.home_lat = parsed.get("home_lat")
-                        existing_flight.home_lon = parsed.get("home_lon")
-                        existing_flight.point_count = parsed.get("point_count", 0)
-                        existing_flight.gps_track = parsed.get("gps_track")
-                        existing_flight.telemetry = parsed.get("telemetry")
-                        existing_flight.raw_metadata = parsed.get("raw_metadata")
-                        await db.flush()
+                            if existing_flight:
+                                existing_flight.duration_secs = parsed.get("duration_secs", 0)
+                                existing_flight.total_distance = parsed.get("total_distance", 0)
+                                existing_flight.max_altitude = parsed.get("max_altitude", 0)
+                                existing_flight.max_speed = parsed.get("max_speed", 0)
+                                existing_flight.home_lat = parsed.get("home_lat")
+                                existing_flight.home_lon = parsed.get("home_lon")
+                                existing_flight.point_count = parsed.get("point_count", 0)
+                                existing_flight.gps_track = parsed.get("gps_track")
+                                existing_flight.telemetry = parsed.get("telemetry")
+                                existing_flight.raw_metadata = parsed.get("raw_metadata")
+                                await db.flush()
+                            else:
+                                # Same builder /upload and /device-upload use —
+                                # fleet attribution, name, persist, battery-track.
+                                new_flight = await _build_flight_from_parsed(
+                                    db, parsed, file_hash, upload.filename,
+                                    log_prefix="Reprocess: imported",
+                                )
+                    except Exception as fe:
+                        errors.append(f"{upload.filename}: {fe}")
+                        continue
+
+                    if existing_flight is not None:
                         updated_count += 1
                         logger.info("Reprocess: updated flight %s (%s) — %d points",
                                     existing_flight.id, existing_flight.name,
                                     parsed.get("point_count", 0))
-                    else:
-                        # Same builder /upload and /device-upload use — fleet
-                        # attribution, name, persist, battery-track. The
-                        # "Reprocess: imported" prefix keeps the per-flight log
-                        # line caller-distinguishable (FU-8 #5a consolidation).
-                        await _build_flight_from_parsed(
-                            db, parsed, file_hash, upload.filename,
-                            log_prefix="Reprocess: imported",
-                        )
+                    elif new_flight is not None:
                         imported_count += 1
+                    else:
+                        skipped += 1
 
         except httpx.ConnectError:
             errors.append(f"{upload.filename}: flight-parser service unavailable")
@@ -1946,17 +2071,25 @@ async def upload_flights(
                     errors.extend(data["errors"])
 
                 for parsed in data.get("flights", []):
-                    # Check hash dedup again (parser may return multiple flights)
-                    ph = parsed.get("file_hash", file_hash)
-                    dup = await db.execute(select(Flight).where(Flight.source_file_hash == ph))
-                    if dup.scalar_one_or_none():
-                        skipped += 1
+                    # ADR-0028 C2: each flight is its own SAVEPOINT, so a single
+                    # IntegrityError rolls back ONLY that flight — never the
+                    # already-imported siblings in this batch (the old code let
+                    # one failure poison the whole transaction, and get_db then
+                    # skipped the end-commit, silently discarding the batch while
+                    # returning 200 "imported"). The builder handles dedup +
+                    # autoname races and returns None on a clean skip.
+                    try:
+                        async with db.begin_nested():
+                            flight = await _build_flight_from_parsed(
+                                db, parsed, file_hash, upload.filename
+                            )
+                    except Exception as fe:
+                        errors.append(f"{upload.filename}: {fe}")
                         continue
-
-                    flight = await _build_flight_from_parsed(
-                        db, parsed, file_hash, upload.filename
-                    )
-                    imported.append(flight)
+                    if flight is not None:
+                        imported.append(flight)
+                    else:
+                        skipped += 1
 
         except httpx.ConnectError:
             errors.append(f"{upload.filename}: flight-parser service unavailable")
@@ -1983,7 +2116,7 @@ async def create_manual_flight(
         drone_model=data.drone_model,
         drone_serial=data.drone_serial,
         battery_serial=data.battery_serial,
-        start_time=data.start_time,
+        start_time=_parse_datetime(data.start_time),  # L5: normalize tz-aware → naive UTC
         duration_secs=data.duration_secs,
         total_distance=data.total_distance,
         max_altitude=data.max_altitude,
@@ -2175,6 +2308,20 @@ async def import_from_opendronelog(
                 except (ValueError, TypeError):
                     return default
 
+            # C1 (ADR-0028): ODL passes total_distance through verbatim, so a
+            # corrupt/teleported value (e.g. 12,583,855 m in 554 s) lands in the
+            # DB and poisons every mission report that sums it. Clamp/recompute
+            # any physically-impossible distance and stash an audit note.
+            _odl_dur = _float(odl.get("duration_secs"))
+            _odl_spd = _float(odl.get("max_speed"))
+            _odl_dist_raw = _float(odl.get("total_distance"))
+            _odl_dist, _dist_note = sanitize_odl_distance(_odl_dist_raw, _odl_dur, _odl_spd, track)
+            if _dist_note:
+                logger.warning(
+                    "ODL import: sanitized implausible distance for %s (%s): %.0f→%.1f m via %s",
+                    odl_id, name, _odl_dist_raw, _odl_dist, _dist_note["method"],
+                )
+
             flight = Flight(
                 name=name,
                 drone_model=drone_model,
@@ -2182,14 +2329,15 @@ async def import_from_opendronelog(
                 drone_serial=drone_serial,
                 battery_serial=bat_serial,
                 start_time=start_dt,
-                duration_secs=_float(odl.get("duration_secs")),
-                total_distance=_float(odl.get("total_distance")),
+                duration_secs=_odl_dur,
+                total_distance=_odl_dist,
                 max_altitude=_float(odl.get("max_altitude")),
-                max_speed=_float(odl.get("max_speed")),
+                max_speed=_odl_spd,
                 home_lat=_float(odl.get("home_lat"), None) if odl.get("home_lat") else None,
                 home_lon=_float(odl.get("home_lon"), None) if odl.get("home_lon") else None,
                 point_count=_int(odl.get("point_count")) or len(track),
                 gps_track=track if track else None,
+                raw_metadata={"distance_sanitized": _dist_note} if _dist_note else None,
                 notes=odl.get("notes") or None,
                 tags=odl.get("tags") if odl.get("tags") else None,
                 source="opendronelog_import",
@@ -2322,6 +2470,20 @@ async def import_from_opendronelog_stream(
                             except (ValueError, TypeError):
                                 return default
 
+                        # C1 (ADR-0028): clamp/recompute physically-impossible
+                        # ODL distances (see import_from_opendronelog).
+                        _odl_dur = _float(odl.get("duration_secs"))
+                        _odl_spd = _float(odl.get("max_speed"))
+                        _odl_dist_raw = _float(odl.get("total_distance"))
+                        _odl_dist, _dist_note = sanitize_odl_distance(
+                            _odl_dist_raw, _odl_dur, _odl_spd, track
+                        )
+                        if _dist_note:
+                            logger.warning(
+                                "ODL import: sanitized implausible distance for %s (%s): %.0f→%.1f m via %s",
+                                odl_id, name, _odl_dist_raw, _odl_dist, _dist_note["method"],
+                            )
+
                         flight = Flight(
                             name=name,
                             drone_model=drone_model,
@@ -2329,14 +2491,15 @@ async def import_from_opendronelog_stream(
                             drone_serial=drone_serial,
                             battery_serial=bat_serial,
                             start_time=start_dt,
-                            duration_secs=_float(odl.get("duration_secs")),
-                            total_distance=_float(odl.get("total_distance")),
+                            duration_secs=_odl_dur,
+                            total_distance=_odl_dist,
                             max_altitude=_float(odl.get("max_altitude")),
-                            max_speed=_float(odl.get("max_speed")),
+                            max_speed=_odl_spd,
                             home_lat=_float(odl.get("home_lat"), None) if odl.get("home_lat") else None,
                             home_lon=_float(odl.get("home_lon"), None) if odl.get("home_lon") else None,
                             point_count=_int(odl.get("point_count")) or len(track),
                             gps_track=track if track else None,
+                            raw_metadata={"distance_sanitized": _dist_note} if _dist_note else None,
                             notes=odl.get("notes") or None,
                             tags=odl.get("tags") if odl.get("tags") else None,
                             source="opendronelog_import",

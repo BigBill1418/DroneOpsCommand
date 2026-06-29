@@ -4,6 +4,44 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-06-29 — fix(flight-data): GPS outlier gate, batch-import transaction safety, race-safe dedup, live-scalar reporting, Part-107 altitude truthfulness — v2.76.0
+
+A full flight-data/parser/touchpoint integrity pass. See **ADR-0028**. Flight
+parser bumped to **v1.1.0** (separate image). Three idempotent migrations
+(0005–0007) sequence cleanly after 0004; all proven end-to-end against a real
+Postgres (fresh + brownfield empty-diff, head `0007_strip_legacy_cache_track`,
+idempotent re-run).
+
+* **C1 — GPS teleport gate.** All three Rust parsers (`dji.rs`/`airdata.rs`/
+  `litchi.rs`) now drop a haversine segment whose implied speed > 60 m/s (or, with
+  no Δt, whose length > 500 m) via the shared `gate::segment_ok`, mirrored in
+  `app/services/flight_metrics.py`. ODL ingest clamps physically-impossible
+  passthrough distances. **Data repair:** the one catastrophic ODL row
+  (`f57c9373`: 12,583,855 m → recomputed **3,604 m** from its own track, 1
+  teleport dropped) is fixed by migration 0006, audit-trailed under
+  `raw_metadata.distance_sanitized`.
+* **C2 — batch upload transaction safety.** Each file in `/upload`,
+  `/device-upload`, `/reprocess`, `/reprocess/all` runs in its own SAVEPOINT, so
+  one `IntegrityError` no longer silently discards an entire "imported" batch.
+* **H3/H4 — race-safe naming + dedup.** Partial unique index
+  `uq_flights_source_file_hash` (migration 0005; zero existing duplicates) +
+  catch-and-retry auto-naming; the builder never propagates `IntegrityError`.
+* **H2 — reports read live `Flight` scalars** (heavy JSON deferred), cache only
+  as legacy-ODL fallback.
+* **H1 — Part-107 truthfulness.** Flights > 400 ft AGL (121.92 m) are flagged
+  factually to the report + LLM prompt (no fabricated waiver claims); ODL ~500 m
+  altitudes flagged ceiling-limited.
+* **H5 — map coverage** measured at full resolution (matches the PDF report).
+* **M1** strip heavy keys from native flight caches (migration 0007; ODL-legacy
+  tracks preserved). **M2** cadence guard from `frame_count`, ceiling 60→25 Hz.
+  **M4** per-row bulk-attach savepoints. **M5** stream stored file on reprocess
+  (no OOM). **M6** minimal-viability gate. **M7** escape auto-name LIKE wildcards.
+  **M8** ghosts excluded uniformly from totals + count. **M9** corrupt header
+  bounded to wall-clock span. **L2/L4/L5/L6** correctness fixes.
+* **Deferred (documented in ADR-0028):** M3 (multi-flight-per-file — parser emits
+  one flight/file today), L1/L3/L7/L8/L9. **Operator action:** ODL
+  `maxAltitude`/`totalDistance` semantics flagged for verification.
+
 ## 2026-06-29 — fix(migrations): shorten 0004 revision id to fit alembic_version(32) — v2.75.1
 
 Hotfix making v2.75.0 deployable. The migration revision id

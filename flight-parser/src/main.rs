@@ -14,6 +14,7 @@ use tracing_subscriber;
 mod dji;
 mod litchi;
 mod airdata;
+mod gate;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ParsedFlight {

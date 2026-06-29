@@ -86,7 +86,9 @@ def _scalar_cache_from_flight(local_flight, base: dict | None = None) -> dict:
         "name": local_flight.name,
         "display_name": local_flight.name,
         "drone_model": local_flight.drone_model,
+        "drone_name": local_flight.drone_name,          # L6 (ADR-0028)
         "drone_serial": local_flight.drone_serial,
+        "battery_serial": local_flight.battery_serial,  # L6 (ADR-0028)
         "start_time": iso_utc(local_flight.start_time),
         "duration_secs": local_flight.duration_secs,
         "total_distance": local_flight.total_distance,
@@ -792,9 +794,25 @@ async def add_flights_bulk(
             )
             created.append(mf)
 
+    # M4 (ADR-0028): insert each row in its OWN savepoint. A concurrent attach
+    # that wins a unique-constraint race (uq_mission_flights_mission_flight /
+    # _mission_odl, migration 0003) would otherwise raise IntegrityError on a
+    # single bulk flush and 500 the entire batch. Per-row savepoints let a
+    # losing racer be skipped while every other row still commits.
+    persisted: list[MissionFlight] = []
     for mf in created:
-        db.add(mf)
-    await db.flush()
+        try:
+            async with db.begin_nested():
+                db.add(mf)
+                await db.flush()
+            persisted.append(mf)
+        except IntegrityError:
+            skipped += 1
+            logger.info(
+                "[BULK-ATTACH] mission=%s skipped duplicate (race) flight_id=%s odl=%s",
+                mission_id, mf.flight_id, mf.opendronelog_flight_id,
+            )
+    created = persisted
 
     logger.info(
         "[BULK-ATTACH] mission=%s attached=%d skipped=%d (requested=%d) user=%s",
