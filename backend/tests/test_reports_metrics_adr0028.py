@@ -1,4 +1,10 @@
-"""ADR-0028 H1/H2/M8 — report metric resolution (live scalars, ghost, altitude)."""
+"""Report metric resolution (live scalars, ghost, altitude).
+
+ADR-0028 H2/M8 (live scalars, ghost) + ADR-0029, which REVERSES ADR-0028 H1:
+mission reports are client deliverables, not compliance audits, so NO altitude-
+limit / 400 ft / Part-107 exceedance flag is derived or rendered. The only
+altitude caveat is a neutral data-confidence note for unverified ODL peaks.
+"""
 
 from __future__ import annotations
 
@@ -60,54 +66,76 @@ def test_real_short_flight_is_not_ghost():
     assert R._resolve_flight_metrics(mf, live)["is_ghost"] is False
 
 
-# ── H1: Part-107 + ceiling-limited altitude flags ────────────────────────
+# ── ADR-0029: NO altitude-limit / Part-107 / 400 ft exceedance flag ──────
+# Reverses ADR-0028 H1. Mission reports are client deliverables, not compliance
+# audits — they must NEVER flag, list, or comment on altitude-limit exceedance.
 
-def test_over_400ft_flag():
+# Terms that must NEVER appear in any per-flight summary the LLM receives.
+_FORBIDDEN_ALT_TERMS = (
+    "400", "121.92", "part 107", "part-107", "ceiling", "exceed", "limit",
+    "over 400", "agl part", "above the", "regulatory",
+)
+
+
+def _assert_no_limit_language(summary: dict) -> None:
+    blob = " ".join(str(v) for v in summary.values()).lower()
+    for term in _FORBIDDEN_ALT_TERMS:
+        assert term not in blob, f"forbidden altitude-limit term {term!r} in {summary!r}"
+    # The exceedance flag field itself must be gone entirely.
+    assert "over_400ft" not in summary
+    assert "ceiling_limited" not in summary
+
+
+def test_no_over_400ft_flag_derived():
     fid = uuid.uuid4()
     mf = _mf(flight_id=fid)
-    # 130 m AGL > 121.92 m (400 ft)
+    # 130 m AGL would once have been flagged "over 400 ft" — no longer.
     live = {fid: _live_row(fid, duration=120.0, distance=500.0, alt=130.0)}
-    assert R._resolve_flight_metrics(mf, live)["over_400ft"] is True
-    # 100 m AGL < 400 ft
-    live2 = {fid: _live_row(fid, duration=120.0, distance=500.0, alt=100.0)}
-    assert R._resolve_flight_metrics(mf, live2)["over_400ft"] is False
+    m = R._resolve_flight_metrics(mf, live)
+    assert "over_400ft" not in m
+    assert "ceiling_limited" not in m
 
 
-def test_odl_ceiling_limited_flag():
+def test_resolve_marks_unverified_odl_peak():
+    """Data-confidence flag only — NOT a regulatory/limit check."""
     fid = uuid.uuid4()
     mf = _mf(flight_id=fid)
     live = {fid: _live_row(fid, duration=120.0, distance=500.0, alt=500.0,
                            source="opendronelog_import")}
     m = R._resolve_flight_metrics(mf, live)
-    assert m["ceiling_limited"] is True
-    # a dji_txt flight at 500 m is NOT a ceiling artifact
+    assert m["unverified_peak"] is True
+    # a dji_txt flight at 500 m is NOT an ODL device-max artifact
     live2 = {fid: _live_row(fid, duration=120.0, distance=500.0, alt=500.0,
                             source="dji_txt")}
-    assert R._resolve_flight_metrics(mf, live2)["ceiling_limited"] is False
+    assert R._resolve_flight_metrics(mf, live2)["unverified_peak"] is False
 
 
-# ── H1: summaries render the altitude flags + aborted handling ───────────
+# ── ADR-0029: summaries carry NO altitude-limit language ─────────────────
 
-def test_summary_annotates_over_400ft():
+def test_summary_high_altitude_has_no_limit_language():
     fid = uuid.uuid4()
     mf = _mf(flight_id=fid, aircraft_name="Mavic 3")
-    live = {fid: _live_row(fid, duration=120.0, distance=500.0, alt=130.0)}
+    # 190.8 m AGL (626 ft) — the savannah case once flagged "exceeds 400 ft".
+    live = {fid: _live_row(fid, duration=120.0, distance=500.0, alt=190.8)}
     mission = SimpleNamespace(flights=[mf])
     summaries = R._build_flight_summaries(mission, live)
     assert len(summaries) == 1
-    assert "exceeds the 400 ft AGL" in summaries[0]["max_altitude"]
-    assert summaries[0]["over_400ft"] is True
+    # Altitude is still presented as neutral capture data, unit-correct...
+    assert "190.8 m AGL" in summaries[0]["max_altitude"]
+    assert "626 ft" in summaries[0]["max_altitude"]
+    # ...but with ZERO limit/exceedance/Part-107 commentary.
+    _assert_no_limit_language(summaries[0])
 
 
-def test_summary_marks_ceiling_limited_not_over400():
+def test_summary_unverified_odl_peak_neutral_note():
     fid = uuid.uuid4()
     mf = _mf(flight_id=fid, aircraft_name="M300")
     live = {fid: _live_row(fid, duration=120.0, distance=500.0, alt=500.0,
                            source="opendronelog_import")}
     mission = SimpleNamespace(flights=[mf])
     s = R._build_flight_summaries(mission, live)[0]
-    assert "ceiling-limited" in s["max_altitude"]
-    assert s["over_400ft"] is False
+    assert "unverified (device-reported maximum" in s["max_altitude"]
+    _assert_no_limit_language(s)
 
 
 def test_summary_flags_aborted_launch():

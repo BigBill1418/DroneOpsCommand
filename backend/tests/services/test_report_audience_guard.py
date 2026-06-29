@@ -183,3 +183,75 @@ class TestAudienceLeakDetector:
             f"expected >=3 rule categories on incident-shape leak, "
             f"got {rules_hit}"
         )
+
+
+# ───────────────── ADR-0029: altitude-limit / Part-107 guard ─────────────
+
+
+class TestAltitudeLimitGuard:
+    """The prompt must forbid altitude-limit commentary; the detector is the
+    deterministic second line that catches any that slips through."""
+
+    @pytest.fixture
+    def rendered(self) -> str:
+        return SYSTEM_PROMPT_TEMPLATE.format(company_name="DroneOps")
+
+    def test_prompt_forbids_altitude_limit_commentary(self, rendered: str) -> None:
+        low = rendered.lower()
+        # The reversed ADR-0028 H1 instruction must be GONE.
+        assert "note factually that it exceeds 400 ft" not in low
+        assert "the fact of exceedance" not in low
+        # The explicit prohibition must be present.
+        assert "not a compliance audit" in low
+        assert "must not mention, compare against, flag, or comment on any altitude limit" in low
+        assert "the 400 ft agl ceiling" in low
+        assert "must never state or imply that any flight exceeded" in low
+        # The single permitted positive framing is preserved.
+        assert "in accordance with faa part 107 procedures" in low
+
+    def test_flags_real_world_savannah_exceedance_sentence(self) -> None:
+        """The verbatim damaging language Bill reported. Must be caught."""
+        offending = (
+            "A number of flights operated above 400 ft AGL — specifically "
+            "Flights 2,4,5,6,7,8,9,11,15,19,20,21,22,23,26 — and as such "
+            "exceeded the standard Part 107 400 ft AGL altitude limit."
+        )
+        leaks = detect_audience_leaks(offending)
+        assert leaks, "detector failed to flag the savannah exceedance sentence"
+        assert has_audience_leak(offending) is True
+
+    @pytest.mark.parametrize(
+        "bad_text, expected_rule",
+        [
+            ("Three flights operated above 400 ft AGL.", "altitude_over_400ft"),
+            ("Flight 4 exceeded 400 feet AGL.", "altitude_over_400ft"),
+            ("This exceeds the 400 ft AGL Part 107 limit.", "altitude_over_400ft"),
+            ("The flight breached the 400 ft AGL altitude limit.", "altitude_limit_phrase"),
+            ("Several flights went beyond the 400-foot ceiling.", "ft_ceiling"),
+            ("This altitude exceeds the Part 107 restriction.", "altitude_exceeds_limit"),
+            ("Operations stayed under the Part 107 400 ft ceiling.", "part_107_altitude_limit"),
+        ],
+    )
+    def test_flags_altitude_limit_phrasings(
+        self, bad_text: str, expected_rule: str
+    ) -> None:
+        leaks = detect_audience_leaks(bad_text)
+        assert leaks, f"detector failed to flag: {bad_text!r}"
+        assert any(leak.rule == expected_rule for leak in leaks), (
+            f"expected rule {expected_rule!r}, got {[leak.rule for leak in leaks]}"
+        )
+
+    @pytest.mark.parametrize(
+        "clean_text",
+        [
+            "Maximum altitude: 280 ft AGL.",
+            "The aircraft reached 190.8 m AGL (626 ft) on the final pass.",
+            "Altitude across the survey ranged from 95 ft to 412 ft AGL.",
+            "Operations were conducted in accordance with FAA Part 107 procedures.",
+            "DroneOps is an FAA Part 107 certified drone operations company.",
+            "The 500 m value is unverified (device-reported maximum, not a measured peak).",
+        ],
+    )
+    def test_neutral_altitude_and_positive_framing_pass(self, clean_text: str) -> None:
+        leaks = detect_audience_leaks(clean_text)
+        assert leaks == [], f"neutral/positive text falsely flagged: {leaks}"

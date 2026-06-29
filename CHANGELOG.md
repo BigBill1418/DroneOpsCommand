@@ -4,6 +4,42 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-06-29 — fix(reports): mission reports are client deliverables, not compliance audits — remove altitude-limit / Part-107 exceedance commentary — v2.76.1
+
+Reverses the **H1** portion of ADR-0028. See **ADR-0029**. A client-facing
+report must NEVER announce, flag, list, compute, or comment on whether any
+flight exceeded an altitude limit, the 400 ft AGL ceiling, or any Part-107 /
+regulatory limit. The v2.76.0 report engine emitted, in the Savannah Bananas
+client report, "A number of flights operated above 400 ft AGL — specifically
+Flights … — and as such exceeded the standard Part 107 400 ft AGL altitude
+limit." That class of language is removed and prohibited.
+
+* **Report builder (`backend/app/routers/reports.py`).** Removed the
+  `PART_107_CEILING_M` (121.92 m) constant, the per-flight `over_400ft` flag,
+  the `over_400ft` summary field, the `over_400ft_count` tally + its log line,
+  and the `" — exceeds the 400 ft AGL Part 107 limit"` annotation. The
+  `ceiling-limited` annotation was replaced with a neutral data-confidence note.
+  Altitude is now presented as neutral capture data only (value/range, correct
+  units — the v2.74.0 display fix is retained). The sole remaining caveat is a
+  data-quality flag (`unverified_peak`) for ODL rows pinned at the device-
+  reported ~500 m maximum, rendered "unverified (device-reported maximum, not a
+  measured peak)" — no limit/ceiling/threshold/Part-107 reference.
+* **LLM system prompt (`backend/app/services/ollama.py`, shared by the Claude
+  path).** The "state the fact of exceedance" clause is replaced with an explicit
+  prohibition: the model must not mention, compare against, or flag any altitude
+  limit / 400 ft ceiling / Part-107 altitude rule; must not state or imply any
+  exceedance; must not list flights by altitude. The single positive framing
+  ("conducted in accordance with FAA Part 107 procedures") is preserved.
+* **Runtime guard (`backend/app/services/report_audience.py`).** The existing
+  post-generation audience-leak detector (wired into the editorial gate via
+  `has_audience_leak`) now also flags altitude-limit / exceedance / Part-107-
+  ceiling language as a deterministic second line of defense. Tuned to not flag
+  neutral altitude data or the positive Part-107 framing. No schema change.
+* **Tests.** ADR-0028 H1 exceedance tests replaced with absence-assertions;
+  added detector tests for the verbatim Savannah sentence + limit phrasings, and
+  passes for neutral altitude / positive-framing text. Full backend suite green
+  (502 passed, 3 skipped).
+
 ## 2026-06-29 — fix(flight-data): GPS outlier gate, batch-import transaction safety, race-safe dedup, live-scalar reporting, Part-107 altitude truthfulness — v2.76.0
 
 A full flight-data/parser/touchpoint integrity pass. See **ADR-0028**. Flight

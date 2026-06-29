@@ -89,17 +89,21 @@ METERS_TO_FEET = 3.28084
 GHOST_MAX_DURATION_S = 30.0
 GHOST_MAX_DISTANCE_M = 10.0
 
-# Part 107 §107.51(b): 400 ft AGL ceiling = 121.92 m. The report engine flags —
-# but never fabricates a waiver claim about — flights whose recorded max
-# altitude exceeds this (ADR-0028 H1). The operator adds any LAANC/waiver
-# context separately.
-PART_107_CEILING_M = 121.92
+# ADR-0029 reverses ADR-0028 H1: mission reports are CLIENT DELIVERABLES, not
+# compliance audits. The report engine must NEVER announce, flag, list, compute,
+# or comment on whether any flight exceeded an altitude limit, the 400 ft AGL
+# ceiling, or any Part-107 / regulatory limit. Whether an altitude was permissible
+# is the certificated operator's determination, supplied (if at all) separately —
+# it is not editorialized in a client-facing narrative. Altitude is presented as
+# neutral capture data only. No 400 ft / Part-107 / exceedance logic lives here.
 
-# Many OpenDroneLog max-altitude values cluster at ~500 m — the DJI configured
-# ceiling limit, not a measured peak. Flag those as ceiling-limited so the
-# narrative does not present them as an achieved altitude (ADR-0028 H1).
-_ODL_CEILING_LOW_M = 495.0
-_ODL_CEILING_HIGH_M = 505.0
+# DATA-QUALITY guard (NOT a regulatory check): many OpenDroneLog max-altitude
+# values pin at ~500 m — a device-reported figure, not a measured peak. We mark
+# those as unverified so the narrative does not present an artifact as an achieved
+# altitude. This is a data-confidence note; it makes NO reference to any limit,
+# regulatory ceiling, threshold, or Part-107.
+_ODL_DEVICE_MAX_LOW_M = 495.0
+_ODL_DEVICE_MAX_HIGH_M = 505.0
 
 
 def _cache_num(cache: dict, *keys) -> float | None:
@@ -162,7 +166,8 @@ async def _load_live_flight_metrics(db: AsyncSession, mission: Mission) -> dict:
 def _resolve_flight_metrics(mf: MissionFlight, live: dict) -> dict:
     """Resolve one flight's metrics, preferring live ``Flight`` scalars (H2),
     falling back to the cache only for legacy-ODL rows. Also derives the M8
-    ghost flag and the H1 altitude flags."""
+    ghost flag and the ADR-0029 data-confidence flag for unverified ODL peaks.
+    NO altitude-limit / Part-107 / 400 ft exceedance flag is derived here."""
     if mf.flight_id is not None and mf.flight_id in live:
         r = live[mf.flight_id]
         dur = float(r.duration_secs or 0.0)
@@ -178,24 +183,25 @@ def _resolve_flight_metrics(mf: MissionFlight, live: dict) -> dict:
         source = cache.get("source") or "opendronelog_import"
         notes = cache.get("notes")
     is_ghost = dur < GHOST_MAX_DURATION_S and dist < GHOST_MAX_DISTANCE_M
-    over_400 = alt is not None and alt > PART_107_CEILING_M
-    ceiling_limited = (
+    unverified_peak = (
         source == "opendronelog_import"
         and alt is not None
-        and _ODL_CEILING_LOW_M <= alt <= _ODL_CEILING_HIGH_M
+        and _ODL_DEVICE_MAX_LOW_M <= alt <= _ODL_DEVICE_MAX_HIGH_M
     )
     return {
         "duration_secs": dur, "distance_m": dist, "max_altitude_m": alt,
         "source": source, "notes": notes, "is_ghost": is_ghost,
-        "over_400ft": over_400, "ceiling_limited": ceiling_limited,
+        "unverified_peak": unverified_peak,
     }
 
 
 def _build_flight_summaries(mission: Mission, live: dict) -> list[dict]:
     """Per-flight summaries for the LLM — deduplicated, live-scalar metrics
-    (H2), unit-correct altitude, aborted launches flagged so they don't pollute
-    altitude ranges (ADR-0026), and Part-107 / ceiling-limited altitude flags
-    stated factually (ADR-0028 H1)."""
+    (H2), unit-correct altitude, and aborted launches flagged so they don't
+    pollute altitude ranges (ADR-0026). Altitude is neutral capture data only:
+    NO altitude-limit, 400 ft, regulatory-ceiling, or Part-107 exceedance flag
+    is ever attached (ADR-0029, reversing ADR-0028 H1). The sole altitude caveat
+    is a data-confidence note for unverified device-reported ODL peaks."""
     summaries = []
     for f in _dedup_flights(mission.flights):
         m = _resolve_flight_metrics(f, live)
@@ -212,14 +218,11 @@ def _build_flight_summaries(mission: Mission, live: dict) -> list[dict]:
             })
             continue
         alt_str = _format_altitude(m["max_altitude_m"])
-        if m["ceiling_limited"]:
-            alt_str += " — ceiling-limited (device ceiling artifact; peak unverified)"
-        elif m["over_400ft"]:
-            alt_str += " — exceeds the 400 ft AGL Part 107 limit"
+        if m["unverified_peak"]:
+            alt_str += " — unverified (device-reported maximum, not a measured peak)"
         summary = {
             "aircraft": aircraft,
             "max_altitude": alt_str,
-            "over_400ft": m["over_400ft"] and not m["ceiling_limited"],
         }
         if m["notes"]:
             summary["notes"] = m["notes"]
@@ -296,7 +299,6 @@ async def generate_report(
     total_distance = 0
     real_flight_count = 0
     aborted_count = 0
-    over_400ft_count = 0
     for f in _dedup_flights(mission.flights):
         m = _resolve_flight_metrics(f, live_metrics)
         if m["is_ghost"]:
@@ -305,11 +307,9 @@ async def generate_report(
         real_flight_count += 1
         total_duration += m["duration_secs"]
         total_distance += m["distance_m"]
-        if m["over_400ft"] and not m["ceiling_limited"]:
-            over_400ft_count += 1
     logger.info(
-        "Mission %s report metrics: %d flights (%d aborted excluded), %d over 400ft AGL",
-        mission_id, real_flight_count, aborted_count, over_400ft_count,
+        "Mission %s report metrics: %d flights (%d aborted excluded)",
+        mission_id, real_flight_count, aborted_count,
     )
 
     # Ensure a report record exists so the frontend can poll GET /report
