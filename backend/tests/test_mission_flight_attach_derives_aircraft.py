@@ -34,6 +34,16 @@ class _ScalarOneOrNone:
     def scalar(self):
         return self._value
 
+    # ADR-0026: the idempotent-attach guard reads with .scalars().first().
+    def scalars(self):
+        return self
+
+    def first(self):
+        return self._value
+
+    def all(self):
+        return [] if self._value is None else [self._value]
+
 
 class _MissionStub:
     def __init__(self) -> None:
@@ -131,7 +141,7 @@ def test_attach_derives_aircraft_from_flight_log():
     mission = _MissionStub()
     flight = _FlightStub(aircraft_id=fleet_aircraft_id)
 
-    app, db = _build_app(execute_results=[mission, flight])
+    app, db = _build_app(execute_results=[mission, None, flight])
     client = TestClient(app)
 
     resp = client.post(
@@ -162,7 +172,7 @@ def test_attach_overrides_client_supplied_aircraft_id():
     mission = _MissionStub()
     flight = _FlightStub(aircraft_id=fleet_aircraft_id)
 
-    app, db = _build_app(execute_results=[mission, flight])
+    app, db = _build_app(execute_results=[mission, None, flight])
     client = TestClient(app)
 
     resp = client.post(
@@ -187,7 +197,7 @@ def test_attach_with_unmatched_flight_log_stores_null_aircraft():
     mission = _MissionStub()
     flight = _FlightStub(aircraft_id=None)  # unmatched
 
-    app, db = _build_app(execute_results=[mission, flight])
+    app, db = _build_app(execute_results=[mission, None, flight])
     client = TestClient(app)
 
     resp = client.post(

@@ -79,16 +79,45 @@ def extract_gps_tracks(flights: list[dict]) -> list[list[tuple[float, float]]]:
     return tracks
 
 
+def _utm_transformer_for(center_lat: float, center_lng: float) -> Transformer:
+    """Build a WGS84→UTM transformer for the zone containing the given point."""
+    utm_zone = int((center_lng + 180) / 6) + 1
+    epsg_code = (32600 if center_lat >= 0 else 32700) + utm_zone
+    return Transformer.from_crs("EPSG:4326", f"EPSG:{epsg_code}", always_xy=True)
+
+
+def _simplify_and_buffer_track(track, transformer: Transformer, buffer_meters: float):
+    """Project, shape-preservingly simplify (Douglas-Peucker @ tolerance) and
+    buffer ONE (lat,lng) track into a coverage polygon.
+
+    Returns ``(polygon, raw_vertex_count, kept_vertex_count)`` or ``None`` for a
+    degenerate track (<2 points). The DP simplify is in projected metres so the
+    tolerance is meaningful and the buffered geometry stays small/bounded —
+    this is what keeps GEOS memory bounded even on a full-resolution track
+    (ADR-0020 OOM fix), WITHOUT the lossy strided decimation that distorts
+    measured shape (ADR-0026 RC-2: measurements run on full-res geometry).
+    """
+    if len(track) < 2:
+        return None
+    line = LineString([transformer.transform(lng, lat) for lat, lng in track])
+    line = line.simplify(GEO_SIMPLIFY_TOLERANCE_M, preserve_topology=False)
+    return line.buffer(buffer_meters), len(track), len(line.coords)
+
+
 def calculate_area_acres(tracks: list[list[tuple[float, float]]], buffer_meters: float = 30.0) -> float:
     """Calculate the approximate area covered by flight paths in acres.
 
     Uses a buffer around each flight path to approximate camera coverage.
     Default buffer of 30m assumes ~60m swath width at typical survey altitudes.
+
+    NOTE (ADR-0026 RC-2): for accurate MEASUREMENT the caller must pass
+    full-resolution tracks — strided decimation (the render path) distorts the
+    measured shape. The internal Douglas-Peucker simplify (shape-preserving) is
+    the only reduction applied here and keeps GEOS memory bounded.
     """
     if not tracks:
         return 0.0
 
-    # Find center point for UTM projection
     all_points = [p for track in tracks for p in track]
     if not all_points:
         return 0.0
@@ -96,50 +125,40 @@ def calculate_area_acres(tracks: list[list[tuple[float, float]]], buffer_meters:
     try:
         center_lat = sum(p[0] for p in all_points) / len(all_points)
         center_lng = sum(p[1] for p in all_points) / len(all_points)
+        transformer = _utm_transformer_for(center_lat, center_lng)
 
-        # Determine UTM zone
-        utm_zone = int((center_lng + 180) / 6) + 1
-        hemisphere = "north" if center_lat >= 0 else "south"
-        epsg_code = 32600 + utm_zone if hemisphere == "north" else 32700 + utm_zone
-
-        # Transform to UTM for accurate area calculation
-        transformer = Transformer.from_crs("EPSG:4326", f"EPSG:{epsg_code}", always_xy=True)
-
-        # Simplify EACH track in projected space before buffering. A raw survey
-        # track is tens of thousands of near-collinear points; buffering that
-        # MultiLineString makes GEOS allocate >900 MB and OOM-kills the worker
-        # (ADR-0020). Douglas-Peucker at GEO_SIMPLIFY_TOLERANCE_M removes the
-        # redundant vertices with sub-1% area impact. We buffer each simplified
-        # line independently and union the resulting polygons, which keeps every
-        # intermediate geometry small and bounded.
         raw_vertices = 0
         kept_vertices = 0
         buffered_polys = []
         for track in tracks:
-            if len(track) < 2:
+            result = _simplify_and_buffer_track(track, transformer, buffer_meters)
+            if result is None:
                 continue
-            raw_vertices += len(track)
-            line = LineString([transformer.transform(lng, lat) for lat, lng in track])
-            line = line.simplify(GEO_SIMPLIFY_TOLERANCE_M, preserve_topology=False)
-            kept_vertices += len(line.coords)
-            buffered_polys.append(line.buffer(buffer_meters))
+            poly, raw_n, kept_n = result
+            raw_vertices += raw_n
+            kept_vertices += kept_n
+            buffered_polys.append(poly)
 
-        if not buffered_polys:
-            return 0.0
-
-        coverage = unary_union(buffered_polys)
-        area_sq_meters = coverage.area
-        acres = area_sq_meters * SQ_METERS_TO_ACRES
-        logger.info(
-            "Area calculation: %.2f acres (%.0f sq m, buffer=%.0fm); "
-            "simplified %d→%d vertices @ %.1fm tolerance",
-            acres, area_sq_meters, buffer_meters,
-            raw_vertices, kept_vertices, GEO_SIMPLIFY_TOLERANCE_M,
-        )
-        return acres
+        return _union_polys_acres(buffered_polys, buffer_meters, raw_vertices, kept_vertices)
     except Exception as exc:
         logger.error("Area calculation failed: %s", exc, exc_info=True)
         return 0.0
+
+
+def _union_polys_acres(buffered_polys, buffer_meters, raw_vertices, kept_vertices) -> float:
+    """Union pre-buffered coverage polygons and return the total area in acres."""
+    if not buffered_polys:
+        return 0.0
+    coverage = unary_union(buffered_polys)
+    area_sq_meters = coverage.area
+    acres = area_sq_meters * SQ_METERS_TO_ACRES
+    logger.info(
+        "Area calculation: %.2f acres (%.0f sq m, buffer=%.0fm); "
+        "simplified %d→%d vertices @ %.1fm tolerance",
+        acres, area_sq_meters, buffer_meters,
+        raw_vertices, kept_vertices, GEO_SIMPLIFY_TOLERANCE_M,
+    )
+    return acres
 
 
 def calculate_convex_hull_geojson(tracks: list[list[tuple[float, float]]]) -> dict | None:

@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFil
 from pydantic import BaseModel, ValidationError
 from PIL import Image as PILImage
 from sqlalchemy import select, func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import noload, raiseload, selectinload
 
@@ -515,6 +516,35 @@ async def delete_mission(
 
 # --- Mission Flights ---
 
+async def _find_existing_attachment(
+    db: AsyncSession,
+    mission_id: UUID,
+    flight_id: UUID | None,
+    opendronelog_flight_id: str | None,
+) -> MissionFlight | None:
+    """Return the MissionFlight already attaching this flight to this mission.
+
+    Idempotency key mirrors the partial unique indexes added in migration
+    0003 / ADR-0026: native flights match on ``(mission_id, flight_id)``,
+    legacy ODL rows on ``(mission_id, opendronelog_flight_id)``. Returns None
+    when the flight is not yet attached (the insert path runs) or when neither
+    key is present (a malformed row we cannot dedup — let it through).
+    """
+    if flight_id is not None:
+        q = select(MissionFlight).where(
+            MissionFlight.mission_id == mission_id,
+            MissionFlight.flight_id == flight_id,
+        )
+    elif opendronelog_flight_id:
+        q = select(MissionFlight).where(
+            MissionFlight.mission_id == mission_id,
+            MissionFlight.opendronelog_flight_id == opendronelog_flight_id,
+        )
+    else:
+        return None
+    return (await db.execute(q)).scalars().first()
+
+
 @router.post("/{mission_id}/flights", response_model=MissionFlightResponse, status_code=status.HTTP_201_CREATED)
 async def add_flight(
     mission_id: UUID,
@@ -525,6 +555,23 @@ async def add_flight(
     result = await db.execute(select(Mission).where(Mission.id == mission_id))
     if not result.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Mission not found")
+
+    # ADR-0026: idempotent single-add. The legacy path had ZERO dedup, so a
+    # retry storm (attach timing out / 500ing while the operator re-clicked)
+    # inserted the same flight many times — the "savannah" mission reached 50
+    # rows for 27 flights and every report total inflated 100-160%. If this
+    # flight is already attached, return the existing row instead of inserting
+    # a duplicate. (Re-clicking a successful attach is now a safe no-op.)
+    existing = await _find_existing_attachment(
+        db, mission_id, data.flight_id, data.opendronelog_flight_id
+    )
+    if existing is not None:
+        logger.info(
+            "[ADD-FLIGHT] idempotent skip — flight already attached "
+            "(mission=%s flight_id=%s odl=%s) returning existing row %s",
+            mission_id, data.flight_id, data.opendronelog_flight_id, existing.id,
+        )
+        return existing
 
     # Aircraft attribution is derived from the flight log — the operator
     # never picks it. Flight uploads already fleet-match by serial/model
@@ -587,7 +634,25 @@ async def add_flight(
 
     flight = MissionFlight(mission_id=mission_id, **data.model_dump())
     db.add(flight)
-    await db.flush()
+    try:
+        await db.flush()
+    except IntegrityError:
+        # Backstop for the partial unique indexes (ADR-0026). Two concurrent
+        # attach requests can both pass the SELECT guard above and race to
+        # INSERT; the DB rejects the second. Roll back this row and return the
+        # one that won — the attach is still idempotent under concurrency.
+        await db.rollback()
+        existing = await _find_existing_attachment(
+            db, mission_id, data.flight_id, data.opendronelog_flight_id
+        )
+        if existing is not None:
+            logger.info(
+                "[ADD-FLIGHT] unique-constraint race resolved — returning "
+                "existing row %s (mission=%s flight_id=%s odl=%s)",
+                existing.id, mission_id, data.flight_id, data.opendronelog_flight_id,
+            )
+            return existing
+        raise
     await db.refresh(flight)
     return flight
 

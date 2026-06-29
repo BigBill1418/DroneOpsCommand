@@ -4,6 +4,43 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-06-29 — fix(reports): de-duplicate flights + accurate, unit-correct metrics — v2.74.0
+
+The AI mission report for **"Savannah Bananas Games"** showed badly inflated
+numbers (50 flights / 1,660 min / 160.33 mi against a true 27 / 695 / 62.29).
+Root cause: a **retry storm** during the 2026-06 OOM window inserted the same
+flights many times — 50 `mission_flights` rows for 27 unique flights (one flight
+×13) — because the single-attach path had **zero dedup** and there was **no DB
+constraint**. The report engine summed over every row, so totals inflated
+100-160%. Area was ≈correct (geometry union is insensitive to duplicates). See
+**ADR-0026** for the full decision record.
+
+* **Data repair (one-time, reversible):** the 23 duplicate savannah rows were
+  backed up and deleted, keeping the earliest `added_at` per flight → 27 rows.
+  A fleet-wide scan found **no other affected mission** (blast radius = 1).
+* **Structural guard (RC-1):** migration **0003** adds partial UNIQUE indexes
+  `(mission_id, flight_id) WHERE flight_id IS NOT NULL` and
+  `(mission_id, opendronelog_flight_id) WHERE opendronelog_flight_id IS NOT
+  NULL`. The migration dedups first (idempotent) then constrains. Applied live.
+* **Idempotent single-add:** `POST /api/missions/{id}/flights` now returns the
+  existing row if the flight is already attached (re-clicking is a safe no-op),
+  with an `IntegrityError` backstop for the concurrent-attach race.
+* **Defensive report dedup (RC-1):** `reports.py` aggregates iterate over
+  flights uniqued by identity key, so a stray duplicate can never re-inflate a
+  report's count / time / distance.
+* **Area on full-resolution geometry (RC-2):** coverage acreage is now measured
+  on the full-res track (shape-preserving Douglas-Peucker only), streamed one
+  flight at a time to preserve the ADR-0025 OOM fix — not the 2000-vertex
+  strided render decimation.
+* **Altitude units fixed (credibility):** the report printed raw cache values
+  with a bare "ft" label, but DJI logs altitude in **metres** (flight-parser
+  `dji.rs`). "190.8 ft" was actually **190.8 m AGL (626 ft)**. Altitude is now
+  formatted in code with the correct unit (metres + explicit feet), and the LLM
+  is told the source unit and instructed never to convert or relabel.
+* **Ghost / aborted-launch filter:** flights under 30 s AND 10 m (e.g. two
+  ~7 s, ~0 m aborted launches in savannah) are excluded from altitude ranges so
+  they no longer drag the minimum to 0.
+
 ## 2026-06-29 — feat(missions): bulletproof large-mission flight handling + bulk attach — v2.73.0
 
 Building a mission with far more flights than ever before ("savannah") errored

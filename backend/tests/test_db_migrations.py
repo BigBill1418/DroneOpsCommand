@@ -43,7 +43,7 @@ def _script_dir():
 def test_migration_tree_has_single_linear_head():
     script = _script_dir()
     heads = script.get_heads()
-    assert heads == ["0002_p2_p3_indexes"], heads
+    assert heads == ["0003_mission_flight_dedup_unique"], heads
 
 
 def test_baseline_is_the_root_revision():
@@ -54,9 +54,13 @@ def test_baseline_is_the_root_revision():
 
 def test_revision_chain_is_baseline_then_indexes():
     script = _script_dir()
-    # Walk from head back to base; expect exactly the two revisions in order.
+    # Walk from head back to base; expect exactly the revisions, in order.
     revs = [r.revision for r in script.walk_revisions()]
-    assert revs == ["0002_p2_p3_indexes", "0001_baseline_schema"], revs
+    assert revs == [
+        "0003_mission_flight_dedup_unique",
+        "0002_p2_p3_indexes",
+        "0001_baseline_schema",
+    ], revs
 
 
 def test_baseline_revision_constant_matches_tree():
@@ -258,6 +262,9 @@ def _autogenerate_diffs(sync_url: str):
         "ix_missions_customer_id", "ix_missions_status",
         "ix_mission_images_mission_id", "ix_maintenance_records_aircraft_id",
         "ix_maintenance_schedules_aircraft_id",
+        # ADR-0026 partial unique guards (migration 0003) — created by the
+        # migration, not declared in Base.metadata, so excluded from the diff.
+        "uq_mission_flights_mission_flight", "uq_mission_flights_mission_odl",
     }
 
     def _inc(obj, name, type_, reflected, compare_to):
@@ -329,7 +336,7 @@ def test_brownfield_stamp_and_upgrade_matches_base_metadata():
     with eng.connect() as c:
         head = c.execute(text("SELECT version_num FROM alembic_version")).scalar()
     eng.dispose()
-    assert head == "0002_p2_p3_indexes", head
+    assert head == "0003_mission_flight_dedup_unique", head
 
     # Idempotent: a second run is a no-op.
     assert run_migrations_sync() == "noop"

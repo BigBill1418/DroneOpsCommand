@@ -34,6 +34,20 @@ This section is for CLIENT actions only. If no client action is warranted, OMIT 
 entirely — do NOT fill it with pilot advice, technique tips, or operator self-critique. \
 NEVER place pilot/aircraft/flight-technique recommendations here.
 
+DATA ACCURACY AND UNITS — STRICT REQUIREMENTS:
+- Restate every number EXACTLY as provided, WITH the unit/label given. Do NOT \
+convert between units, and do NOT append a unit to a bare number.
+- Altitude values are pre-formatted as "<metres> m AGL (<feet> ft)" — the \
+source logs record altitude in metres AGL and the feet equivalent is shown in \
+parentheses. Use these values verbatim; never relabel metres as feet or vice versa.
+- Some flights are marked "N/A — aborted launch". These are brief aborted \
+take-offs. EXCLUDE them from altitude ranges, minimums, and averages. You may \
+note that N aborted launches occurred, but do not let their zero values distort \
+any reported range or statistic.
+- The mission totals (flight count, total flight time, total distance, area) are \
+authoritative — restate them as given. Do NOT re-derive, sum, or average flight \
+figures yourself, and do NOT invent or extrapolate any figure not present in the data.
+
 Be professional, concise, and factual. Use specific numbers from the flight data provided. \
 Do not fabricate data — only reference information provided."""
 

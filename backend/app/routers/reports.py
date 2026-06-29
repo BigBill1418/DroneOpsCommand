@@ -20,8 +20,8 @@ from app.models.mission import Mission, MissionFlight
 from app.models.report import Report
 from app.models.user import User
 from app.schemas.report import ReportGenerateRequest, ReportResponse, ReportUpdateRequest
-from app.services.map_renderer import calculate_area_acres, extract_gps_tracks, render_static_map
-from app.services.mission_tracks import load_bounded_flight_tracks
+from app.services.map_renderer import render_static_map
+from app.services.mission_tracks import calculate_mission_area_acres, load_bounded_flight_tracks
 from app.services.pdf_generator import generate_pdf
 
 logger = logging.getLogger("doc.reports")
@@ -46,13 +46,104 @@ async def _load_mission_with_flights(db: AsyncSession, mission_id: UUID) -> Miss
     return mission
 
 
+# ADR-0026 RC-1 defence: even with the DB unique guard (migration 0003) and the
+# idempotent attach path, the report engine NEVER trusts the row set to be
+# duplicate-free. A stray duplicate (legacy data, a race that slips the guard)
+# must not re-inflate a report, so every aggregate iterates over flights uniqued
+# by their identity key.
+def _flight_key(f: MissionFlight) -> tuple[str, str]:
+    if f.flight_id is not None:
+        return ("fid", str(f.flight_id))
+    if f.opendronelog_flight_id:
+        return ("odl", str(f.opendronelog_flight_id))
+    return ("id", str(f.id))
+
+
+def _dedup_flights(flights) -> list[MissionFlight]:
+    """Return flights uniqued by identity key, preserving first-seen order."""
+    seen: set[tuple[str, str]] = set()
+    out: list[MissionFlight] = []
+    for f in flights:
+        key = _flight_key(f)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(f)
+    return out
+
+
+# Metres → feet. DJI logs altitude in METRES natively (flight-parser dji.rs:50
+# "meters AGL"; airdata.rs converts feet→metres on ingest). Flight.max_altitude
+# and the scalar cache are therefore METRES (ADR-0026). The legacy report
+# printed the raw metre value with a bare "ft" label — understating altitude by
+# ~3.28× AND mislabeling the unit. Altitude is now formatted in code with an
+# explicit, correct unit so the LLM never guesses or appends a unit.
+METERS_TO_FEET = 3.28084
+
+# Ghost / aborted-launch threshold. A real survey flight has meaningful airtime
+# AND ground track; an aborted launch is a few seconds with ~zero travel and a
+# 0 m max altitude that drags altitude ranges and averages (ADR-0026). A flight
+# is a "ghost" only when BOTH are tiny, so a legitimate short hop is never
+# excluded.
+GHOST_MAX_DURATION_S = 30.0
+GHOST_MAX_DISTANCE_M = 10.0
+
+
+def _cache_num(cache: dict, *keys) -> float | None:
+    """First numeric value among ``keys`` in ``cache``; None if none present."""
+    for k in keys:
+        v = cache.get(k)
+        if isinstance(v, (int, float)):
+            return v
+    return None
+
+
+def _cache_duration_secs(cache: dict) -> float:
+    return _cache_num(cache, "duration_secs", "durationSecs", "duration_seconds", "flight_time_seconds") or 0.0
+
+
+def _cache_distance_m(cache: dict) -> float:
+    return _cache_num(cache, "total_distance", "totalDistance", "distance", "distance_meters") or 0.0
+
+
+def _cache_max_altitude_m(cache: dict) -> float | None:
+    return _cache_num(cache, "max_altitude", "maxAltitude", "max_height")
+
+
+def _is_ghost(cache: dict) -> bool:
+    return (
+        _cache_duration_secs(cache) < GHOST_MAX_DURATION_S
+        and _cache_distance_m(cache) < GHOST_MAX_DISTANCE_M
+    )
+
+
+def _format_altitude(alt_m: float | None) -> str:
+    if alt_m is None:
+        return "Unknown"
+    return f"{alt_m:.1f} m AGL ({alt_m * METERS_TO_FEET:.0f} ft)"
+
+
 def _build_flight_summaries(mission: Mission) -> list[dict]:
+    """Per-flight summaries for the LLM — deduplicated, unit-correct altitude,
+    aborted launches flagged so they don't pollute altitude ranges (ADR-0026)."""
     summaries = []
-    for f in mission.flights:
+    for f in _dedup_flights(mission.flights):
         cache = f.flight_data_cache or {}
+        aircraft = f.aircraft.model_name if f.aircraft else "Unknown"
+        if _is_ghost(cache):
+            summaries.append({
+                "aircraft": aircraft,
+                "max_altitude": "N/A — aborted launch",
+                "aborted": True,
+                "notes": (
+                    f"Aborted launch ({_cache_duration_secs(cache):.0f}s, "
+                    f"{_cache_distance_m(cache):.1f} m travelled) — exclude from altitude ranges."
+                ),
+            })
+            continue
         summary = {
-            "aircraft": f.aircraft.model_name if f.aircraft else "Unknown",
-            "max_altitude": cache.get("max_altitude", cache.get("maxAltitude", cache.get("max_height", "Unknown"))),
+            "aircraft": aircraft,
+            "max_altitude": _format_altitude(_cache_max_altitude_m(cache)),
         }
         if cache.get("notes"):
             summary["notes"] = cache["notes"]
@@ -89,29 +180,29 @@ async def generate_report(
     mission = await _load_mission_with_flights(db, mission_id)
     logger.info("Mission %s loaded: %d flights", mission_id, len(mission.flights))
 
-    # ADR-0025: load each flight's GPS track ON DEMAND, one at a time, and
-    # decimate it immediately. The previous path packed every full
-    # flight_data_cache (each with ~19k raw points) into a list at once and
-    # ran GEOS over it — O(N_flights × track) memory that OOM-killed the
-    # worker on a large mission. `load_bounded_flight_tracks` never holds more
-    # than one raw track simultaneously, so this is O(rows × vertex_cap).
-    flights = await load_bounded_flight_tracks(db, mission)
     loop = asyncio.get_running_loop()
 
+    # ADR-0026 RC-2: AREA is a MEASUREMENT and must run on FULL-RESOLUTION
+    # geometry — not the 2000-vertex strided decimation used for the map. The
+    # streaming measurement loader loads each flight's full-res track on demand,
+    # one at a time, simplifying (shape-preserving DP) + buffering each before
+    # the next is materialized, so the ADR-0025 OOM fix is preserved.
     try:
-        tracks = await loop.run_in_executor(None, extract_gps_tracks, flights)
-        acres = await loop.run_in_executor(None, calculate_area_acres, tracks)
-        logger.info("Mission %s geo: %d tracks, %.2f acres (%.2fs)",
-                     mission_id, len(tracks), acres, time.perf_counter() - start)
+        acres = await calculate_mission_area_acres(db, mission)
+        logger.info("Mission %s area (full-res): %.2f acres (%.2fs)",
+                     mission_id, acres, time.perf_counter() - start)
     except Exception as exc:
-        logger.error("Mission %s geo computation failed: %s", mission_id, exc)
-        tracks = []
+        logger.error("Mission %s area computation failed: %s", mission_id, exc)
         acres = 0.0
+
+    # MAP render uses the cheap DECIMATED path (sub-pixel detail is wasted on an
+    # 800×600 PNG). ADR-0025: never holds more than one raw track at a time.
+    flights = await load_bounded_flight_tracks(db, mission)
 
     flight_summaries = _build_flight_summaries(mission)
 
     map_path = None
-    if tracks:
+    if flights:
         try:
             map_path = await loop.run_in_executor(None, render_static_map, flights)
             logger.info("Mission %s map rendered: %s (%.2fs)",
@@ -119,18 +210,14 @@ async def generate_report(
         except Exception as exc:
             logger.error("Mission %s map render failed: %s", mission_id, exc)
 
+    # Duration/distance totals — summed over flights uniqued by identity key so
+    # a stray duplicate row can never re-inflate the totals (ADR-0026 RC-1).
     total_duration = 0
     total_distance = 0
-    for f in mission.flights:
+    for f in _dedup_flights(mission.flights):
         cache = f.flight_data_cache or {}
-        dur = cache.get("duration_secs", cache.get("durationSecs",
-              cache.get("duration_seconds", cache.get("flight_time_seconds", 0))))
-        if isinstance(dur, (int, float)):
-            total_duration += dur
-        dist = cache.get("total_distance", cache.get("totalDistance",
-               cache.get("distance", cache.get("distance_meters", 0))))
-        if isinstance(dist, (int, float)):
-            total_distance += dist
+        total_duration += _cache_duration_secs(cache)
+        total_distance += _cache_distance_m(cache)
 
     # Ensure a report record exists so the frontend can poll GET /report
     existing = await db.execute(select(Report).where(Report.mission_id == mission_id))
@@ -274,7 +361,7 @@ async def generate_report_pdf(
         "flight_duration_total_seconds": report.flight_duration_total_seconds,
         "flight_distance_total_meters": report.flight_distance_total_meters,
         "map_image_path": report.map_image_path,
-        "flight_count": len(mission.flights),
+        "flight_count": len(_dedup_flights(mission.flights)),
     }
 
     # Aircraft used
