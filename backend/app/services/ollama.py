@@ -59,10 +59,6 @@ flights by altitude.
 - Treat altitude purely as neutral operational/capture statistics. If altitude is \
 mentioned at all, restate the provided value verbatim with its unit and add NO \
 limit, ceiling, threshold, compliance, or regulatory commentary of any kind.
-- Some flights' altitude is annotated "unverified (device-reported maximum, not a \
-measured peak)". Treat such a value as an unverified device-reported figure — do \
-NOT present it as the altitude actually achieved, and do NOT describe it as a limit \
-or ceiling.
 - The ONLY permitted compliance framing is the positive statement that operations \
 were conducted in accordance with FAA Part 107 procedures. Make NO other regulatory \
 claim, and never compute, assert, or imply any altitude exceedance.

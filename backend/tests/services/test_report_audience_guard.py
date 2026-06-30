@@ -249,7 +249,6 @@ class TestAltitudeLimitGuard:
             "Altitude across the survey ranged from 95 ft to 412 ft AGL.",
             "Operations were conducted in accordance with FAA Part 107 procedures.",
             "DroneOps is an FAA Part 107 certified drone operations company.",
-            "The 500 m value is unverified (device-reported maximum, not a measured peak).",
         ],
     )
     def test_neutral_altitude_and_positive_framing_pass(self, clean_text: str) -> None:

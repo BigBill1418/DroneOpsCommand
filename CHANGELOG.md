@@ -4,6 +4,34 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-06-30 — fix(reports): remove the disproven "unverified peak" ODL altitude caveat — v2.76.3
+
+ODL-imported flights at the ~500 m DJI device ceiling were tagged in client
+reports as `" — unverified (device-reported maximum, not a measured peak)"`. That
+caveat was a defensive residue from ADR-0028 H1, never validated. It is **false**
+and is removed. See **ADR-0031**.
+
+**Ground-truth verification** (authoritative `droneops-standby-db`, per-point
+`gps_track`): of **570** ODL flights with tracks, **570 (100%)** have stored
+`max_altitude` matching the actual track peak within 1 m; **0** where stored
+exceeds the track; max absolute difference **0.4 m**. The 13 device-max-band
+flights each carry hundreds of real GPS points at 499–500 m AGL — the drone
+genuinely flew to its configured 500 m limit. ODL `max_altitude` is an accurate
+achieved-peak AGL value and is now presented plainly.
+
+* **`backend/app/routers/reports.py`.** Removed the `unverified_peak` flag
+  computation + dict key + summary annotation string, and the now-unused
+  `_ODL_DEVICE_MAX_LOW_M` / `_ODL_DEVICE_MAX_HIGH_M` constants.
+* **`backend/app/services/ollama.py`.** Removed the matching "unverified
+  device-reported maximum" clause from `SYSTEM_PROMPT_TEMPLATE` (imported by
+  `claude_llm.py`, so both LLM providers are covered).
+* **Tests.** Flipped the two ODL-peak assertions to verify the caveat is GONE;
+  dropped the obsolete guard clean-text case. Full backend suite: 504 passed, 3
+  skipped.
+* **ADR-0029 NOT regressed.** The altitude-limit / 400 ft / Part-107 exceedance
+  prohibition (prompt clause + `report_audience.py` runtime guard + tests) is
+  fully intact. This removed only the data-quality caveat.
+
 ## 2026-06-29 — fix(reports): raise LLM output-token caps so full after-action reports complete (no more mid-sentence truncation) — v2.76.2
 
 Reports were truncating mid-sentence in the client portal preview — every

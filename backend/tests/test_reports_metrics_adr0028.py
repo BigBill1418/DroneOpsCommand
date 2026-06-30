@@ -2,8 +2,9 @@
 
 ADR-0028 H2/M8 (live scalars, ghost) + ADR-0029, which REVERSES ADR-0028 H1:
 mission reports are client deliverables, not compliance audits, so NO altitude-
-limit / 400 ft / Part-107 exceedance flag is derived or rendered. The only
-altitude caveat is a neutral data-confidence note for unverified ODL peaks.
+limit / 400 ft / Part-107 exceedance flag is derived or rendered. ADR-0031 retired
+the former "unverified ODL peak" caveat (ground-truth verified: ODL max_altitude is
+an accurate achieved peak), so altitude is now presented plainly for every source.
 """
 
 from __future__ import annotations
@@ -96,18 +97,19 @@ def test_no_over_400ft_flag_derived():
     assert "ceiling_limited" not in m
 
 
-def test_resolve_marks_unverified_odl_peak():
-    """Data-confidence flag only — NOT a regulatory/limit check."""
+def test_resolve_derives_no_unverified_peak_flag():
+    """ADR-0031: the 'unverified ODL peak' data-quality flag is GONE. ODL
+    max_altitude is a verified achieved peak (570/570 matched track within 1 m),
+    so a ~500 m ODL flight carries no caveat flag."""
     fid = uuid.uuid4()
     mf = _mf(flight_id=fid)
     live = {fid: _live_row(fid, duration=120.0, distance=500.0, alt=500.0,
                            source="opendronelog_import")}
     m = R._resolve_flight_metrics(mf, live)
-    assert m["unverified_peak"] is True
-    # a dji_txt flight at 500 m is NOT an ODL device-max artifact
-    live2 = {fid: _live_row(fid, duration=120.0, distance=500.0, alt=500.0,
-                            source="dji_txt")}
-    assert R._resolve_flight_metrics(mf, live2)["unverified_peak"] is False
+    assert "unverified_peak" not in m
+    assert "ceiling_limited" not in m
+    # altitude is resolved as a plain value, like any other source
+    assert m["max_altitude_m"] == 500.0
 
 
 # ── ADR-0029: summaries carry NO altitude-limit language ─────────────────
@@ -127,14 +129,19 @@ def test_summary_high_altitude_has_no_limit_language():
     _assert_no_limit_language(summaries[0])
 
 
-def test_summary_unverified_odl_peak_neutral_note():
+def test_summary_odl_peak_presented_plainly():
+    """ADR-0031: a ~500 m ODL peak is presented as a plain, trustworthy altitude
+    value with NO 'unverified / device-reported / not a measured peak' caveat."""
     fid = uuid.uuid4()
     mf = _mf(flight_id=fid, aircraft_name="M300")
     live = {fid: _live_row(fid, duration=120.0, distance=500.0, alt=500.0,
                            source="opendronelog_import")}
     mission = SimpleNamespace(flights=[mf])
     s = R._build_flight_summaries(mission, live)[0]
-    assert "unverified (device-reported maximum" in s["max_altitude"]
+    assert s["max_altitude"] == "500.0 m AGL (1640 ft)"
+    assert "unverified" not in s["max_altitude"]
+    assert "device-reported" not in s["max_altitude"]
+    assert "not a measured peak" not in s["max_altitude"]
     _assert_no_limit_language(s)
 
 

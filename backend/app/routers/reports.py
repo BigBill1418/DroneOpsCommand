@@ -97,13 +97,13 @@ GHOST_MAX_DISTANCE_M = 10.0
 # it is not editorialized in a client-facing narrative. Altitude is presented as
 # neutral capture data only. No 400 ft / Part-107 / exceedance logic lives here.
 
-# DATA-QUALITY guard (NOT a regulatory check): many OpenDroneLog max-altitude
-# values pin at ~500 m — a device-reported figure, not a measured peak. We mark
-# those as unverified so the narrative does not present an artifact as an achieved
-# altitude. This is a data-confidence note; it makes NO reference to any limit,
-# regulatory ceiling, threshold, or Part-107.
-_ODL_DEVICE_MAX_LOW_M = 495.0
-_ODL_DEVICE_MAX_HIGH_M = 505.0
+# ADR-0031 retires the former "unverified ODL peak" data-quality caveat. Ground-
+# truth verification (570/570 OpenDroneLog flights with per-point gps_track: stored
+# max_altitude matched the track peak within 1 m, max diff 0.4 m, zero stored>track;
+# the ~500 m flights each carry hundreds of real GPS points at 499–500 m AGL). ODL
+# max_altitude is an accurate achieved peak AGL value and is now presented plainly,
+# like any other source. (This does NOT reintroduce any altitude-limit / 400 ft /
+# Part-107 exceedance commentary — that prohibition, ADR-0029, stays intact.)
 
 
 def _cache_num(cache: dict, *keys) -> float | None:
@@ -166,8 +166,8 @@ async def _load_live_flight_metrics(db: AsyncSession, mission: Mission) -> dict:
 def _resolve_flight_metrics(mf: MissionFlight, live: dict) -> dict:
     """Resolve one flight's metrics, preferring live ``Flight`` scalars (H2),
     falling back to the cache only for legacy-ODL rows. Also derives the M8
-    ghost flag and the ADR-0029 data-confidence flag for unverified ODL peaks.
-    NO altitude-limit / Part-107 / 400 ft exceedance flag is derived here."""
+    ghost flag. NO altitude-limit / Part-107 / 400 ft exceedance flag is derived
+    here (ADR-0029), and no ODL "unverified peak" caveat either (ADR-0031)."""
     if mf.flight_id is not None and mf.flight_id in live:
         r = live[mf.flight_id]
         dur = float(r.duration_secs or 0.0)
@@ -183,15 +183,9 @@ def _resolve_flight_metrics(mf: MissionFlight, live: dict) -> dict:
         source = cache.get("source") or "opendronelog_import"
         notes = cache.get("notes")
     is_ghost = dur < GHOST_MAX_DURATION_S and dist < GHOST_MAX_DISTANCE_M
-    unverified_peak = (
-        source == "opendronelog_import"
-        and alt is not None
-        and _ODL_DEVICE_MAX_LOW_M <= alt <= _ODL_DEVICE_MAX_HIGH_M
-    )
     return {
         "duration_secs": dur, "distance_m": dist, "max_altitude_m": alt,
         "source": source, "notes": notes, "is_ghost": is_ghost,
-        "unverified_peak": unverified_peak,
     }
 
 
@@ -200,8 +194,8 @@ def _build_flight_summaries(mission: Mission, live: dict) -> list[dict]:
     (H2), unit-correct altitude, and aborted launches flagged so they don't
     pollute altitude ranges (ADR-0026). Altitude is neutral capture data only:
     NO altitude-limit, 400 ft, regulatory-ceiling, or Part-107 exceedance flag
-    is ever attached (ADR-0029, reversing ADR-0028 H1). The sole altitude caveat
-    is a data-confidence note for unverified device-reported ODL peaks."""
+    is ever attached (ADR-0029, reversing ADR-0028 H1). ODL altitude is a verified
+    achieved peak and carries no data-quality caveat (ADR-0031)."""
     summaries = []
     for f in _dedup_flights(mission.flights):
         m = _resolve_flight_metrics(f, live)
@@ -218,8 +212,6 @@ def _build_flight_summaries(mission: Mission, live: dict) -> list[dict]:
             })
             continue
         alt_str = _format_altitude(m["max_altitude_m"])
-        if m["unverified_peak"]:
-            alt_str += " — unverified (device-reported maximum, not a measured peak)"
         summary = {
             "aircraft": aircraft,
             "max_altitude": alt_str,
