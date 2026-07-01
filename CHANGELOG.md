@@ -4,7 +4,35 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
-## 2026-06-30 — fix(reports): remove the disproven "unverified peak" ODL altitude caveat — v2.76.3
+## 2026-07-01 — fix(reports): remove disproven "unverified peak" ODL altitude caveat — v2.76.3
+
+ODL-imported flights at the ~500 m DJI device ceiling were tagged in client
+reports as `" — unverified (device-reported maximum, not a measured peak)"`. That
+caveat was a defensive residue from ADR-0028 H1, never validated. It is **false**
+and is removed. See **ADR-0031**.
+
+**Ground-truth verification** (authoritative `droneops-standby-db`, per-point
+`gps_track`): of **570** ODL flights with tracks, **570 (100%)** have stored
+`max_altitude` matching the actual track peak within 1 m; **0** where stored
+exceeds the track; max absolute difference **0.4 m**. The 13 device-max-band
+flights each carry hundreds of real GPS points at 499–500 m AGL — the drone
+genuinely flew to its configured 500 m limit. ODL `max_altitude` is an accurate
+achieved-peak AGL value and is now presented plainly.
+
+* **`backend/app/routers/reports.py`.** Removed the `unverified_peak` flag
+  computation + dict key + summary annotation string, and the now-unused
+  `_ODL_DEVICE_MAX_LOW_M` / `_ODL_DEVICE_MAX_HIGH_M` constants.
+* **`backend/app/services/ollama.py`.** Removed the matching "unverified
+  device-reported maximum" clause from `SYSTEM_PROMPT_TEMPLATE` (imported by
+  `claude_llm.py`, so both LLM providers are covered).
+* **Tests.** Flipped the two ODL-peak assertions to verify the caveat is GONE;
+  dropped the obsolete guard clean-text case. Full backend suite: 504 passed, 3
+  skipped.
+* **ADR-0029 NOT regressed.** The altitude-limit / 400 ft / Part-107 exceedance
+  prohibition (prompt clause + `report_audience.py` runtime guard + tests) is
+  fully intact. This removed only the data-quality caveat.
+
+## 2026-06-30 — fix(reports): remove disproven "unverified peak" ODL altitude caveat — v2.76.3
 
 ODL-imported flights at the ~500 m DJI device ceiling were tagged in client
 reports as `" — unverified (device-reported maximum, not a measured peak)"`. That
@@ -298,35 +326,4 @@ Pro** flight log (2026-06-24): client got `202` + poll `complete/100`, then
   (it was also **leaking** on the backend, since the worker's `unlink` ran in
   the wrong container). The canonical stored original is never deleted.
 * **Tests:** two regression tests reproduce the cross-container topology the
-  old hermetic harness hid (`test_task_reads_shared_store_when_tmp_spool_absent`,
-  `test_task_errors_clearly_when_artifact_missing_everywhere`). Full backend
-  suite green (433 passed, 3 skipped).
-* **Resilience:** reads from the persistent `app_data` volume instead of
-  ephemeral `/tmp` — strictly more recreation-safe. No DB/replication/blue-green/
-  failover impact.
-* **Client:** DroneOpsSync needs **no change** — it behaved correctly end to end.
-* **Next (non-blocking):** consider hard-failing the async spool if the
-  shared-store write fails, so a 202 is never returned for an unreadable file.
-
-## 2026-06-20 — feat(financials): customer contact on summary missions[] for marketing review engine — v2.72.0
-
-Additive: `GET /api/financials/summary` mission detail rows now carry
-`customer_email` and `customer_phone` alongside the existing `customer_name`
-(ADR-0024, extends ADR-0016).
-
-* **Why:** the marketing service-revenue bridge
-  (`marketing/api/droneops-financials.js`) consumes `summary.missions[]` and
-  needs a way to reach the customer to send a **post-job Google review
-  request**. The rows carried `customer_name` but no contact handle.
-* **Source:** pulled straight off the already eager-loaded `Mission.customer`
-  relationship (`Customer.email` / `Customer.phone`). No new data source, no
-  extra query, no migration, no loader change — the ADR-0019/P0-1 OOM-safe
-  loader contract is untouched.
-* **PII posture (ADR-0024):** minimal (only the two contact fields), not
-  logged at the endpoint, opt-out honored downstream by the marketing review
-  engine. Same JWT-gated trust boundary the bridge already uses.
-* **Gotcha:** a billable mission with no attached customer record — or a
-  customer with no email/phone on file — leaves those fields null in the payload
-  (no defaults, no fallback). The review engine skips contact for any mission
-  with null contact fields (inherits the opt-out behavior from the contact data
-  itself).
+  old hermetic harness hid (`test_task_reads_sha`).
