@@ -4,6 +4,47 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-07-02 — fix(flight-parser): correct DJI voltage, Litchi/Airdata speed units, Airdata altitude selection
+
+Three confirmed flight-log parser correctness bugs that put wrong numbers into
+client-facing report data. All fixed with new per-format tests (the Litchi and
+Airdata parsers previously had zero test coverage). Candidate for a new ADR
+(parser unit-correctness; number TBD by the operator).
+
+* **`flight-parser/src/dji.rs` — DJI battery voltage was 1000× too small.** The
+  frame loop did `battery.voltage as f64 / 1000.0`, but `dji-log-parser` 0.5.7
+  already returns `FrameBattery.voltage` in **volts** (its `SmartBattery` and
+  `CenterBattery` record parsers map the raw `u16` with `/1000.0` — confirmed in
+  the crate's `src/record/smart_battery.rs` and `src/record/center_battery.rs`).
+  The extra divide turned a 15.2 V pack into 0.0152 V and disagreed with the
+  Airdata parser (which stores volts raw). Extracted a tested
+  `frame_battery_voltage()` normaliser that passes volts through unchanged.
+
+* **`flight-parser/src/litchi.rs` — Litchi speed was stored without unit
+  conversion.** Litchi CSVs export `speed(mph)` (some km/h); the value was
+  summed into `max_speed` and every track speed with no conversion, inflating
+  speed by ~2.237× (mph) / ~3.6× (km/h). Now detects the unit from the matched
+  header and normalises to m/s, mirroring the Airdata parser. Also fixed the
+  time-column selection: the old `contains("time")` could bind the numeric
+  epoch-ms `timestamp` column instead of `datetime(utc)`, collapsing duration to
+  the point-count fallback — now prefers an explicit `datetime` column and never
+  binds `timestamp`.
+
+* **`flight-parser/src/airdata.rs` — metric Airdata speed + altitude
+  selection.** Added a km/h → m/s branch (metric exports were treated as m/s,
+  ~3.6× inflated). Lowercased the dead `altitude_above_seaLevel(feet)` candidate
+  (its capital `L` never matched a lowercased header) and demoted sea-level (MSL)
+  below the AGL / relative-altitude candidates, adding an explicit
+  `height_above_takeoff(m)` entry — so a metric export exposing both
+  `height_above_takeoff(m)` and `altitude_above_sealevel(m)` now reports the AGL
+  value for `max_altitude`, not the (much larger) MSL value.
+
+No altitude/Part-107 exceedance flagging was added — these are unit-correctness
+fixes only (ADR-0029: reports are client deliverables, not compliance audits).
+
+Verification: `cargo test` in a `rust:1-slim` container — 20/20 pass (14
+pre-existing + 6 new); clean `cargo build`, zero warnings.
+
 ## 2026-07-01 — fix(reports): remove disproven "unverified peak" ODL altitude caveat — v2.76.3
 
 ODL-imported flights at the ~500 m DJI device ceiling were tagged in client

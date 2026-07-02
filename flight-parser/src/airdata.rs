@@ -32,17 +32,35 @@ pub fn parse_airdata_csv(
     let lat_idx = lat_idx.unwrap();
     let lon_idx = lon_idx.unwrap();
 
-    // Height/altitude — Airdata often uses feet
-    let alt_idx = find_col(&header_lower, &["height_above_takeoff(feet)", "altitude_above_seaLevel(feet)", "altitude(m)", "altitude", "height"]);
-    let speed_idx = find_col(&header_lower, &["speed(mph)", "speed(m/s)", "speed"]);
+    // Height/altitude — Airdata often uses feet. Prefer AGL (height above
+    // takeoff, both feet and metric) over MSL (sea level); the sea-level
+    // candidate is last resort. NB the earlier candidate string had a stray
+    // capital 'L' matched against a lowercased header, so it never matched —
+    // dead code, now lowercased and demoted below the AGL/relative columns so
+    // a metric export with both height_above_takeoff(m) and
+    // altitude_above_sealevel(m) reports the AGL value, not MSL.
+    let alt_idx = find_col(&header_lower, &[
+        "height_above_takeoff(feet)",
+        "height_above_takeoff(m)",
+        "altitude(m)",
+        "altitude",
+        "height",
+        "altitude_above_sealevel(feet)",
+    ]);
+    let speed_idx = find_col(&header_lower, &["speed(mph)", "speed(km/h)", "speed(m/s)", "speed"]);
     let time_idx = find_col(&header_lower, &["datetime(utc)", "datetime", "time", "timestamp"]);
     let batt_idx = find_col(&header_lower, &["battery_percent", "battery(%)", "battery"]);
     let voltage_idx = find_col(&header_lower, &["voltage(v)", "battery_voltage", "voltage"]);
     let satellites_idx = find_col(&header_lower, &["satellites", "gps_satellites", "nsats"]);
 
-    // Detect if altitude is in feet
+    // Detect altitude/speed units from the matched header.
     let alt_is_feet = alt_idx.map(|i| header_lower[i].contains("feet")).unwrap_or(false);
-    let speed_is_mph = speed_idx.map(|i| header_lower[i].contains("mph")).unwrap_or(false);
+    let speed_hdr = speed_idx.map(|i| header_lower[i].as_str()).unwrap_or("");
+    let speed_is_mph = speed_hdr.contains("mph");
+    // Metric Airdata exports report km/h; without this branch the value is
+    // treated as m/s and inflated ~3.6×.
+    let speed_is_kmh = speed_hdr.contains("km/h") || speed_hdr.contains("kmh")
+        || speed_hdr.contains("kph") || speed_hdr.contains("km-h");
 
     let mut track = Vec::new();
     let mut altitudes = Vec::new();
@@ -90,6 +108,7 @@ pub fn parse_airdata_csv(
         // Convert units to metric
         if alt_is_feet { alt *= 0.3048; }  // feet to meters
         if speed_is_mph { speed *= 0.44704; }  // mph to m/s
+        else if speed_is_kmh { speed *= 0.277778; }  // km/h to m/s
 
         if home_lat.is_none() {
             home_lat = Some(lat);
@@ -256,4 +275,61 @@ fn estimate_duration(start: &Option<String>, end: &Option<String>, point_count: 
         }
     }
     point_count as f64
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_airdata_csv;
+
+    // Metric Airdata exports report speed in km/h. Without a km/h branch the
+    // value is treated as m/s and inflated ~3.6×. 18 km/h must become 5.0 m/s.
+    #[test]
+    fn kmh_speed_converted_to_ms() {
+        let csv = "\
+latitude,longitude,altitude(m),speed(km/h),datetime(utc)
+45.5000,-122.6000,10.0,9.0,2024-01-01 12:00:00
+45.5001,-122.6000,12.0,18.0,2024-01-01 12:00:01
+";
+        let f = parse_airdata_csv(csv.as_bytes(), "t.csv", "h").unwrap();
+        assert!((f.max_speed - 5.0).abs() < 1e-3, "max_speed = {}", f.max_speed);
+    }
+
+    // Existing behaviour must hold: mph → m/s (regression guard).
+    #[test]
+    fn mph_speed_converted_to_ms() {
+        let csv = "\
+latitude,longitude,altitude(m),speed(mph),datetime(utc)
+45.5000,-122.6000,10.0,5.0,2024-01-01 12:00:00
+45.5001,-122.6000,12.0,10.0,2024-01-01 12:00:01
+";
+        let f = parse_airdata_csv(csv.as_bytes(), "t.csv", "h").unwrap();
+        assert!((f.max_speed - 4.4704).abs() < 1e-6, "max_speed = {}", f.max_speed);
+    }
+
+    // AGL (height above takeoff) must be preferred over MSL (sea level) for
+    // max_altitude. A metric export exposing both must report the AGL value.
+    #[test]
+    fn prefers_agl_over_sealevel() {
+        let csv = "\
+latitude,longitude,altitude_above_seaLevel(m),height_above_takeoff(m),speed(m/s),datetime(utc)
+45.5000,-122.6000,500.0,50.0,1.0,2024-01-01 12:00:00
+45.5001,-122.6000,505.0,55.0,2.0,2024-01-01 12:00:01
+";
+        let f = parse_airdata_csv(csv.as_bytes(), "t.csv", "h").unwrap();
+        assert!((f.max_altitude - 55.0).abs() < 1e-6, "max_altitude = {}", f.max_altitude);
+    }
+
+    // The lowercased sea-level candidate must still match and detect feet when
+    // it is the only altitude column (regression guard on unit conversion).
+    #[test]
+    fn sealevel_feet_converted_to_meters() {
+        let csv = "\
+latitude,longitude,altitude_above_seaLevel(feet),speed(m/s),datetime(utc)
+45.5000,-122.6000,328.084,1.0,2024-01-01 12:00:00
+45.5001,-122.6000,328.084,2.0,2024-01-01 12:00:01
+";
+        let f = parse_airdata_csv(csv.as_bytes(), "t.csv", "h").unwrap();
+        // 328.084 ft = 100.0 m
+        assert!((f.max_altitude - 100.0).abs() < 1e-2, "max_altitude = {}", f.max_altitude);
+    }
 }
