@@ -191,7 +191,7 @@ pub fn parse_dji_log(
 
         // Battery data
         let battery = &frame.battery;
-        let voltage = battery.voltage as f64 / 1000.0;
+        let voltage = frame_battery_voltage(battery.voltage);
         let pct = battery.charge_level as f64;
         let temp = battery.temperature as f64;
 
@@ -368,6 +368,19 @@ fn choose_duration(
     header_duration // 0.0 — nothing better is available
 }
 
+/// Normalise a decoded frame battery voltage to volts.
+///
+/// `dji-log-parser` (0.5.7) already returns `FrameBattery.voltage` in volts:
+/// its `SmartBattery` and `CenterBattery` record parsers map the raw `u16`
+/// with `/1000.0` (crate `src/record/smart_battery.rs` and
+/// `src/record/center_battery.rs`). No further scaling belongs here — a prior
+/// `/ 1000.0` divided a second time, turning a 15.2 V pack into 0.0152 V and
+/// disagreeing with the Airdata parser, which stores volts raw.
+#[inline]
+fn frame_battery_voltage(volts: f32) -> f64 {
+    volts as f64
+}
+
 /// Haversine distance in meters between two lat/lon points
 fn haversine(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
     let r = 6371000.0;
@@ -381,7 +394,20 @@ fn haversine(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use super::choose_duration;
+    use super::{choose_duration, frame_battery_voltage};
+
+    // dji-log-parser already returns FrameBattery.voltage in VOLTS (its record
+    // parsers apply /1000.0). The old inline `battery.voltage as f64 / 1000.0`
+    // divided a second time: a 15.2 V pack became 0.0152 V. The normaliser must
+    // pass volts through unchanged so DJI agrees with the Airdata parser.
+    #[test]
+    fn frame_voltage_is_volts_not_millivolts() {
+        // Tolerance covers the f32→f64 widening (15.2f32 ≈ 15.2000007).
+        assert!((frame_battery_voltage(15.2) - 15.2).abs() < 1e-3);
+        assert!((frame_battery_voltage(25.2) - 25.2).abs() < 1e-3);
+        // Regression guard against the historical double-divide (→ 0.0152 V).
+        assert!(frame_battery_voltage(15.2) > 1.0);
+    }
 
     // Mavic 4 Pro logs at 15 Hz. A real 580.7s flight produces 8708 frames;
     // the OLD code returned 8708/10 = 870.8s — a 1.500× inflation. The header

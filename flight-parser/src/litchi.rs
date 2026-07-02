@@ -31,8 +31,27 @@ pub fn parse_litchi_csv(
     let lat_idx = lat_idx.unwrap();
     let lon_idx = lon_idx.unwrap();
     let alt_idx = header_lower.iter().position(|h| h.contains("altitude") || h == "alt" || h == "altitude(m)");
-    let speed_idx = header_lower.iter().position(|h| h.contains("speed") || h == "speed(m/s)");
-    let time_idx = header_lower.iter().position(|h| h.contains("datetime") || h.contains("time") || h.contains("timestamp"));
+    let speed_idx = header_lower.iter().position(|h| h.contains("speed"));
+    // Litchi exports speed in mph by default (header `speed(mph)`); some
+    // exports use km/h. The number carries no unit, so detect it from the
+    // matched header and normalise to m/s below. Treating an mph value as m/s
+    // inflates max_speed and every track speed by ~2.237× (km/h by ~3.6×).
+    let (speed_is_mph, speed_is_kmh) = match speed_idx {
+        Some(i) => {
+            let h = header_lower[i].as_str();
+            (
+                h.contains("mph"),
+                h.contains("km/h") || h.contains("kmh") || h.contains("kph") || h.contains("km-h"),
+            )
+        }
+        None => (false, false),
+    };
+    // Prefer an explicit `datetime` column. Litchi CSVs also carry a numeric
+    // epoch-ms `timestamp` column; binding it as the wall-clock source yields
+    // gross duration errors (it is not a parseable datetime), so it must never
+    // win over `datetime(utc)` and is excluded from the substring fallback.
+    let time_idx = header_lower.iter().position(|h| h.contains("datetime"))
+        .or_else(|| header_lower.iter().position(|h| h.contains("time") && !h.contains("timestamp")));
 
     let mut track = Vec::new();
     let mut altitudes = Vec::new();
@@ -66,8 +85,12 @@ pub fn parse_litchi_csv(
         };
 
         let alt = alt_idx.and_then(|i| record.get(i)).and_then(|v| v.parse::<f64>().ok()).unwrap_or(0.0);
-        let speed = speed_idx.and_then(|i| record.get(i)).and_then(|v| v.parse::<f64>().ok()).unwrap_or(0.0);
+        let mut speed = speed_idx.and_then(|i| record.get(i)).and_then(|v| v.parse::<f64>().ok()).unwrap_or(0.0);
         let time = time_idx.and_then(|i| record.get(i)).map(|v| v.to_string());
+
+        // Normalise speed to m/s (Litchi exports mph or km/h; detected above).
+        if speed_is_mph { speed *= 0.44704; }
+        else if speed_is_kmh { speed *= 0.277778; }
 
         if home_lat.is_none() {
             home_lat = Some(lat);
@@ -204,4 +227,51 @@ fn estimate_duration(start: &Option<String>, end: &Option<String>, point_count: 
     }
     // Fallback: assume ~1 second per data point (see L2 caveat above).
     point_count as f64
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_litchi_csv;
+
+    // Litchi exports speed in mph by default. Treating the number as m/s
+    // inflates every speed by ~2.237×. 10 mph must become 4.4704 m/s.
+    #[test]
+    fn mph_speed_converted_to_ms() {
+        let csv = "\
+latitude,longitude,altitude(m),speed(mph),datetime(utc)
+45.5000,-122.6000,10.0,5.0,2024-01-01 12:00:00
+45.5001,-122.6000,12.0,10.0,2024-01-01 12:00:01
+";
+        let f = parse_litchi_csv(csv.as_bytes(), "t.csv", "h").unwrap();
+        assert!((f.max_speed - 4.4704).abs() < 1e-6, "max_speed = {}", f.max_speed);
+        let speeds = &f.telemetry.as_ref().unwrap().speed;
+        assert!((speeds[0] - 5.0 * 0.44704).abs() < 1e-6, "speed[0] = {}", speeds[0]);
+    }
+
+    // Some Litchi exports use km/h; 18 km/h must become 5.0 m/s.
+    #[test]
+    fn kmh_speed_converted_to_ms() {
+        let csv = "\
+latitude,longitude,altitude(m),speed(km/h),datetime(utc)
+45.5000,-122.6000,10.0,9.0,2024-01-01 12:00:00
+45.5001,-122.6000,12.0,18.0,2024-01-01 12:00:01
+";
+        let f = parse_litchi_csv(csv.as_bytes(), "t.csv", "h").unwrap();
+        assert!((f.max_speed - 5.0).abs() < 1e-3, "max_speed = {}", f.max_speed);
+    }
+
+    // Litchi CSVs carry a numeric epoch-ms `timestamp` column alongside
+    // `datetime(utc)`. The `datetime` column must win even when `timestamp`
+    // appears first, or duration collapses to the point-count fallback.
+    #[test]
+    fn prefers_datetime_over_numeric_timestamp() {
+        let csv = "\
+latitude,longitude,altitude(m),speed(mph),timestamp,datetime(utc)
+45.5000,-122.6000,10.0,5.0,1704110400000,2024-01-01 12:00:00
+45.5001,-122.6000,12.0,10.0,1704110460000,2024-01-01 12:01:00
+";
+        let f = parse_litchi_csv(csv.as_bytes(), "t.csv", "h").unwrap();
+        assert_eq!(f.duration_secs, 60.0, "duration_secs = {}", f.duration_secs);
+        assert_eq!(f.start_time.as_deref(), Some("2024-01-01 12:00:00"));
+    }
 }
