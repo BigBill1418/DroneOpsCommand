@@ -70,6 +70,44 @@ Migration-consolidation hardening, Phase 1 of
   but does not rebuild. Ship via a hand-deploy on BOS-HQ
   (`docker compose build backend worker beat && up -d --no-deps …`); verify
   container build time, not `deployer-state.json`.
+## 2026-07-03 — feat(missions): airspace / LAANC awareness at mission creation (ADR-0037)
+
+Airspace/weather data was dashboard-only and not tied to mission creation.
+Operators now get an **operator-facing pre-flight airspace check** at
+scheduling time. Full design in **docs/adr/0037-airspace-laanc-awareness-at-mission-creation.md**.
+
+* **New service `backend/app/services/airspace.py`.** `fetch_airspace_class()`
+  point-in-polygon queries the FAA public Class Airspace ArcGIS FeatureServer
+  (free, no key) — no intersecting polygon ⇒ uncontrolled Class G.
+  `derive_laanc_requirement()` is tri-state: `True` for controlled B/C/D/
+  E-surface, `False` for G, **`None` when undetermined** (never fabricate a
+  safe-looking default from missing data). `assemble_preflight()` reuses the
+  existing weather-router TFR/METAR/Open-Meteo fetchers and emits neutral
+  advisories. `extract_latlon()` derives a coordinate from a mission's
+  free-form `area_coordinates` (flat/aliases, `center`, GeoJSON Point/Polygon).
+* **New endpoints (`backend/app/routers/missions.py`).**
+  `GET /api/missions/airspace-preflight?lat=&lon=&airport=` (primary) and
+  `GET /api/missions/{mission_id}/preflight`. Returns `{airspace_class,
+  laanc_likely_required, controlling_facility, tfrs, weather, advisories,
+  degraded, disclaimer}`. Static preflight route is declared before
+  `/{mission_id}` so the path isn't captured as a mission id.
+* **Computed on demand, never persisted.** TFRs/weather are time-varying; a
+  create-time snapshot would be stale by flight day. No schema change, no
+  migration → failover-safe. The `create_mission` write path is unchanged.
+* **Graceful degradation.** All feeds gathered with `return_exceptions=True`;
+  any feed failing (or raising) yields partial data + `degraded: true` +
+  advisory — **never a 500**. Undetermined airspace ⇒ `laanc_likely_required:
+  null`.
+* **Operator-facing ONLY — never in the client report (ADR-0029 boundary).**
+  Preflight is never persisted on the mission, never passed to any report
+  builder, and renders no compliance verdict. Guarded by
+  `tests/test_report_never_references_airspace.py` (fails if any report module
+  or the mission schema references airspace/laanc/preflight/tfr) and by a unit
+  test asserting no advisory contains "violation/illegal/non-compliant".
+* **Tests.** +44 (`tests/services/test_airspace_service.py`,
+  `tests/test_missions_airspace_preflight.py`,
+  `tests/test_report_never_references_airspace.py`). Suite 507 → 551 passing,
+  0 regressions.
 
 ## 2026-07-03 — Avata 2 report incident: data remediation + prod deploy (ADR-0033)
 
