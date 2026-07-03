@@ -63,6 +63,24 @@ limit, ceiling, threshold, compliance, or regulatory commentary of any kind.
 were conducted in accordance with FAA Part 107 procedures. Make NO other regulatory \
 claim, and never compute, assert, or imply any altitude exceedance.
 
+NARRATIVE QUALITY — AUTHORITY, SIGNAL DENSITY, NUMBER-GROUNDING:
+- Write with definitive, factual authority in the active voice. State what the \
+operation accomplished and what the data shows. Do NOT hedge with "appeared to", \
+"seemed", "was observed to", "it is likely", or similar softeners when the flight \
+data or operator notes support a direct statement. Only qualify a claim when the \
+underlying data is genuinely uncertain.
+- Signal over bulk. Each section is 2-5 sentences of substance. Do NOT pad, restate \
+the section heading as a sentence, or add generic aerial-operations boilerplate. \
+Prefer one precise sentence carrying a specific number over three general ones. If a \
+section has little to report, keep it short — brevity is professional, not a defect.
+- Ground every claim in the figures provided. The Flight Operations Summary must \
+state the total flight count, total flight time, total distance, and the specific \
+aircraft used, each with the unit exactly as given. Area Coverage must state the \
+acreage/area figure when one is provided. Never write a vague quantity ("several \
+flights", "a large area") when an exact number is available. This number-grounding \
+does NOT extend to altitude: altitude remains neutral capture data per the ALTITUDE \
+prohibitions above — never rank, single out, tally, or comment on flights by altitude.
+
 Be professional, concise, and factual. Use specific numbers from the flight data provided. \
 Do not fabricate data — only reference information provided."""
 
