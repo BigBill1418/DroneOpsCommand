@@ -4,6 +4,36 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-07-03 — fix(reports): attached flight with unrecognized aircraft no longer missing from report
+
+An attached flight whose fleet aircraft was unrecognized (`flights.aircraft_id`
+NULL) was dropped from — or genericized to "Unknown" in — the client report.
+
+* **Field defect.** The 2026-07-02 "Springfield Drifters Promo" mission had a DJI
+  Avata 2 flight attached (native `flight_id`), but the generated report omitted
+  it. Root cause: the Avata flight carried a `drone_serial` that the fleet
+  "DJI Avata 2" aircraft record lacked (its `serial_number` is blank), so the
+  strict serial-match path (ADR-0007) refused a model fallback and left
+  `aircraft_id` NULL. `backend/app/routers/reports.py` then read ONLY
+  `MissionFlight.aircraft` and substituted the literal "Unknown" — discarding the
+  flight's own parsed `drone_model` ("Avata2"). The flight was attached the whole
+  time; the report layer was not robust to an unlinked aircraft.
+* **Fix (report layer, defense-in-depth).** New `_aircraft_label()` resolves the
+  aircraft display name with a fallback chain: linked fleet `model_name` → live
+  `Flight.drone_name`/`drone_model` → cache `drone_name`/`drone_model`/`aircraft`
+  → "Unknown" only as a true last resort. `_build_flight_summaries` (the LLM
+  aggregation) and the PDF "Aircraft used" section both use it, so an attached
+  flight is never silently dropped from either surface. `_load_live_flight_metrics`
+  now also selects `drone_model`/`drone_name` (scalar columns; heavy JSON still
+  never loaded, ADR-0019). Regression test:
+  `backend/tests/test_report_unrecognized_aircraft_label.py`.
+* **No compliance logic touched** — the ADR-0029 altitude/Part-107 exceedance
+  prohibition stays intact.
+* **Operator residual (data, not code).** To restore canonical fleet attribution
+  (and the aircraft image/specs card), add serial `1581F6W8A242N0A3` to the
+  "DJI Avata 2" fleet aircraft record, then POST `/api/flights/backfill-aircraft`.
+  Until then the report labels the flight "Avata2" from the parsed model.
+
 ## 2026-07-02 — fix(flight-parser): correct DJI voltage, Litchi/Airdata speed units, Airdata altitude selection
 
 Three confirmed flight-log parser correctness bugs that put wrong numbers into
