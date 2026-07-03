@@ -185,6 +185,81 @@ class TestAudienceLeakDetector:
         )
 
 
+# ─────────────── Report-quality levers (2026-07-03, ADR-0035) ────────────
+
+
+class TestNarrativeQualityLevers:
+    """The 2026-07-03 quality pass added three guard-safe prompt levers to the
+    shared system prompt: (3.1) kill hedging, (3.2) anti-bloat / signal-density
+    budget, (3.3) number-grounding. Lock them structurally so a future edit
+    can't silently drop them — and prove the added number-grounding lever does
+    NOT weaken the ADR-0029 altitude guard."""
+
+    @pytest.fixture
+    def rendered(self) -> str:
+        return SYSTEM_PROMPT_TEMPLATE.format(company_name="DroneOps")
+
+    def test_31_kills_hedging_verbs(self, rendered: str) -> None:
+        low = rendered.lower()
+        assert "definitive, factual authority" in low
+        # The named hedging softeners the lever forbids.
+        for softener in ("appeared to", "seemed", "was observed to"):
+            assert softener in low, f"hedging lever dropped {softener!r}"
+
+    def test_32_anti_bloat_budget(self, rendered: str) -> None:
+        low = rendered.lower()
+        assert "2-5 sentences of substance" in low
+        assert "do not pad" in low
+        assert "brevity is professional" in low
+
+    def test_33_number_grounding(self, rendered: str) -> None:
+        low = rendered.lower()
+        assert "ground every claim in the figures provided" in low
+        assert "total flight count, total flight time, total distance" in low
+        # Never accept a vague quantity when an exact number exists.
+        assert "several flights" in low
+
+    def test_number_grounding_lever_reinforces_altitude_guard(
+        self, rendered: str
+    ) -> None:
+        """The number-grounding lever must EXPLICITLY exclude altitude, so it
+        cannot be read as license to cite/rank altitude figures (ADR-0029)."""
+        low = rendered.lower()
+        assert "does not extend to altitude" in low
+        assert "never rank, single out, tally, or comment on flights by altitude" in low
+
+    def test_representative_high_altitude_report_stays_guard_clean(self) -> None:
+        """A full report written in the new authoritative, number-grounded
+        style — INCLUDING a flight whose neutral max altitude is above 400 ft —
+        must still pass the runtime guard. The lever cites counts/time/distance
+        assertively but keeps altitude as neutral capture data (no limit,
+        ranking, or exceedance framing)."""
+        report = (
+            "## Mission Overview\n"
+            "On 2026-06-30, the operator completed an aerial survey of the "
+            "client's 62.40-acre parcel near Coburg, Oregon. The objective was "
+            "full orthomosaic coverage for site planning, and the deliverables "
+            "were captured in a single sortie block.\n\n"
+            "## Area Coverage\n"
+            "The survey covered 62.40 acres of mixed pasture and tree line, with "
+            "complete coverage of the northern drainage.\n\n"
+            "## Flight Operations Summary\n"
+            "The operator flew 8 flights totaling 96 minutes over 4.10 miles "
+            "using a DJI Mavic 3 Enterprise. Maximum altitude across the block "
+            "reached 146.3 m AGL (480 ft).\n\n"
+            "## Key Findings\n"
+            "The survey delivered continuous coverage of the parcel. Standing "
+            "water was captured along the northern drainage, and the imagery set "
+            "resolves individual fence posts along the eastern boundary.\n\n"
+            "## Client Follow-Up Items\n"
+            "The standing-water area flagged in the northern imagery warrants "
+            "on-the-ground inspection by the property owner.\n"
+        )
+        leaks = detect_audience_leaks(report)
+        assert leaks == [], f"high-altitude report falsely flagged: {leaks}"
+        assert has_audience_leak(report) is False
+
+
 # ───────────────── ADR-0029: altitude-limit / Part-107 guard ─────────────
 
 

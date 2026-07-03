@@ -4,6 +4,32 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-07-03 — feat(reports): client-report narrative quality levers — v2.77.0 (ADR-0035)
+
+Guard-safe quality pass on the shared report system prompt
+(`SYSTEM_PROMPT_TEMPLATE` in `backend/app/services/ollama.py`, inherited by the
+Claude path via `claude_llm.py`). Implements the top three levers of
+**docs/plans/2026-07-03-report-quality.md** (`FU-AI-QUALITY-PASS`):
+
+* **Kill hedging (§3.1).** Requires definitive, active-voice authority; forbids
+  "appeared to" / "seemed" / "was observed to" / "it is likely" softeners unless
+  the data is genuinely uncertain.
+* **Anti-bloat budget (§3.2).** Each section is 2–5 sentences of substance — no
+  padding, no restating the heading, no generic boilerplate; brevity on a routine
+  flight is professional, not a defect.
+* **Number-grounding (§3.3).** Grounds every claim in the provided figures
+  (flight count / total time / distance / aircraft with units; area acreage); no
+  vague quantities when an exact number exists.
+* **Guard integrity (ADR-0029).** The number-grounding lever carries an explicit
+  altitude carve-out — number-grounding does NOT extend to altitude, which stays
+  neutral capture data; ranking/singling-out/tallying flights by altitude remains
+  forbidden. The runtime detector `report_audience.py` is unchanged; new tests in
+  `test_report_audience_guard.py::TestNarrativeQualityLevers` lock the levers and
+  prove a report containing a 146.3 m AGL (480 ft) flight stays guard-clean. Full
+  ADR-0029 / audience-leak suites pass unchanged (52 passed).
+* **Caps unchanged** (ADR-0030). `.deployer-disabled` repo — hand-deploy on
+  BOS-HQ; verify the public OpenAPI version (2.77.0), not `deployer-state.json`.
+
 ## 2026-07-03 — Avata 2 report incident: data remediation + prod deploy (ADR-0033)
 
 Follows the code fix below. Full incident write-up + audit trail in
