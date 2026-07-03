@@ -15,6 +15,7 @@ from sqlalchemy.orm import selectinload
 from app.auth.jwt import get_current_user
 from app.config import settings
 from app.database import get_db
+from app.models.aircraft import Aircraft
 from app.models.flight import Flight
 from app.models.invoice import Invoice
 from app.models.mission import Mission, MissionFlight
@@ -150,6 +151,14 @@ async def _load_live_flight_metrics(db: AsyncSession, mission: Mission) -> dict:
     authoritative live ``Flight`` scalars — selecting only scalar COLUMNS so the
     heavy ``gps_track`` / ``telemetry`` / ``raw_metadata`` JSON is never loaded
     (ADR-0019). Legacy-ODL rows (``flight_id IS NULL``) keep using the cache.
+
+    ADR-0035 (flight-attach unification, Phase 1): the row also LEFT-JOINs the
+    live fleet ``Aircraft`` (via ``Flight.aircraft_id``) so both the narrative
+    label and the PDF "Aircraft used" card resolve the aircraft from the LIVE
+    flight — never the junction's copied ``aircraft_id``, which is snapshotted at
+    attach time and goes stale when a fleet serial is registered later (the
+    ADR-0033 Avata incident). Only scalar aircraft columns are selected; the
+    heavy Flight JSON is still never loaded.
     """
     ids = [mf.flight_id for mf in mission.flights if mf.flight_id is not None]
     if not ids:
@@ -165,7 +174,18 @@ async def _load_live_flight_metrics(db: AsyncSession, mission: Mission) -> dict:
             # defect, 2026-07). Both are scalar VARCHARs — the heavy JSON
             # (gps_track/telemetry/raw_metadata) is still never loaded (ADR-0019).
             Flight.drone_model, Flight.drone_name,
-        ).where(Flight.id.in_(ids))
+            # Live fleet aircraft, joined via Flight.aircraft_id (ADR-0035). These
+            # are the authoritative aircraft identity/card fields — resolved live,
+            # so a serial registered AFTER attach is reflected without re-attach.
+            Aircraft.id.label("aircraft_id"),
+            Aircraft.model_name.label("aircraft_model_name"),
+            Aircraft.manufacturer.label("aircraft_manufacturer"),
+            Aircraft.image_filename.label("aircraft_image_filename"),
+            Aircraft.specs.label("aircraft_specs"),
+        )
+        .select_from(Flight)
+        .outerjoin(Aircraft, Flight.aircraft_id == Aircraft.id)
+        .where(Flight.id.in_(ids))
     )
     return {r.id: r for r in rows.all()}
 
@@ -198,37 +218,142 @@ def _resolve_flight_metrics(mf: MissionFlight, live: dict) -> dict:
 
 def _aircraft_label(mf: MissionFlight, live: dict) -> str:
     """Resolve the display label for a flight's aircraft, robust to an
-    unrecognized / unlinked fleet aircraft.
+    unrecognized / unlinked fleet aircraft, and — for native flights — never
+    trusting the junction's stale copied ``aircraft_id``.
 
-    An attached flight whose ``aircraft_id`` is NULL — e.g. it carries a serial
-    the fleet record lacks, so the strict serial-match path (ADR-0007) left it
+    An attached flight whose aircraft is NULL — e.g. it carries a serial the
+    fleet record lacks, so the strict serial-match path (ADR-0007) left it
     unattributed — must NEVER be dropped from, or genericized to "Unknown" in,
     the client report. The flight already knows its own model from the parsed
     ``Flight.drone_model`` (native rows) or the attach-time cache snapshot
-    (legacy-ODL rows). Resolution order, most-authoritative first:
+    (legacy-ODL rows).
 
-      1. Linked fleet aircraft's canonical ``model_name`` (e.g. "DJI Avata 2").
-      2. Live ``Flight.drone_name`` (operator nickname), then ``drone_model``.
-      3. Cache ``drone_name`` → ``drone_model`` → ``aircraft`` (legacy-ODL rows).
-      4. "Unknown" — only when no model is available anywhere.
+    Two classes, resolved differently (ADR-0035, flight-attach unification):
+
+    * **Native** (``flight_id`` set) — resolve from the LIVE ``Flight`` only,
+      never ``mf.aircraft`` (the junction copy snapshots the aircraft at attach
+      and goes stale when a fleet serial is registered LATER — the ADR-0033
+      Avata incident). Order: live fleet ``Aircraft.model_name`` (joined via
+      ``Flight.aircraft_id``) → live ``drone_name`` → live ``drone_model`` →
+      "Unknown". A serial registered after attach is now reflected on the next
+      report generation with no detach/re-attach.
+    * **Legacy-ODL** (``flight_id IS NULL``) — has no live backing ``Flight``
+      row, so the junction ``mf.aircraft`` + the cache snapshot remain the only
+      sources (Phase 2 materializes these into real ``Flight`` rows). Order:
+      junction ``mf.aircraft.model_name`` → cache ``drone_name`` → ``drone_model``
+      → ``aircraft`` → "Unknown".
 
     Field defect this closes: the DJI Avata 2 on the 2026-07-02 "Springfield
-    Drifters Promo" mission vanished from the report because the code read only
-    ``mf.aircraft`` and fell straight to "Unknown".
+    Drifters Promo" mission vanished from the report because the code read the
+    (NULL) junction copy and fell straight to "Unknown"; and — once the fleet
+    serial was registered — the junction copy STAYED stale versus the live flight.
     """
+    if mf.flight_id is not None:
+        # Native — live flight is authoritative; junction copy is ignored.
+        r = live.get(mf.flight_id)
+        if r is not None:
+            name = (getattr(r, "aircraft_model_name", None) or "").strip()
+            if name:
+                return name
+            label = (getattr(r, "drone_name", None) or "").strip() or (getattr(r, "drone_model", None) or "").strip()
+            if label:
+                return label
+        return "Unknown"
+    # Legacy-ODL — no live row; junction copy + cache are the only sources.
     if mf.aircraft is not None and mf.aircraft.model_name:
         return mf.aircraft.model_name
-    if mf.flight_id is not None and mf.flight_id in live:
-        r = live[mf.flight_id]
-        label = (getattr(r, "drone_name", None) or "").strip() or (getattr(r, "drone_model", None) or "").strip()
-        if label:
-            return label
     cache = mf.flight_data_cache or {}
     for key in ("drone_name", "drone_model", "aircraft"):
         val = cache.get(key)
         if isinstance(val, str) and val.strip():
             return val.strip()
     return "Unknown"
+
+
+def _build_aircraft_cards(mission: Mission, live: dict) -> list[dict]:
+    """Build the PDF "Aircraft used" cards, deduplicated, resolving each flight's
+    aircraft the SAME way ``_aircraft_label`` resolves the narrative label
+    (ADR-0035, flight-attach unification Phase 1).
+
+    * **Native** (``flight_id`` set) — read the LIVE fleet aircraft carried on
+      the ``live`` join rows (``aircraft_id`` / ``aircraft_model_name`` / … from
+      ``Flight.aircraft``), never the junction's copied ``aircraft_id``. A serial
+      registered AFTER attach is therefore reflected on the next generation with
+      no detach/re-attach, and a stale copy can never surface. A native flight
+      with no fleet aircraft is still listed by its parsed model (never dropped).
+    * **Legacy-ODL** (``flight_id IS NULL``) — no live backing row, so the
+      junction ``f.aircraft`` (full card) then the cache label remain the only
+      sources (Phase 2 materializes these into real ``Flight`` rows).
+    """
+    bundled_aircraft_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "aircraft")
+
+    def _image_path(image_filename: str | None) -> str | None:
+        if not image_filename:
+            return None
+        upload_path = os.path.join(settings.upload_dir, image_filename)
+        bundled_path = os.path.join(bundled_aircraft_dir, image_filename)
+        if os.path.isfile(upload_path):
+            return upload_path
+        if os.path.isfile(bundled_path):
+            return bundled_path
+        return None
+
+    aircraft_list: list[dict] = []
+    seen: set = set()
+
+    def _add_label_card(label: str) -> None:
+        key = ("label", label.lower()) if label else None
+        if label and key not in seen:
+            seen.add(key)
+            aircraft_list.append({
+                "model_name": label,
+                "manufacturer": "DJI" if label.upper().startswith("DJI") else "",
+                "image_path": None,
+                "specs": {},
+            })
+
+    for f in mission.flights:
+        if f.flight_id is not None:
+            # NATIVE — live flight aircraft only; junction copy is ignored.
+            r = live.get(f.flight_id)
+            ac_id = getattr(r, "aircraft_id", None) if r is not None else None
+            if ac_id is not None:
+                if ac_id in seen:
+                    continue
+                seen.add(ac_id)
+                aircraft_list.append({
+                    "model_name": r.aircraft_model_name,
+                    "manufacturer": r.aircraft_manufacturer,
+                    "image_path": _image_path(r.aircraft_image_filename),
+                    "specs": r.aircraft_specs or {},
+                })
+                continue
+            label = ""
+            if r is not None:
+                label = (getattr(r, "drone_name", None) or "").strip() or (getattr(r, "drone_model", None) or "").strip()
+            _add_label_card(label)
+            continue
+
+        # LEGACY-ODL — junction copy (full card), else cache label.
+        if f.aircraft and f.aircraft.id not in seen:
+            seen.add(f.aircraft.id)
+            aircraft_list.append({
+                "model_name": f.aircraft.model_name,
+                "manufacturer": f.aircraft.manufacturer,
+                "image_path": _image_path(f.aircraft.image_filename),
+                "specs": f.aircraft.specs,
+            })
+        elif not f.aircraft:
+            cache = f.flight_data_cache or {}
+            label = ""
+            for key in ("drone_name", "drone_model", "aircraft"):
+                val = cache.get(key)
+                if isinstance(val, str) and val.strip():
+                    label = val.strip()
+                    break
+            _add_label_card(label)
+
+    return aircraft_list
 
 
 def _build_flight_summaries(mission: Mission, live: dict) -> list[dict]:
@@ -498,54 +623,11 @@ async def generate_report_pdf(
         "flight_count": len(real_flights),
     }
 
-    # Aircraft used
-    aircraft_list = []
-    seen_aircraft = set()
-    bundled_aircraft_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "aircraft")
-    for f in mission.flights:
-        if f.aircraft and f.aircraft.id not in seen_aircraft:
-            seen_aircraft.add(f.aircraft.id)
-            # Resolve full image path for WeasyPrint
-            img_path = None
-            if f.aircraft.image_filename:
-                upload_path = os.path.join(settings.upload_dir, f.aircraft.image_filename)
-                bundled_path = os.path.join(bundled_aircraft_dir, f.aircraft.image_filename)
-                if os.path.isfile(upload_path):
-                    img_path = upload_path
-                elif os.path.isfile(bundled_path):
-                    img_path = bundled_path
-            aircraft_list.append({
-                "model_name": f.aircraft.model_name,
-                "manufacturer": f.aircraft.manufacturer,
-                "image_path": img_path,
-                "specs": f.aircraft.specs,
-            })
-        elif not f.aircraft:
-            # Attached flight with an unrecognized / unlinked fleet aircraft
-            # (aircraft_id NULL). Still list it in "Aircraft used" by its parsed
-            # model so the deliverable never silently omits an aircraft that
-            # flew (Avata-2 defect, 2026-07). No fleet record → no bundled image
-            # or specs; the template already renders those as absent.
-            fl = getattr(f, "flight", None)
-            label = ""
-            if fl is not None:
-                label = (getattr(fl, "drone_name", None) or "").strip() or (getattr(fl, "drone_model", None) or "").strip()
-            if not label:
-                cache = f.flight_data_cache or {}
-                for key in ("drone_name", "drone_model", "aircraft"):
-                    val = cache.get(key)
-                    if isinstance(val, str) and val.strip():
-                        label = val.strip()
-                        break
-            label_key = ("label", label.lower()) if label else None
-            if label and label_key not in seen_aircraft:
-                seen_aircraft.add(label_key)
-                aircraft_list.append({
-                    "model_name": label,
-                    "manufacturer": "DJI" if label.upper().startswith("DJI") else "",
-                    "image_path": None,
-                    "specs": {},
-                })
+    # Aircraft used — resolved to match the narrative (ADR-0035, Phase 1). See
+    # ``_build_aircraft_cards``: native flights use the LIVE Flight.aircraft, so
+    # a serial registered AFTER attach is reflected and the card can never go
+    # stale (the ADR-0033 Avata incident); legacy-ODL keeps the junction/cache.
+    aircraft_list = _build_aircraft_cards(mission, pdf_live)
 
     # Invoice
     invoice_dict = None

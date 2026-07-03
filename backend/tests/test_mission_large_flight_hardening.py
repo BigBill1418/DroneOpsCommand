@@ -204,11 +204,13 @@ async def test_bulk_attach_many_in_one_call_with_scalar_caches(db: AsyncSession)
     await db.commit()
 
     assert len(created) == 6
-    # Native rows derived aircraft + scalar cache, no track.
+    # Native rows keep flight linkage + scalar cache (no track). ADR-0035: the
+    # junction no longer copies the aircraft — reports resolve it live from
+    # Flight.aircraft via flight_id, so the junction aircraft_id stays NULL.
     native_rows = [r for r in created if r.flight_id is not None]
     assert len(native_rows) == 5
     for r in native_rows:
-        assert r.aircraft_id == air.id
+        assert r.aircraft_id is None
         assert "track" not in (r.flight_data_cache or {})
     # ODL row preserved with its id + scalar display fields, track stripped.
     odl_rows = [r for r in created if r.opendronelog_flight_id == "odl-7"]
