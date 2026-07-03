@@ -77,28 +77,63 @@ def test_baseline_revision_constant_matches_tree():
 
 
 def _run_with_fakes(*, has_alembic_version: bool, has_sentinel: bool,
-                    current: str | None, head: str = "0002_p2_p3_indexes"):
+                    current: str | None, head: str = "0002_p2_p3_indexes",
+                    upgrade_raises: bool = False, calls: dict | None = None):
     """Drive ``run_migrations_sync`` with the engine / inspector / Alembic
-    command surface mocked, returning (action, stamp_called, upgrade_called).
+    command surface mocked, returning ``(action, calls)``.
 
     No real DB. We assert the BRANCHING logic (fresh vs brownfield vs
-    pending vs noop), which is the part that must be correct unattended.
+    pending vs noop) AND the advisory-lock envelope (ADR-0035): ``calls``
+    carries ``lock_sql`` (the raw SQL issued on the dedicated lock
+    connection) and ``events`` (an ordered log of lock/stamp/upgrade/unlock)
+    so tests can prove the lock is acquired BEFORE the upgrade and released
+    AFTER — even when the upgrade raises.
+
+    ``action`` is ``None`` when ``upgrade_raises`` is set (the exception
+    propagates through the runner; the caller catches it).
     """
     from app import db_migrations as dm
 
-    calls = {"stamp": 0, "upgrade": 0, "stamp_rev": None}
+    if calls is None:
+        calls = {}
+    calls.setdefault("stamp", 0)
+    calls.setdefault("upgrade", 0)
+    calls.setdefault("stamp_rev", None)
+    calls.setdefault("lock_sql", [])
+    calls.setdefault("events", [])
 
-    # Fake engine whose connect()/begin() yield context-manager conns.
-    class _Ctx:
+    # A single fake connection type serves every ``engine.connect()`` /
+    # ``engine.begin()`` call. It is BOTH a context manager (the read-only
+    # probe + the ``begin()`` upgrade transaction use ``with``) AND a plain
+    # object with ``execution_options``/``execute``/``close`` (the dedicated
+    # advisory-lock connection is held open across the whole run). It records
+    # any advisory lock/unlock SQL it is asked to run.
+    class _FakeConn:
+        def execution_options(self, **_k):
+            return self
+
+        def execute(self, clause):
+            sql = str(clause)
+            if "pg_advisory_lock" in sql:
+                calls["lock_sql"].append(sql)
+                calls["events"].append("lock")
+            elif "pg_advisory_unlock" in sql:
+                calls["lock_sql"].append(sql)
+                calls["events"].append("unlock")
+            return MagicMock()
+
+        def close(self):
+            pass
+
         def __enter__(self):
-            return MagicMock(name="conn")
+            return self
 
         def __exit__(self, *a):
             return False
 
     fake_engine = MagicMock()
-    fake_engine.connect.return_value = _Ctx()
-    fake_engine.begin.return_value = _Ctx()
+    fake_engine.connect.side_effect = lambda: _FakeConn()
+    fake_engine.begin.side_effect = lambda: _FakeConn()
 
     fake_inspector = MagicMock()
     fake_inspector.has_table.side_effect = lambda t: (
@@ -111,9 +146,13 @@ def _run_with_fakes(*, has_alembic_version: bool, has_sentinel: bool,
     def _stamp(cfg, rev):
         calls["stamp"] += 1
         calls["stamp_rev"] = rev
+        calls["events"].append("stamp")
 
     def _upgrade(cfg, rev):
         calls["upgrade"] += 1
+        calls["events"].append("upgrade")
+        if upgrade_raises:
+            raise RuntimeError("boom during upgrade")
 
     with patch.object(dm, "create_engine", return_value=fake_engine), \
             patch.object(dm, "inspect", return_value=fake_inspector), \
@@ -159,6 +198,99 @@ def test_already_at_head_is_noop():
     assert action == "noop"
     assert calls["stamp"] == 0
     assert calls["upgrade"] == 0
+
+
+# ── Hermetic: migration run is advisory-locked (ADR-0035) ───────────────
+
+
+def test_migration_lock_id_is_distinct_from_seed_lock():
+    """The migration lock must NOT collide with seed's, so migrating and
+    seeding don't needlessly serialize against each other (plan §Phase 1)."""
+    from app.db_migrations import _MIGRATION_LOCK_ID
+    from app.seed import _SEED_LOCK_ID
+    assert _MIGRATION_LOCK_ID != _SEED_LOCK_ID
+    assert isinstance(_MIGRATION_LOCK_ID, int)
+
+
+def test_migration_acquires_and_releases_advisory_lock():
+    """A steady-state upgrade takes ``pg_advisory_lock(<id>)`` before doing
+    any work and ``pg_advisory_unlock(<id>)`` after — on the same id."""
+    from app.db_migrations import _MIGRATION_LOCK_ID
+    action, calls = _run_with_fakes(
+        has_alembic_version=True, has_sentinel=True, current=None)
+    assert action == "upgraded"
+    assert calls["lock_sql"] == [
+        f"SELECT pg_advisory_lock({_MIGRATION_LOCK_ID})",
+        f"SELECT pg_advisory_unlock({_MIGRATION_LOCK_ID})",
+    ], calls["lock_sql"]
+
+
+def test_lock_is_held_around_the_upgrade():
+    """Ordering contract: lock acquired BEFORE the upgrade runs, released
+    AFTER — so two booting workers cannot both be inside ``upgrade``."""
+    _, calls = _run_with_fakes(
+        has_alembic_version=True, has_sentinel=True, current=None)
+    assert calls["events"] == ["lock", "upgrade", "unlock"], calls["events"]
+
+
+def test_lock_wraps_brownfield_stamp_and_upgrade():
+    """The lock spans the entire detect+stamp+upgrade critical section."""
+    _, calls = _run_with_fakes(
+        has_alembic_version=False, has_sentinel=True, current=None)
+    assert calls["events"] == ["lock", "stamp", "upgrade", "unlock"], calls["events"]
+
+
+def test_noop_path_still_acquires_and_releases_lock():
+    """Even the already-at-head fast path must take + drop the lock: a losing
+    racer BLOCKS on acquire until the winner finishes, then re-detects head
+    and no-ops (it must not skip acquisition and proceed un-serialized)."""
+    from app.db_migrations import _MIGRATION_LOCK_ID
+    action, calls = _run_with_fakes(
+        has_alembic_version=True, has_sentinel=True,
+        current="0002_p2_p3_indexes")
+    assert action == "noop"
+    assert calls["upgrade"] == 0
+    assert calls["events"] == ["lock", "unlock"], calls["events"]
+    assert calls["lock_sql"] == [
+        f"SELECT pg_advisory_lock({_MIGRATION_LOCK_ID})",
+        f"SELECT pg_advisory_unlock({_MIGRATION_LOCK_ID})",
+    ]
+
+
+def test_lock_released_even_when_upgrade_raises():
+    """If ``command.upgrade`` throws, the exception propagates BUT the lock
+    is still released in the ``finally`` — a crash must never leave the
+    advisory lock held and wedge the next booting worker forever."""
+    with pytest.raises(RuntimeError, match="boom during upgrade"):
+        _run_with_fakes(has_alembic_version=True, has_sentinel=True,
+                        current=None, upgrade_raises=True)
+
+
+def test_lock_release_ordering_when_upgrade_raises():
+    """Capture the event log across a failing upgrade to prove ``unlock``
+    fired AFTER the failed ``upgrade`` — i.e. the lock was released on the
+    exception path, not leaked."""
+    calls: dict = {}
+    with pytest.raises(RuntimeError, match="boom during upgrade"):
+        _run_with_fakes(has_alembic_version=True, has_sentinel=True,
+                        current=None, upgrade_raises=True, calls=calls)
+    assert calls["events"] == ["lock", "upgrade", "unlock"], calls["events"]
+
+
+# ── Hermetic: revision-id length invariant (v2.75.1 crash-loop fence) ────
+
+
+def test_all_revision_ids_within_alembic_varchar_limit():
+    """``alembic_version.version_num`` is ``VARCHAR(32)``. A revision id > 32
+    chars runs its DDL then rolls the stamp back on EVERY boot — the v2.75.1
+    crash-loop (revision ``0004`` was 41 chars). Fail CI before it ships."""
+    script = _script_dir()
+    offenders = {r.revision: len(r.revision)
+                 for r in script.walk_revisions() if len(r.revision) > 32}
+    assert not offenders, (
+        "revision id(s) exceed alembic_version VARCHAR(32) and will "
+        f"crash-loop the backend at startup: {offenders}"
+    )
 
 
 # ── Hermetic: startup offloads the (sync) runner to an executor ──────────
