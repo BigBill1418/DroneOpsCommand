@@ -158,6 +158,13 @@ async def _load_live_flight_metrics(db: AsyncSession, mission: Mission) -> dict:
         select(
             Flight.id, Flight.duration_secs, Flight.total_distance,
             Flight.max_altitude, Flight.max_speed, Flight.source, Flight.notes,
+            # drone_model / drone_name resolve the aircraft LABEL when a flight
+            # has no linked fleet aircraft (aircraft_id NULL) — so an attached
+            # flight whose aircraft is unrecognized is still named by its parsed
+            # model instead of being dropped/genericized to "Unknown" (Avata-2
+            # defect, 2026-07). Both are scalar VARCHARs — the heavy JSON
+            # (gps_track/telemetry/raw_metadata) is still never loaded (ADR-0019).
+            Flight.drone_model, Flight.drone_name,
         ).where(Flight.id.in_(ids))
     )
     return {r.id: r for r in rows.all()}
@@ -189,6 +196,41 @@ def _resolve_flight_metrics(mf: MissionFlight, live: dict) -> dict:
     }
 
 
+def _aircraft_label(mf: MissionFlight, live: dict) -> str:
+    """Resolve the display label for a flight's aircraft, robust to an
+    unrecognized / unlinked fleet aircraft.
+
+    An attached flight whose ``aircraft_id`` is NULL — e.g. it carries a serial
+    the fleet record lacks, so the strict serial-match path (ADR-0007) left it
+    unattributed — must NEVER be dropped from, or genericized to "Unknown" in,
+    the client report. The flight already knows its own model from the parsed
+    ``Flight.drone_model`` (native rows) or the attach-time cache snapshot
+    (legacy-ODL rows). Resolution order, most-authoritative first:
+
+      1. Linked fleet aircraft's canonical ``model_name`` (e.g. "DJI Avata 2").
+      2. Live ``Flight.drone_name`` (operator nickname), then ``drone_model``.
+      3. Cache ``drone_name`` → ``drone_model`` → ``aircraft`` (legacy-ODL rows).
+      4. "Unknown" — only when no model is available anywhere.
+
+    Field defect this closes: the DJI Avata 2 on the 2026-07-02 "Springfield
+    Drifters Promo" mission vanished from the report because the code read only
+    ``mf.aircraft`` and fell straight to "Unknown".
+    """
+    if mf.aircraft is not None and mf.aircraft.model_name:
+        return mf.aircraft.model_name
+    if mf.flight_id is not None and mf.flight_id in live:
+        r = live[mf.flight_id]
+        label = (getattr(r, "drone_name", None) or "").strip() or (getattr(r, "drone_model", None) or "").strip()
+        if label:
+            return label
+    cache = mf.flight_data_cache or {}
+    for key in ("drone_name", "drone_model", "aircraft"):
+        val = cache.get(key)
+        if isinstance(val, str) and val.strip():
+            return val.strip()
+    return "Unknown"
+
+
 def _build_flight_summaries(mission: Mission, live: dict) -> list[dict]:
     """Per-flight summaries for the LLM — deduplicated, live-scalar metrics
     (H2), unit-correct altitude, and aborted launches flagged so they don't
@@ -199,7 +241,7 @@ def _build_flight_summaries(mission: Mission, live: dict) -> list[dict]:
     summaries = []
     for f in _dedup_flights(mission.flights):
         m = _resolve_flight_metrics(f, live)
-        aircraft = f.aircraft.model_name if f.aircraft else "Unknown"
+        aircraft = _aircraft_label(f, live)
         if m["is_ghost"]:
             summaries.append({
                 "aircraft": aircraft,
@@ -478,6 +520,32 @@ async def generate_report_pdf(
                 "image_path": img_path,
                 "specs": f.aircraft.specs,
             })
+        elif not f.aircraft:
+            # Attached flight with an unrecognized / unlinked fleet aircraft
+            # (aircraft_id NULL). Still list it in "Aircraft used" by its parsed
+            # model so the deliverable never silently omits an aircraft that
+            # flew (Avata-2 defect, 2026-07). No fleet record → no bundled image
+            # or specs; the template already renders those as absent.
+            fl = getattr(f, "flight", None)
+            label = ""
+            if fl is not None:
+                label = (getattr(fl, "drone_name", None) or "").strip() or (getattr(fl, "drone_model", None) or "").strip()
+            if not label:
+                cache = f.flight_data_cache or {}
+                for key in ("drone_name", "drone_model", "aircraft"):
+                    val = cache.get(key)
+                    if isinstance(val, str) and val.strip():
+                        label = val.strip()
+                        break
+            label_key = ("label", label.lower()) if label else None
+            if label and label_key not in seen_aircraft:
+                seen_aircraft.add(label_key)
+                aircraft_list.append({
+                    "model_name": label,
+                    "manufacturer": "DJI" if label.upper().startswith("DJI") else "",
+                    "image_path": None,
+                    "specs": {},
+                })
 
     # Invoice
     invoice_dict = None
