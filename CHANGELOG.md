@@ -29,6 +29,47 @@ Claude path via `claude_llm.py`). Implements the top three levers of
   ADR-0029 / audience-leak suites pass unchanged (52 passed).
 * **Caps unchanged** (ADR-0030). `.deployer-disabled` repo — hand-deploy on
   BOS-HQ; verify the public OpenAPI version (2.77.0), not `deployer-state.json`.
+## 2026-07-03 — Advisory-lock the Alembic migration boot path (ADR-0036, Phase 1)
+
+Migration-consolidation hardening, Phase 1 of
+**docs/plans/2026-07-03-migration-consolidation.md**. Decision + rationale in
+**docs/adr/0036-migration-single-path-hardening.md**.
+
+* **Advisory lock on the migration run.** `run_migrations_sync()`
+  (`backend/app/db_migrations.py`) now wraps its entire detect + stamp +
+  upgrade critical section in a **session-level Postgres advisory lock**
+  (`_MIGRATION_LOCK_ID = 8675310`) taken on a dedicated AUTOCOMMIT connection
+  and released in a `finally`. Previously the migration path relied only on
+  transaction atomicity + the `--workers 1` / single-replica assumptions — two
+  backends booting concurrently (multi-worker, multi-replica, or a blue-green
+  pair briefly pointing two backends at the same writable primary) could both
+  enter `command.upgrade` and deadlock on a revision's DELETEs (0003) or
+  double-apply DDL. The lock is **blocking** (`pg_advisory_lock`, not `try_`):
+  a losing racer WAITS for the winner, then re-detects `current == head` and
+  no-ops — it never skips the lock and proceeds against an un-migrated schema.
+  Lock id is DISTINCT from `seed.py`'s `_SEED_LOCK_ID` (8675309) so migrating
+  and seeding don't needlessly serialize against each other. Mirrors the
+  posture the seed path already had. The ADR-0021 `pg_is_in_recovery()`
+  primary-only guard is untouched.
+* **Revision-id length invariant fence.** A hermetic test asserts every
+  Alembic revision id is ≤ 32 chars (the `alembic_version.version_num`
+  `VARCHAR(32)` that caused the v2.75.1 crash-loop when revision `0004` was
+  41 chars, ran its DDL, then rolled back the stamp on every boot). CI now
+  fails before such a revision can ship.
+* **Tests.** `backend/tests/test_db_migrations.py` gains lock-envelope
+  coverage: acquire-before-upgrade / release-after ordering, brownfield
+  stamp+upgrade under lock, the no-op fast path still acquires+releases, the
+  lock is released even when `command.upgrade` raises, and the lock id is
+  distinct from the seed lock. Suite: 25 passed, 2 skipped (opt-in real-PG
+  integration via `DOC_TEST_PG_URL`).
+* **Scope.** Phase 1 only. `_add_missing_columns` / `_create_hot_indexes` and
+  the legacy helpers in `main.py` are intentionally NOT removed here — the plan
+  defers helper-severance (Phase 3) and the model-vs-head CI sync gate
+  (Phase 2) to later, lower-urgency passes.
+* **Deploy.** This repo is `.deployer-disabled` — the NOC deployer pulls git
+  but does not rebuild. Ship via a hand-deploy on BOS-HQ
+  (`docker compose build backend worker beat && up -d --no-deps …`); verify
+  container build time, not `deployer-state.json`.
 
 ## 2026-07-03 — Avata 2 report incident: data remediation + prod deploy (ADR-0033)
 

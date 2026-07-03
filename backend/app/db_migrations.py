@@ -23,10 +23,14 @@ Two correct entry states, both handled here:
     ``upgrade head`` runs only the migrations AFTER the baseline (0002+).
 
 The detection + stamp + upgrade all run on ONE synchronous connection so
-the decision and the action cannot race against another booting worker.
-``seed.py`` already takes a PG advisory lock to serialize seeding across
-workers; migrations are guarded by Alembic's own ``alembic_version``
-row-level semantics plus this single-connection flow.
+the decision and the action are internally consistent. On top of that, the
+whole run is wrapped in a **session-level Postgres advisory lock**
+(``_MIGRATION_LOCK_ID``, ADR-0035) taken on a dedicated AUTOCOMMIT
+connection, so two backends booting concurrently (multi-worker,
+multi-replica, or a blue-green pair briefly pointing at the same writable
+primary) cannot both enter ``command.upgrade`` and deadlock or double-apply.
+This mirrors the posture ``seed.py`` already had for seeding, but on a
+DISTINCT lock id so migrating and seeding don't serialize against each other.
 """
 
 from __future__ import annotations
@@ -38,7 +42,7 @@ from alembic import command
 from alembic.config import Config
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import create_engine, inspect, text
 
 from app.config import settings
 
@@ -54,6 +58,19 @@ BASELINE_REVISION = "0001_baseline_schema"
 # is a core table created by the very first legacy schema and present in
 # every real DroneOpsCommand database.
 SENTINEL_TABLE = "missions"
+
+# Session-level Postgres advisory lock serializing the ENTIRE migration run
+# (detect + stamp + upgrade) across concurrently-booting backends — multiple
+# uvicorn workers, multiple replicas, or a blue-green pair briefly pointing
+# two backends at the same writable primary (ADR-0035). Transaction atomicity
+# alone is not enough: two processes could both pass state-detection and both
+# call ``command.upgrade``, deadlocking on a revision's DELETEs (0003) or
+# double-applying DDL. DISTINCT from ``seed.py``'s ``_SEED_LOCK_ID`` (8675309)
+# so migrating and seeding do not needlessly serialize against each other.
+# We take it with the BLOCKING ``pg_advisory_lock`` (not ``try_``): a losing
+# racer WAITS for the winner, then re-detects ``current == head`` and no-ops —
+# it must never skip the lock and proceed against an un-migrated schema.
+_MIGRATION_LOCK_ID = 8675310
 
 _BACKEND_ROOT = Path(__file__).resolve().parent.parent
 
@@ -100,7 +117,21 @@ def run_migrations_sync() -> str:
 
     engine = create_engine(sync_url, poolclass=_pool.NullPool)
     head = _current_head(cfg)
+
+    # ── Phase 0: serialize the whole run with an advisory lock (ADR-0035) ─
+    # A dedicated AUTOCOMMIT connection holds a SESSION-level advisory lock
+    # for the entire detect+stamp+upgrade below. AUTOCOMMIT keeps it out of
+    # an open transaction (avoids idle-in-transaction) while the lock — which
+    # is session-scoped, not transaction-scoped — stays held until we unlock
+    # or the connection closes. Acquire BEFORE reading state so a losing
+    # racer blocks here, then re-detects head and no-ops.
+    lock_conn = engine.connect().execution_options(isolation_level="AUTOCOMMIT")
     try:
+        lock_conn.execute(text(f"SELECT pg_advisory_lock({_MIGRATION_LOCK_ID})"))
+        logger.info(
+            "MIGRATIONS: acquired advisory lock %s (ADR-0035).",
+            _MIGRATION_LOCK_ID,
+        )
         # ── Phase 1: detect state (read-only) ───────────────────────────
         with engine.connect() as probe:
             inspector = inspect(probe)
@@ -154,5 +185,21 @@ def run_migrations_sync() -> str:
         logger.info("MIGRATIONS: %s complete (head=%s)", action, head)
         return action
     finally:
+        # Release the advisory lock FIRST (best-effort) so a waiting racer is
+        # unblocked even if disposal hiccups; closing the session would drop
+        # the lock anyway, but an explicit unlock is the contract. Then clean
+        # up the shared cfg attribute and both engines/connections. Every step
+        # is guarded so one failure cannot mask the exception being unwound.
         cfg.attributes.pop("connection", None)
-        engine.dispose()
+        try:
+            lock_conn.execute(
+                text(f"SELECT pg_advisory_unlock({_MIGRATION_LOCK_ID})"))
+            logger.info(
+                "MIGRATIONS: released advisory lock %s.", _MIGRATION_LOCK_ID)
+        except Exception:  # noqa: BLE001 — never let cleanup swallow the real error
+            logger.warning(
+                "MIGRATIONS: advisory unlock %s failed; session close will "
+                "release it.", _MIGRATION_LOCK_ID, exc_info=True)
+        finally:
+            lock_conn.close()
+            engine.dispose()
