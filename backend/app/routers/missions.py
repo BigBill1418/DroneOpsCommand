@@ -33,7 +33,17 @@ from app.schemas.mission import (
     MissionResponse,
     MissionUpdate,
 )
+from app.services import airspace
 from app.services.opendronelog import opendronelog_client
+# ADR-0035 — reuse the EXISTING weather-router aviation feeds (AviationWeather
+# TFR/METAR, Open-Meteo) for the mission preflight; do NOT reinvent them.
+# Aliased so tests can patch them at the missions-module boundary.
+from app.routers.weather import (
+    _fetch_metar as _weather_fetch_metar,
+    _fetch_tfrs as _weather_fetch_tfrs,
+    _fetch_weather as _weather_fetch_weather,
+    _load_weather_location as _weather_load_location,
+)
 
 logger = logging.getLogger("doc.missions")
 
@@ -354,6 +364,138 @@ async def create_mission(
     except Exception as exc:
         logger.exception("Failed to create mission: %s", exc)
         raise HTTPException(status_code=500, detail="An internal error occurred")
+
+
+async def _gather_preflight(lat: float, lon: float, airport: str | None) -> dict:
+    """Fetch all preflight feeds concurrently and assemble the response.
+
+    ADR-0035. Each upstream feed is fetched independently and any one
+    failing degrades to partial data — it NEVER propagates as a 500. The
+    airspace-class fetch already returns a structured error dict; the
+    weather-router fetchers already swallow their own errors; and this
+    orchestrator wraps every await in ``return_exceptions=True`` so an
+    unexpected raise from any feed still yields a partial preflight.
+    """
+    airspace_res, tfrs_res, weather_res, metar_res = await asyncio.gather(
+        airspace.fetch_airspace_class(lat, lon),
+        _weather_fetch_tfrs(airport) if airport else _noop_list(),
+        _weather_fetch_weather(lat, lon),
+        _weather_fetch_metar(airport) if airport else _noop_dict(),
+        return_exceptions=True,
+    )
+
+    airspace_data = (
+        airspace_res
+        if isinstance(airspace_res, dict)
+        else {"airspace_class": None, "controlling_facility": None, "e_surface": False,
+              "error": f"{type(airspace_res).__name__}: {airspace_res}"}
+    )
+    tfrs_data = tfrs_res if isinstance(tfrs_res, list) else []
+    weather_data = weather_res if isinstance(weather_res, dict) else {"error": str(weather_res)}
+    metar_data = metar_res if isinstance(metar_res, dict) else {"error": str(metar_res)}
+
+    return airspace.assemble_preflight(
+        lat=lat,
+        lon=lon,
+        airport=airport,
+        airspace=airspace_data,
+        tfrs=tfrs_data,
+        weather=weather_data,
+        metar=metar_data,
+    )
+
+
+async def _noop_list() -> list:
+    return []
+
+
+async def _noop_dict() -> dict:
+    return {}
+
+
+@router.get("/airspace-preflight")
+async def airspace_preflight(
+    lat: float = Query(..., ge=-90, le=90, description="Site latitude (WGS84)"),
+    lon: float = Query(..., ge=-180, le=180, description="Site longitude (WGS84)"),
+    airport: str | None = Query(
+        None,
+        max_length=8,
+        description="Reference airport ICAO for TFR/METAR (defaults to the configured weather station)",
+    ),
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """OPERATOR-FACING airspace/LAANC pre-flight awareness for a coordinate.
+
+    ADR-0035. Surfaces airspace class, whether LAANC authorization is likely
+    required (controlled B/C/D/E-surface vs uncontrolled G), the controlling
+    facility, nearby active TFRs, and weather suitability — as neutral facts
+    with advisories. It renders NO compliance verdict and is NEVER included
+    in the client report.
+
+    Computed on demand (never persisted): TFRs and weather are time-varying,
+    so a snapshot taken at mission-creation would be stale by flight day.
+    """
+    if airport is None:
+        try:
+            _lat, _lon, _label, airport = await _weather_load_location(db)
+        except Exception as exc:  # DB hiccup must not block the preflight
+            logger.warning("preflight: could not load configured airport: %s", exc)
+            airport = None
+    return await _gather_preflight(lat, lon, airport)
+
+
+@router.get("/{mission_id}/preflight")
+async def mission_preflight(
+    mission_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """Airspace/LAANC preflight for an existing mission (ADR-0035).
+
+    Resolves the site coordinate from the mission's ``area_coordinates`` (or
+    returns a preflight shell with a ``no_coordinates`` advisory if none is
+    derivable). Operator-facing only; never persisted, never in the report.
+    """
+    result = await db.execute(select(Mission).where(Mission.id == mission_id))
+    mission = result.scalar_one_or_none()
+    if mission is None:
+        raise HTTPException(status_code=404, detail="Mission not found")
+
+    coords = airspace.extract_latlon(mission.area_coordinates)
+    if coords is None:
+        return {
+            "mission_id": str(mission_id),
+            "location": {"lat": None, "lon": None, "airport_ref": None},
+            "airspace_class": None,
+            "laanc_likely_required": None,
+            "controlling_facility": None,
+            "tfrs": [],
+            "weather": {},
+            "advisories": [
+                {
+                    "code": "no_coordinates",
+                    "severity": "info",
+                    "message": (
+                        "This mission has no usable location coordinates. Provide "
+                        "lat/lon to /api/missions/airspace-preflight for an airspace "
+                        "check."
+                    ),
+                }
+            ],
+            "degraded": True,
+            "generated_at": iso_utc(),
+        }
+
+    lat, lon = coords
+    try:
+        _lat, _lon, _label, airport = await _weather_load_location(db)
+    except Exception as exc:
+        logger.warning("mission preflight: could not load configured airport: %s", exc)
+        airport = None
+    preflight = await _gather_preflight(lat, lon, airport)
+    preflight["mission_id"] = str(mission_id)
+    return preflight
 
 
 @router.get("/{mission_id}", response_model=MissionResponse)
