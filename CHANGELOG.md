@@ -108,6 +108,43 @@ scheduling time. Full design in **docs/adr/0037-airspace-laanc-awareness-at-miss
   `tests/test_missions_airspace_preflight.py`,
   `tests/test_report_never_references_airspace.py`). Suite 507 → 551 passing,
   0 regressions.
+## 2026-07-03 — fix(reports): resolve the aircraft from the live flight, not the stale junction copy (ADR-0038) — v2.78.0
+
+Phase 1 of the flight-attach unification (plan:
+`docs/plans/2026-07-03-flight-attach-unification.md`) — the **root fix** for the
+ADR-0033 junction-staleness class.
+
+* **The bug.** The `MissionFlight` junction copied `Flight.aircraft_id` at attach
+  time. When a fleet serial was registered **later**, the live flight updated but
+  the junction copy stayed stale — the Avata 2 mechanism. ADR-0033 made the
+  report *tolerant* of a NULL copy (fell back to parsed `drone_model`), but never
+  read the live fleet record, so a late-linked flight showed the bare string
+  `"Avata2"` instead of the canonical `"DJI Avata 2"` card (name/image/specs).
+* **Read convergence** (`backend/app/routers/reports.py`). `_load_live_flight_metrics`
+  now LEFT-JOINs the fleet `Aircraft` (scalar columns only — the heavy Flight
+  JSON is still never loaded, ADR-0025/0019). `_aircraft_label` and the new
+  `_build_aircraft_cards` (extracted from the PDF path) resolve **native** flights
+  from the live `Flight.aircraft`; **legacy-ODL** (`flight_id IS NULL`) rows keep
+  the junction/cache read (Phase 2 materializes them). One resolver drives both
+  the narrative label and the PDF "Aircraft used" card.
+* **Write change** (`backend/app/routers/missions.py`). The single-add and bulk
+  native attach paths no longer copy `aircraft_id` onto the junction (set NULL —
+  derived on read; client-sent values still ignored, ADR-0007). The column is
+  **retained** (drop is Phase 4).
+* **Behaviour.** Preserving for reports **except** the fix: a native flight linked
+  after attach now shows the correct fleet aircraft with no detach/re-attach.
+* **Defers (per plan):** legacy-ODL materialization (Phase 2); metrics/track
+  live-only flip + zero-cache-read counter (Phase 3); column drops + `flight_id`
+  NOT NULL (Phase 4). ADR-0007 matcher and ADR-0029 audience guard untouched.
+* **Tests.** New `backend/tests/test_report_live_aircraft_adr0038.py`: real-DB
+  late-link root-fix proof (junction stays NULL, live resolves), legacy-ODL
+  no-regression, unlinked-native `drone_model` fallback, stale-copy-ignored.
+  Fail-before/pass-after confirmed (`"Avata2"` → `"DJI Avata 2"`). Full backend
+  suite green (511 passed, 3 skipped). Existing attach-derives-aircraft tests
+  updated to the new "junction not copied" contract.
+* **Deploy.** `.deployer-disabled` — manual BOS-HQ rebuild
+  (`docker compose build backend worker beat flight-parser && up -d --no-deps …`);
+  verify the public `openapi.json` version (`2.78.0`), not `deployer-state.json`.
 
 ## 2026-07-03 — Avata 2 report incident: data remediation + prod deploy (ADR-0033)
 

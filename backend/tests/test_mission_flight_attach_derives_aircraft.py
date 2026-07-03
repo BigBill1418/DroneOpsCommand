@@ -1,10 +1,20 @@
-"""POST /api/missions/{id}/flights — aircraft_id is derived server-side.
+"""POST /api/missions/{id}/flights — the junction never copies the aircraft.
 
 The mission editor no longer asks the operator to pick an aircraft for
 each flight (or to maintain a separate "aircraft used" list). The flight
 log already carries its drone — matched to the fleet at upload time by
-serial/model — so on attach the backend reads ``Flight.aircraft_id`` and
-ignores whatever the client sends (or doesn't send).
+serial/model — so the flight log is the single source of truth and the
+client-sent aircraft_id is always ignored.
+
+ADR-0035 (flight-attach unification, Phase 1) changed the write contract:
+the backend NO LONGER copies ``Flight.aircraft_id`` onto the junction
+(``mission_flights.aircraft_id``) for native flights. The copy was a
+snapshot taken at attach time and went STALE when the fleet serial was
+registered later — that is exactly the ADR-0033 Avata incident. Reports now
+resolve the aircraft from the LIVE ``Flight.aircraft`` (via ``flight_id``),
+which can never be stale, so the junction copy is redundant. The junction
+``aircraft_id`` is therefore left NULL for every native attach (matched or
+not) — never the live value, never the client value.
 
 These tests pin that contract end-to-end through the FastAPI ASGI stack,
 mirroring the fake-session pattern in
@@ -137,8 +147,10 @@ def _build_app(execute_results: list[Any]) -> tuple[FastAPI, _FakeSession]:
     return app, fake_db
 
 
-def test_attach_derives_aircraft_from_flight_log():
-    """Client omits aircraft_id → server fills it from Flight.aircraft_id."""
+def test_attach_does_not_copy_aircraft_onto_junction():
+    """Client omits aircraft_id → server leaves the junction aircraft_id NULL
+    (ADR-0035). The live Flight.aircraft_id stays authoritative for reads; the
+    junction never carries a copy that could go stale."""
     fleet_aircraft_id = uuid.uuid4()
     mission = _MissionStub()
     flight = _FlightStub(aircraft_id=fleet_aircraft_id)
@@ -159,16 +171,19 @@ def test_attach_derives_aircraft_from_flight_log():
     assert resp.status_code == 201, resp.text
     assert len(db.added) == 1
     mf = db.added[0]
-    assert mf.aircraft_id == fleet_aircraft_id, (
-        f"server must derive aircraft_id from Flight.aircraft_id; "
-        f"got {mf.aircraft_id!r}"
+    assert mf.aircraft_id is None, (
+        f"native attach must NOT copy the aircraft onto the junction "
+        f"(ADR-0035 — reports resolve it live); got {mf.aircraft_id!r}"
     )
+    # The native flight linkage itself is preserved — that is how the report
+    # joins back to the live Flight.aircraft.
+    assert mf.flight_id == flight.id
 
 
-def test_attach_overrides_client_supplied_aircraft_id():
-    """Even if a stale client sends aircraft_id, the server's derived
-    value from the flight log wins. Single source of truth — the flight
-    log is authoritative, not the editor screen."""
+def test_attach_ignores_client_supplied_aircraft_id():
+    """Even if a stale client sends aircraft_id, it is discarded — the junction
+    stays NULL. Single source of truth is the live flight log, not the editor
+    screen and not a snapshot on the junction (ADR-0035)."""
     fleet_aircraft_id = uuid.uuid4()
     stale_client_value = uuid.uuid4()
     mission = _MissionStub()
@@ -189,13 +204,14 @@ def test_attach_overrides_client_supplied_aircraft_id():
 
     assert resp.status_code == 201, resp.text
     mf = db.added[0]
-    assert mf.aircraft_id == fleet_aircraft_id
+    assert mf.aircraft_id is None
     assert mf.aircraft_id != stale_client_value
 
 
 def test_attach_with_unmatched_flight_log_stores_null_aircraft():
-    """If the flight log itself has no fleet match, aircraft_id is null
-    — never the stale client value, never a guess."""
+    """A native flight with no fleet match also leaves the junction NULL —
+    never the stale client value, never a guess. (Same NULL as the matched
+    case now: the junction copy is retired for native rows, ADR-0035.)"""
     mission = _MissionStub()
     flight = _FlightStub(aircraft_id=None)  # unmatched
 

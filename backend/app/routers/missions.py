@@ -728,7 +728,18 @@ async def add_flight(
         flt_result = await db.execute(select(FlightModel).where(FlightModel.id == data.flight_id))
         local_flight = flt_result.scalar_one_or_none()
         if local_flight:
-            data.aircraft_id = local_flight.aircraft_id
+            # ADR-0035 (flight-attach unification, Phase 1): do NOT copy the
+            # aircraft onto the junction for native flights. The copy is a
+            # snapshot taken at attach time and goes stale when the fleet serial
+            # is registered LATER — that is exactly the ADR-0033 Avata incident,
+            # where flights.aircraft_id was updated but the junction copy kept
+            # its stale NULL. Reports now resolve the aircraft from the LIVE
+            # Flight.aircraft (via flight_id), which can never be stale, so the
+            # junction copy is redundant for native rows. We null it (also
+            # ignoring any client-sent aircraft_id — single source of truth is
+            # the flight log, ADR-0007). The column is retained (dropped in
+            # Phase 4); existing rows keep their value but are no longer read.
+            data.aircraft_id = None
             # ADR-0025: store SCALAR display fields only — never the GPS track.
             # The track stays once on Flight.gps_track and is loaded on demand
             # by the map/report paths via flight_id. Writing it here duplicated
@@ -898,7 +909,11 @@ async def add_flights_bulk(
                 mission_id=mission_id,
                 flight_id=item.flight_id,
                 opendronelog_flight_id=None,
-                aircraft_id=local_flight.aircraft_id,
+                # ADR-0035 Phase 1: native attach no longer copies the aircraft
+                # onto the junction — reports resolve it live from Flight.aircraft
+                # so it can never go stale (the ADR-0033 Avata incident). Same
+                # class of write as the single-add path above.
+                aircraft_id=None,
                 flight_data_cache=_scalar_cache_from_flight(
                     local_flight, item.flight_data_cache
                 ),
