@@ -4,6 +4,25 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-07-03 — Avata 2 report incident: data remediation + prod deploy (ADR-0033)
+
+Follows the code fix below. Full incident write-up + audit trail in
+**docs/adr/0033-avata2-missing-from-report-incident.md**.
+
+* **Data remediation (prod).** Root cause was a blank `serial_number` on the
+  fleet `DJI Avata 2` record, so ADR-0007's strict serial-first matcher left
+  every recent Avata flight unlinked. Registered serial `1581F6W8A242N0A3` and
+  backfilled: aircraft 1 row, `flights` 12 rows (unlinked 12 → 0),
+  `mission_flights` 4 rows. The "Springfield Drifters Promo" mission now resolves
+  `DJI Avata 2 ×2 + DJI Mini 5 Pro ×1`; regenerating the report renders the Avata
+  correctly. **Standing rule:** register a drone's serial when adding it to the
+  fleet, or its flights stay unlinked under ADR-0007.
+* **Deploy.** This repo is `.deployer-disabled` — the NOC deployer pulls git but
+  does not rebuild. The reports fix + the ADR-0032 parser fix were hand-deployed
+  on BOS-HQ (`docker compose build backend worker beat flight-parser && up -d
+  --no-deps …`). Verify container build time, not `deployer-state.json`, to
+  confirm a DOC deploy is actually running.
+
 ## 2026-07-03 — fix(reports): attached flight with unrecognized aircraft no longer missing from report
 
 An attached flight whose fleet aircraft was unrecognized (`flights.aircraft_id`
