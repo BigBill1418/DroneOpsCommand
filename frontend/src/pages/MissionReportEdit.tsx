@@ -90,6 +90,12 @@ export default function MissionReportEdit() {
   const [reportContent, setReportContent] = useState<string>('');
   const [includeDownloadLink, setIncludeDownloadLink] = useState<boolean>(false);
 
+  // ADR-0039 unpaid-invoice download-link gate. `paymentBlocked` is the
+  // server-computed "link would be withheld right now" flag;
+  // `paymentOverride` is the operator's deliberate early-release valve.
+  const [paymentBlocked, setPaymentBlocked] = useState<boolean>(false);
+  const [paymentOverride, setPaymentOverride] = useState<boolean>(false);
+
   // Baseline snapshot for dirty-guard. Populated on initial load and
   // re-baselined after a successful Save Draft / AI generate / PDF
   // generate (each persists at least one of these fields).
@@ -97,6 +103,7 @@ export default function MissionReportEdit() {
     narrative: '',
     reportContent: '',
     includeDownloadLink: false,
+    paymentOverride: false,
   });
 
   // Action state
@@ -177,13 +184,17 @@ export default function MissionReportEdit() {
           const initialNarrative = r.user_narrative || '';
           const initialContent = r.final_content || '';
           const initialIncludeLink = Boolean(r.include_download_link);
+          const initialOverride = Boolean(r.download_link_payment_override);
           setNarrative(initialNarrative);
           setReportContent(initialContent);
           setIncludeDownloadLink(initialIncludeLink);
+          setPaymentOverride(initialOverride);
+          setPaymentBlocked(Boolean(r.download_link_payment_blocked));
           setBaseline({
             narrative: initialNarrative,
             reportContent: initialContent,
             includeDownloadLink: initialIncludeLink,
+            paymentOverride: initialOverride,
           });
           setLastSavedAt(r.updated_at || r.generated_at || null);
           setLastSentAt(r.sent_at || null);
@@ -225,18 +236,22 @@ export default function MissionReportEdit() {
         user_narrative: narrative || undefined,
         final_content: reportContent || undefined,
         include_download_link: includeDownloadLink,
+        download_link_payment_override: paymentOverride,
       });
       const ts =
         resp?.data?.updated_at ||
         resp?.data?.generated_at ||
         new Date().toISOString();
       setLastSavedAt(ts);
+      // Server recomputes the ADR-0039 gate state on every save.
+      setPaymentBlocked(Boolean(resp?.data?.download_link_payment_blocked));
       // Re-baseline so a subsequent Cancel doesn't prompt for changes
       // we just persisted.
       setBaseline({
         narrative,
         reportContent,
         includeDownloadLink,
+        paymentOverride,
       });
       notifications.show({
         title: 'Draft Saved',
@@ -286,6 +301,7 @@ export default function MissionReportEdit() {
           narrative,
           reportContent: syncContent,
           includeDownloadLink,
+          paymentOverride,
         });
         setGenerating(false);
         return;
@@ -329,6 +345,7 @@ export default function MissionReportEdit() {
                 narrative,
                 reportContent: generatedContent,
                 includeDownloadLink,
+                paymentOverride,
               });
               notifications.show({
                 title: leakFlag ? 'Report Ready — Audience Leak Flagged' : 'Report Ready',
@@ -391,6 +408,7 @@ export default function MissionReportEdit() {
           narrative,
           reportContent,
           includeDownloadLink,
+          paymentOverride,
         });
       }
 
@@ -451,10 +469,16 @@ export default function MissionReportEdit() {
         resp?.data?.updated_at ||
         new Date().toISOString();
       setLastSentAt(ts);
+      // ADR-0039: the backend reports whether the download link was
+      // withheld by the payment gate — tell the operator, don't let a
+      // "Sent" toast imply the client got the footage link.
+      const withheld = Boolean(resp?.data?.download_link_withheld);
       notifications.show({
         title: 'Sent',
-        message: 'Report emailed to customer',
-        color: 'green',
+        message: withheld
+          ? 'Report emailed — download link WITHHELD (invoice not paid in full)'
+          : 'Report emailed to customer',
+        color: withheld ? 'yellow' : 'green',
       });
     } catch (err: any) {
       notifications.show({
@@ -473,7 +497,8 @@ export default function MissionReportEdit() {
     !loading &&
     (narrative !== baseline.narrative ||
       reportContent !== baseline.reportContent ||
-      includeDownloadLink !== baseline.includeDownloadLink);
+      includeDownloadLink !== baseline.includeDownloadLink ||
+      paymentOverride !== baseline.paymentOverride);
 
   const { showConfirm, setShowConfirm, guardedNavigate, confirmAndNavigate } =
     useDirtyGuard({ isDirty, navigate });
@@ -550,6 +575,35 @@ export default function MissionReportEdit() {
             onChange={(e) => setIncludeDownloadLink(e.currentTarget.checked)}
             disabled={!downloadLinkUrl}
           />
+          {/* ADR-0039 unpaid-invoice gate surface. Shown only when the
+              link is requested and the server says payment is outstanding
+              (or the operator already overrode). */}
+          {includeDownloadLink && downloadLinkUrl && (paymentBlocked || paymentOverride) && (
+            <Stack gap="xs">
+              {paymentBlocked && !paymentOverride && (
+                <Alert
+                  color="yellow"
+                  icon={<IconAlertTriangle size={16} />}
+                  title="Download link withheld — invoice not paid in full"
+                >
+                  The client will receive the report, but the download link
+                  is withheld from the PDF and email until the invoice is
+                  paid in full. Flip the override below to release it early.
+                </Alert>
+              )}
+              <Switch
+                label="Release download link before payment (override)"
+                description={
+                  paymentOverride
+                    ? 'OVERRIDE ACTIVE — the link goes out even though the invoice is unpaid'
+                    : 'Leave off to withhold the link until the invoice is paid in full'
+                }
+                color="orange"
+                checked={paymentOverride}
+                onChange={(e) => setPaymentOverride(e.currentTarget.checked)}
+              />
+            </Stack>
+          )}
           <Group justify="space-between" wrap="wrap">
             <Button
               leftSection={

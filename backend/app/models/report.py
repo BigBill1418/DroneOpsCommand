@@ -24,6 +24,14 @@ class Report(Base):
     map_image_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
     pdf_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
     include_download_link: Mapped[bool] = mapped_column(Boolean, default=False)
+    # ADR-0039 payment gate override: the download link is withheld from the
+    # PDF and report email while the mission's invoice is unpaid, UNLESS the
+    # operator deliberately flips this per-report override. Default False =
+    # gate enforced. Only settable via PUT /report (a conscious operator
+    # action) — never by the generate path, so regeneration can't reset it.
+    download_link_payment_override: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
     generated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 

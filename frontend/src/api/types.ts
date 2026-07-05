@@ -122,6 +122,12 @@ export interface Report {
   map_image_path: string | null;
   pdf_path: string | null;
   include_download_link: boolean;
+  // ADR-0039 unpaid-invoice download-link gate. `download_link_payment_blocked`
+  // is computed server-side (needs the invoice) and says whether the link
+  // would currently be withheld from the PDF/email;
+  // `download_link_payment_override` is the deliberate operator release valve.
+  download_link_payment_override?: boolean;
+  download_link_payment_blocked?: boolean;
   generated_at: string | null;
   sent_at: string | null;
   // ADR-0015 soft-block runtime audience-leak gate.

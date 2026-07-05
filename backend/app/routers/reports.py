@@ -40,12 +40,71 @@ async def _load_mission_with_flights(db: AsyncSession, mission_id: UUID) -> Miss
             selectinload(Mission.flights).selectinload(MissionFlight.aircraft),
             selectinload(Mission.customer),
             selectinload(Mission.images),
+            # ADR-0039: the download-link payment gate needs the invoice.
+            selectinload(Mission.invoice),
         )
     )
     mission = result.scalar_one_or_none()
     if not mission:
         raise HTTPException(status_code=404, detail="Mission not found")
     return mission
+
+
+# ── ADR-0039: unpaid-invoice download-link gate ────────────────────────
+# Policy: clients do not receive the mission-footage download link until the
+# invoice is paid in full. The per-report `download_link_payment_override`
+# is the deliberate operator release valve. Fail-closed: a billable mission
+# with NO invoice row withholds the link too (nothing has been collected).
+def _download_link_payment_blocked(mission: Mission, report: Report) -> bool:
+    """True when the payment gate must withhold the download link."""
+    if getattr(report, "download_link_payment_override", False):
+        return False
+    if not mission.is_billable:
+        return False
+    invoice = mission.invoice
+    if invoice is None:
+        # Billable but never invoiced — fail closed until an invoice exists
+        # and is paid (or the operator overrides).
+        return True
+    if invoice.paid_in_full:
+        return False
+    if float(invoice.total or 0) <= 0:
+        # Nothing to collect (mirrors the payment-links section logic).
+        return False
+    return True
+
+
+def _build_download_link(mission: Mission, report: Report) -> dict | None:
+    """Download-link payload for the PDF/email, or None when absent or gated.
+
+    Single choke point for BOTH exposure paths (PDF render + report email)
+    so the ADR-0039 gate can never be bypassed by one of them drifting.
+    """
+    if not report.include_download_link or not mission.download_link_url:
+        return None
+    if _download_link_payment_blocked(mission, report):
+        inv = mission.invoice
+        logger.info(
+            "[DL-PAYMENT-GATE] WITHHELD download link for mission=%s — "
+            "invoice=%s total=%s paid_in_full=%s override=%s (ADR-0039)",
+            mission.id,
+            inv.invoice_number if inv else None,
+            float(inv.total) if inv and inv.total is not None else None,
+            inv.paid_in_full if inv else None,
+            report.download_link_payment_override,
+        )
+        return None
+    if report.download_link_payment_override and mission.is_billable:
+        logger.info(
+            "[DL-PAYMENT-GATE] OVERRIDE active — download link released "
+            "before payment for mission=%s (operator-set)", mission.id,
+        )
+    return {
+        "url": mission.download_link_url,
+        "expires_at": mission.download_link_expires_at.strftime("%B %d, %Y at %I:%M %p")
+        if mission.download_link_expires_at
+        else "N/A",
+    }
 
 
 # ADR-0026 RC-1 defence: even with the DB unique guard (migration 0003) and the
@@ -399,7 +458,33 @@ async def get_report(
     report = result.scalar_one_or_none()
     if not report:
         raise HTTPException(status_code=404, detail="Report not found")
-    return report
+    return await _report_response_with_gate(db, report)
+
+
+async def _report_response_with_gate(db: AsyncSession, report: Report) -> ReportResponse:
+    """Serialize a report, computing the ADR-0039 gate state for the UI.
+
+    Fail-soft: if the mission/invoice lookup errors, the report payload
+    still returns with `download_link_payment_blocked=False` rather than
+    500ing the editor page — the enforcement itself lives in
+    `_build_download_link`, not here.
+    """
+    resp = ReportResponse.model_validate(report)
+    try:
+        m_result = await db.execute(
+            select(Mission)
+            .where(Mission.id == report.mission_id)
+            .options(selectinload(Mission.invoice))
+        )
+        mission = m_result.scalar_one_or_none()
+        if mission is not None:
+            resp.download_link_payment_blocked = _download_link_payment_blocked(mission, report)
+    except Exception as exc:  # noqa: BLE001 — display-only computation
+        logger.warning(
+            "[DL-PAYMENT-GATE] gate-state computation failed for mission=%s: %s",
+            report.mission_id, exc,
+        )
+    return resp
 
 
 @router.post("/{mission_id}/report/generate")
@@ -552,17 +637,26 @@ async def update_report(
     result = await db.execute(select(Report).where(Report.mission_id == mission_id))
     report = result.scalar_one_or_none()
 
+    payload = data.model_dump(exclude_unset=True)
+    if "download_link_payment_override" in payload:
+        # ADR-0039: the override releases deliverables before payment —
+        # always leave an audit trail of who-flipped-what in the logs.
+        logger.info(
+            "[DL-PAYMENT-GATE] override set to %s on mission=%s report by user=%s",
+            payload["download_link_payment_override"], mission_id,
+            getattr(_user, "username", None) or getattr(_user, "email", None) or _user.id,
+        )
     if report:
-        for key, value in data.model_dump(exclude_unset=True).items():
+        for key, value in payload.items():
             setattr(report, key, value)
     else:
         # Create a new report record (draft save before generation)
-        report = Report(mission_id=mission_id, **data.model_dump(exclude_unset=True))
+        report = Report(mission_id=mission_id, **payload)
         db.add(report)
 
     await db.flush()
     await db.refresh(report)
-    return report
+    return await _report_response_with_gate(db, report)
 
 
 @router.post("/{mission_id}/report/pdf")
@@ -694,15 +788,8 @@ async def generate_report_pdf(
     # Images
     image_list = [{"file_path": img.file_path, "caption": img.caption} for img in mission.images]
 
-    # Download link
-    download_link = None
-    if report.include_download_link and mission.download_link_url:
-        download_link = {
-            "url": mission.download_link_url,
-            "expires_at": mission.download_link_expires_at.strftime("%B %d, %Y at %I:%M %p")
-            if mission.download_link_expires_at
-            else "N/A",
-        }
+    # Download link — payment-gated (ADR-0039).
+    download_link = _build_download_link(mission, report)
 
     # Load branding for PDF template
     from app.routers.system_settings import get_branding
@@ -757,15 +844,24 @@ async def send_report(
     if not report or not report.pdf_path:
         raise HTTPException(status_code=400, detail="PDF not generated yet")
 
-    # Build download link for email
-    download_link = None
-    if report.include_download_link and mission.download_link_url:
-        download_link = {
-            "url": mission.download_link_url,
-            "expires_at": mission.download_link_expires_at.strftime("%B %d, %Y at %I:%M %p")
-            if mission.download_link_expires_at
-            else "N/A",
-        }
+    # Build download link for email — payment-gated (ADR-0039).
+    download_link = _build_download_link(mission, report)
+    link_withheld = (
+        download_link is None
+        and report.include_download_link
+        and bool(mission.download_link_url)
+    )
+    if link_withheld:
+        # The attached PDF is whatever was last rendered — if it was rendered
+        # while the link was permitted (pre-gate, or before the invoice was
+        # un-paid), the link is baked into it. Flag loudly so a stale PDF
+        # doesn't quietly defeat the gate.
+        logger.warning(
+            "[DL-PAYMENT-GATE] mission=%s email link withheld, but the attached "
+            "PDF (%s) is used as-rendered — regenerate the PDF if it may "
+            "predate the gate (ADR-0039)",
+            mission_id, report.pdf_path,
+        )
 
     logger.info("Sending report for mission %s to %s", mission_id, mission.customer.email)
     try:
@@ -785,5 +881,17 @@ async def send_report(
     mission.status = "sent"
     await db.flush()
 
-    logger.info("Mission %s report sent successfully", mission_id)
-    return {"message": "Report sent successfully"}
+    logger.info(
+        "Mission %s report sent successfully%s",
+        mission_id,
+        " (download link WITHHELD — invoice not paid in full)" if link_withheld else "",
+    )
+    if link_withheld:
+        return {
+            "message": (
+                "Report sent — download link withheld until the invoice is "
+                "paid in full (override available on this report)"
+            ),
+            "download_link_withheld": True,
+        }
+    return {"message": "Report sent successfully", "download_link_withheld": False}

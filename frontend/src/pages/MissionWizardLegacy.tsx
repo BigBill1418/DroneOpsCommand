@@ -1123,7 +1123,7 @@ export default function MissionNew() {
               />
               <Switch
                 label="Include download link in report"
-                description={downloadLinkUrl ? 'Client will see a download button for mission footage' : 'Set a download link URL in Step 1 first'}
+                description={downloadLinkUrl ? 'Withheld until the invoice is paid in full (ADR-0039) — override available on the report editor' : 'Set a download link URL in Step 1 first'}
                 color="cyan"
                 checked={includeDownloadLink}
                 onChange={(e) => setIncludeDownloadLink(e.currentTarget.checked)}

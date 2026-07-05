@@ -4,6 +4,37 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-07-05 — feat(reports): unpaid-invoice download-link gate + operator override — v2.79.0 (ADR-0039)
+
+Policy (Bill, 2026-07-05): **clients do not get the mission-footage download
+link until the invoice is paid in full.** Trigger: the 2026-07-02 River M.
+report went out with the footage link while BARNARDHQ-2026-0005 ($400.50) was
+unpaid — nothing in the code checked payment.
+
+* **Server-side gate at a single choke point.** Both exposure paths (report
+  PDF render + report email) now build the link only via
+  `_build_download_link()` → `_download_link_payment_blocked()`
+  (`backend/app/routers/reports.py`). Withholds while a billable mission's
+  invoice is unpaid; **fail-closed** when billable-but-never-invoiced; $0
+  invoices and non-billable missions pass. Deposit alone does NOT release —
+  only `paid_in_full`.
+* **Per-report operator override** `reports.download_link_payment_override`
+  (migration `0008_report_dl_payment_override`, additive, default false).
+  Settable only via `PUT /report` (never the generate path, so regeneration
+  can't reset it); every flip is audit-logged with the acting user.
+* **Editor surface** (`MissionReportEdit.tsx`): yellow "link withheld —
+  invoice not paid in full" alert + orange override switch when the link is
+  requested and payment is outstanding; the Sent toast says explicitly when
+  the link was withheld (`download_link_withheld` on the send response).
+  `GET/PUT /report` return computed `download_link_payment_blocked`.
+* **Withholding never blocks the report itself** — the client still gets the
+  report; only the footage link is held.
+* **Residual:** a PDF rendered pre-gate carries the baked-in link; send
+  warn-logs this and River's stale `pdf_path` was invalidated in prod. See
+  ADR-0039 for the full policy + alternatives.
+* Tests: 14 new gate tests (`test_report_download_link_payment_gate.py`);
+  migration-fence + ADR-0038 fixtures updated; 582 backend / 53 frontend pass.
+
 ## 2026-07-03 — feat(reports): client-report narrative quality levers — v2.77.0 (ADR-0035)
 
 Guard-safe quality pass on the shared report system prompt

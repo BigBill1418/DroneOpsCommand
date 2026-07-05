@@ -13,6 +13,10 @@ class ReportUpdateRequest(BaseModel):
     final_content: str | None = None
     user_narrative: str | None = None
     include_download_link: bool | None = None
+    # ADR-0039: deliberate operator override releasing the download link
+    # before the invoice is paid in full. Settable ONLY here (not on the
+    # generate request) so a report regeneration can never reset it.
+    download_link_payment_override: bool | None = None
 
 
 class AudienceLeakDetail(BaseModel):
@@ -41,6 +45,13 @@ class ReportResponse(BaseModel):
     map_image_path: str | None
     pdf_path: str | None
     include_download_link: bool = False
+    # ADR-0039 payment gate surface. `download_link_payment_override` mirrors
+    # the DB column; `download_link_payment_blocked` is COMPUTED by the router
+    # (needs the mission's invoice) and says whether the gate would currently
+    # withhold the link from the PDF/email. Defaults keep from_attributes
+    # validation working on paths that don't compute it.
+    download_link_payment_override: bool = False
+    download_link_payment_blocked: bool = False
     generated_at: datetime | None
     sent_at: datetime | None
     # ADR-0015 soft-block runtime gate — fast filter + structured findings.

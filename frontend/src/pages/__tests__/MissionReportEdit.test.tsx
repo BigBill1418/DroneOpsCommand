@@ -290,6 +290,9 @@ describe('MissionReportEdit', () => {
       user_narrative: 'Initial operator notes from the field.',
       final_content: '<p>Existing AI report content.</p>',
       include_download_link: false,
+      // ADR-0039: the save draft PUT always carries the payment-gate
+      // override so the server can audit-log deliberate early releases.
+      download_link_payment_override: false,
     });
 
     // Contract: POST /missions still untouched.
