@@ -4,6 +4,40 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-07-06 — fix(payments): delivery verification pass — two real bugs + e2e endpoint tests — v2.80.1 (ADR-0040 addendum)
+
+End-to-end verification of the v2.80.0 automation caught two bugs before any
+prod payment exercised them (full detail in the ADR-0040 addendum):
+
+* **`Mission.invoice` lazy="noload" identity-map trap.** Every trigger path
+  loads the mission before the delivery service runs, so the service's
+  `selectinload(Mission.invoice)` re-query returned the identity-mapped
+  mission WITHOUT repopulating the relationship — the gate read
+  `invoice=None` and skipped `not-paid-in-full` on PAID missions. The Stripe
+  webhook and mission-update triggers were silently dead. Fix: the service
+  queries the Invoice table directly; `_delivery_skip_reason(mission,
+  invoice)` takes it explicitly.
+* **SMTP-unconfigured no-op was stamped as sent.** `_send_html_email`
+  returns False when SMTP isn't configured; the stamp was written anyway,
+  permanently losing the delivery. Fix: stamp only on a True send; the False
+  path returns `skipped:smtp-unconfigured` (WARN) and stays armed.
+* New `test_download_link_delivery_e2e.py`: 9 endpoint-level tests driving
+  the REAL `update_invoice` / `update_mission` / `get_client_mission`
+  functions against sqlite (house pattern; includes a JSONB→JSON sqlite
+  shim for the reports table). These are the tests that caught bug #1.
+* **Report-editor override could be silently lost (independent review
+  finding).** Generate Report / Generate PDF re-baselined the unsaved
+  `paymentOverride` switch without persisting it — the dirty-guard went
+  quiet and the server kept override=false, so the operator believed the
+  link was released while PDF + email withheld it. Fix: the pre-PDF PUT now
+  persists `include_download_link` + `download_link_payment_override` (the
+  PDF renders against what the operator sees), and the generate paths
+  preserve the previous baseline so an unsaved flip stays dirty.
+* Bypass sweep confirmed: portal + report PDF/email are the only
+  client-reachable `download_link_url` surfaces, all gated; docs updated
+  (README feature sections, PROGRESS, ADR-0040 addendum).
+* Suites: 607 backend / 53 frontend pass; tsc clean.
+
 ## 2026-07-06 — feat(payments): automated download-link delivery on payment-in-full — v2.80.0 (ADR-0040)
 
 Completes ADR-0039: payment-in-full is now a TRIGGER, not just a gate. Per

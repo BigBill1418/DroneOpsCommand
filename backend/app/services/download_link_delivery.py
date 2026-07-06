@@ -58,8 +58,16 @@ def download_link_payment_blocked(mission, report) -> bool:
     return True
 
 
-def _delivery_skip_reason(mission) -> str | None:
-    """Why the payment-triggered delivery email should NOT fire, or None."""
+def _delivery_skip_reason(mission, invoice) -> str | None:
+    """Why the payment-triggered delivery email should NOT fire, or None.
+
+    `invoice` is passed EXPLICITLY (not read via `mission.invoice`): the
+    relationship is lazy="noload", so on a mission already in the session's
+    identity map (every trigger path — the webhook and both PUT routes load
+    the mission/invoice before delivery runs) a re-query with selectinload
+    does NOT repopulate it and the gate would mis-read paid missions as
+    never-invoiced. Caught by test_download_link_delivery_e2e.
+    """
     if not mission.download_link_url:
         return "no-download-url"
     if mission.download_link_email_sent_at is not None:
@@ -68,7 +76,7 @@ def _delivery_skip_reason(mission) -> str | None:
         # No payment event exists for non-billable missions; the link is
         # already un-gated for them (report + portal carry it).
         return "not-billable"
-    if mission.invoice is None or not mission.invoice.paid_in_full:
+    if invoice is None or not invoice.paid_in_full:
         return "not-paid-in-full"
     if (
         mission.download_link_expires_at is not None
@@ -92,16 +100,14 @@ async def deliver_download_link_if_due(
     Never raises past its own boundary — callers sit on payment paths that
     must not fail because an email did.
     """
+    from app.models.invoice import Invoice
     from app.models.mission import Mission
 
     try:
         result = await db.execute(
             select(Mission)
             .where(Mission.id == mission_id)
-            .options(
-                selectinload(Mission.invoice),
-                selectinload(Mission.customer),
-            )
+            .options(selectinload(Mission.customer))
         )
         mission = result.scalar_one_or_none()
         if mission is None:
@@ -111,7 +117,13 @@ async def deliver_download_link_if_due(
             )
             return "skipped:mission-not-found"
 
-        reason = _delivery_skip_reason(mission)
+        # Direct invoice query — NOT mission.invoice; see _delivery_skip_reason
+        # docstring for the lazy="noload" identity-map trap this avoids.
+        invoice = (
+            await db.execute(select(Invoice).where(Invoice.mission_id == mission.id))
+        ).scalar_one_or_none()
+
+        reason = _delivery_skip_reason(mission, invoice)
         if reason is not None:
             level = logging.WARNING if reason in ("link-expired", "no-customer-email") else logging.INFO
             logger.log(
@@ -123,7 +135,7 @@ async def deliver_download_link_if_due(
 
         from app.services.email_service import send_download_link_email
 
-        await send_download_link_email(
+        sent = await send_download_link_email(
             to_email=mission.customer.email,
             customer_name=mission.customer.name,
             mission_title=mission.title,
@@ -131,6 +143,16 @@ async def deliver_download_link_if_due(
             expires_at=mission.download_link_expires_at,
             db=db,
         )
+        if not sent:
+            # Graceful no-op path (SMTP unconfigured — demo stacks). Do NOT
+            # stamp: the delivery stays armed and fires on the next trigger
+            # once SMTP exists, instead of being silently lost forever.
+            logger.warning(
+                "[DL-DELIVERY] trigger=%s mission=%s SKIPPED (smtp-unconfigured) — "
+                "not stamping sent_at; delivery stays armed",
+                trigger, mission_id,
+            )
+            return "skipped:smtp-unconfigured"
         mission.download_link_email_sent_at = datetime.utcnow()
         await db.flush()
         logger.info(

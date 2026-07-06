@@ -4,6 +4,20 @@ Maintained alongside `CHANGELOG.md` and `docs/adr/`. `CHANGELOG.md` is
 the ledger of shipped changes; this file tracks what's in-flight or
 blocked.
 
+## 2026-07-06 — Download-link payment gate + automated delivery — SHIPPED (v2.79.0–v2.80.1, ADR-0039/0040)
+
+**Complete and live on BOS-HQ.** Policy: clients never receive the
+mission-footage download link until the invoice is paid in full; once it is,
+delivery is fully automated (follow-up email + client-portal unlock) with no
+operator steps. Both halves shipped, tested (delivery/gate suites incl.
+endpoint-level e2e tests), and deployed. Verification pass on 2026-07-06
+caught and fixed two bugs before they could bite: the SMTP-unconfigured path
+stamping a delivery that never went out, and the `Mission.invoice`
+lazy="noload" identity-map trap silently disabling the webhook/mission-update
+triggers. Nothing in-flight; the only operator residual is outside the app
+(revoking the pre-gate UI Drop share sent to River M. on 2026-07-02, and
+re-minting it once paid — after which the automation takes over).
+
 ## 2026-06-24 — Async device-upload cross-container temp-handoff fix — SHIPPED + OPERATOR-CONFIRMED (v2.72.1)
 
 **Deployed live to BOS-HQ 22:44 PDT 2026-06-24** (droneops.barnardhq.com →

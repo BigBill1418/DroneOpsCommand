@@ -77,6 +77,41 @@ exposure — zero operator steps.**
 - A mission with the URL set but payment never collected simply never
   fires — correct by policy.
 
+## Addendum — 2026-07-06 verification pass (v2.80.1)
+
+An end-to-end verification pass (endpoint-level tests in
+`test_download_link_delivery_e2e.py` driving the real router functions
+against sqlite, house pattern) caught two real bugs in the v2.80.0 cut,
+both fixed in v2.80.1 before any prod payment exercised them:
+
+1. **`Mission.invoice` lazy="noload" identity-map trap (delivery-killing).**
+   Every trigger path loads the mission (webhook via
+   `_load_mission_and_customer`, both PUT routes directly) *before* the
+   delivery service runs. `noload` marks the relationship "loaded (None)"
+   at that first load, so the service's re-query with
+   `selectinload(Mission.invoice)` returned the identity-mapped object
+   without repopulating it — the gate read `invoice=None` → skipped
+   `not-paid-in-full` on PAID missions. The Stripe and mission-update
+   triggers were silently dead. **Fix:** the service queries the Invoice
+   directly (`select(Invoice).where(mission_id=…)`), never through the
+   relationship; `_delivery_skip_reason(mission, invoice)` takes it
+   explicitly. Rule of thumb this leaves behind: never read
+   `Mission.invoice`/`Mission.report` on a mission that may already be in
+   the session — query the table.
+
+2. **SMTP-unconfigured no-op stamped as sent (delivery-losing).**
+   `_send_html_email` returns False (graceful skip) when SMTP is not
+   configured; v2.80.0 stamped `download_link_email_sent_at` regardless,
+   permanently losing the delivery on demo/misconfigured stacks. **Fix:**
+   the stamp is only written when the send returns True; the False path
+   returns `skipped:smtp-unconfigured` (WARN) and stays armed for the next
+   trigger.
+
+The pass also confirmed: no client-reachable surface exposes
+`download_link_url` outside the gate (portal + report PDF/email are the
+only client paths; operator routes require operator JWT), and the report
+email template only renders the link from the gated payload.
+
 ## Failover & Resilience Guard self-check
 
 1. Replication: additive nullable column via WAL — safe. 2. Container

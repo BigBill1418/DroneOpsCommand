@@ -297,12 +297,14 @@ export default function MissionReportEdit() {
         const syncContent = resp?.data?.final_content || '';
         setReportContent(syncContent);
         setLastGeneratedAt(new Date().toISOString());
-        setBaseline({
+        // paymentOverride NOT persisted by the generate request — keep its
+        // previous baseline so an unsaved override flip stays dirty.
+        setBaseline((prev) => ({
+          ...prev,
           narrative,
           reportContent: syncContent,
           includeDownloadLink,
-          paymentOverride,
-        });
+        }));
         setGenerating(false);
         return;
       }
@@ -341,12 +343,14 @@ export default function MissionReportEdit() {
               // AI generation persisted on the server; treat narrative
               // + new content as the new clean baseline so Cancel
               // doesn't fire after a successful Generate.
-              setBaseline({
+              // paymentOverride NOT persisted by the generate request —
+              // keep its previous baseline so an unsaved flip stays dirty.
+              setBaseline((prev) => ({
+                ...prev,
                 narrative,
                 reportContent: generatedContent,
                 includeDownloadLink,
-                paymentOverride,
-              });
+              }));
               notifications.show({
                 title: leakFlag ? 'Report Ready — Audience Leak Flagged' : 'Report Ready',
                 message: leakFlag
@@ -393,10 +397,17 @@ export default function MissionReportEdit() {
     setGeneratingPdf(true);
     try {
       // Persist final report content first so the PDF reflects edits.
+      // ADR-0039/0040: also persist the payment-override + include-link
+      // switches — the server renders the PDF against its STORED flags, so
+      // an unsaved override flip would otherwise produce a link-less PDF
+      // while the UI shows the override as active.
       if (reportContent) {
-        await api.put(`/missions/${missionId}/report`, {
+        const putResp = await api.put(`/missions/${missionId}/report`, {
           final_content: reportContent,
+          include_download_link: includeDownloadLink,
+          download_link_payment_override: paymentOverride,
         });
+        setPaymentBlocked(Boolean(putResp?.data?.download_link_payment_blocked));
         setLastSavedAt(new Date().toISOString());
         // The PUT only included final_content but the operator's
         // narrative + include-link toggle live alongside it. Re-

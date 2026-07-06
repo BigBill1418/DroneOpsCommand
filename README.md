@@ -2,7 +2,7 @@
 
 **Self-hosted mission management, flight log analysis, GPS flight replay with video export, AI report generation, invoicing, and real-time airspace monitoring for commercial drone operators.**
 
-**Version 2.80.0** | [Quick Start](#quick-start) | [Features](#features) | [Configuration](#configuration) | [Contributing](CONTRIBUTING.md) | [License](LICENSE)
+**Version 2.80.1** | [Quick Start](#quick-start) | [Features](#features) | [Configuration](#configuration) | [Contributing](CONTRIBUTING.md) | [License](LICENSE)
 
 **Live Demo:** [command-demo.barnardhq.com](https://command-demo.barnardhq.com) (login: `demo` / `demo123`)
 
@@ -208,7 +208,8 @@ After logging in, go to **Settings > Branding** to set your company name, taglin
 - Includes: mission metadata, report narrative, flight map, aircraft specs, mission images with captions
 - Invoice section with line items, totals, tax calculation
 - Payment links (PayPal/Venmo) for unpaid invoices
-- Optional client download link for mission footage
+- Optional client download link for mission footage — **withheld until the
+  invoice is paid in full** (ADR-0039; per-report operator override available)
 - Generated timestamp and mission ID
 
 ### Invoicing
@@ -266,7 +267,9 @@ After logging in, go to **Settings > Branding** to set your company name, taglin
 ### Email Delivery
 - Send PDF reports directly to customer email
 - Async SMTP with TLS support via aiosmtplib
-- HTML email body with mission title and optional download link
+- HTML email body with mission title and optional download link (payment-gated per ADR-0039)
+- Automated follow-up email delivers the download link the moment the
+  invoice is paid in full — Stripe or manual mark-paid (ADR-0040)
 - PDF attached automatically
 - SMTP configuration via Settings page with test email button
 - Mission status updated to "Sent" after successful delivery
@@ -275,7 +278,9 @@ After logging in, go to **Settings > Branding** to set your company name, taglin
 - Store mission footage folder paths (UNAS/Synology NAS)
 - Paste share links from UNAS web interface with expiration dates
 - Active/expired link status badge with date tracking
-- Optional inclusion of download link in client reports and emails
+- Optional inclusion of download link in client reports and emails —
+  payment-gated: withheld until the invoice is paid in full, then delivered
+  automatically by email and unlocked in the client portal (ADR-0039/0040)
 - Supports file paths with special characters, unicode, and spaces
 
 ### Weather & Airspace Intelligence

@@ -61,51 +61,57 @@ def _mission(
 
 
 # ── _delivery_skip_reason ──────────────────────────────────────────────
+# The invoice is passed EXPLICITLY (lazy="noload" identity-map trap — see
+# the service docstring); these call it exactly as the service does.
+
+def _skip(m):
+    return _delivery_skip_reason(m, m.invoice)
+
 
 def test_all_conditions_met_sends():
-    assert _delivery_skip_reason(_mission()) is None
+    assert _skip(_mission()) is None
 
 
 def test_no_url_skips():
-    assert _delivery_skip_reason(_mission(download_link_url=None)) == "no-download-url"
+    assert _skip(_mission(download_link_url=None)) == "no-download-url"
 
 
 def test_already_sent_skips():
     m = _mission(download_link_email_sent_at=datetime.utcnow())
-    assert _delivery_skip_reason(m) == "already-sent"
+    assert _skip(m) == "already-sent"
 
 
 def test_not_billable_skips():
-    assert _delivery_skip_reason(_mission(is_billable=False)) == "not-billable"
+    assert _skip(_mission(is_billable=False)) == "not-billable"
 
 
 def test_unpaid_skips():
-    assert _delivery_skip_reason(_mission(paid_in_full=False)) == "not-paid-in-full"
+    assert _skip(_mission(paid_in_full=False)) == "not-paid-in-full"
 
 
 def test_no_invoice_skips():
-    assert _delivery_skip_reason(_mission(invoice=None)) == "not-paid-in-full"
+    assert _skip(_mission(invoice=None)) == "not-paid-in-full"
 
 
 def test_expired_link_skips():
     m = _mission(download_link_expires_at=datetime.utcnow() - timedelta(hours=1))
-    assert _delivery_skip_reason(m) == "link-expired"
+    assert _skip(m) == "link-expired"
 
 
 def test_future_expiry_sends():
     m = _mission(download_link_expires_at=datetime.utcnow() + timedelta(days=7))
-    assert _delivery_skip_reason(m) is None
+    assert _skip(m) is None
 
 
 def test_no_customer_email_skips():
-    assert _delivery_skip_reason(_mission(customer_email=None)) == "no-customer-email"
+    assert _skip(_mission(customer_email=None)) == "no-customer-email"
 
 
 def test_rearmed_after_url_change_sends():
     # The mission-update path nulls the stamp when the URL changes; a
     # re-armed mission with a paid invoice delivers again.
     m = _mission(download_link_email_sent_at=None)
-    assert _delivery_skip_reason(m) is None
+    assert _skip(m) is None
 
 
 # ── download_link_payment_blocked (relocated ADR-0039 policy) ──────────
