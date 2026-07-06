@@ -679,6 +679,43 @@ async def send_payment_received_email(
     return True
 
 
+async def send_download_link_email(
+    *,
+    to_email: str,
+    customer_name: str | None,
+    mission_title: str,
+    download_url: str,
+    expires_at: object = None,
+    db: AsyncSession | None = None,
+) -> bool:
+    """ADR-0040: payment-triggered footage download-link delivery.
+
+    Fired automatically when a mission's invoice becomes paid in full (or
+    when the link URL lands on an already-paid mission). This is the
+    "separate follow-up email" of the download-link policy — the report
+    email never carries the link while unpaid (ADR-0039); this one does,
+    the moment payment clears.
+    """
+    logger.info(
+        "[EMAIL-DL-LINK] Preparing download-link email to=%s, customer=%s, mission='%s'",
+        to_email, customer_name, mission_title,
+    )
+    branding = await _get_branding(db)
+    html = jinja_env.get_template("download_link_email.html").render(
+        customer_name=customer_name,
+        mission_title=mission_title,
+        download_url=download_url,
+        expires_at=expires_at.strftime("%B %d, %Y at %I:%M %p")
+        if hasattr(expires_at, "strftime")
+        else None,
+        **branding,
+    )
+    cn = branding.get("company_name", "DroneOps")
+    return await _send_html_email(
+        to_email, f"Your Files Are Ready — {mission_title} — {cn}", html, db
+    )
+
+
 async def _send_html_email(to_email: str, subject: str, html_body: str, db=None) -> bool:
     """Shared HTML-email sender (SMTP from DB settings, env fallback)."""
     if db:

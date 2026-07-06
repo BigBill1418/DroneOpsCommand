@@ -30,6 +30,7 @@ import {
   IconArrowLeft,
   IconCalendar,
   IconCheck,
+  IconDownload,
   IconDrone,
   IconFileText,
   IconMapPin,
@@ -54,6 +55,10 @@ interface ClientMissionData {
   client_notes: string | null;
   created_at: string;
   image_count: number;
+  // ADR-0040: present ONLY when the payment gate passes (invoice paid in
+  // full / non-billable / operator override). Null while payment is due.
+  download_url: string | null;
+  download_expires_at: string | null;
 }
 
 interface ClientInvoiceLineItem {
@@ -335,6 +340,14 @@ export default function ClientMissionDetail() {
       const newPhase = inv?.payment_phase ?? null;
       if (newPhase && newPhase !== postPayContext.startedPhase) {
         // Phase advanced — payment is confirmed. Clear context.
+        // ADR-0040: re-pull the mission so the now-unlocked download
+        // link appears without a manual reload.
+        try {
+          const m = await clientApi.get(`/missions/${missionId}`);
+          setMission(m.data);
+        } catch {
+          /* mission refresh is best-effort — link shows on next load */
+        }
         lastPhaseRef.current = newPhase;
         try {
           sessionStorage.removeItem(PAYMENT_CTX_KEY(missionId));
@@ -378,6 +391,14 @@ export default function ClientMissionDetail() {
     const inv = await fetchInvoice();
     const newPhase = inv?.payment_phase ?? null;
     if (newPhase && postPayContext && newPhase !== postPayContext.startedPhase) {
+      // ADR-0040: re-pull the mission so the now-unlocked download link
+      // appears without a manual reload.
+      try {
+        const m = await clientApi.get(`/missions/${missionId}`);
+        setMission(m.data);
+      } catch {
+        /* mission refresh is best-effort — link shows on next load */
+      }
       lastPhaseRef.current = newPhase;
       try {
         sessionStorage.removeItem(PAYMENT_CTX_KEY(missionId));
@@ -637,7 +658,7 @@ export default function ClientMissionDetail() {
         </Card>
       )}
 
-      {/* ── Deliverables placeholder ─────────────────────────── */}
+      {/* ── Deliverables (ADR-0040 payment-gated download link) ── */}
       <Card padding="lg" radius="md" style={customerStyles.card}>
         <Group gap="xs" mb="sm">
           <IconPackage size={18} color={customerBrand.brandCyan} />
@@ -645,22 +666,65 @@ export default function ClientMissionDetail() {
             DELIVERABLES
           </Title>
         </Group>
-        <Paper
-          p="md"
-          radius="sm"
-          style={{
-            background: customerBrand.bgDeep,
-            border: `1px dashed ${customerBrand.border}`,
-          }}
-        >
-          <Text
-            size="sm"
-            ta="center"
-            style={{ color: customerBrand.textMuted, ...monoFont }}
+        {mission.download_url ? (
+          <Paper
+            p="md"
+            radius="sm"
+            style={{
+              background: customerBrand.bgDeep,
+              border: `1px solid ${customerBrand.brandCyan}`,
+            }}
           >
-            Deliverables will be available here once your mission is complete.
-          </Text>
-        </Paper>
+            <Stack gap="sm" align="center">
+              <Text
+                size="sm"
+                ta="center"
+                style={{ color: customerBrand.textBody, ...monoFont }}
+              >
+                Your mission footage is ready.
+              </Text>
+              <Button
+                component="a"
+                href={mission.download_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                leftSection={<IconDownload size={16} />}
+                color="cyan"
+              >
+                DOWNLOAD YOUR FILES
+              </Button>
+              {mission.download_expires_at && (
+                <Text
+                  size="xs"
+                  ta="center"
+                  style={{ color: customerBrand.textMuted, ...monoFont }}
+                >
+                  Link available until{' '}
+                  {new Date(mission.download_expires_at).toLocaleString()}
+                </Text>
+              )}
+            </Stack>
+          </Paper>
+        ) : (
+          <Paper
+            p="md"
+            radius="sm"
+            style={{
+              background: customerBrand.bgDeep,
+              border: `1px dashed ${customerBrand.border}`,
+            }}
+          >
+            <Text
+              size="sm"
+              ta="center"
+              style={{ color: customerBrand.textMuted, ...monoFont }}
+            >
+              {invoice && !invoice.paid_in_full
+                ? 'Your download will be available here once the invoice is paid in full.'
+                : 'Deliverables will be available here once your mission is complete.'}
+            </Text>
+          </Paper>
+        )}
       </Card>
 
       {/* ── Invoice card (deposit feature ADR-0009) ──────────── */}

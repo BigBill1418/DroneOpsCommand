@@ -263,6 +263,10 @@ async def update_invoice(
 
     payload = data.model_dump(exclude_unset=True)
 
+    # ADR-0040: detect the manual paid-in-full transition so the automated
+    # download-link delivery can fire exactly once, same as the Stripe path.
+    became_paid_in_full = bool(payload.get("paid_in_full")) and not invoice.paid_in_full
+
     # ADR-0009 — deposit fields are immutable once collected. The
     # webhook handler sets deposit_paid=True; from that point only the
     # rest of the invoice (line items, paid_in_full) is editable.
@@ -292,6 +296,16 @@ async def update_invoice(
 
     _recalculate_invoice(invoice)
     await db.flush()
+
+    if became_paid_in_full:
+        logger.info(
+            "[INVOICE-UPDATE] mission=%s invoice=%s manually marked PAID IN FULL — "
+            "triggering download-link delivery (ADR-0040)",
+            mission_id, invoice.id,
+        )
+        from app.services.download_link_delivery import deliver_download_link_if_due
+        await deliver_download_link_if_due(db, mission_id, trigger="manual-mark-paid")
+
     await db.refresh(invoice)
     return invoice
 

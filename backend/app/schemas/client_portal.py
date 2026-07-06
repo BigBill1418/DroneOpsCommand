@@ -73,6 +73,11 @@ class ClientMissionDetail(BaseModel):
     client_notes: str | None = None
     created_at: datetime
     image_count: int = 0
+    # ADR-0040: mission-footage download link, present ONLY when the
+    # ADR-0039 payment gate passes (invoice paid in full / non-billable /
+    # operator override). Null while payment is outstanding.
+    download_url: str | None = None
+    download_expires_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 

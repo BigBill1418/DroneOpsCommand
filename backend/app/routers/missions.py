@@ -527,6 +527,7 @@ async def update_mission(
 
     try:
         old_customer_id = mission.customer_id
+        old_download_link_url = mission.download_link_url
         update_fields = data.model_dump(exclude_unset=True)
 
         for key, value in update_fields.items():
@@ -539,7 +540,28 @@ async def update_mission(
                 value = value.value
             setattr(mission, key, value)
 
+        # ADR-0040: a new/changed download link re-arms the automated
+        # delivery email (a replacement link must reach the client too),
+        # and if the invoice is already paid the delivery fires right now —
+        # this covers "payment landed before the footage was ready".
+        new_download_link_url = update_fields.get("download_link_url")
+        link_changed = (
+            "download_link_url" in update_fields
+            and (new_download_link_url or None) != (old_download_link_url or None)
+        )
+        if link_changed:
+            mission.download_link_email_sent_at = None
+            logger.info(
+                "[MISSION-UPDATE] mission=%s download_link_url changed — delivery re-armed (ADR-0040)",
+                mission_id,
+            )
+
         await db.flush()
+
+        if link_changed and new_download_link_url:
+            from app.services.download_link_delivery import deliver_download_link_if_due
+            await deliver_download_link_if_due(db, mission_id, trigger="download-url-set")
+
         # Re-query with explicit eager loads so relationships are populated for response
         result = await db.execute(
             select(Mission).where(Mission.id == mission_id).options(*_mission_graph_options())

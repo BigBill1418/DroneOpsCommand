@@ -425,6 +425,16 @@ async def _send_balance_notifications(invoice: Invoice, db: AsyncSession):
     except Exception as exc:
         logger.error("[STRIPE-WEBHOOK] BALANCE email failed for invoice=%s: %s", invoice.id, exc)
 
+    # ADR-0040: invoice just became paid in full — deliver the mission-footage
+    # download link in its own follow-up email (fail-soft inside the service;
+    # skips cleanly when no link URL is set or it was already delivered).
+    from app.services.download_link_delivery import deliver_download_link_if_due
+    status = await deliver_download_link_if_due(
+        db, invoice.mission_id, trigger="stripe-balance-paid"
+    )
+    if status == "sent":
+        await db.commit()
+
 
 def _frontend_origin() -> str:
     """Read the operator-side frontend URL once. Defaults to production

@@ -4,6 +4,34 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-07-06 — feat(payments): automated download-link delivery on payment-in-full — v2.80.0 (ADR-0040)
+
+Completes ADR-0039: payment-in-full is now a TRIGGER, not just a gate. Per
+Bill (2026-07-06): no manual report regeneration — when the client pays they
+get the link in a separate automated follow-up email and it populates in the
+client portal.
+
+* **Delivery service** `app/services/download_link_delivery.py` — also now
+  owns the ADR-0039 gate policy (reports router + portal import it; one
+  source of truth). Sends branded `download_link_email.html`, stamps
+  `missions.download_link_email_sent_at` (migration
+  `0009_mission_dl_email_sent_at`) AFTER a successful send so failures retry
+  on the next trigger. Fail-soft: never breaks the payment flow.
+* **Three triggers:** Stripe balance-paid webhook; manual mark-paid
+  (`PUT /invoice` false→true transition); download URL set/changed on the
+  mission (covers footage-ready-after-payment; a URL change RESETS the dedup
+  stamp so replacement links re-deliver).
+* **Client portal:** `GET /api/client/missions/{id}` returns
+  `download_url`/`download_expires_at` only when the gate passes; the
+  DELIVERABLES card shows the download button when unlocked ("unlocks when
+  the invoice is paid in full" while unpaid), and the post-payment poll
+  re-pulls the mission so the link appears without a reload. Gotcha honored:
+  `Mission.invoice` is lazy="noload" — endpoint eager-loads it explicitly.
+* Skip conditions logged with reason: no-url / already-sent / not-billable /
+  not-paid-in-full / link-expired (WARN) / no-customer-email (WARN).
+* Tests: 16 new (`test_download_link_delivery.py`); portal fixture +
+  migration fence updated; 598 backend / 53 frontend pass.
+
 ## 2026-07-05 — feat(reports): unpaid-invoice download-link gate + operator override — v2.79.0 (ADR-0039)
 
 Policy (Bill, 2026-07-05): **clients do not get the mission-footage download

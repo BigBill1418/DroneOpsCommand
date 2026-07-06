@@ -30,6 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from app.models.aircraft import Aircraft
 from app.models.customer import Customer
 from app.models.flight import Flight
+from app.models.invoice import Invoice
 from app.models.mission import (
     Mission,
     MissionFlight,
@@ -58,6 +59,8 @@ async def db():
             Mission.__table__,
             MissionFlight.__table__,
             MissionImage.__table__,
+            # ADR-0040: the portal mission endpoint now eager-loads the invoice.
+            Invoice.__table__,
         ):
             await conn.run_sync(table.create)
     Session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)

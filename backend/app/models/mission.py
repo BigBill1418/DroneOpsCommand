@@ -95,6 +95,10 @@ class Mission(Base):
     unas_folder_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
     download_link_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     download_link_expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # ADR-0040: when the payment-triggered download-link delivery email went
+    # out (dedup stamp). Reset to NULL when download_link_url changes so a
+    # replacement link re-arms delivery.
+    download_link_email_sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     client_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

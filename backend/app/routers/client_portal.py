@@ -268,7 +268,14 @@ async def get_client_mission(
         logger.warning("[CLIENT-MISSION] ACCESS DENIED — customer=%s cannot access mission=%s from ip=%s", client.customer_id, mission_id, client_ip)
         raise HTTPException(status_code=403, detail="You do not have access to this mission")
 
-    result = await db.execute(select(Mission).where(Mission.id == mission_id))
+    # ADR-0040: invoice eager-loaded for the download-link payment gate
+    # (Mission.invoice is lazy="noload" — without the option it reads None
+    # and a billable mission would be mis-judged as never-invoiced).
+    result = await db.execute(
+        select(Mission)
+        .where(Mission.id == mission_id)
+        .options(selectinload(Mission.invoice))
+    )
     mission = result.scalar_one_or_none()
 
     if not mission:
@@ -285,8 +292,31 @@ async def get_client_mission(
     )
     image_count = count_result.scalar() or 0
 
+    # ADR-0040: expose the footage download link ONLY when the ADR-0039
+    # payment gate passes (paid in full / non-billable / operator override —
+    # the override lives on the report row, loaded here for that check).
+    download_url = None
+    download_expires_at = None
+    if mission.download_link_url:
+        from app.models.report import Report
+        from app.services.download_link_delivery import download_link_payment_blocked
+        report_row = (
+            await db.execute(select(Report).where(Report.mission_id == mission_id))
+        ).scalar_one_or_none()
+        if download_link_payment_blocked(mission, report_row):
+            logger.info(
+                "[CLIENT-MISSION] mission=%s download link WITHHELD from portal — invoice not paid in full (ADR-0039/0040)",
+                mission_id,
+            )
+        else:
+            download_url = mission.download_link_url
+            download_expires_at = mission.download_link_expires_at
+
     elapsed = time.perf_counter() - start
-    logger.info("[CLIENT-MISSION] Served mission=%s for customer=%s (%.3fs)", mission_id, client.customer_id, elapsed)
+    logger.info(
+        "[CLIENT-MISSION] Served mission=%s for customer=%s download_link=%s (%.3fs)",
+        mission_id, client.customer_id, "shown" if download_url else "hidden", elapsed,
+    )
 
     return ClientMissionDetail(
         id=str(mission.id),
@@ -299,6 +329,8 @@ async def get_client_mission(
         client_notes=mission.client_notes,
         created_at=mission.created_at,
         image_count=image_count,
+        download_url=download_url,
+        download_expires_at=download_expires_at,
     )
 
 

@@ -55,23 +55,13 @@ async def _load_mission_with_flights(db: AsyncSession, mission_id: UUID) -> Miss
 # invoice is paid in full. The per-report `download_link_payment_override`
 # is the deliberate operator release valve. Fail-closed: a billable mission
 # with NO invoice row withholds the link too (nothing has been collected).
+# The policy itself lives in `app.services.download_link_delivery` (ADR-0040)
+# so this router, the client portal, and the automated payment-triggered
+# delivery email all share one source of truth.
 def _download_link_payment_blocked(mission: Mission, report: Report) -> bool:
     """True when the payment gate must withhold the download link."""
-    if getattr(report, "download_link_payment_override", False):
-        return False
-    if not mission.is_billable:
-        return False
-    invoice = mission.invoice
-    if invoice is None:
-        # Billable but never invoiced — fail closed until an invoice exists
-        # and is paid (or the operator overrides).
-        return True
-    if invoice.paid_in_full:
-        return False
-    if float(invoice.total or 0) <= 0:
-        # Nothing to collect (mirrors the payment-links section logic).
-        return False
-    return True
+    from app.services.download_link_delivery import download_link_payment_blocked
+    return download_link_payment_blocked(mission, report)
 
 
 def _build_download_link(mission: Mission, report: Report) -> dict | None:
