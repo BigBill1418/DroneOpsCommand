@@ -4,6 +4,30 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-07-16 — ops(backups): off-host R2 push + fix broken tos_signed path + freshness metric [skip-deploy]
+
+Ops-script only (no app/version change). The 2026-07-16 BOS backup audit found
+the nightly `scripts/snapshot.sh` dump was **local-only** (no off-host copy)
+and its signed-TOS step was silently no-op'ing every night — it tarred
+`${REPO_ROOT}/data/tos_signed`, a path that never existed. The real signed
+legal PDFs live in the `droneops_app_data` Docker volume at `uploads/tos_signed`
+(alongside `uploads/flight_logs`, ~557M total).
+
+* **Off-host DB push.** After the local gzipped `pg_dump` (unchanged, 14-day
+  local retention), the dump is streamed to Cloudflare R2 at
+  `s3://<obs bucket>/droneops/db/YYYY/MM/DD/droneops-<TS>.sql.gz`, reusing the
+  obs R2 credential source (`/opt/observability/.env`) and the shared
+  `obs-glitchtip-backups` bucket with a dedicated `droneops/` prefix.
+* **Fixed + expanded uploads coverage.** Replaced the broken `data/tos_signed`
+  tar with an incremental `aws s3 sync` of the volume's `uploads/` tree
+  (signed-TOS PDFs + flight logs) to `s3://<obs bucket>/droneops/uploads/`,
+  mounting the volume read-only.
+* **Freshness metric + alerting.** On FULL success writes
+  `droneops_backup_last_success_timestamp_seconds` to the node-exporter
+  textfile collector; InfraWatch `obs-rule-droneops-backup-stale` pages on
+  >28h/never-written. Any dump/upload failure pushes ntfy `high` to the
+  existing `infrawatch-alerts` topic. Removed the silent `|| true` swallow.
+
 ## 2026-07-06 — fix(payments): delivery verification pass — two real bugs + e2e endpoint tests — v2.80.1 (ADR-0040 addendum)
 
 End-to-end verification of the v2.80.0 automation caught two bugs before any
