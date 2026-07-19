@@ -26,7 +26,14 @@ services:
         -c hot_standby=on
         -c primary_conninfo='host=10.99.0.2 port=5434 user=replicator password=${REPLICATION_PASSWORD:?REPLICATION_PASSWORD must be set} application_name=hsh_hq_standby'
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U replicator || exit 1"]
+      # -U/-d must name a role+database that actually exist: pg_isready's
+      # startup packet is rejected pre-auth when the database is missing, so
+      # the old `-U replicator` (dbname defaults to the username; no such
+      # database) made the server log `FATAL: database "replicator" does not
+      # exist` every 10s (~8.5k lines/day of pure noise) while the check
+      # still exited 0. Fixed 2026-07-19; droneops/droneops is the app
+      # role+db, present on the standby via replication.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U droneops -d droneops || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
