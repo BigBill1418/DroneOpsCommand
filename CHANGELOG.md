@@ -4,6 +4,16 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-07-19 — ops(standby): silence chronic healthcheck FATAL spam on droneops-db-standby [skip-deploy]
+
+Compose-only (no app/version change). The standby's healthcheck ran
+`pg_isready -U replicator`; dbname defaults to the username and no
+`replicator` database exists, so PostgreSQL logged
+`FATAL: database "replicator" does not exist` every 10 s (~8.5k lines/day)
+while the check still passed. Healthcheck now probes `-U droneops -d droneops`
+(the app role+db, present on the standby via replication). Applied live on
+CHAD-HQ (10.99.0.2) by recreating `droneops-db-standby`.
+
 ## 2026-07-16 — ops(backups): off-host R2 push + fix broken tos_signed path + freshness metric [skip-deploy]
 
 Ops-script only (no app/version change). The 2026-07-16 BOS backup audit found
