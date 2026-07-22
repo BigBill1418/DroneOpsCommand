@@ -4,6 +4,33 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-07-22 — ops(backups): automated quarterly R2 restore drill [skip-deploy]
+
+Ops-script only (no app/version change). Closes the last discipline gap in the
+backup lane: the quarterly restore drill documented in `scripts/snapshot.sh`
+was manual — it relied on an operator remembering every ~92 days.
+
+* **`scripts/restore-drill.sh`** — downloads the *newest R2 dump* (the off-host
+  copy that matters in a disaster, not the local file), verifies gzip integrity
+  and that the dump is <48 h old, restores it into a throwaway
+  `droneops_restore_drill` database on `droneops-standby-db`, sanity-checks
+  restored row counts (`flights` ≥90 % of live, `battery_logs` /
+  `tos_acceptances` non-empty), then drops the scratch DB (trap-guaranteed).
+* **`scripts/systemd/droneops-restore-drill.{service,timer}`** — installed on
+  BOS-HQ at `/etc/systemd/system/`, `OnCalendar=*-01,04,07,10-16 16:23 UTC`
+  (quarterly on the 16th, anchored to the 2026-07-16 install-time verified
+  restore), `Persistent=true` so a powered-off host catches up.
+* **Self-watching:** full success writes node-exporter textfile metric
+  `droneops_restore_drill_last_success_timestamp_seconds`; an InfraWatch
+  Grafana rule pages `infrawatch-alerts` if the drill has not succeeded in
+  >100 days or the metric is absent. Failure fires an ntfy `high`
+  (dedup `droneops-restore-drill`, 6 h cooldown); success posts one
+  `default`-priority note (4×/year, ADR-0037 digest class).
+* **Proved live 2026-07-22:** restored `droneops/db/2026/07/22/…sql.gz` from
+  R2, verified flights=760/760, battery_logs=759, tos_acceptances=10; scratch
+  DB dropped; metric stamped.
+
+
 ## 2026-07-19 — ops(standby): silence chronic healthcheck FATAL spam on droneops-db-standby [skip-deploy]
 
 Compose-only (no app/version change). The standby's healthcheck ran

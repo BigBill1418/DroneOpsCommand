@@ -1,0 +1,12 @@
+[Unit]
+Description=DroneOps quarterly R2 restore drill (proves off-host dump restorable)
+Documentation=file:///home/bbarnard065/droneops/scripts/restore-drill.sh
+Requires=docker.service
+After=docker.service network-online.target
+
+[Service]
+Type=oneshot
+User=bbarnard065
+Environment=HOME=/home/bbarnard065
+ExecStart=/home/bbarnard065/droneops/scripts/restore-drill.sh
+TimeoutStartSec=30min

@@ -1,0 +1,11 @@
+[Unit]
+Description=Quarterly trigger for the DroneOps R2 restore drill
+
+[Timer]
+# 16th of Jan/Apr/Jul/Oct, 16:23 UTC (09:23 PDT / 08:23 PST — waking hours).
+# Anchored to the 16th: the install-time verified restore was 2026-07-16.
+OnCalendar=*-01,04,07,10-16 16:23:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target
