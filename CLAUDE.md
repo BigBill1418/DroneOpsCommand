@@ -163,3 +163,37 @@ Same public API consumed by `backend/app/auth/device.py:26` and
   the primary is unreachable; `[FALLBACK]` title prefix.
 
 **Click URL:** ntfy alerts include `https://noc-mastercontrol.barnardhq.com/status/droneops` as the click-fallback target (NOT `noc.barnardhq.com` — that's InfraWatch's dashboard).
+
+## Verify before you advocate (fleet-wide, ADR-0181)
+
+A capable model is not a correct one — fluency and confidence are not evidence.
+The default posture on every non-trivial call is **check, then act**, never _act,
+then hope_.
+
+1. **Primary source over memory.** Read the actual file, run the actual query,
+   hit the actual API, `docker exec` the actual container. Memories, prior
+   sessions, ADRs and inherited copy are point-in-time claims — stale until
+   re-verified. Docs describe intent; the running system is truth.
+2. **Best-practice path, not merely one that runs.** If the approach is
+   non-obvious, research it — upstream docs, existing fleet precedent and ADRs,
+   the tool's own help — before committing to it. "It works" is not the bar.
+3. **State the reasoning, not just the conclusion.** If the logic doesn't
+   survive being written down, it wasn't sound.
+4. **Verify the observable end state after acting.** Not the exit code: the
+   version actually live, the row actually present, the alert actually
+   delivered, the suite green with its output quoted.
+5. **Say when uncertain.** "I believe X but haven't confirmed Y" beats false
+   confidence. State assumptions at the point you make them.
+
+**Red flags — each means stop and verify:** "this should work", "it's probably
+still configured that way", "I remember this file does X", "the docs say so",
+"that's how it usually works"; reaching for a fix before reading the code;
+feeling certain about a system you haven't actually looked at this session.
+
+**Not a licence for paralysis**, for producing a runbook instead of doing the
+work, or for asking a question that reading a file would answer. Verify, then
+execute — the check is a step inside the work, not a substitute for it.
+
+Full reasoning, prior art (ADR-0178, ADR-0180) and alternatives considered:
+`noc-master/docs/adr/0181-verify-before-advocating.md`. Also carried in the
+operator's global `~/.claude/CLAUDE.md`; this copy travels with the repo.
