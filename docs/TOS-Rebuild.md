@@ -1,10 +1,23 @@
 # Claude Code Handoff — DOC TOS Acceptance: Canvas → AcroForm Replacement
 
+> **SHIPPED — this is a historical handoff spec, not a work order (noted 2026-08-03).**
+> The work landed on 2026-05-03 as
+> **[ADR-0010](adr/0010-tos-acceptance-acroform.md)**, *not* as the "ADR-0030"
+> this document repeatedly names (0030 is
+> `0030-report-output-token-caps-full-after-action-reports.md`). Two other
+> details below are also out of date and must not be copied into new work:
+> the migration is numbered on this repo's linear Alembic tree
+> (`backend/alembic/versions/`, currently 0001…0009 — there is no `0030_*`),
+> and the API container's compose service is `backend`, not `api`, so the
+> `docker compose run --rm api alembic …` lines in §"Deploy" are wrong —
+> migrations run automatically in the API entrypoint on the advisory-locked
+> boot path (ADR-0022 + ADR-0036).
+
 **Repo:** `BigBill1418/DroneOpsCommand`
 **Target version:** v2.63.x → v2.64.0
 **Primary deployment:** BOS-HQ (image built by BOS-HQ self-hosted GH Actions runner per ADR-0029)
 **Branch:** `feat/tos-acroform-acceptance`
-**ADR:** Land as ADR-0030
+**ADR:** landed as ADR-0010 (this file's original text said "Land as ADR-0030")
 
 ---
 

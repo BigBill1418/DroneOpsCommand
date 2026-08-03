@@ -23,7 +23,7 @@ a different controller.
 - **Trigger.** Was: "before a fleet-wide OTA push can be planned".
   Now: **optional hygiene**. ADR-0002 §5's silence watchdog + layer-1
   banner make fleet-wide drift self-detecting (any controller that
-  stops uploading for >48h pages Bill's Pushover, any controller with
+  stops uploading for >48h pages Bill via ntfy, any controller with
   a cleared `Preferences` shows the red banner on next launch). The
   audit is still useful for proactive APK OTA planning but is no
   longer load-bearing against silent data loss.
@@ -52,8 +52,15 @@ a different controller.
   "Device auth failures (24h)" sourced from the structured WARN log
   emitted by `validate_device_api_key` in
   `backend/app/auth/device.py` (fields: `key_prefix`, `ip`,
-  `user_agent`, `path`). Pushover alert at ≥5 hits/24h from ≥2
+  `user_agent`, `path`). ntfy alert at ≥5 hits/24h from ≥2
   distinct IPs (filters out a single responder testing an old phone).
+  **Transport corrected 2026-08-03:** this item was written pre-cutover and
+  said "Pushover". Pushover was decommissioned fleet-wide on 2026-04-26
+  (noc-master ADR-0036 + this repo's
+  `docs/adr/0006-pushover-to-ntfy-migration-addendum.md`); the alert must be
+  built on ntfy (`https://ntfy.barnardhq.com`, topic prefix `droneops`, click
+  `https://noc-mastercontrol.barnardhq.com/status/droneops`) and graded
+  against the ADR-0037 five-question gate before it pages.
 - **Trigger.** v2.63.4 is live. Panel can be shipped any time.
 - **Deliverable.** Grafana JSON + alert rule in `~/noc-master` config.
 - **Owner.** TBD. ~0.5 eng day.
@@ -288,6 +295,33 @@ rationale.
   standby-safe startup + hot-path indexes + streaming flight ingest).
   Full findings: `docs/plans/2026-06-11-ground-up-audit.md`; ADR-0021.
 - **Remaining items (deliberately deferred, in priority order):**
+
+  > **Corrected 2026-08-03 — this list is stale; nearly all of it SHIPPED.**
+  > It was written when FU-8 was opened and was never trimmed when FU-8 was
+  > closed, so the two halves of this entry now contradict each other (the
+  > CLOSED note above already names the same work as delivered). Verified
+  > against the code at HEAD, not against prose:
+  >
+  > - **#1 lean mission list** — shipped; `app/routers/missions.py` strips the
+  >   heavy `flight_data_cache` keys (`_strip_cache_heavy_keys`,
+  >   `_scalar_cache_from_flight`).
+  > - **#2 Alembic** — shipped (ADR-0022, v2.70.0). `backend/alembic/versions/`
+  >   holds `0001_baseline_schema` … `0009_mission_dl_email_sent_at`, all nine
+  >   are present inside the running `droneops-backend-1` container on BOS-HQ,
+  >   and ADR-0036 made the advisory-locked Alembic boot the single schema
+  >   path. **Anything that still says "DroneOpsCommand has no Alembic; add
+  >   columns to `_add_missing_columns()` in `main.py`" is describing the
+  >   pre-v2.70.0 repo and must not be followed.**
+  > - **#3 per-call `StripeClient`** — shipped;
+  >   `app/services/stripe_service.py::stripe_client()`, consumed by
+  >   `client_portal.py` and `stripe_webhook.py`.
+  > - **#4 backup/restore as a Celery job** — shipped;
+  >   `run_backup_job_task` in `app/tasks/celery_tasks.py` (comment there still
+  >   cites "FU-8 #4").
+  > - **#5** — `_save_original_file` no longer exists in `backend/app`; only
+  >   the optional `/reprocess` refactor half may remain.
+  > - **#6 P2/P3 index audit** — shipped as Alembic revision `0002_p2_p3_indexes`.
+
   1. Mission Hub list payload is still O(track) — `flight_data_cache`
      duplicates the GPS track in every list row; needs a lean list schema or
      pagination (contract change → frontend work in the same pass).
