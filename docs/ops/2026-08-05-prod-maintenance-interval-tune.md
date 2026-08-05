@@ -28,6 +28,22 @@ Zero overdue items by both the date-based and flight-hours-based checks that
 `GET /api/maintenance/status` uses. Next date-based due item anywhere:
 Avata 2 Gimbal Calibration, 2026-10-04.
 
+## Correction (same day, ~03:20 UTC): record-based alerts were missed
+
+The first "verified zero overdue" claim was **wrong**. `GET /api/maintenance/due`
+has a **second alert source**: `maintenance_records.next_due_date` (any record
+due within 7 days alerts). Four March-2026 service records carried stale
+`next_due_date` values (2026-05-15 / 2026-06-15 / 2026-08-01), producing the
+"82d / 51d OVERDUE" dashboard alerts on Matrice 30T, Mini 5 Pro, Mavic 3 Pro,
+and Avata 2. Compounding it, the earlier verification queries JOINed through
+`maintenance_schedules`, hiding the 4+ prod aircraft that have records but no
+schedules (Mini 5 Pro, Mavic 3 Pro, etc.).
+
+Fix: set `next_due_date = NULL` on those 4 records (service history retained).
+Re-verified all four dashboard alert sources at zero: schedule date-based,
+schedule never-performed, record `next_due_date`, and battery
+(`health_pct < 40 OR cycle_count > 200`).
+
 ## Gotchas for future sessions
 
 - The `seed-defaults` endpoint only creates schedules for aircraft that have
