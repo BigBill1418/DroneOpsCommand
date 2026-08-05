@@ -4,6 +4,18 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-08-05 — ops(data): prod maintenance-alert clear + 30→90-day interval tune [skip-deploy]
+
+Data-only change in the prod DB (no code, no schema, no version bump). On
+Bill's direction: cleared all 8 overdue maintenance schedules (reset
+`last_performed` to 2026-08-05, same semantics as the app's Skip/Defer
+endpoints), extended all nine 30-day `interval_days` to 90 (Sensor Cleaning /
+Battery Health Check / Firmware Review across all three aircraft), and
+deferred the two Matrice 4TD 90-day items that were inside the due-soon
+window (IMU Calibration, Remote Controller Inspection). Verified zero
+overdue post-change; next due item is Avata 2 Gimbal Calibration 2026-10-04.
+Details + re-seed gotcha: `docs/ops/2026-08-05-prod-maintenance-interval-tune.md`.
+
 ## 2026-07-22 — ops(backups): automated quarterly R2 restore drill [skip-deploy]
 
 Ops-script only (no app/version change). Closes the last discipline gap in the
