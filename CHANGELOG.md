@@ -7,14 +7,27 @@ Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 ## 2026-08-05 — ops(data): prod maintenance-alert clear + 30→90-day interval tune [skip-deploy]
 
 Data-only change in the prod DB (no code, no schema, no version bump). On
-Bill's direction: cleared all 8 overdue maintenance schedules (reset
-`last_performed` to 2026-08-05, same semantics as the app's Skip/Defer
-endpoints), extended all nine 30-day `interval_days` to 90 (Sensor Cleaning /
-Battery Health Check / Firmware Review across all three aircraft), and
-deferred the two Matrice 4TD 90-day items that were inside the due-soon
-window (IMU Calibration, Remote Controller Inspection). Verified zero
-overdue post-change; next due item is Avata 2 Gimbal Calibration 2026-10-04.
-Details + re-seed gotcha: `docs/ops/2026-08-05-prod-maintenance-interval-tune.md`.
+Bill's direction, in three passes:
+
+* **Schedule-based clear:** reset `last_performed` to 2026-08-05 on all 8
+  overdue `maintenance_schedules` (same semantics as the app's Skip/Defer
+  endpoints), extended all nine 30-day `interval_days` to 90 (Sensor
+  Cleaning / Battery Health Check / Firmware Review across Avata 2 /
+  Matrice 30T / Matrice 4TD), and deferred the two Matrice 4TD 90-day items
+  inside the due-soon window (IMU Calibration, Remote Controller Inspection).
+* **Correction — record-based alerts:** the above did NOT clear the dashboard;
+  `GET /maintenance/due` has a second alert source, `maintenance_records.next_due_date`.
+  Four March-2026 service records carried stale due dates (up to 82 d overdue,
+  on aircraft with no schedules at all — Mini 5 Pro, Mavic 3 Pro, plus
+  Matrice 30T and Avata 2). Set `next_due_date = NULL` on those 4 rows
+  (service history retained).
+* **Final verified state:** all four dashboard alert sources at zero
+  (schedule date-based, schedule never-performed, record `next_due_date`,
+  battery health/cycles). Next date-based due item: Avata 2 Gimbal
+  Calibration 2026-10-04.
+
+Details, the schedules-JOIN verification blindness, and the seed-defaults
+re-seed gotcha: `docs/ops/2026-08-05-prod-maintenance-interval-tune.md`.
 
 ## 2026-07-22 — ops(backups): automated quarterly R2 restore drill [skip-deploy]
 
