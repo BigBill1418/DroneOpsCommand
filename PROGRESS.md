@@ -4,6 +4,79 @@ Maintained alongside `CHANGELOG.md` and `docs/adr/`. `CHANGELOG.md` is
 the ledger of shipped changes; this file tracks what's in-flight or
 blocked.
 
+## 2026-08-17 — Encrypted R2 backup (ADR-0041) — LIVE, IN PARALLEL RUN — cutover pending
+
+**The new lane is deployed, running on a timer, and verified end-to-end**
+(V1–V12, see ADR-0041 "Implementation outcome"). **The old lane is still
+running and has not been touched.** Both write every day. That is deliberate:
+the plan requires **three consecutive green days** on the new lane before the
+old one is removed. Removing it early is the one way to turn a working backup
+into no backup at all.
+
+**Green-day window opened:** 2026-08-17 (first timer-driven run 15:23 UTC).
+
+### Cutover criteria — ALL must hold before running §5.7
+
+1. Three consecutive days with `droneops_backup_last_success_timestamp_seconds`
+   advancing after **timer-driven** runs (not hand runs). Check:
+   ```bash
+   ssh 10.99.0.4 'systemctl list-timers droneops-backup.timer --no-pager;
+                  journalctl -u droneops-backup.service --since "3 days ago" | grep -c "done\."'
+   ```
+   Expect ≥ 6 completions (twice daily × 3 days).
+2. `obs-rule-droneops-backup-stale` has not fired in that window.
+3. `restic check` green on every run (it is fatal in-script, so any failure
+   would already have paged).
+4. A Sunday `--read-data-subset=5%` run has completed at least once.
+
+### Cutover commands (run on BOS-HQ `10.99.0.4`, in this order)
+
+```bash
+# 1. Retire the legacy cron line (leaves CallSign's line intact)
+crontab -l | grep -v 'droneops/scripts/snapshot.sh' | crontab -
+crontab -l                                   # verify only the callsign line remains
+
+# 2. Retire the superseded script (history preserves it)
+cd ~/droneops && git rm scripts/snapshot.sh && git commit -m 'ops(backups): retire snapshot.sh, superseded by droneops-backup.sh (ADR-0041) [skip-deploy]'
+
+# 3. Delete the old PLAINTEXT R2 prefixes (~2.3 GiB, 229 objects)
+#    ⚠️ Confirm the new repo has >=3 days of db snapshots FIRST.
+docker run --rm --network host \
+  -e AWS_ACCESS_KEY_ID=... -e AWS_SECRET_ACCESS_KEY=... -e AWS_EC2_METADATA_DISABLED=true \
+  amazon/aws-cli s3 rm --recursive \
+  --endpoint-url https://<R2_ACCOUNT_ID>.r2.cloudflarestorage.com \
+  s3://obs-glitchtip-backups/droneops/
+```
+
+Then confirm the freshness metric keeps advancing for **three more days**
+before declaring done.
+
+### Also at cutover (do not forget)
+
+- **Update the two Grafana rule descriptions.** `obs-rule-droneops-backup-stale`
+  still instructs the operator to `tail ~/droneops/backups/snapshot.log` and
+  re-run `snapshot.sh`. Replace with
+  `journalctl -u droneops-backup.service -n 50` and
+  `sudo systemctl start droneops-backup.service`. In
+  `/opt/infrawatch/grafana/provisioning/alerting/observability-alerts.yml`.
+  **Change the `description` text only — the metric names and expressions are a
+  hard contract and must not move.**
+- **Keep the local `.sql.gz` lane.** It is not part of the old lane being
+  retired; it is the documented break-glass path that needs no
+  `RESTIC_PASSWORD`.
+
+### Open, for Bill
+
+- **ntfy topic** stayed `infrawatch-alerts` per the 2026-07-14 "no new topics"
+  decision, rather than the new `droneops-backup` topic the brief proposed.
+- **7-year yearly retention** shipped per ADR-0041 D4, driven by the executed
+  TOS PDFs and invoice records. Costs essentially nothing either way; confirm
+  it matches the intended legal posture.
+- **`~/backups/n8n_*.sqlite` on droneops-server** (~840 MB, root-owned, stops
+  2026-04-15) — untouched, out of scope, needs a separate decision.
+- **Legacy volumes** `droneops_postgres_data` (46 MB) and the `droneops-demo`
+  stack — keep indefinitely, or schedule removal?
+
 ## 2026-07-06 — Download-link payment gate + automated delivery — SHIPPED (v2.79.0–v2.80.1, ADR-0039/0040)
 
 **Complete and live on BOS-HQ.** Policy: clients never receive the

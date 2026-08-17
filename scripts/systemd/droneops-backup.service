@@ -1,0 +1,12 @@
+[Unit]
+Description=DroneOps Command encrypted backup to R2 (restic; db + files + config lanes)
+Documentation=file:///home/bbarnard065/droneops/docs/runbooks/droneops-backup-restore.md
+Requires=docker.service
+After=docker.service network-online.target
+
+[Service]
+Type=oneshot
+User=bbarnard065
+Environment=HOME=/home/bbarnard065
+ExecStart=/home/bbarnard065/droneops/scripts/droneops-backup.sh
+TimeoutStartSec=60min

@@ -4,6 +4,71 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-08-17 — ops(backups): comprehensive ENCRYPTED backup to R2 (ADR-0041) [skip-deploy]
+
+Ops-scripts + docs only (no app change, no version bump). Closes the seven gaps
+in the backup lane. The old plaintext lane is **still running in parallel** and
+is not removed by this change — cutover is gated on three green days
+(`PROGRESS.md`).
+
+* **`scripts/droneops-backup.sh`** (new, supersedes `snapshot.sh`) — four
+  restic lanes into a **dedicated, encrypted** R2 repository: `db`
+  (`pg_dump -Fc`), `files` (`uploads/` **+ `reports/`**), `config`, and a
+  one-shot `legacy`. Fail-closed on every path; the freshness metric is
+  stamped only after all lanes, the retention pass and the integrity check
+  succeed.
+* **Encryption + a dedicated credential.** New R2 bucket `droneops-backups`
+  with a **bucket-scoped** token replaces the account-wide
+  `OBS_GLITCHTIP_BACKUPS_R2_*` reuse — blast radius drops from four services
+  to one. Customer PII, invoice records, `device_api_keys` and the 11 executed
+  TOS PDFs are no longer stored in the clear. `RESTIC_PASSWORD` and the R2
+  credentials are filed to the 1Password **Fleet** vault (ADR-0086); the
+  password is the recovery key and is unrecoverable if lost.
+* **Host config is finally backed up** — `.env` (41 keys incl.
+  `JWT_SECRET_KEY`, `POSTGRES_PASSWORD`, `CLOUDFLARE_TUNNEL_TOKEN`) and the
+  compose overrides. Restoring DB + files without these produced a stack that
+  *could not boot*. The lane is an explicit allowlist, so rotated `.env.bak-*`
+  secrets cannot be swept in.
+* **`uploads/` gains real history.** `aws s3 sync` was an additive mirror that
+  faithfully copied corruption over the only good copy; snapshots make a
+  damaged flight log recoverable.
+* **Retention is now enforced in R2** — `forget --prune`
+  14d/8w/24m/7y `--group-by tags`, replacing a sweep that pruned only the local
+  copy while R2 grew unbounded at ~54 MB/day.
+* **Dedup verified, not assumed.** The dump is fed to restic **uncompressed**
+  (`-Z0`); a second full run added **414 KiB** (`files` lane: 0 B). Compressing
+  first would have stored a fresh ~55 MB nightly forever.
+* **WAL archiving retired.** `archive_mode=off` + `wal_archive/` deleted:
+  it wrote into the very volume it protected, had never been pruned
+  (5.5 GiB / 358 segments), and had not archived since 2026-07-22 — a 26-day
+  hole. **Reclaimed 5.5 GiB** (`droneops_standby_pgdata` 8.0G → 2.5G); the
+  `chad_hq_standby` slot stayed `active` throughout. Plus 68 MB of stale
+  in-app dumps and ~130 MB of dead pre-migration dumps on droneops-server
+  (archived to the `legacy` lane first).
+* **`scripts/restore-drill.sh`** — migrated to restic (`pg_restore`, not
+  `gunzip | psql`). Preserves the 90 %-of-live `flights` ratio, the <48 h
+  freshness assertion, the throwaway DB and its `trap` cleanup. **Adds a
+  `config`-lane assertion**: `.env` is restored and sha256-compared against the
+  live file — the only check that proves the critical gap stays closed.
+* **`scripts/systemd/droneops-backup.{service,timer}`** — twice daily,
+  03:23 + 15:23 UTC (RPO 24 h → **12 h**), `Persistent=true`. UTC deliberately:
+  the BOS-HQ nightly window is stacked in UTC and a local-time entry would
+  DST-collide with a sibling job twice a year.
+* **The failure path was observed firing**, not assumed: a deliberately
+  corrupted R2 secret produced exit 1 and one `high` ntfy on
+  `infrawatch-alerts` with the previously-missing click URL
+  (`noc-mastercontrol.barnardhq.com/status/droneops`, HTTP 200) — and exactly
+  one notification across two failures, confirming the 6 h cooldown.
+* **Metric names deliberately unchanged.**
+  `droneops_backup_last_success_timestamp_seconds` and
+  `droneops_restore_drill_last_success_timestamp_seconds` are a hard contract
+  with two live Grafana rules; renaming either would have converted a live
+  alert into a permanently-green dead man.
+
+New runbook: `docs/runbooks/droneops-backup-restore.md` (full DR, DB-only
+rollback, single-file recovery, break-glass without the restic password, and
+how to run the drill). Decision record: `docs/adr/0041-*.md`.
+
 ## 2026-08-05 — ops(data): prod maintenance-alert clear + 30→90-day interval tune [skip-deploy]
 
 Data-only change in the prod DB (no code, no schema, no version bump). On

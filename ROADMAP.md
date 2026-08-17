@@ -5,6 +5,42 @@ in-flight scope is tracked in `PROGRESS.md`. This file holds only
 not-yet-started work with a clear trigger, scope, and ADR/decision
 reference where applicable.
 
+## Backup + DR follow-ups (from ADR-0041, 2026-08-17)
+
+### BK-1 — PITR via `pg_receivewal` — DEFERRED
+
+- **Scope.** A fifth restic lane: `pg_receivewal` streaming into a dedicated
+  volume (never into pgdata), backed up alongside the existing four lanes, with
+  its own liveness alert — a silently-dead `pg_receivewal` is a new dead-man
+  class and must be monitored as one.
+- **Trigger.** Write volume grows ~10×, **or** the RPO requirement drops below
+  the current 12 h. Neither holds today: real change is ~1 MB/day, and one
+  16 MiB WAL segment was produced in the 26 days before archiving was retired.
+- **Explicitly NOT the path.** Re-enabling `archive_command` into pgdata. That
+  is what was retired on 2026-08-17: the archive lived inside the volume it was
+  meant to protect, was never pruned (5.5 GiB / 358 segments), and with
+  `archive_timeout=0` had a 26-day hole — a liability wearing PITR's clothes.
+  Setting `archive_timeout=300` instead would write ~4.6 GB/day of
+  mostly-empty padded segments to protect ~1 MB/day of change.
+- **Reference.** ADR-0041 D5 + Option D.
+
+### BK-2 — Standby `archive_mode` on `10.99.0.2` — deferred hygiene
+
+- **Scope.** The droneops standby (`droneops-db-standby` on svdp-dev) still
+  carries `archive_mode = 'on'` and the old
+  `archive_command = cp %p …/wal_archive/%f` in its `postgresql.auto.conf`,
+  inherited from the base backup.
+- **Why it matters.** Inert today — `on` does not archive during recovery, only
+  `always` does. **But a promotion would immediately recreate ADR-0041 Gap 7 on
+  that host**, silently accumulating an unpruned archive inside the pgdata
+  volume it is supposed to protect.
+- **Fix.** `ALTER SYSTEM SET archive_mode='off'; ALTER SYSTEM RESET
+  archive_command;` then restart the standby (archive_mode needs a restart, not
+  a reload) and confirm it resumes streaming and the slot returns to `active`.
+- **Trigger.** Next planned maintenance window on svdp-dev, or immediately
+  before any deliberate failover drill. Deferred here only because it needs a
+  standby restart, which was out of scope for the backup change.
+
 ## Observability + Fleet Hygiene (follow-ups from ADR-0002, 2026-04-24)
 
 **Context.** ADR-0002 shipped the primary fix for the operator's DJI RC

@@ -1,0 +1,17 @@
+[Unit]
+Description=Twice-daily trigger for the DroneOps Command encrypted R2 backup
+
+[Timer]
+# 12h RPO per ADR-0041 D5 (PITR deliberately not adopted at this write volume).
+#
+# Kept in UTC on purpose. The BOS-HQ nightly window is stacked in UTC
+# (docs 02:44, droneops 03:23, callsign 03:30, glitchtip 03:32,
+# claudesync 03:46); a local-time OnCalendar would DST-shift into a sibling
+# job twice a year. Operator note: 03:23 UTC = 20:23 PDT the previous evening.
+OnCalendar=*-*-* 03:23:00 UTC
+OnCalendar=*-*-* 15:23:00 UTC
+Persistent=true
+RandomizedDelaySec=5min
+
+[Install]
+WantedBy=timers.target
