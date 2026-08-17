@@ -4,6 +4,66 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-08-17 — ops(backups): cold DR rehearsal + four review defects (ADR-0041 as-built) [skip-deploy]
+
+Adversarial re-review of the backup lane shipped earlier the same day
+(`e43018f`), plus the **first cold disaster-recovery rehearsal**: a full
+rebuild from the **1Password Fleet items and the R2 bucket only**, executed on
+`droneops-server`, with nothing read from BOS-HQ except comparison hashes and
+no production container or volume touched.
+
+**The rehearsal passed.** Recovery works cold. Three independent paths — restic
+from R2, the plain break-glass `.sql.gz`, and live production — produced
+**identical content digests**: `flights_digest=4d6d9276…`, 146,420,719 bytes of
+telemetry, 334,757,775 bytes of GPS track, 6,842,636 telemetry points. All 226
+files in the `files` lane are sha256-identical to production, and all 10
+executed TOS PDFs match `tos_acceptances.signed_sha256` — a cross-lane proof
+that the db and files lanes agree with each other. The restored `.env` matches
+live byte-for-byte, and the full 11-service stack renders from restored config
+alone; with `.env` removed the same render is correctly *refused* on the
+ADR-0012 `:?` guard, so that check is not vacuous. Full evidence table:
+`docs/runbooks/droneops-backup-restore.md` §11.
+
+Four defects found and fixed (`c3d9502`) — none had broken a restore, but each
+could have:
+
+* **No concurrency guard.** The runbook tells operators to run the backup by
+  hand; systemd blocks a second *service* start but not a manual shell run
+  overlapping a timer run. Both would contend for restic's exclusive lock
+  during `forget --prune`, turning a benign overlap into a `high` page. Added
+  `flock`; an overlap exits 0 *without* stamping the freshness metric, so a
+  one-off overlap is silent while a persistent one is still caught within 28 h.
+* **`backups/` was not gitignored** — 1.1 GB of *plaintext* pg dumps (customer
+  PII, invoice records, `device_api_keys`) sitting untracked in the deploy
+  clone's working tree, one `git add -A` from being committed. Now ignored.
+* **The quarterly drill never read the `files` lane** — 657 MiB of flight logs,
+  report deliverables and executed TOS PDFs, the largest lane. It certified
+  "restorable" while never touching it. Now asserted via a cross-lane sha256
+  check rather than a file-count floor, which would stay green against a stale
+  or truncated snapshot.
+* **Post-metric error hole.** The local retention sweep ran after the freshness
+  stamp under `set -e` with no `|| fail`, so a failure exited non-zero with no
+  ntfy and a green metric — visible only in systemd.
+
+Also fixed: **Procedure A2's first database command did not work.**
+`docker compose up -d droneops-standby-db` fails with `no such service` — the
+service is `db-standby`; `droneops-standby-db` is the *container* name. This
+was in the critical path of a from-nothing recovery.
+
+Explicitly re-verified and **not** changed: `forget --group-by tags` retention
+is correct. A 40-day, twice-daily synthetic corpus (80 snapshots) converged to
+exactly 20 — 14 daily + weeklies + monthly, one per day. The two same-day
+snapshots per lane currently visible in R2 are a transient artifact of a
+one-day-old repository, not a policy fault. Bash *does* run the `EXIT` trap on
+`SIGTERM` (tested), so the workdir holding the repository password is not
+leaked on a systemd timeout. `fail()` does **not** fail open when ntfy is
+absent — exit 1 confirmed with the helper removed.
+
+Minor, recorded not fixed: `.env` carries `FRONTEND_URL` twice (42 assignments,
+41 unique keys); `uploads/tos_signed/` holds 11 PDFs against 10
+`tos_acceptances` rows (one orphan from an abandoned signing flow, correctly
+backed up).
+
 ## 2026-08-17 — ops(backups): comprehensive ENCRYPTED backup to R2 (ADR-0041) [skip-deploy]
 
 Ops-scripts + docs only (no app change, no version bump). Closes the seven gaps

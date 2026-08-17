@@ -118,7 +118,7 @@ rather than from memory.
 ### A2. Bring up Postgres and restore the database
 
 ```bash
-docker compose up -d droneops-standby-db      # or the standby compose file, per topology
+docker compose up -d db-standby               # SERVICE is `db-standby`; the CONTAINER is `droneops-standby-db`
 docker exec droneops-standby-db psql -U droneops -d postgres -c 'CREATE DATABASE droneops'
 
 R dump --tag db latest /droneops.dump > /restore/droneops.dump
@@ -130,6 +130,13 @@ docker exec -i droneops-standby-db \
 > The `db` lane is a pg_dump **custom** archive (`-Fc`), so this is
 > `pg_restore`, **not** `gunzip | psql`. (`-Z0` — uncompressed — is deliberate;
 > see ADR-0041 D1. It is what makes restic dedup work.)
+
+> ⚠️ **Service name vs container name.** `droneops-standby-db` is the
+> `container_name`; the compose **service** is `db-standby`. `docker compose`
+> subcommands take the service (`up -d db-standby`), `docker exec` takes the
+> container (`docker exec droneops-standby-db …`). Mixing them fails with
+> `no such service: droneops-standby-db` — this runbook said the wrong one
+> until the 2026-08-17 DR rehearsal caught it (§11).
 
 ### A3. Restore the file volume
 
@@ -378,7 +385,70 @@ extravagant one.
 
 ---
 
-## 11. Related
+## 11. DR rehearsal — 2026-08-17 (cold, from 1Password only)
+
+The quarterly drill (§6) runs **on BOS-HQ, using the credentials on BOS-HQ**.
+That proves the artifact restores; it proves nothing about the disaster it
+exists for, because in that disaster BOS-HQ and `~/.droneops-secrets/` are
+gone. This rehearsal closed that hole by rebuilding from the **only two inputs
+that survive a lost host**: the 1Password Fleet items and the R2 bucket.
+
+**Executed on** `droneops-server` (HSH-HQ), in a throwaway environment.
+**Nothing on BOS-HQ was written to, and no production container or volume was
+touched** — prod was read-only, and only to produce comparison hashes.
+
+### What was rehearsed, and what it proved
+
+| # | Step | Evidence |
+|---|---|---|
+| 1 | Read both secrets from 1Password via the `op` service account — **no BOS-HQ input** | Parsed by label into a mode-600 env file. Shapes: restic password 64 ch, `AWS_ACCESS_KEY_ID` 32 ch, `AWS_SECRET_ACCESS_KEY` 64 ch |
+| 2 | Open the repository with those secrets alone | `restic snapshots` exit 0; `repo_id=e9c833aef19c…` — matches the ID recorded in the 1Password note |
+| 3 | Restore **all four lanes** to scratch | db 483,440,022 B · files 226 files / 657 MiB · config 10 files · legacy 25,963,218 B — all exit 0 |
+| 4 | `pg_restore` the db lane into a throwaway `postgres:16-alpine` (matching prod 16.14), no published port, dedicated volume | exit 0 in **22 s** |
+| 5 | Row counts vs prod | flights **780**, battery_logs **779**, tos_acceptances **10**, customers **7**, aircraft 9, invoices 6 — all match |
+| 6 | **Deep probe** — payload volume and content digests, run identically against restored and live | `telemetry_bytes=146,420,719` · `gps_track_bytes=334,757,775` · `sum_point_count=6,842,636` · `flights_digest=4d6d9276…` · `tos_digest=2c106a61…` — **byte-identical to live on every probe** |
+| 7 | Config lane completeness | `.env` sha256 `8839dd0d…` **matches live exactly**; 41 unique keys, trailing newline present, no empty values |
+| 8 | **Can the stack actually boot?** | All 11 services render from restored config alone (`docker compose config`). **Negative control:** the same render with `.env` removed is *refused* — `required variable DATABASE_URL is missing a value … (no default — see ADR-0012)`. Gap 5 is closed, and the check is not vacuous |
+| 9 | Files lane vs prod | **All 226 files sha256-identical to production** |
+| 10 | Files lane vs the *database* | All 10 executed TOS PDFs match `tos_acceptances.signed_sha256` byte-for-byte — an independent, cross-lane proof |
+| 11 | Legacy lane readable | Valid archive, 83 TOC entries, `Archive created at 2026-04-15 02:00:02 UTC` |
+| 12 | **Break-glass (§5) with no restic password at all** | `gunzip \| psql` of the plain `.sql.gz` produced digests **identical** to both the restic path and live prod |
+| 13 | Teardown | Container + volume destroyed; restored `.env`, dump and env file `shred`ded; scratch confirmed free of secret material |
+| 14 | Scheduled path still works after the fixes | `systemctl start droneops-backup.service` → `Result=success`, 56 s, metric advanced `1786949417 → 1786951740` (2026-08-17 00:29 PDT), new snapshots, `restic check` clean, lock released, no `/tmp` residue |
+
+**Verdict: recovery works cold.** Three independent paths (restic-from-R2,
+break-glass `.sql.gz`, live prod) agree on every digest. The 1Password items
+alone are sufficient — nothing needed from the failed host.
+
+### What the rehearsal broke that a drill would not have
+
+- **`docker compose up -d droneops-standby-db` (Procedure A2) does not work** —
+  `no such service`. The service is `db-standby`. This was the *first command*
+  of the database step in a from-nothing recovery. Fixed above.
+- The quarterly drill **never read the `files` lane** — 657 MiB of flight logs,
+  report deliverables and executed TOS PDFs, the largest lane. It certified
+  "restorable" while never touching it. Fixed in `restore-drill.sh` with a
+  cross-lane sha256 assertion (commit `c3d9502`).
+
+### Known cosmetics (not defects, recorded so they are not re-investigated)
+
+- `.env` contains **`FRONTEND_URL` twice** (lines 24 and 42) — 42 assignments,
+  41 unique keys. Last wins; harmless, but worth de-duplicating.
+- `uploads/tos_signed/` holds **11** PDFs against **10** `tos_acceptances`
+  rows. `DOC-20260503173725-5b448dbe.pdf` has no DB row — an orphan from an
+  abandoned signing flow. It is backed up correctly.
+- 14 of 780 flights have a `gps_track` that is neither a JSON object nor array;
+  identical in prod and restored, so not a restore artifact.
+
+### Next rehearsal
+
+The drill (§6) covers the artifact quarterly. **Repeat *this* cold, 1Password-only
+rehearsal annually, or after any rotation of either Fleet item** — a rotation
+that is filed incorrectly is invisible until exactly the moment it matters.
+
+---
+
+## 12. Related
 
 - [ADR-0041](../adr/0041-comprehensive-encrypted-backup-to-r2.md) — the decision, the seven gaps, options considered
 - `scripts/droneops-backup.sh` — the backup job

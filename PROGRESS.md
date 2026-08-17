@@ -51,6 +51,28 @@ docker run --rm --network host \
 Then confirm the freshness metric keeps advancing for **three more days**
 before declaring done.
 
+### 2026-08-17 later the same day — cold DR rehearsal PASSED, four defects fixed
+
+The lane was re-reviewed adversarially and rehearsed **cold**: rebuilt from the
+1Password Fleet items and the R2 bucket only, on `droneops-server`, reading
+nothing from BOS-HQ but comparison hashes and touching no production container
+or volume. Restic-from-R2, the break-glass `.sql.gz` and live prod agreed on
+every content digest; all 226 files in the `files` lane are sha256-identical to
+production; the restored `.env` matches live byte-for-byte and the full stack
+renders from it. **Recovery works cold — the filed secrets are sufficient.**
+Evidence: `docs/runbooks/droneops-backup-restore.md` §11.
+
+Fixed in `c3d9502`: missing `flock` concurrency guard; `backups/` not
+gitignored (1.1 GB of plaintext PII dumps in the deploy clone's working tree);
+the quarterly drill never reading the `files` lane; a post-metric error hole.
+Plus a runbook defect — Procedure A2's first database command
+(`docker compose up -d droneops-standby-db`) fails with `no such service`; the
+service is `db-standby`.
+
+Retention was challenged and **upheld**: a synthetic 40-day twice-daily corpus
+converged exactly as designed. This does **not** change the three-green-days
+cutover gate below — it remains the criterion.
+
 ### Also at cutover (do not forget)
 
 - **Update the two Grafana rule descriptions.** `obs-rule-droneops-backup-stale`

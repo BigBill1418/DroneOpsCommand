@@ -560,3 +560,80 @@ commands and criteria are in `PROGRESS.md`.
    root-owned `n8n_*.sqlite` on droneops-server, legacy volume disposal)
    remain for Bill. Retention shipped at 7 years per D4; it is trivially
    changeable either way.
+
+---
+
+## As-built addendum (2026-08-17) — cold DR rehearsal + review defects
+
+The "Implementation outcome" above records a 12-point matrix run **on BOS-HQ
+with BOS-HQ's credentials**. That validates the artifact; it does not validate
+the disaster, because in the disaster BOS-HQ and `~/.droneops-secrets/` are
+gone. This addendum records the adversarial re-review and the first **cold**
+rehearsal, performed from the 1Password Fleet items and the R2 bucket only.
+
+### Outcome: the recovery path is real
+
+Rebuilt on `droneops-server` in a throwaway environment, reading nothing from
+BOS-HQ but comparison hashes, touching no production container or volume.
+Restic-from-R2, the plain break-glass `.sql.gz`, and live production all agreed
+on every content digest. The `.env` restored from the `config` lane matches
+live byte-for-byte, and the full 11-service stack renders from restored config
+alone — while the same render with `.env` removed is refused on the ADR-0012
+`:?` guard, proving the assertion is not vacuous. Step-by-step evidence:
+`docs/runbooks/droneops-backup-restore.md` §11.
+
+**The single most valuable result is negative:** the filed secrets were
+*sufficient and correct*. A mis-filed recovery key is the failure that DR
+discovers too late, and it can only be disproven by reading the vault and
+opening the repository with what is actually in it — which is now done.
+
+### D4 (retention) — challenged and upheld
+
+`forget --prune --group-by tags` was re-tested rather than re-reasoned, because
+the live repository showed two same-day snapshots per lane surviving a `forget`
+that should collapse them. A synthetic 40-day, twice-daily corpus (80 snapshots
+of a `db`-tagged lane) converged under the exact production policy to **exactly
+20** — 14 daily + weeklies + monthly, one snapshot per day, the 03:23 run
+correctly dropped in favour of the 15:23 one. The live anomaly reproduces only
+when *every* snapshot in a group is dated today; adding one snapshot dated
+yesterday immediately makes the extra same-day one removable. It is a transient
+property of a one-day-old repository, **not** a policy fault. D4 stands as
+written, and the one-stable-tag-per-lane warning remains load-bearing.
+
+### Defects found (fixed in `c3d9502`)
+
+1. **No concurrency guard** (reliability). The runbook instructs manual runs;
+   systemd blocks a second *service* start but not a manual shell run racing a
+   timer run. Contention on restic's exclusive lock during `forget --prune`
+   would page. Now `flock`-guarded, with the overlap path deliberately exiting
+   0 *without* stamping the metric so a benign overlap is silent while a
+   persistent one is still caught by `obs-rule-droneops-backup-stale`.
+2. **`backups/` not gitignored** (security). Gap 1 moved PII into encrypted R2,
+   but the break-glass lane kept writing 1.1 GB of *plaintext* dumps into the
+   deploy clone's working tree, untracked and one `git add -A` from a commit.
+   The mitigation that makes a lost password survivable was itself an exposure.
+3. **The drill never read the `files` lane** (coverage). It asserted `db` and
+   `config` and certified "restorable" while never touching the largest lane.
+   Now a cross-lane assertion against `tos_acceptances.signed_sha256` — chosen
+   over a file-count floor, which stays green against a stale snapshot.
+4. **Post-metric error hole** (observability). The local sweep ran after the
+   freshness stamp with no `|| fail`, so a failure was visible only in systemd.
+
+Plus a runbook defect with real DR cost: **Procedure A2's first database
+command did not work** — `docker compose up -d droneops-standby-db` fails with
+`no such service`; the service is `db-standby`. Documented commands in a
+recovery runbook are load-bearing and are now executed, not assumed.
+
+### Correcting two hypotheses that did not survive testing
+
+- Bash **does** run the `EXIT` trap on `SIGTERM`, so a `TimeoutStartSec` kill
+  does **not** leak the workdir holding the repository password. Tested.
+- `fail()` does **not** fail open when ntfy is unavailable: exit 1 confirmed
+  with the helper removed, so a dead notification channel cannot manufacture a
+  green run.
+
+### Residual (added to the list above)
+
+5. **Repeat the cold, 1Password-only rehearsal annually, and after any rotation
+   of either Fleet item.** The quarterly drill cannot detect a mis-filed secret,
+   because it never reads 1Password. Only this rehearsal shape can.
