@@ -42,6 +42,12 @@ service-account*.json
 # Data volumes
 /data/
 
+# Local break-glass database dumps (ADR-0041 Procedure D). On BOS-HQ this is
+# ~1.1 GB of PLAINTEXT pg dumps holding customer PII, invoice records and
+# device_api_keys, living inside the deploy clone's working tree. Untracked is
+# not enough — one `git add -A` would commit it. Ignored so it cannot be.
+backups/
+
 # OS
 .DS_Store
 Thumbs.db

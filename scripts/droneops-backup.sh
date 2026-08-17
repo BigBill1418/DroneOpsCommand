@@ -116,6 +116,27 @@ fail() {
   exit 1
 }
 
+# --- Single-instance lock ---------------------------------------------------
+# systemd will not start a second droneops-backup.service while one is active,
+# but the runbook (§6) tells operators to run this script BY HAND, and a manual
+# run overlapping a timer run collides on restic's EXCLUSIVE repository lock
+# during `forget --prune` / `check` — turning a benign overlap into a fail()
+# page. Two concurrent pg_dumps of the same database is also pure waste.
+#
+# An overlap exits 0 WITHOUT stamping the freshness metric. That asymmetry is
+# deliberate: a one-off overlap must not page, while a PERSISTENT overlap stops
+# advancing the metric and is therefore caught within 28 h by
+# obs-rule-droneops-backup-stale. Failing loudly here would page on the benign
+# case; exiting 0 with a stamped metric would hide the pathological one.
+#
+# Declared after fail()/log() because it uses them.
+LOCK_PATH="${DRONEOPS_BACKUP_LOCK:-${HOME}/.droneops-backup.lock}"
+exec 9>"${LOCK_PATH}" || fail "cannot open lock file ${LOCK_PATH}"
+if ! flock -n 9; then
+  log "another droneops-backup run holds ${LOCK_PATH}; exiting 0 without stamping the freshness metric"
+  exit 0
+fi
+
 # Atomic node-exporter textfile write (mktemp + mv -f). Best-effort by design:
 # a textfile hiccup must not fail an otherwise-good backup. Called ONLY after
 # full success of every lane.
@@ -307,7 +328,12 @@ emit_freshness_metric
 # freshness stamp; still fatal, so a broken sweep is surfaced rather than
 # swallowed. Never touches the most recent file (it is younger than N days).
 find "${BACKUP_DIR}" -maxdepth 1 -type f -name 'droneops-*.sql.gz' \
-  -mtime "+${RETENTION_DAYS}" -print -delete
+  -mtime "+${RETENTION_DAYS}" -print -delete \
+  || fail "local retention sweep of ${BACKUP_DIR} failed (break-glass copies may be growing unbounded)"
 
 log "done. local=$(du -h "${OUT}" | cut -f1) repo=s3:${R2_BUCKET}/restic lanes=db,files,config"
-restic_do -- snapshots --latest 3
+# Cosmetic tail only. Explicitly non-fatal: the backup is already complete and
+# stamped, so a transient R2 hiccup listing snapshots must not mark the unit
+# failed — a `set -e` exit here would leave systemd red against a green metric,
+# which is a contradiction an operator would waste time chasing.
+restic_do -- snapshots --latest 3 || true

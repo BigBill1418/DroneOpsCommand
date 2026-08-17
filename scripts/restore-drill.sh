@@ -15,6 +15,12 @@
 #     thing that proves ADR-0041 Gap 5 (host config not backed up -> a restore
 #     that cannot boot) is actually closed, so it is fatal, not advisory.
 #
+# 2026-08-17 (DR rehearsal review): a `files` lane assertion was added. The
+# drill previously certified "the backup restores" while never reading the
+# largest lane. It now dumps one executed TOS PDF and checks it against the
+# sha256 the DATABASE recorded at signing time — a cross-lane check, so it
+# cannot go vacuous the way a file-count floor would.
+#
 # Scheduled by systemd (droneops-restore-drill.timer, quarterly on the 16th of
 # Jan/Apr/Jul/Oct at 16:23 UTC, Persistent=true). Unit files live in
 # scripts/systemd/; install with:
@@ -196,9 +202,37 @@ LIVE_SHA="$(sha256sum "${REPO_ROOT}/.env" | cut -d' ' -f1)"
   || fail "config lane .env sha256 mismatch: restored=${RESTORED_SHA:0:16} live=${LIVE_SHA:0:16} (backup is stale or truncated)"
 echo "[restore-drill] config lane verified: .env sha256 matches live (${LIVE_SHA:0:16}...)"
 
+# --- 4c. Files lane: the largest lane, previously never restore-tested -------
+# Until 2026-08-17 this drill certified "the backup restores" while never
+# reading the `files` lane at all — 657 MiB of flight logs, report deliverables
+# and executed TOS PDFs. A file-count floor would not fix that: it stays green
+# against a stale or truncated snapshot (the count is right, the bytes are not).
+#
+# Instead this is a CROSS-LANE assertion. tos_acceptances.signed_sha256 is the
+# hash the application recorded when it generated the PDF, so the db lane is
+# used to check the files lane. Those two lanes can only agree if both are
+# current and intact; a stale files snapshot fails immediately.
+# signed_pdf_path is stored as /data/uploads/... — already the snapshot path.
+FILES_SNAP="$(restic_do snapshots --tag files --latest 1 --json 2>/dev/null | jq -r '.[0].short_id // empty')"
+[[ -n "${FILES_SNAP}" ]] || fail "no files-tagged snapshot found — client deliverables are NOT backed up"
+TOS_ROW="$(docker exec "${DB_CONTAINER}" psql -U "${DB_USER}" -d "${DRILL_DB}" -qAtF'|' -c \
+  "SELECT signed_pdf_path, signed_sha256 FROM tos_acceptances
+    WHERE signed_pdf_path IS NOT NULL AND signed_sha256 IS NOT NULL
+    ORDER BY accepted_at DESC LIMIT 1")"
+TOS_PATH="${TOS_ROW%%|*}"; TOS_SHA="${TOS_ROW##*|}"
+[[ -n "${TOS_PATH}" && -n "${TOS_SHA}" && "${TOS_PATH}" != "${TOS_SHA}" ]] \
+  || fail "no signed TOS row carrying a recorded sha256 in the restored DB — cannot verify the files lane"
+restic_do dump "${FILES_SNAP}" "${TOS_PATH}" > "${WORKDIR}/tos.pdf" \
+  || fail "restic dump of ${TOS_PATH} from the files lane failed"
+[[ -s "${WORKDIR}/tos.pdf" ]] || fail "files lane returned 0 bytes for ${TOS_PATH} (wrong snapshot path?)"
+FILE_SHA="$(sha256sum "${WORKDIR}/tos.pdf" | cut -d' ' -f1)"
+[[ "${FILE_SHA}" == "${TOS_SHA}" ]] \
+  || fail "files lane CORRUPT: ${TOS_PATH} restored sha256=${FILE_SHA:0:16} but the database recorded ${TOS_SHA:0:16}"
+echo "[restore-drill] files lane verified: $(basename "${TOS_PATH}") matches db-recorded sha256 (${FILE_SHA:0:16}...)"
+
 # --- 5. Success: stamp metric, quarterly OK note (cleanup trap drops the DB) --
 emit_freshness_metric
 notify default "[DroneOps Command] quarterly restore drill OK" \
   --tags "backup,white_check_mark" --dedup-key droneops-restore-drill-ok --cooldown 86400 \
-  -- "Restored db snapshot ${SNAP_ID} (${AGE_H}h old) from the encrypted R2 repo into ${DRILL_DB}: flights=${DRILL_FLIGHTS}/${LIVE_FLIGHTS}, battery_logs=${DRILL_BATT}, tos_acceptances=${DRILL_TOS}. Config lane .env sha256 matches live. Scratch DB dropped."
-echo "[restore-drill] done. snapshot=${SNAP_ID} flights=${DRILL_FLIGHTS}/${LIVE_FLIGHTS} config=verified"
+  -- "Restored db snapshot ${SNAP_ID} (${AGE_H}h old) from the encrypted R2 repo into ${DRILL_DB}: flights=${DRILL_FLIGHTS}/${LIVE_FLIGHTS}, battery_logs=${DRILL_BATT}, tos_acceptances=${DRILL_TOS}. Config lane .env sha256 matches live. Files lane $(basename "${TOS_PATH}") matches db-recorded sha256. Scratch DB dropped."
+echo "[restore-drill] done. snapshot=${SNAP_ID} flights=${DRILL_FLIGHTS}/${LIVE_FLIGHTS} config=verified files=verified"
