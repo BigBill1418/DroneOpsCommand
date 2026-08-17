@@ -4,6 +4,19 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-08-17 — ops(backups): legacy n8n final state archived, HSH stale dumps retired [skip-deploy]
+
+Operator-approved cleanup of the retired HSH-HQ backup lane (`~/backups/` on
+droneops-server, dead since 2026-04-15). The final n8n SQLite dump
+(`n8n_20260415_020001.sqlite`, 218 MB, sha256 `ae28fe7b…`) — the last surviving
+data from n8n, decommissioned fleet-wide 2026-04-21 — was archived into this
+repo's encrypted R2 restic repository under its own tag **`legacy-n8n`**
+(snapshot `1d0cfb76`, 19 MiB stored), restore-verified byte-identical, and all
+local copies deleted (~994 MB reclaimed, dirs removed). Not a DroneOps
+artifact; parked here because this is the fleet's encrypted archive repo — see
+the lane table in `docs/runbooks/droneops-backup-restore.md`. The retirement
+README at droneops-server `~/backups/README.RETIRED.md` records the disposition.
+
 ## 2026-08-17 — ops(backups): cold DR rehearsal + four review defects (ADR-0041 as-built) [skip-deploy]
 
 Adversarial re-review of the backup lane shipped earlier the same day
