@@ -24,7 +24,7 @@ reference where applicable.
   mostly-empty padded segments to protect ~1 MB/day of change.
 - **Reference.** ADR-0041 D5 + Option D.
 
-### BK-2 — Standby `archive_mode` on `10.99.0.2` — deferred hygiene
+### BK-2 — Standby `archive_mode` on `10.99.0.2` — ✅ DONE 2026-08-18
 
 - **Scope.** The droneops standby (`droneops-db-standby` on svdp-dev) still
   carries `archive_mode = 'on'` and the old
@@ -40,6 +40,14 @@ reference where applicable.
 - **Trigger.** Next planned maintenance window on svdp-dev, or immediately
   before any deliberate failover drill. Deferred here only because it needs a
   standby restart, which was out of scope for the backup change.
+- **Executed 2026-08-18 (operator-approved).** `ALTER SYSTEM` is unavailable in
+  recovery, so `postgresql.auto.conf` was edited directly (`archive_mode='off'`,
+  `archive_command` line removed) followed by a container restart. Also found
+  and deleted **1.5 GiB / 99 stale WAL segments** already sitting in the
+  standby's own `wal_archive` (inherited from the seeding basebackup) — pgdata
+  2.3 G → 851 M. Verified after: `pg_is_in_recovery()=t`, `archive_mode=off`,
+  wal receiver `streaming`, primary slot `chad_hq_standby` active with empty
+  `replay_lag`. A promotion can no longer recreate Gap 7.
 
 ## Observability + Fleet Hygiene (follow-ups from ADR-0002, 2026-04-24)
 

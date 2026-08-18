@@ -4,6 +4,19 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-08-18 — ops(standby): BK-2 executed — standby archive_mode off, 1.5 GiB stale WAL reclaimed [skip-deploy]
+
+The droneops standby on svdp-dev (`droneops-db-standby`) carried inherited
+`archive_mode='on'` + the Gap-7 `archive_command` in `postgresql.auto.conf`
+(ALTER SYSTEM is blocked in recovery, so the file was edited directly), plus
+**1.5 GiB / 99 stale WAL segments** in its own `wal_archive` from the seeding
+basebackup. Fixed and deleted; two standby restarts (first attempt targeted
+`postgresql.conf`, where the setting does not live — `pg_settings.sourcefile`
+pointed to `auto.conf`). Verified: standby in recovery, `archive_mode=off`,
+wal receiver `streaming`, primary slot active, `replay_lag` empty, pgdata
+2.3 G → 851 M. Production primary untouched. A promotion can no longer
+recreate Gap 7. ROADMAP BK-2 closed.
+
 ## 2026-08-18 — ops(backups): yearly retention → unlimited (operator decision) [skip-deploy]
 
 Bill: "retention is indefinite." `KEEP_YEARLY` 7 → `unlimited` in
