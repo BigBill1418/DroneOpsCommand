@@ -18,6 +18,7 @@ R2 bucket. Four lanes, distinguished by restic **tag**:
 | `config` | `.env`, compose files, crontab, volume list, git HEAD | **the ability to boot at all** |
 | `legacy` | one-shot pre-migration dump (2026-04-15) | historical HSH-HQ state |
 | `legacy-n8n` | one-shot final n8n SQLite DB (2026-04-15; n8n decommissioned 2026-04-21) | historical n8n state — NOT a DroneOps artifact; parked here because this is the fleet's encrypted archive repo. Snapshot `1d0cfb76`, sha256 `ae28fe7b…`, restore-verified 2026-08-17 |
+| `legacy-bos-primary-pgdata` | one-shot tar of the orphaned `droneops_postgres_data` volume (BOS pre-promotion primary pgdata; superseded when `droneops-standby-db` was promoted) | historical pgdata; snapshot `66ed2135`, restore-verified 2026-08-18, volume then removed |
 
 ```
 Repository:  s3:https://<R2_ACCOUNT_ID>.r2.cloudflarestorage.com/droneops-backups/restic

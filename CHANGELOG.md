@@ -4,6 +4,26 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-08-18 — ops(volumes): orphaned legacy volumes archived + removed [skip-deploy]
+
+Operator-approved disposal of the two truly orphaned volumes on BOS-HQ
+(referenced by zero containers and zero compose files, verified before
+touching):
+
+- **`droneops_postgres_data`** (46 MB) — the pre-promotion BOS primary pgdata,
+  superseded when `droneops-standby-db` was promoted. Archived first into the
+  encrypted restic repo as a tar (tag `legacy-bos-primary-pgdata`, snapshot
+  `66ed2135`, restore-read verified: 1,204 entries incl. `PG_VERSION`), then
+  removed.
+- **`droneops-demo_ollama_data`** (4 KB, empty; demo compose has ollama
+  disabled) — removed, nothing to archive.
+
+**The demo stack was NOT touched** — it is live and tunnel-exposed (6 healthy
+containers up 2 weeks); its data volumes are in active use and are not
+"legacy". `droneops-gw_caddy_data` (live gateway ACME state) also untouched.
+Post-check: 103 containers running, demo 6/6 healthy, prod DB accepting
+connections.
+
 ## 2026-08-18 — ops(backups): §5.7 cutover automated — one-shot gated timer on droneops-server [skip-deploy]
 
 Operator approved executing the cutover without waiting for a live session.
