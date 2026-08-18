@@ -341,7 +341,7 @@ thing standing between a broken backup and finding out during a restore.
 ## 9. Retention, cost, and what is deliberately *not* backed up
 
 ```
-forget --prune --keep-daily 14 --keep-weekly 8 --keep-monthly 24 --keep-yearly 7 --group-by tags
+forget --prune --keep-daily 14 --keep-weekly 8 --keep-monthly 24 --keep-yearly unlimited --group-by tags
 ```
 
 `--group-by tags` is **required** — without it the policy mixes all four lanes

@@ -70,7 +70,7 @@ RETENTION_DAYS="${DRONEOPS_BACKUP_RETENTION_DAYS:-14}"
 KEEP_DAILY=14
 KEEP_WEEKLY=8
 KEEP_MONTHLY=24
-KEEP_YEARLY=7
+KEEP_YEARLY=unlimited   # operator decision 2026-08-18: yearly snapshots are kept forever (was 7)
 
 NTFY_TOPIC="${NTFY_TOPIC:-infrawatch-alerts}"
 NTFY_HELPER="${NTFY_HELPER:-${HOME}/.local/bin/ntfy-publish.sh}"

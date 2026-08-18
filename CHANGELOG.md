@@ -4,6 +4,13 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-08-18 — ops(backups): yearly retention → unlimited (operator decision) [skip-deploy]
+
+Bill: "retention is indefinite." `KEEP_YEARLY` 7 → `unlimited` in
+`droneops-backup.sh`; yearly backup snapshots are never pruned (ADR-0041 D4
+amended). Backup history only — live flight data was never subject to any
+retention. Daily/weekly/monthly tiers unchanged (14/8/24).
+
 ## 2026-08-18 — ops(volumes): orphaned legacy volumes archived + removed [skip-deploy]
 
 Operator-approved disposal of the two truly orphaned volumes on BOS-HQ

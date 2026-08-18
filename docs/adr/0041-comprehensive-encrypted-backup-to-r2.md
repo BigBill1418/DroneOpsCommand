@@ -243,6 +243,14 @@ Deliberately longer than DR3-Vision's 7d/4w/12m/5y:
 
 Affordable precisely because of D1's dedup — see Consequences.
 
+**Amended 2026-08-18 (operator decision):** yearly retention raised from 7 to
+**unlimited** — Bill: "retention is indefinite." Yearly snapshots are never
+pruned. Applies to backup snapshot history only; live production data was
+never subject to any retention. Marginal cost is a few deduplicated MB per
+year. Shipped as `KEEP_YEARLY=unlimited` in `scripts/droneops-backup.sh`
+(restic `forget --keep-yearly unlimited`, supported natively by the pinned
+0.17.3).
+
 ### D5 — Retire WAL archiving; do not adopt PITR
 
 Set `archive_mode = off`, delete `wal_archive/` (reclaims 5.5 GiB), and accept a
