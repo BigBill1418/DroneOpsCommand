@@ -15,6 +15,17 @@ into no backup at all.
 
 **Green-day window opened:** 2026-08-17 (first timer-driven run 15:23 UTC).
 
+**Soak tally** (timer-driven runs, `Result=success` + metric advanced, each
+verified live over ssh — not inferred):
+- 2026-08-17 15:23 UTC ✓ (completed 15:28:22)
+- 2026-08-18 03:23 UTC ✓ (completed ~03:28)
+- 2026-08-18 15:23 UTC ✓ (completed ~15:29)
+- remaining: the 2026-08-19 pair + 2026-08-20 03:23 → then run §5.7.
+
+Also archived into this repo's restic repository during the window: the final
+n8n database snapshot, tag `legacy-n8n` (see CHANGELOG 2026-08-17 entry and the
+runbook lane table).
+
 ### Cutover criteria — ALL must hold before running §5.7
 
 1. Three consecutive days with `droneops_backup_last_success_timestamp_seconds`
