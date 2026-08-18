@@ -4,6 +4,20 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-08-18 — ops(backups): §5.7 cutover automated — one-shot gated timer on droneops-server [skip-deploy]
+
+Operator approved executing the cutover without waiting for a live session.
+New `scripts/droneops-backup-cutover.sh` runs once via a user-level systemd
+timer on droneops-server (HSH-HQ — the host with both BOS ssh access and repo
+push credentials; HSH's `/etc` is bind-mounted read-only, so user units are
+the local pattern) at **2026-08-20 04:12 UTC**, after the soak window's final
+run. Fail-closed: all four gates re-verified over ssh before any mutation, any
+failure aborts pre-mutation and pages `infrawatch-alerts` at `high`; success
+notifies at `default`. Dry-run validated under the systemd user environment on
+2026-08-18 (refused correctly on the not-yet-met ≥4-snapshot gate, ntfy
+suppressed). The script self-documents the executed cutover into PROGRESS.md
+and pushes.
+
 ## 2026-08-17 — ops(backups): legacy n8n final state archived, HSH stale dumps retired [skip-deploy]
 
 Operator-approved cleanup of the retired HSH-HQ backup lane (`~/backups/` on

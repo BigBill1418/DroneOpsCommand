@@ -20,7 +20,23 @@ verified live over ssh — not inferred):
 - 2026-08-17 15:23 UTC ✓ (completed 15:28:22)
 - 2026-08-18 03:23 UTC ✓ (completed ~03:28)
 - 2026-08-18 15:23 UTC ✓ (completed ~15:29)
-- remaining: the 2026-08-19 pair + 2026-08-20 03:23 → then run §5.7.
+- remaining: the 2026-08-19 pair + 2026-08-20 03:23 → then §5.7 fires
+  **automatically**.
+
+**Cutover is AUTOMATED (operator-approved 2026-08-18).** A user-level systemd
+timer on droneops-server (`~/.config/systemd/user/droneops-backup-cutover.timer`)
+fires `scripts/droneops-backup-cutover.sh` once at **2026-08-20 04:12 UTC**.
+The script re-verifies every gate below over ssh BEFORE mutating anything
+(≥6 completions, metric <13 h, `Result=success`, ≥4 restic db snapshots),
+executes §5.7 (cron line out, plaintext R2 prefix deleted, `snapshot.sh`
+retired), flips this doc, commits/pushes, syncs the BOS clone, and reports the
+outcome — success or abort — to ntfy `infrawatch-alerts` with a click URL.
+Any gate failure aborts before mutation. Dry-run tested 2026-08-18 under the
+systemd user environment (correct refusal on the not-yet-met snapshot gate).
+Cancel with: `systemctl --user disable --now droneops-backup-cutover.timer`
+(on droneops-server). Note: criterion 4 (Sunday `--read-data-subset=5%`) is
+satisfied by the manual deep-read checks in V2 + the DR rehearsal (both clean);
+the first in-script Sunday run lands 2026-08-23, after cutover — accepted.
 
 Also archived into this repo's restic repository during the window: the final
 n8n database snapshot, tag `legacy-n8n` (see CHANGELOG 2026-08-17 entry and the
