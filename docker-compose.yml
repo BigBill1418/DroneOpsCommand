@@ -399,7 +399,14 @@ services:
   # Exposes the app securely without opening router ports.
   # Set CLOUDFLARE_TUNNEL_TOKEN in .env — service is a no-op without it.
   cloudflared:
-    image: cloudflare/cloudflared:2026.3.0
+    # PINNED, deliberately (ADR-0212). Never `:latest` — a floating tag only
+    # resolves at container recreate, so it silently freezes at whatever was
+    # current the last time this stack was recreated while *looking* current.
+    # The official image also disables cloudflared's built-in self-updater, so
+    # nothing here self-heals: this literal is the only thing that decides what
+    # runs. Raised by the monthly supervised bump (ADR-0212); drift from the
+    # upstream release is watched by cloudflared-version-drift-check.
+    image: cloudflare/cloudflared:2026.8.2
     restart: unless-stopped
     # BOS-HQ 2026-06-05 sweep: tunnel sidecar (~17 MiB) → 256M floor.
     mem_limit: 256m
