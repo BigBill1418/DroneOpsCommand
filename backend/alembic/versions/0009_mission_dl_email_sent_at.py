@@ -12,6 +12,13 @@ delivery for a replacement link.
 
 Additive nullable column — no backfill, no data rewrite. Replication-safe
 (plain DDL via WAL). Revision id is 29 chars (<= 32).
+
+IDEMPOTENT (v2.80.2): 0001 builds fresh databases with ``create_all`` from
+the LIVE models, which already include this column — so on a fresh DB this
+revision must no-op instead of raising DuplicateColumn. Every post-baseline
+schema migration needs the same guard; a bare ``op.add_column`` here
+crash-looped every fresh install (demo reseed, self-host quick start,
+managed provisioning) from 2026-07-06 until this fix.
 """
 from __future__ import annotations
 
@@ -27,6 +34,10 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    conn = op.get_bind()
+    cols = {c["name"] for c in sa.inspect(conn).get_columns("missions")}
+    if "download_link_email_sent_at" in cols:
+        return  # fresh DB: 0001's live-models create_all already built it
     op.add_column(
         "missions",
         sa.Column("download_link_email_sent_at", sa.DateTime(), nullable=True),

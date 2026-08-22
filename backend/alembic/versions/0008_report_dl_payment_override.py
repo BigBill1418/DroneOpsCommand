@@ -12,6 +12,13 @@ the deliberate per-report operator override that releases the link early.
 Default false = gate enforced for every existing and new report. Additive
 column with a server default — no backfill, no data rewrite. Replication-safe
 (plain DDL via WAL). Revision id is 31 chars (<= 32).
+
+IDEMPOTENT (v2.80.2): 0001 builds fresh databases with ``create_all`` from
+the LIVE models, which already include this column — so on a fresh DB this
+revision must no-op instead of raising DuplicateColumn. Every post-baseline
+schema migration needs the same guard; a bare ``op.add_column`` here
+crash-looped every fresh install (demo reseed, self-host quick start,
+managed provisioning) from 2026-07-05 until this fix.
 """
 from __future__ import annotations
 
@@ -27,6 +34,10 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    conn = op.get_bind()
+    cols = {c["name"] for c in sa.inspect(conn).get_columns("reports")}
+    if "download_link_payment_override" in cols:
+        return  # fresh DB: 0001's live-models create_all already built it
     op.add_column(
         "reports",
         sa.Column(

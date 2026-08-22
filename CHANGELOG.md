@@ -4,6 +4,34 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-08-22 — v2.80.2: fix fresh-install crash loop in migrations 0008/0009
+
+Every fresh database — the demo instance reseed, the self-host Quick Start,
+and future managed-client provisioning — crash-looped at startup since
+0008 landed (2026-07-05). Root cause: `0001_baseline_schema` builds fresh
+DBs with `Base.metadata.create_all` from the **live** models, which already
+include the columns 0008/0009 add, so their bare `op.add_column` raised
+`DuplicateColumn`. Existing databases (prod) never noticed: they are stamped
+past the baseline and their columns were added by the ORM path before the
+migrations existed.
+
+The failure was silent: uvicorn exits 3 on lifespan-startup failure and the
+migration exception's traceback never reached the container logs — the demo
+just looped every ~5 s. Diagnosed by running `alembic upgrade head` in a
+one-off container, which surfaced the real `DuplicateColumn`.
+
+- `0008_report_dl_payment_override` and `0009_mission_dl_email_sent_at` now
+  no-op when their column already exists (inspector guard), matching the
+  idempotent house style of 0001–0007.
+- **Rule going forward:** every post-baseline schema migration must be
+  written idempotently, because 0001 always produces the current-model
+  schema on fresh DBs. A bare `op.add_column`/`op.create_table` WILL break
+  fresh installs while passing on every existing DB and in CI against
+  migrated schemas.
+- Known residual: the swallowed startup traceback (uvicorn exit 3 with no
+  logged exception) made this a forensic hunt; surfacing lifespan failures
+  in logs is a candidate follow-up.
+
 ## 2026-08-19 — cloudflared 2026.3.0 -> 2026.8.2 (fleet-wide version-rot remediation)
 
 This stack's tunnel connector was running cloudflared 2026.3.0. Cloudflare
