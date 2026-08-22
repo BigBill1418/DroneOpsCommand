@@ -186,7 +186,10 @@ def test_tos_accept_post_with_full_frontend_payload_returns_201(tmp_path):
                 "title": "",
                 "confirm": True,
                 "customer_id": str(uuid.uuid4()),
-                "intake_token": "s6Yel7IFniIyxOI7oLW24YQ-9XWdMbplZcRRQBiEVQ8",
+                # Obviously-fake, low-entropy stand-in (same URL-safe-base64
+                # alphabet/length shape). A realistic random literal here trips
+                # the gitleaks generic-api-key rule and reds every CI run.
+                "intake_token": "TESTONLY-intake-token-TESTONLY-0000000000A",
             },
         )
 

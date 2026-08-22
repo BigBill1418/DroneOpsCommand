@@ -4,6 +4,31 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-08-22 — v2.80.3: green Secret Scan + nightly demo reset
+
+Two "big-time readiness" items from the same audit that produced v2.80.2:
+
+- **Secret Scan CI red on every push since the ToS tests landed** — gitleaks
+  flagged the realistic random `intake_token` literal in
+  `backend/tests/test_tos_accept_route_body.py` (generic-api-key,
+  entropy 4.9). It was a test-only round-trip value with no format
+  constraint beyond `max_length=64`, so it is now an obviously-fake
+  low-entropy stand-in (`TESTONLY-…`) instead of an allowlist entry —
+  no weakening of the gate, robust to line-number drift, and the workflow
+  goes green. A permanently-red public workflow both looks broken and
+  trains everyone to ignore the one gate that matters.
+- **`scripts/demo-nightly-reset.sh`** — the demo instance accumulated
+  months of visitor junk (uploaded flight logs with real GPS, third-party
+  contact emails) because `DEMO_RESET_INTERVAL_HOURS` is configured but
+  unimplemented. Until an in-backend reset task exists (celery beat is not
+  an option — the demo worker/beat must stay stopped, dunning-email
+  hazard), this script is the reset: wipe the demo schema, restart the
+  backend (startup rebuilds via alembic + demo seed), wait for healthy,
+  verify the trial login end-to-end, and page `droneops-demo-reset` (high)
+  via the ADR-0036 helper on any failure. Installed in the BOS-HQ operator
+  crontab at 09:23 UTC (2:23 AM PDT) daily, following the existing
+  snapshot-cron pattern.
+
 ## 2026-08-22 — v2.80.2: fix fresh-install crash loop in migrations 0008/0009
 
 Every fresh database — the demo instance reseed, the self-host Quick Start,
