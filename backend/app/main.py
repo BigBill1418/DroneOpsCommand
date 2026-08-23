@@ -496,6 +496,36 @@ async def _wait_for_redis(max_retries: int = 10, delay: float = 3.0):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # v2.80.4: the whole pre-yield body runs inside _startup_body() so any
+    # startup exception is emitted through OUR logger before uvicorn turns it
+    # into a bare exit(3). uvicorn's "Application startup failed" traceback
+    # goes to the uvicorn.error logger, which this app's JSON logging config
+    # does not emit — the 2026-08-22 fresh-install crash loop (CHANGELOG
+    # v2.80.2) restarted every ~5s with logs ending mid-migration and no
+    # exception anywhere. Never let a startup death be silent again.
+    try:
+        await _startup_body()
+    except Exception:
+        logger.exception(
+            "STARTUP FAILED — unhandled exception during application "
+            "startup (container will exit; traceback follows)"
+        )
+        # Belt-and-braces: ALSO write the traceback straight to stderr.
+        # If any startup step reconfigures logging out from under us (the
+        # alembic env.py fileConfig did exactly that until ADR-0042), the
+        # logger call above becomes a no-op and this is the only evidence.
+        import sys
+        import traceback
+        print("STARTUP FAILED — traceback (stderr, logging-config-proof):",
+              file=sys.stderr, flush=True)
+        traceback.print_exc(file=sys.stderr)
+        sys.stderr.flush()
+        raise
+    yield
+    await engine.dispose()
+
+
+async def _startup_body() -> None:
     # Warn about insecure default credentials
     if settings.jwt_secret_key == "changeme_generate_a_random_secret":
         logger.warning("SECURITY: JWT_SECRET_KEY is using the default value — change it in production!")
@@ -553,10 +583,6 @@ async def lifespan(app: FastAPI):
                     "(will serve from /static/aircraft/ instead)", fname, e
                 )
 
-    yield
-
-    await engine.dispose()
-
 
 limiter = Limiter(key_func=get_remote_address)
 
@@ -573,7 +599,7 @@ logger.info("MultiPartParser spool threshold set to 4 MB (large uploads spool to
 app = FastAPI(
     title="D.O.C — Drone Operations Command",
     description="Self-hosted mission management, flight log analysis, AI report generation, invoicing, telemetry visualization, and real-time airspace monitoring for commercial drone operators.",
-    version="2.80.3",
+    version="2.80.4",
     lifespan=lifespan,
 )
 

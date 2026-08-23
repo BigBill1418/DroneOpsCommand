@@ -4,6 +4,36 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-08-23 — v2.80.4: startup failures are loud + ADR-0042
+
+Closes the last residual from the 2026-08-22 fresh-install audit. Root
+cause of the silence, found by reproducing the failure in a scratch
+container: `alembic/env.py` ran `fileConfig(alembic.ini)` on every
+invocation, and `fileConfig()` defaults to `disable_existing_loggers=True`
+— so the moment `command.upgrade()` ran during startup, the app's `doc`
+logger AND `uvicorn.error` were disabled, and every subsequent message
+(including the exception that explained the crash and uvicorn's
+"Application startup failed") was dropped. That is why the seven-week
+fresh-install crash loop (v2.80.2) restarted every ~5 s with logs that
+simply ended mid-migration.
+
+- `alembic/env.py`: `fileConfig()` now runs only for the standalone CLI —
+  skipped when the programmatic path passes its connection via
+  `config.attributes` — so app logging survives migrations.
+- `app/main.py`: the entire pre-yield lifespan body is wrapped; on any
+  exception the full traceback is logged (`STARTUP FAILED — …`) and also
+  printed directly to stderr (immune to any future logging reconfig),
+  then re-raised.
+- Verified: forced a bogus `alembic_version` revision in a scratch
+  container — exit 3 as before, but `docker logs` now carries the full
+  traceback ending in the real error.
+
+New **ADR-0042** (`docs/adr/0042-fresh-install-integrity-and-demo-hygiene.md`)
+records the whole 2026-08-22 incident and the standing decisions:
+post-baseline migrations must be idempotent, startup failures must be
+loud, the demo resets nightly (BOS crontab + `scripts/demo-nightly-reset.sh`,
+ntfy on failure), and no realistic random literals in tests.
+
 ## 2026-08-22 — v2.80.3: green Secret Scan + nightly demo reset
 
 Two "big-time readiness" items from the same audit that produced v2.80.2:

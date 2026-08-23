@@ -36,10 +36,16 @@ import app.models  # noqa: F401,E402 — register every model on Base.metadata
 
 config = context.config
 
-# Honour Alembic's own logging config from alembic.ini if present. Guard
-# against a missing config_file_name (programmatic invocation passes a
-# Config built in code that may not point at a file).
-if config.config_file_name is not None:
+# Honour Alembic's own logging config from alembic.ini — but ONLY for the
+# standalone CLI. The programmatic path (app.db_migrations passes its
+# connection via config.attributes) already has the app's JSON logging
+# wired, and fileConfig() defaults to disable_existing_loggers=True: it
+# silently killed the "doc" logger mid-startup, so everything after
+# `command.upgrade()` — including the exception that explains a crash —
+# vanished from container logs (ADR-0042; the 2026-08-22 crash loop was
+# undebuggable because of this exact line). Guard against a missing
+# config_file_name (a code-built Config may not point at a file).
+if config.attributes.get("connection") is None and config.config_file_name is not None:
     try:
         fileConfig(config.config_file_name)
     except (KeyError, Exception):  # pragma: no cover - logging best-effort
