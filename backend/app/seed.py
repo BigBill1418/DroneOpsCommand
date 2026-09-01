@@ -153,6 +153,141 @@ AIRCRAFT_SEED = [
     },
 ]
 
+# Billable-rate templates. Insert-if-missing by name at startup, so renames
+# or rate changes to existing rows in prod are never clobbered — only new
+# names are added. Module-level (like AIRCRAFT_SEED) so tests can assert on it.
+RATE_TEMPLATE_SEED = [
+    {
+        "name": "Standard Hourly Rate",
+        "description": "Standard operator hourly rate for drone operations",
+        "category": LineItemCategory.BILLED_TIME,
+        "default_quantity": 1,
+        "default_unit": "hours",
+        "default_rate": 150.00,
+        "sort_order": 0,
+    },
+    {
+        "name": "Travel - Mileage",
+        "description": "Per-mile travel charge to and from mission site",
+        "category": LineItemCategory.TRAVEL,
+        "default_quantity": 1,
+        "default_unit": "miles",
+        "default_rate": 0.67,
+        "sort_order": 1,
+    },
+    {
+        "name": "Travel - Flat Rate",
+        "description": "Flat rate travel fee for local missions",
+        "category": LineItemCategory.TRAVEL,
+        "default_quantity": 1,
+        "default_unit": "flat",
+        "default_rate": 50.00,
+        "sort_order": 2,
+    },
+    {
+        "name": "Rapid Deployment",
+        "description": "Extra fee for same-day or emergency deployment",
+        "category": LineItemCategory.RAPID_DEPLOYMENT,
+        "default_quantity": 1,
+        "default_unit": "flat",
+        "default_rate": 250.00,
+        "sort_order": 3,
+    },
+    {
+        "name": "Night Operations Surcharge",
+        "description": "Additional charge for operations conducted at night or low-light",
+        "category": LineItemCategory.SPECIAL,
+        "default_quantity": 1,
+        "default_unit": "flat",
+        "default_rate": 100.00,
+        "sort_order": 4,
+    },
+    {
+        "name": "Thermal Imaging",
+        "description": "Thermal camera operations surcharge",
+        "category": LineItemCategory.EQUIPMENT,
+        "default_quantity": 1,
+        "default_unit": "hours",
+        "default_rate": 75.00,
+        "sort_order": 5,
+    },
+    {
+        "name": "Video Editing",
+        "description": "Post-mission video editing and production",
+        "category": LineItemCategory.BILLED_TIME,
+        "default_quantity": 1,
+        "default_unit": "hours",
+        "default_rate": 85.00,
+        "sort_order": 6,
+    },
+    {
+        "name": "Report Preparation",
+        "description": "Detailed report writing and documentation",
+        "category": LineItemCategory.BILLED_TIME,
+        "default_quantity": 1,
+        "default_unit": "flat",
+        "default_rate": 75.00,
+        "sort_order": 7,
+    },
+    # ── 2026-09-01 billable-rates expansion (operator-directed) ────
+    {
+        "name": "PV Thermal Inspection — Field Day",
+        "description": "Full field day of PV/solar thermal inspection operations",
+        "category": LineItemCategory.BILLED_TIME,
+        "default_quantity": 1,
+        "default_unit": "flat",
+        "default_rate": 2200.00,
+        "sort_order": 8,
+    },
+    {
+        "name": "Mobilization — Regional Overnight",
+        "description": "Regional mobilization requiring overnight travel",
+        "category": LineItemCategory.TRAVEL,
+        "default_quantity": 1,
+        "default_unit": "flat",
+        "default_rate": 850.00,
+        "sort_order": 9,
+    },
+    {
+        "name": "Lodging + Per Diem",
+        "description": "Lodging and per diem, billed per day on site",
+        "category": LineItemCategory.TRAVEL,
+        "default_quantity": 1,
+        "default_unit": "days",
+        "default_rate": 235.00,
+        "sort_order": 10,
+    },
+    {
+        "name": "Weather Standby",
+        "description": "Standby fee when weather holds prevent scheduled operations",
+        "category": LineItemCategory.BILLED_TIME,
+        "default_quantity": 1,
+        "default_unit": "flat",
+        "default_rate": 1100.00,
+        "sort_order": 11,
+    },
+    {
+        "name": "Data Processing & QA",
+        "description": "Post-mission data processing and quality assurance",
+        "category": LineItemCategory.BILLED_TIME,
+        "default_quantity": 1,
+        "default_unit": "hours",
+        "default_rate": 150.00,
+        "sort_order": 12,
+    },
+    {
+        # No formula support in the schema — rate stays 0 and this
+        # description carries the billing rule for the invoicing operator.
+        "name": "Third-Party Analytics (pass-through)",
+        "description": "Third-party analytics vendor invoice passed through at cost (no markup) — enter the vendor amount as the unit price",
+        "category": LineItemCategory.OTHER,
+        "default_quantity": 1,
+        "default_unit": "flat",
+        "default_rate": 0.00,
+        "sort_order": 13,
+    },
+]
+
 
 async def seed_database(db: AsyncSession):
     """Seed the database with initial data.
@@ -197,82 +332,7 @@ async def seed_database(db: AsyncSession):
         _seed_log.info("Seed lock released")
 
     # ── Rate templates ─────────────────────────────────────────────
-    rate_templates = [
-        {
-            "name": "Standard Hourly Rate",
-            "description": "Standard operator hourly rate for drone operations",
-            "category": LineItemCategory.BILLED_TIME,
-            "default_quantity": 1,
-            "default_unit": "hours",
-            "default_rate": 150.00,
-            "sort_order": 0,
-        },
-        {
-            "name": "Travel - Mileage",
-            "description": "Per-mile travel charge to and from mission site",
-            "category": LineItemCategory.TRAVEL,
-            "default_quantity": 1,
-            "default_unit": "miles",
-            "default_rate": 0.67,
-            "sort_order": 1,
-        },
-        {
-            "name": "Travel - Flat Rate",
-            "description": "Flat rate travel fee for local missions",
-            "category": LineItemCategory.TRAVEL,
-            "default_quantity": 1,
-            "default_unit": "flat",
-            "default_rate": 50.00,
-            "sort_order": 2,
-        },
-        {
-            "name": "Rapid Deployment",
-            "description": "Extra fee for same-day or emergency deployment",
-            "category": LineItemCategory.RAPID_DEPLOYMENT,
-            "default_quantity": 1,
-            "default_unit": "flat",
-            "default_rate": 250.00,
-            "sort_order": 3,
-        },
-        {
-            "name": "Night Operations Surcharge",
-            "description": "Additional charge for operations conducted at night or low-light",
-            "category": LineItemCategory.SPECIAL,
-            "default_quantity": 1,
-            "default_unit": "flat",
-            "default_rate": 100.00,
-            "sort_order": 4,
-        },
-        {
-            "name": "Thermal Imaging",
-            "description": "Thermal camera operations surcharge",
-            "category": LineItemCategory.EQUIPMENT,
-            "default_quantity": 1,
-            "default_unit": "hours",
-            "default_rate": 75.00,
-            "sort_order": 5,
-        },
-        {
-            "name": "Video Editing",
-            "description": "Post-mission video editing and production",
-            "category": LineItemCategory.BILLED_TIME,
-            "default_quantity": 1,
-            "default_unit": "hours",
-            "default_rate": 85.00,
-            "sort_order": 6,
-        },
-        {
-            "name": "Report Preparation",
-            "description": "Detailed report writing and documentation",
-            "category": LineItemCategory.BILLED_TIME,
-            "default_quantity": 1,
-            "default_unit": "flat",
-            "default_rate": 75.00,
-            "sort_order": 7,
-        },
-    ]
-
-    for tmpl_data in rate_templates:
+    for tmpl_data in RATE_TEMPLATE_SEED:
         result = await db.execute(
             select(RateTemplate).where(RateTemplate.name == tmpl_data["name"])
         )

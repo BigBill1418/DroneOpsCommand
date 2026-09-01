@@ -4,6 +4,29 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-09-01 — v2.81.0: six new billable-rate templates
+
+Operator-directed expansion of the seeded billable rates (PV/solar
+inspection service line):
+
+- **PV Thermal Inspection — Field Day** — Billed Time, $2,200.00 flat
+- **Mobilization — Regional Overnight** — Travel, $850.00 flat
+- **Lodging + Per Diem** — Travel, $235.00 per day
+- **Weather Standby** — Billed Time, $1,100.00 flat
+- **Data Processing & QA** — Billed Time, $150.00/hr
+- **Third-Party Analytics (pass-through)** — Other, billed at vendor
+  cost with **no markup** (operator decision 2026-09-01; earlier +15%
+  and +10% drafts both rejected). The schema has no formula field, so
+  the template is seeded at $0.00 with the rule in its description —
+  the invoicing operator enters the vendor amount as the unit price.
+
+Mechanics: `backend/app/seed.py` rate templates hoisted to a module-level
+`RATE_TEMPLATE_SEED` constant (same pattern as `AIRCRAFT_SEED`); the
+startup seed inserts by name only when missing, so existing prod rows
+(including any operator edits to the original eight) are untouched. New
+hermetic test `backend/tests/test_rate_template_seed.py` (9 tests) locks
+the list. No schema change, no migration.
+
 ## 2026-08-23 — v2.80.4: startup failures are loud + ADR-0042
 
 Closes the last residual from the 2026-08-22 fresh-install audit. Root
