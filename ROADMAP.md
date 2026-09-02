@@ -5,6 +5,23 @@ in-flight scope is tracked in `PROGRESS.md`. This file holds only
 not-yet-started work with a clear trigger, scope, and ADR/decision
 reference where applicable.
 
+## Billing follow-ups
+
+### BL-1 — Formula/markup support for pass-through rate templates — NOT STARTED
+
+- **Scope.** `rate_templates.default_rate` is a plain dollar amount; there is
+  no way to express "vendor cost + X%" or "at cost" as a computed rate. The
+  v2.81.0 "Third-Party Analytics (pass-through)" template works around this:
+  seeded at $0.00 with the billing rule in its description ("passed through
+  at cost, no markup — enter the vendor amount as the unit price"). A real
+  fix would add an optional markup/formula field to `RateTemplate` and have
+  the invoice line-item editor compute the unit price from an entered cost.
+- **Trigger.** The operator asks for computed markups, or a second
+  formula-shaped rate appears. One at-cost template does not justify the
+  schema + UI work; the description-carried rule is adequate at current volume.
+- **Reference.** CHANGELOG 2026-09-01 (v2.81.0); operator decision same day
+  (markup drafts of +15% and +10% both rejected in favor of straight cost).
+
 ## Backup + DR follow-ups (from ADR-0041, 2026-08-17)
 
 ### BK-1 — PITR via `pg_receivewal` — DEFERRED
