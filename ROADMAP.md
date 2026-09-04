@@ -19,24 +19,42 @@ reference where applicable.
   count (needs a decode shim).
 - **Implementation plan (written 2026-09-04, nothing built).**
   `docs/plans/2026-09-04-flight-details-data-ingestion.md` — data model,
-  parser contract, backfill design for the 210 retained logs, API, frontend
-  scope, six phases with sizing and per-phase tests, risks, and seven open
-  questions for the operator.
+  parser contract, backfill + repair + re-import design, API, frontend scope,
+  nine phases with sizing and per-phase tests, nine risks, and the PENDING log
+  inventory.
 - **Decision record.** `docs/adr/0043-flight-details-sidecar-table-for-extended-log-data.md`
-  — extended log data lands in a `flight_details` sidecar table (1:1 with
-  `flights`, typed scalars + JSONB groups), **not** as a fourth heavy JSON
-  column on `flights`. The backfill never loads a `Flight` entity, so the
-  headline metrics ADR-0027/0028 settled structurally cannot move.
+  (amended same day for D1–D7) — extended log data lands in a `flight_details`
+  sidecar (1:1 with `flights`, typed scalars + JSONB groups) **plus** a
+  `flight_series` table for full-resolution time series, **not** as heavy JSON
+  columns on `flights`. Three write sets, three guarantees: the details backfill
+  never loads a `Flight` entity (structural); the repair pass merges timestamps
+  into the existing track and asserts the coordinate hash inside its savepoint
+  (verified); the ODL re-import is the one place headline metrics change on
+  purpose, scoped to unique file matches with prior values preserved.
 - **Operator ask (Bill, 2026-09-04).** "make all this extra data more
   accessible and … pull it into the DB — even if that is just a 'Flight
   Details' link somewhere on a flight in the 'flights' menu — then later we can
   figure out where else to pull that data in to utilize it." Breadth of capture
   first; presentation minimal; reports/battery/maintenance deliberately later.
-- **Trigger to start.** Operator answers the plan's open questions (§8) —
-  chiefly OQ-2 (store raw pilot GPS or derived VLOS distance only) and OQ-3
-  (series resolution cap). Phases P0/P1 do not depend on either and can start
-  ahead of the answers if desired; P2 opens with a hard spike gate on the
-  `dji-log-parser` record-access API, which is the plan's one real unknown.
+- **Operator decisions folded in 2026-09-04 (D1–D7, plan §"Operator
+  decisions").** Full raw pilot track stored (reports guarded); series stored at
+  **full resolution** — which moved them out of the sidecar into a dedicated
+  `flight_series` table; Details link on **every** flight regardless of source;
+  flight logs become the **source of truth for batteries**; the backfill also
+  **repairs** existing rows (per-point timestamps + the `Unknown(NNN)`
+  `drone_model` literal) while leaving duration/distance/max-altitude/max-speed
+  untouched; a `dji-log-parser` bump is **evaluated with a before/after diff
+  first**; and recovered original DJI files **re-import over** the matching
+  `opendronelog_import` rows, carrying mission attachments across.
+- **Nine phases, ≈13 days.** P0 schema → P1 Tier 0 parser → P-EVAL crate diff →
+  P2 Tier 1 records → P3 backfill → P4 repair → P5 UI → P6 battery → P7 ODL
+  re-import. Three destructive-capable passes (P4, P7 and any `force` re-backfill)
+  default to `dry_run=true`.
+- **Trigger to start.** P0/P1 are unblocked now. P2 opens with a hard spike gate
+  on the `dji-log-parser` record-access API — the plan's one real unknown.
+  **P7 is BLOCKED** on the log-inventory hunt across fleet hosts (plan §8, a
+  PENDING table for the operator to fill in): 584 `opendronelog_import` rows are
+  the ceiling on matches, and the count of recovered originals is the real driver.
 
 ## Billing follow-ups
 

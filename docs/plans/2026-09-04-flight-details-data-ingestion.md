@@ -1,7 +1,7 @@
 # Flight Details — pull the untapped DJI log data into the DB and give it a page
 
 **Status:** PLANNED, nothing built. Implementation plan for ROADMAP **FP-1**.
-**Date:** 2026-09-04
+**Date:** 2026-09-04 (revised same day to fold in operator decisions)
 **Decision record:** [ADR-0043](../adr/0043-flight-details-sidecar-table-for-extended-log-data.md)
 **Input:** [`2026-09-04-dji-log-untapped-data-census.md`](2026-09-04-dji-log-untapped-data-census.md)
 — the primary-source census of what the logs actually carry. This plan does not
@@ -14,18 +14,27 @@ re-derive it; it consumes it.
 > link somewhere on a flight in the 'flights' menu - then later we can figure
 > out where else to pull that data in to utilize it."
 
-Read literally, and that's how it's scoped:
+Scope: capture breadth into the database durably, expose one Flight Details view
+off the Flights menu, leave later utilisation (reports, battery, maintenance)
+open. **Breadth of capture beats depth of presentation.**
 
-1. **Capture breadth into the database, durably.** Every Tier 0 / Tier 1 item
-   the census found, not a curated subset.
-2. **One "Flight Details" view** reachable from the Flights menu. Minimal
-   presentation — grouped facts, no chart polish.
-3. **Leave the door open.** Reports, battery health, maintenance triggers are
-   explicitly *later*. This phase must not close any of those doors, and must
-   not pre-build any of them.
+## Operator decisions (Bill, 2026-09-04) — DECIDED, not open
 
-Corollary that shapes every decision below: **breadth of capture beats depth of
-presentation**, and **nothing already trusted may move.**
+The first draft of this plan carried seven open questions. All are now answered.
+They are recorded here because several of them **enlarge** the scope
+significantly — in particular D2 (full-resolution series) forces a storage
+redesign, and D5/D7 mean the backfill now deliberately writes to `flights`,
+which the first draft forbade outright.
+
+| # | Decision | Effect on this plan |
+|---|---|---|
+| **D1** | **Store the full raw pilot position track** (AppGPS lat/lon), plus derived pilot-to-aircraft distance. Reports must not include it unless deliberately added. | §2.3, §2.5, §4.4 (report-audience guard made explicit and testable). |
+| **D2** | **Full resolution at rest.** No downsampling when stored; downsample only at the API/read layer. | Forces series out of the sidecar into a dedicated `flight_series` table — §1.5, the plan's biggest structural change. |
+| **D3** | **Flight Details link on EVERY flight**, any source. Sections with no data render "not available for this source." | §4.1, §5. The `source === 'dji_txt'` gate is dropped. |
+| **D4** | **Logs become the source of truth for batteries.** Un-gate P6: write `battery_logs.discharge_mah`, drive `batteries.cycle_count` / `health_pct` from the pack's own values, keep the hand-entered numbers in history but stop showing them as current. | §1.6, §6 P6. |
+| **D5** | **Backfill also repairs existing rows:** re-stamp `gps_track` / `telemetry` timestamps on the 210 DJI flights, and replace the literal `drone_model = "Unknown(NNN)"` with the header `aircraft_name`. Duration / distance / max altitude / max speed stay untouched. | §3.4 — a *new* guarantee mechanism is required, because the original one (never load the `Flight` entity) no longer applies. |
+| **D6** | **Evaluate the library bump first**, with a before/after diff over all retained logs. Adopt only if nothing moves unexplained. Output a diff report in `docs/`. | New phase **P-EVAL**, §6. |
+| **D7** | **Re-import OpenDroneLog-era flights** if original DJI files are recovered, replacing the matched `opendronelog_import` rows and carrying over mission attachments, notes, tags, pilot, aircraft. Unmatched files import as new. Needs a matching rule and a dry-run. | New phase **P7**, §7. Blocked on the log inventory (§8). |
 
 ---
 
@@ -33,100 +42,84 @@ presentation**, and **nothing already trusted may move.**
 
 ### 1.1 Options considered
 
-**(a) Widen `flights.telemetry` with new series + add a `flights.flight_details`
-JSON column for scalars/summary/events.**
+**(a) Widen `flights.telemetry` + add a `flights.flight_details` JSON column.**
 
-- **Pro:** no new table, no join, no relationship to configure. Reuses the
-  existing `/telemetry` read path for the series.
-- **Con — decisive:** `flights` is already the subject of three OOM ADRs
-  (ADR-0019 list defer, ADR-0020 report geo buffer, ADR-0025 mission detail).
-  It carries three heavy JSON columns today (`gps_track`, `telemetry`,
-  `raw_metadata`, `backend/app/models/flight.py:47-49`). Adding a fourth means
-  every `select(Flight)` in the codebase becomes a little more dangerous, and
-  the ADR-0019 coverage test (`backend/tests/test_flight_library_list_defers_heavy_columns.py`)
-  exists precisely to force a decision when that happens. The concrete hazard is
-  not hypothetical: `reprocess_all_from_stored` does a bare
-  `select(Flight).where(...)` over every matching DJI flight
-  (`flight_library.py:1650-1659`) — full entity load, all JSON columns, no
-  defer. A fourth heavy column widens an existing footgun.
-- **Con:** `Flight.telemetry` is SQLAlchemy generic `JSON`, which emits
-  Postgres `json`, not `jsonb`. Events stored there can never be GIN-indexed
-  without an `ALTER TABLE … USING` rewrite of a multi-hundred-MB TOASTed column.
+- **Pro:** no new table, no join; the existing `/telemetry` read path already
+  serves series.
+- **Con — decisive:** `flights` is the subject of three OOM ADRs (ADR-0019 list
+  defer, ADR-0020 report geo buffer, ADR-0025 mission detail). It already
+  carries three heavy JSON columns (`models/flight.py:47-49`). Adding more makes
+  every `select(Flight)` heavier, protected only by remembering to `defer()` —
+  a discipline that has already failed in production. The live example:
+  `reprocess_all_from_stored` does a bare `select(Flight).where(...)` with no
+  defer (`flight_library.py:1650-1659`).
+- **Con:** `Flight.telemetry` is SQLAlchemy generic `JSON` → Postgres `json`,
+  not `jsonb`. Nothing stored there can ever be GIN-indexed without an
+  `ALTER TABLE … USING` rewrite of a large TOASTed column.
+- **Fatal under D2.** At full resolution the series alone are ~1.3 MB of raw
+  JSON per flight (§1.5). Putting that on `flights` makes every full-entity load
+  in the codebase a multi-megabyte detoast.
 
-**(b) A new `flight_details` table, 1:1 with `flights` — typed columns for
-scalars, `JSONB` for series/events/groups.**
+**(b) A `flight_details` sidecar table, 1:1 with `flights`.**
 
-- **Pro:** loading extended data becomes *opt-in*. The flights list, the mission
-  detail path, the report path, the map path, and `reprocess/all` never see it —
-  by construction, not by remembering to `defer()`. ADR-0019's class of defect
-  cannot recur here.
-- **Pro:** typed scalars are directly queryable later — "battery packs by cycle
-  count across flights", "flights with an RTH", "max MSL by month" — with plain
-  b-tree indexes, no JSONB path extraction.
-- **Pro:** `JSONB` from day one, so a GIN index on `events` is available when
-  event search becomes real, with no rewrite.
-- **Pro — backfill:** the backfill can select `(Flight.id, Flight.source_file_hash)`
-  as *columns*, never load the `Flight` entity, and therefore structurally
-  cannot dirty a headline metric (see §3.2).
-- **Con:** one join for the details page (irrelevant — it is a single-row read),
-  one migration, one relationship that must be declared `lazy="noload"` or it
-  silently recreates the ADR-0019 failure mode.
+- **Pro:** extended data becomes opt-in **by construction** — the list, mission,
+  report and map paths never join it, so they cannot be hurt by it.
+- **Pro:** typed scalars are directly filterable/aggregatable later with plain
+  b-tree indexes; `JSONB` groups keep GIN indexing available for `events`.
+- **Pro:** the details half of the backfill can select `(Flight.id,
+  Flight.source_file_hash)` as *columns* and never load the `Flight` entity.
+- **Con under D2:** a ~300 KB compressed `series` column on this table
+  re-creates the ADR-0019 trap one level down — any `select(FlightDetails)`
+  entity load detoasts the whole thing to read one scalar.
 
-**(c) Normalized child tables — `flight_events`, `flight_battery_samples`,
-`flight_phases`, …**
+**(c) Fully normalized child tables, down to per-sample rows.**
 
-- **Pro:** real SQL over events; no JSON path syntax.
-- **Con — decisive at sample granularity:** the M4TD census log alone has 13,870
-  frames. Sample-level normalization across 210 flights is ~2.9 M rows for one
-  series, and there is no read path today that needs per-sample SQL. That is
-  schema built for a query nobody has asked for.
-- **Con:** ~6 tables, ~6 migrations, ~6 models to land before a single value
-  reaches the screen. Directly against "breadth of capture first."
-- **Partially deferred, not rejected:** `events` is the one group with a
-  plausible future SQL need ("show me every flight with a compass error").
-  Option (b) keeps that door open — `events` is `JSONB`, so it can be GIN-indexed
-  in place, or promoted to a child table later with the JSONB as the source.
+- **Pro:** real SQL over every value.
+- **Con — decisive at sample granularity:** the M4TD census log has 13,870
+  frames; one series across 210 flights is ~2.9 M rows, and 14 series is ~41 M
+  rows. There is no read path that needs per-sample SQL, and the write cost on a
+  streaming-replicated primary is real.
 
-### 1.2 Recommendation — option (b)
+### 1.2 Recommendation — (b) **split**, with series in their own table
 
-**A `flight_details` sidecar table, 1:1 with `flights`, primary-keyed on
-`flight_id`.** Typed nullable columns for every scalar a future query might
-filter or aggregate on; `JSONB` groups for the structured/variable-length data
-(phases, events, config, firmware, health, sd_card, series).
+**Scalars, groups and summaries → `flight_details` (1:1, PK = `flight_id`).
+Time series → `flight_series` (one row per flight *per named series*).**
 
-Rationale in one line: it is the only option where "add a lot of new data" does
-not also mean "make every existing flight query heavier," and the repo has
-already paid for that lesson three times.
+This is a change from the first draft, forced by D2. The reasoning is in §1.5;
+the short version is that a per-series row lets a chart request detoast ~110 KB
+instead of ~1.3 MB, and keeps the scalar row small enough that a careless
+full-entity load is harmless.
 
-### 1.3 Concrete schema
+### 1.3 `flight_details` — scalars and groups
 
 Units follow ADR-0032 conventions throughout: **metres, m/s, volts, amps, °C,
-degrees, mAh, Wh, seconds, Hz.** Every column name carries its unit suffix. All
-columns except `flight_id`, `schema_version`, `generated_at` are **nullable** —
-a Litchi/Airdata flight has no row at all, and a DJI log whose frames failed to
-decode produces a row that is mostly NULL.
+degrees, mAh, Wh, seconds, Hz**, with the unit in the column name. All columns
+except `flight_id`, `schema_version`, `generated_at` are **nullable** — a
+Litchi/Airdata flight has no row at all, and a log whose frames failed to decode
+produces a mostly-NULL row.
 
 ```
 flight_details
   flight_id                     UUID       PK, FK flights.id ON DELETE CASCADE
   schema_version                SMALLINT   NOT NULL DEFAULT 1
-  parser_version                VARCHAR(32)          -- flight-parser Cargo version
+  parser_version                VARCHAR(32)
+  crate_version                 VARCHAR(32)          -- dji-log-parser version used (D6)
   generated_at                  TIMESTAMP  NOT NULL  -- naive UTC, repo convention
 
   -- decode provenance
   frame_count                   INTEGER
   record_count                  INTEGER
-  frame_hz_est                  DOUBLE PRECISION     -- Hz
-  first_frame_at                TIMESTAMP            -- naive UTC
+  frame_hz_est                  DOUBLE PRECISION
+  first_frame_at                TIMESTAMP
   last_frame_at                 TIMESTAMP
 
-  -- altitude (MSL/VPS — AGL stays on flights.max_altitude, untouched)
+  -- altitude (MSL/VPS; AGL stays on flights.max_altitude, untouched)
   max_altitude_msl_m            DOUBLE PRECISION
   min_altitude_msl_m            DOUBLE PRECISION
   home_altitude_msl_m           DOUBLE PRECISION
   max_vps_height_m              DOUBLE PRECISION
-  take_off_altitude_raw         DOUBLE PRECISION     -- UNITS UNCONFIRMED, see OQ-1
-  take_off_altitude_units       VARCHAR(16)          -- 'unconfirmed' until OQ-1 closes
+  take_off_altitude_raw         DOUBLE PRECISION     -- units unconfirmed, see §9 C-1
+  take_off_altitude_units       VARCHAR(16)          -- 'unconfirmed' until C-1 closes
 
   -- range / rates
   max_distance_from_home_m      DOUBLE PRECISION
@@ -144,7 +137,7 @@ flight_details
 
   -- camera
   photo_count                   INTEGER              -- camera.is_photo RISING edges
-  header_capture_num            INTEGER              -- header, for cross-check
+  header_capture_num            INTEGER
   video_seconds                 DOUBLE PRECISION
   header_video_time_s           DOUBLE PRECISION
 
@@ -157,11 +150,11 @@ flight_details
   rc_uplink_max                 SMALLINT
   rc_zero_downlink_frames       INTEGER
   rc_disconnect_events          SMALLINT
-  ofdm_signal_avg_pct           DOUBLE PRECISION     -- video link, separate from RC
+  ofdm_signal_avg_pct           DOUBLE PRECISION
 
-  -- battery (per-flight, from frames)
+  -- battery, this flight (from frames, full resolution)
   battery_current_max_a         DOUBLE PRECISION
-  battery_energy_wh             DOUBLE PRECISION     -- ∫ V·I dt at full frame res
+  battery_energy_wh             DOUBLE PRECISION     -- ∫ V·I dt
   battery_discharge_mah         DOUBLE PRECISION     -- ∫ I dt
   battery_cell_count            SMALLINT
   battery_cell_deviation_max_v  DOUBLE PRECISION
@@ -170,14 +163,14 @@ flight_details
   battery_full_capacity_mah     DOUBLE PRECISION
   battery_current_capacity_mah  DOUBLE PRECISION
 
-  -- pack (Tier 1, SmartBatteryStatic, shim-corrected — see §2.4)
+  -- pack lifetime (Tier 1 SmartBatteryStatic, shim-corrected — §2.4)
   pack_cycle_count              INTEGER
   pack_designed_capacity_mah    INTEGER
   pack_full_charge_voltage_v    DOUBLE PRECISION
-  pack_values_shimmed           BOOLEAN              -- true = >>8 correction applied
-  pack_values_plausible         BOOLEAN              -- false = shimmed value out of range, do not display
+  pack_values_shimmed           BOOLEAN
+  pack_values_plausible         BOOLEAN              -- false → never displayed, never used for D4
 
-  -- config snapshot in force for this flight
+  -- config in force for this flight
   height_limit_m                DOUBLE PRECISION
   go_home_height_m              DOUBLE PRECISION
   max_allowed_height_m          DOUBLE PRECISION
@@ -185,35 +178,40 @@ flight_details
 
   -- identity
   aircraft_sn_full              VARCHAR(32)          -- 20-char, vs header's 16
-  app_platform                  VARCHAR(32)          -- Android / DJIFly / Linux(Goggles)
+  app_platform                  VARCHAR(32)
 
-  -- pilot / VLOS (derived only — see OQ-2)
+  -- pilot / VLOS (D1: raw track lives in flight_series; these are the rollups)
   pilot_sample_count            INTEGER
   pilot_max_distance_m          DOUBLE PRECISION
   pilot_avg_distance_m          DOUBLE PRECISION
+  pilot_track_stored            BOOLEAN              -- true when raw lat/lon series exist
 
   -- rollups so the UI can badge without opening a JSONB
   event_count                   INTEGER
   warning_event_count           INTEGER
   anomaly_flag_count            SMALLINT
 
-  -- JSONB groups
-  phases    JSONB   -- [{state, seconds, frames}]  from osd.flyc_state
+  -- repair provenance (D5 / D7) — keeps flights.raw_metadata clean
+  gps_timestamps_restamped_at   TIMESTAMP            -- D5(a)
+  drone_model_previous          VARCHAR(255)         -- D5(b), the "Unknown(NNN)" literal
+  replaced_from                 JSONB                -- D7: prior source + prior metrics
+
+  -- JSONB groups (small, structured, potentially searchable)
+  phases    JSONB   -- [{state, seconds, frames}]
   events    JSONB   -- [{t_offset_s, last_t_offset_s, kind, severity, message, count, garbled}]
-  config    JSONB   -- failsafe_action, go_home_mode, obstacle_avoidance, mvo, + long tail
+  config    JSONB   -- failsafe_action, go_home_mode, obstacle_avoidance, mvo, long tail
   firmware  JSONB   -- [{component, version}]
   health    JSONB   -- {is_vibrating: N frames, is_compass_error: N, ...}
   sd_card   JSONB   -- {min_remain_capacity_mb, min_remain_photo_num, min_remain_video_s}
   serials   JSONB   -- {rc_sn, camera_sn, battery_sn, component_serials[]}
-  series    JSONB   -- {t_offset_s: [], <name>: []} — decimated, see §2.5
-  extra     JSONB   -- forward-compat catch-all; nullable, normally NULL
+  extra     JSONB   -- forward-compat catch-all; normally NULL
 ```
 
+No `series` column. That is the D2 change.
+
 **Indexes at P0: the primary key only.** No secondary index ships until a query
-exists that needs it — an index is write cost on a streaming-replicated primary,
-paid on every insert, for a read nobody has written yet. The `JSONB` choice is
-what keeps the option open (a GIN on `events` is a later one-liner; a GIN on a
-`json` column is not possible at all).
+needs one. `JSONB` on the group columns is what keeps a later GIN on `events`
+a one-liner.
 
 **Relationship declaration is load-bearing:**
 
@@ -221,35 +219,163 @@ what keeps the option open (a GIN on `events` is a later one-liner; a GIN on a
 # backend/app/models/flight.py
 details = relationship("FlightDetails", back_populates="flight",
                        uselist=False, lazy="noload", cascade="all, delete-orphan")
+series  = relationship("FlightSeries", back_populates="flight",
+                       lazy="noload", cascade="all, delete-orphan")
 ```
 
 `lazy="noload"` matches the existing `battery_logs` relationship
-(`flight.py:58`). `selectin` here would drag a JSONB blob into every
-`/flight-library` list row and reproduce ADR-0019 exactly. A test asserts the
-compiled list query does not reference `flight_details` (§6, P0).
+(`flight.py:58`). `selectin` on either would reproduce ADR-0019. A P0 test
+asserts the compiled list query references neither table.
 
-### 1.4 Migration
+### 1.4 `flight_series` — the time series
 
-`backend/alembic/versions/0010_flight_details.py`, `down_revision =
-"0009_mission_dl_email_sent_at"`.
+```
+flight_series
+  flight_id     UUID        NOT NULL, FK flights.id ON DELETE CASCADE
+  source        VARCHAR(16) NOT NULL   -- 'frame' | 'pilot' | 'ofdm' | 'camera'
+  name          VARCHAR(48) NOT NULL   -- 't_offset_s', 'altitude_msl_m', 'pilot_lat', ...
+  unit          VARCHAR(16)            -- 'm', 'm/s', 'deg', 'V', 'A', 'pct', 's', 'wgs84'
+  sample_count  INTEGER     NOT NULL
+  precision_dp  SMALLINT               -- decimal places emitted (§2.5 rounding)
+  values        JSON        NOT NULL   -- numeric array, FULL resolution — see §1.5
+  PRIMARY KEY (flight_id, source, name)
+```
 
-**Must be idempotent** — ADR-0042 / the 2026-08-22 fresh-install incident.
-Migration `0001_baseline_schema` builds fresh databases with `create_all` from
-the **live models**, so on a fresh DB the table already exists by the time 0010
-runs. Guard exactly as `0009` does (`flight_library`-adjacent pattern,
-`0009_mission_dl_email_sent_at.py:37-40`):
+The composite PK gives the exact lookup the read path wants
+(`WHERE flight_id = ? AND source = 'frame' AND name = ANY(?)`) with no extra
+index. `source` exists because **the series do not share one time base** —
+frames, AppGPS and OFDM are recorded at different cadences (13,870 / 657 / 5,538
+records respectively in the M4TD census log). Each `source` group carries its own
+`t_offset_s` row, and every series within a group is index-aligned to it. This is
+a detail the first draft got wrong by assuming a single decimated time base.
+
+### 1.5 Why series moved out, and what `values` should be — the D2 analysis
+
+**Size, recomputed from the census.** Largest observed log: M4TD, 13,870 frames.
+
+| Block | Rows × samples | Bytes/value (rounded, §2.5) | Raw JSON |
+|---|---|---|---|
+| Frame series (14) | 14 × 13,870 | ~6 | ~1.11 MB |
+| Frame `t_offset_s` | 13,870 | ~7 | ~97 KB |
+| Pilot (lat/lon/dist/t) | 4 × 657 | ~10 avg (13 for coords) | ~26 KB |
+| OFDM (signal + t) | 2 × 5,538 | ~5 | ~55 KB |
+| **Total per flight** | | | **≈ 1.3 MB raw** |
+
+TOAST-compressed (pglz over rounded ASCII numeric runs, typically 3–5×):
+**≈ 260–430 KB for the largest flight**, and roughly 100–150 KB for a typical
+5,000-frame flight. Across 210 flights: **≈ 25–60 MB one-time**, plus ~100–300 KB
+per new flight.
+
+*Note on the operator's figure:* the "0.5–2 MB/flight compressed" estimate is
+close to the **raw** number, not the compressed one — compression is the
+difference. The scale conclusion is unchanged either way: this is real but not
+alarming. For calibration, ADR-0019 measured `gps_track + telemetry +
+raw_metadata` at **33–44 MB compressed across the top 500 flights**, so the new
+series are roughly 0.6–1.8× the existing heavy-JSON footprint. Postgres handles
+this comfortably; the risk is entirely in *read paths*, which is exactly why the
+storage shape matters.
+
+**Why not keep it in `flight_details`.** A TOASTed column is only detoasted when
+that column is selected — so co-location is not fatal *provided every reader is
+column-explicit*. But `select(FlightDetails)` (a normal entity load, which is
+what ORM code writes by default) selects all columns and would detoast ~300 KB to
+read one scalar. That is ADR-0019's exact failure mode, one level down, and
+relying on every future caller to be column-explicit is the same discipline that
+already failed once. Splitting removes the possibility.
+
+**Why one row per series, not one blob row.** The Flight Details page and any
+future chart asks for 1–4 named series. Under a single-blob design, serving one
+2,000-point chart detoasts, decompresses and parses the full ~1.3 MB. Under
+one-row-per-series it touches ~110 KB. That is a ~12× difference on the hot path,
+on a backend with a 1536 MiB cgroup and a documented history of OOM incidents. It
+costs nothing structurally.
+
+**Why `json` and not `jsonb` for `values` — deliberately the opposite of the
+group columns.** `jsonb` is a parsed binary format: it re-encodes every number as
+a variable-length `numeric` and adds a per-element `JEntry` header. For a
+13,870-element float array that is tens of KB of pure overhead before the values,
+and the binary numerics compress worse than ASCII digit runs. The only thing
+`jsonb` buys is containment/path operators and GIN indexing — worthless for an
+opaque float array we always fetch whole. So: **`json` for `flight_series.values`,
+`jsonb` for `flight_details`' group columns.** The distinction is intentional and
+should not be "tidied up" later.
+
+**Alternative considered — `DOUBLE PRECISION[]`.** A native float8 array is 8
+bytes/element fixed, needs no JSON parse in Python, and maps straight to a list.
+Against it: pglz compresses high-entropy IEEE mantissas poorly, whereas rounded
+ASCII (`193.9`) compresses well — so the text form is likely *smaller on disk*
+despite being larger uncompressed. That is a claim I have not measured.
+
+**P0 acceptance gate (measurement, not a guess):** before P1 locks the encoding
+in, write one real flight's series both ways into a scratch table on
+`droneops-standby-db` and compare `pg_column_size()` and read latency. Nothing
+has been written at that point, so flipping `values` to `float8[]` is a
+one-line migration change. Record the numbers in `PROGRESS.md`. **Default is
+`json`; the measurement can overturn it.**
+
+### 1.6 Battery model changes (D4)
+
+```
+batteries
+  + cycle_count_observed  INTEGER          -- preserved hand/incremental history
+  + metrics_source        VARCHAR(16)      -- 'observed' | 'pack'
+
+battery_logs
+  + pack_cycle_count      INTEGER          -- the pack's own count at that flight
+```
+
+`batteries.cycle_count` (`models/battery.py:21`) is today a counter incremented
+once per imported flight (`flight_library.py:2568`, `battery.cycle_count += 1`) —
+it counts *flights we have logs for*, not the pack's lifetime cycles. The pack
+reports its own: 23 on the M4TD, 9 on the M30.
+
+Semantics after D4:
+
+- `cycle_count` becomes the **displayed current** value. When a plausible
+  `pack_cycle_count` exists for the serial, it is pack-derived and
+  `metrics_source = 'pack'`; otherwise the legacy increment continues and
+  `metrics_source = 'observed'`.
+- The pre-existing value is moved into `cycle_count_observed` **once** (only when
+  it is NULL), and the per-flight increment continues to maintain
+  `cycle_count_observed` forever, so the two stay comparable. History is kept;
+  it is just no longer what the UI shows.
+- **Monotonic guard:** cycles only ever increase on a pack, so pack-sourced
+  writes take `GREATEST(cycle_count, pack_cycle_count)`. Without this, a backfill
+  that processes flights in arbitrary order would leave the count at whatever the
+  last-processed (possibly oldest) flight reported.
+- `health_pct` is derived as
+  `battery_full_capacity_mah / pack_designed_capacity_mah × 100`, written only
+  when both are plausible and the ratio lands in 40–105 %. Outside that band it
+  is left NULL rather than written wrong.
+- `battery_logs.discharge_mah` (`models/battery.py:52`, always NULL today) is
+  filled from `flight_details.battery_discharge_mah`.
+- `battery_logs.cycles_at_time` keeps its existing meaning (the observed
+  counter). The pack's value goes in the **new** `pack_cycle_count` column —
+  silently redefining an existing column mid-history would corrupt the series it
+  already holds.
+- `pack_values_plausible = false` rows are never used as a source for any of this.
+
+### 1.7 Migrations
+
+- `0010_flight_details` — creates `flight_details` **and** `flight_series`.
+  `down_revision = "0009_mission_dl_email_sent_at"`.
+- `0011_battery_source_of_truth` — the three additive nullable columns in §1.6.
+
+Both **must be idempotent** (ADR-0042, the 2026-08-22 fresh-install incident):
+`0001_baseline_schema` builds fresh databases with `create_all` from the **live
+models**, so on a fresh DB these objects already exist when the revision runs.
+Guard exactly as `0009` does (`0009_mission_dl_email_sent_at.py:37-40`):
 
 ```python
 conn = op.get_bind()
-if "flight_details" in sa.inspect(conn).get_table_names():
+insp = sa.inspect(conn)
+if "flight_details" in insp.get_table_names():
     return  # fresh DB: 0001's live-models create_all already built it
 ```
 
-Revision id `0010_flight_details` is 19 chars (≤ 32 — the constraint 0007/0009
-call out). Additive, no backfill inside the migration, no data rewrite —
-replication-safe plain DDL via WAL. Survives container recreation and standby
-promotion; no port, pg_hba, or connection-string change (Failover & Resilience
-Guard: clean on all five questions).
+Revision ids are ≤ 32 chars (the constraint 0007/0009 call out). Additive DDL, no
+backfill inside the migration — replication-safe over WAL, survives container
+recreation and standby promotion, no port / `pg_hba` / connection-string change.
 
 ---
 
@@ -257,283 +383,324 @@ Guard: clean on all five questions).
 
 ### 2.1 Shape
 
-One new optional field on `ParsedFlight` (`flight-parser/src/main.rs:19-40`):
+One new optional field on `ParsedFlight` (`main.rs:19-40`):
 
 ```rust
 #[serde(skip_serializing_if = "Option::is_none")]
 pub details: Option<FlightDetails>,
 ```
 
+`FlightDetails` carries the §1.3 scalars, the JSONB groups, and
+`series: Vec<SeriesBlock>` where each block is
+`{source, name, unit, precision_dp, values}` — mapping 1:1 onto `flight_series`
+rows.
+
 Litchi (`litchi.rs:169`) and Airdata (`airdata.rs:208`) build `ParsedFlight`
-struct literals, so adding the field is a **compile error** in both until
-`details: None` is added — the compiler enforces the audit instead of a reviewer
-having to. Their JSON output is byte-identical afterwards (`skip_serializing_if`).
-Backend treats an absent/`null` `details` as "no `flight_details` row," so both
-formats are untouched end to end.
+struct literals, so the new field is a **compile error** in both until
+`details: None` is added — the compiler enforces the audit. Their JSON output is
+byte-identical afterwards. The backend treats absent/`null` as "no details, no
+series."
 
-`FlightDetails` mirrors §1.3: typed scalars flattened, plus
-`phases/events/config/firmware/health/sd_card/serials/series` as
-`serde_json::Value`.
+### 2.2 Tier 0 — from `log.frames()`
 
-### 2.2 Tier 0 — from `log.frames()` (already decoded, currently dropped)
+The parser already iterates every frame (`dji.rs:139-207`); these are additional
+accumulators in that same loop. No second decode.
 
-The parser already iterates every frame (`dji.rs:139-207`). These are additional
-accumulators inside that same loop — no second decode, no extra memory beyond
-the accumulators and the (decimated) series buffers.
-
-| Group | Frame source | New output |
+| Group | Frame source | Output |
 |---|---|---|
-| Time base | `frame.custom.date_time` | `series.t_offset_s`, `first/last_frame_at`, `frame_hz_est`. **Also** fills the currently-empty `TelemetryData.timestamps` (`dji.rs:120` — `let timestamps = Vec::new();` never gets pushed to) and `TrackPoint.timestamp` for **new imports only** (see §3.3 for why backfilled flights don't get this). |
-| Link quality | `rc.downlink_signal`, `rc.uplink_signal` | `rc_downlink_*`, `rc_uplink_*`, `rc_zero_downlink_frames`, `series.rc_downlink`, `series.rc_uplink`. Also fills `TelemetryData.signal_strength` (hard-coded `None` at `dji.rs:265`, which is why `/telemetry` has always served `signal_strength: null`). |
-| Distance from home | `home.latitude/longitude` vs `osd` | `max_distance_from_home_m`, `series.distance_from_home_m`. Also fills `TelemetryData.distance_from_home` (`dji.rs:266`). |
-| Phase timeline | `osd.flyc_state`, `osd.flight_action`, `osd.flyc_command` | `phases` histogram, `takeoff_count`, `landing_count`, `rth_count`, `*_mode_seconds`; state transitions emitted as `events` of kind `mode`. |
-| Camera | `camera.is_photo` rising edges, `camera.is_video`, `sd_card_state` | `photo_count`, `video_seconds`, `sd_card`. |
-| Gimbal | `gimbal.pitch/roll/yaw`, `is_stuck`, `*_at_limit` | `series.gimbal_pitch_deg`, `series.gimbal_yaw_deg`; `is_stuck` frames into `health`. |
-| Attitude / vertical | `osd.pitch/roll/yaw`, `osd.z_speed` | `max_climb_rate_ms`, `max_descent_rate_ms`, `series.z_speed_ms`, `series.aircraft_yaw_deg`. |
-| MSL / VPS | `osd.altitude`, `osd.vps_height`, `home.altitude` | `max/min_altitude_msl_m`, `home_altitude_msl_m`, `max_vps_height_m`, `series.altitude_msl_m`, `series.vps_height_m`. |
-| Battery detail | `battery.current`, `current/full_capacity`, `cell_voltages[]`, `cell_voltage_deviation`, `min/max_temperature` | `battery_current_max_a`, `battery_energy_wh`, `battery_discharge_mah`, `battery_cell_*`, `battery_temp_*`, `series.battery_current_a`. **`battery_discharge_mah` is the value that fills the always-null `BatteryData.discharge_mah`** (`dji.rs:279`) and therefore `battery_logs.discharge_mah` (`models/battery.py:52`) — but only at P5, see §6. |
+| Time base | `frame.custom.date_time` | `series[frame].t_offset_s`, `first/last_frame_at`, `frame_hz_est`. Also fills the currently-empty `TelemetryData.timestamps` (`dji.rs:120`) and `TrackPoint.timestamp`. |
+| Link quality | `rc.downlink_signal`, `rc.uplink_signal` | `rc_*` scalars, `series[frame].rc_downlink/rc_uplink`. Also fills `TelemetryData.signal_strength` (hard-coded `None` at `dji.rs:265` — why `/telemetry` has always served `signal_strength: null`). |
+| Distance from home | `home.latitude/longitude` vs `osd` | `max_distance_from_home_m`, `series[frame].distance_from_home_m`, and `TelemetryData.distance_from_home` (`dji.rs:266`). |
+| Phase timeline | `osd.flyc_state`, `osd.flight_action`, `osd.flyc_command` | `phases`, `takeoff_count`, `landing_count`, `rth_count`, `*_mode_seconds`; transitions emitted as `events` of kind `mode`. |
+| Camera | `camera.is_photo` rising edges, `is_video`, `sd_card_state` | `photo_count`, `video_seconds`, `sd_card`. |
+| Gimbal | `gimbal.pitch/roll/yaw`, `is_stuck`, `*_at_limit` | `series[frame].gimbal_*_deg`; `is_stuck` frames into `health`. |
+| Attitude / vertical | `osd.pitch/roll/yaw`, `osd.z_speed` | `max_climb_rate_ms`, `max_descent_rate_ms`, `series[frame].z_speed_ms`, `aircraft_*_deg`. |
+| MSL / VPS | `osd.altitude`, `osd.vps_height`, `home.altitude` | `max/min_altitude_msl_m`, `home_altitude_msl_m`, `max_vps_height_m`, `series[frame].altitude_msl_m`, `vps_height_m`. |
+| Battery detail | `battery.current`, `current/full_capacity`, `cell_voltages[]`, `cell_voltage_deviation`, `min/max_temperature` | `battery_*` scalars, `series[frame].battery_current_a`, `cell_voltage_deviation_v`. |
 | Safety flags | `is_vibrating`, `is_compass_error`, `is_motor_blocked`, `voltage_warning`, … | `health` frame-counts, `anomaly_flag_count`. |
-| Config | `home.height_limit`, `go_home_height`, `max_allowed_height`, `is_beginner_mode`, `go_home_mode` | `height_limit_m`, `go_home_height_m`, `max_allowed_height_m`, `is_beginner_mode`, `config`. |
-| Events | `app.tip`, `app.warn` | `events` (see §2.6). |
-| Header extras | `max_vertical_speed`, `capture_num`, `video_time`, `take_off_altitude`, `app_platform` | corresponding columns; `take_off_altitude` stored **raw** with `take_off_altitude_units='unconfirmed'`. |
+| Config | `home.height_limit`, `go_home_height`, `max_allowed_height`, `is_beginner_mode`, `go_home_mode` | corresponding columns + `config`. |
+| Events | `app.tip`, `app.warn` | `events` (§2.6). |
+| Header extras | `max_vertical_speed`, `capture_num`, `video_time`, `take_off_altitude`, `app_platform` | corresponding columns; `take_off_altitude` stored **raw**, marked `unconfirmed`. |
 
-### 2.3 Tier 1 — from the raw record stream (**a second pass, and the plan's
-largest unknown**)
+**Also in P1 (supports D5b going forward):** when `details.product_type` renders
+as `Unknown(NNN)`, fall back to the header `aircraft_name` for `drone_model`
+(`dji.rs:27-31`) instead of emitting the literal. Without this, new Matrice 4TD /
+Mavic 4 Pro imports keep producing `Unknown(178)` even after the backfill repairs
+the existing 150 rows.
 
-`dji.rs:104` calls `log.frames(keychains)` and nothing else. `AppGPS`,
-`SmartBatteryGroup::SmartBatteryStatic`, `Firmware`, `Camera`, `MCParams`,
-`OFDM`, `ComponentSerial` never become a `Frame` and are unreachable today.
+### 2.3 Tier 1 — from the raw record stream (**the plan's largest unknown**)
 
-**Unverified and it must be verified first:** the exact `dji-log-parser` 0.5.7
-record-access API — whether it is `log.records(keychains)`, its return type,
-whether it consumes the keychains (forcing a re-fetch from DJI's API for the
-frames pass), and its peak memory. The census says "one `records()` call away";
-that is a reasonable read of the crate but was not exercised. **P2 opens with a
-spike that answers exactly this before any other P2 work** (§6, P2-a). If the
-answer is bad — a second DJI keychain round-trip per flight, or a memory
-profile that blows the parser's 256 MiB cap — P2 stops and gets re-planned; P0/P1
-already deliver the bulk of the value without it.
+`dji.rs:104` calls `log.frames(keychains)` and nothing else, so `AppGPS`,
+`SmartBatteryStatic`, `Firmware`, `Camera`, `MCParams`, `OFDM` and
+`ComponentSerial` are unreachable today.
 
-Per-record outputs:
+**Unverified, and it must be verified first:** the exact `dji-log-parser`
+record-access API — signature, whether it consumes the keychains (which would
+force a second DJI keychain round-trip per flight), return type, and peak memory.
+The census says "one `records()` call away"; that is a reasonable read of the
+crate source but was never exercised. **P2 opens with a spike that answers
+exactly this** (§6). If the answer is bad, P2 stops and is re-planned; P0/P1/P3
+already deliver most of the value.
 
 | Record | → |
 |---|---|
-| `AppGPS` | `pilot_sample_count`, `pilot_max_distance_m`, `pilot_avg_distance_m`, `series.pilot_distance_m`. **Derived only — raw pilot lat/lon is NOT stored.** See OQ-2. |
+| `AppGPS` | **D1:** `series[pilot].pilot_lat`, `pilot_lon`, `pilot_distance_m`, `t_offset_s` (full raw track), plus `pilot_*` rollup scalars and `pilot_track_stored = true`. Absent from Goggles-generated logs (Avata 2, FPV) → NULL, not zero. |
 | `SmartBatteryStatic` | `pack_cycle_count`, `pack_designed_capacity_mah`, `pack_full_charge_voltage_v` via the §2.4 shim. |
 | `Firmware` | `firmware[]`. |
-| `Camera` | `sd_card` (remaining capacity/photos/video timer), `record_time` cross-check against the frame-derived `video_seconds`. |
-| `MCParams` | `config.failsafe_action`, `config.obstacle_avoidance`, `config.mvo`. |
-| `OFDM` | `ofdm_signal_avg_pct`, `series.ofdm_signal_pct`. |
+| `Camera` | `sd_card`, plus a `record_time` cross-check against frame-derived `video_seconds`. |
+| `MCParams` | `config.failsafe_action`, `obstacle_avoidance`, `mvo`. |
+| `OFDM` | `ofdm_signal_avg_pct`, `series[ofdm].signal_pct` + its own `t_offset_s`. |
 | `ComponentSerial` | `aircraft_sn_full`, `serials.component_serials[]`. |
-| `RC` / `RCDisplayField` | **Deferred.** Stick-position→pilot-input-intensity is a modelling exercise with no consumer yet; capturing 4,147 stick samples per flight to display nothing is storage without a reader. Noted in the ADR consequences as an explicit non-goal for this phase. |
+| `RC` / `RCDisplayField` | **Deferred.** Stick-position → pilot-input-intensity is a modelling exercise with no consumer; 4,147 samples/flight to display nothing. |
 
-Tier 2 (`Unknown` record types, ~30% of records in newer logs) is **out of
-scope**, unchanged from the census's conclusion.
+Tier 2 (`Unknown` record types, ~30 % of records in newer logs) stays out of
+scope — unchanged from the census.
 
 ### 2.4 The `SmartBatteryStatic` shim — corrected characterization
 
-The census calls these values "big-endian-wrong." Working the four sample values
-it recorded, the transform is uniformly **`raw >> 8`**, not a byte swap:
+The census calls these "big-endian-wrong." Working its own four recorded values,
+the transform is uniformly **`raw >> 8`**, not a byte swap:
 
-| Field | Raw | Hex | `>> 8` | Census expected |
+| Field | Raw | Hex | `>> 8` | Expected (pack spec) |
 |---|---|---|---|---|
 | `loop_times` (M4TD) | 5888 | `0x1700` | 23 | 23 |
 | `loop_times` (M30) | 2304 | `0x0900` | 9 | 9 |
-| `designed_capacity` (M4TD) | 1899520 | `0x1CFC00` | 7420 | 7420 mAh (pack spec) |
-| `designed_capacity` (M30/TB30) | 1505282 | `0x16F002` | 5880 | 5880 mAh (pack spec) |
+| `designed_capacity` (M4TD) | 1899520 | `0x1CFC00` | 7420 | 7420 mAh |
+| `designed_capacity` (M30/TB30) | 1505282 | `0x16F002` | 5880 | 5880 mAh |
 
-For a `u16` like `loop_times`, `>> 8` and a byte swap are indistinguishable. For
-the 32-bit `designed_capacity` they are not, and the M30 low byte is `0x02` —
-**nonzero**. A clean endian swap of a well-formed field would leave zero there.
-A nonzero low byte plus a uniform 8-bit shift reads as a **field-offset /
-alignment bug in the crate's struct decode**, not an endianness bug. That
-distinction matters: an alignment bug is more likely to be already fixed
-upstream, and more likely to differ per record layout.
+For a `u16` the two are indistinguishable. For the 32-bit `designed_capacity`
+they are not, and the M30 low byte is `0x02` — **nonzero**, which a clean endian
+swap of a well-formed field would not leave. That reads as a **field-offset /
+alignment bug in the crate's struct decode**, not endianness. The distinction
+matters: an alignment bug is more likely already fixed upstream, and more likely
+to differ per record layout.
 
-**Decision:** implement the shim as `raw >> 8` (not `swap_bytes()`), behind a
-plausibility gate — cycles in `0..=3000`, designed capacity in `1000..=30000`
-mAh, full-charge voltage in `10.0..=60.0` V. Out-of-range → store the shimmed
-value anyway but set `pack_values_plausible = false`, and the UI does not display
-it. `pack_values_shimmed` records that the correction was applied, so the day the
-crate fixes it upstream we can tell shimmed rows from native ones. **P2 begins by
-checking the upstream changelog** (§7 R-4) — if 0.6.x decodes these correctly,
-the shim becomes a version-gated no-op instead of a permanent workaround.
+**Implementation:** `raw >> 8` (not `swap_bytes()`), behind a plausibility gate —
+cycles `0..=3000`, designed capacity `1000..=30000` mAh, full-charge voltage
+`10.0..=60.0` V. Out of range → store the value but set
+`pack_values_plausible = false`; it is then never displayed and never feeds D4.
+`pack_values_shimmed` records that the correction was applied, so shimmed rows
+stay distinguishable if upstream fixes it.
 
-### 2.5 Series and downsampling policy
+**P-EVAL (§6, D6) checks whether the shim is needed at all** before P2 builds it.
 
-Two rules, and the ordering between them is the whole point:
+### 2.5 Full resolution, and the rounding that pays for it (D2)
 
-1. **Every scalar is computed at FULL frame resolution**, before any decimation.
-   Maxima, minima, edge counts, and the `∫V·I dt` / `∫I dt` integrals never see a
-   decimated array. Decimating first and then taking a max is how a peak gets
-   quietly lost.
-2. **Series are stored decimated** to `SERIES_MAX_POINTS = 4000`, using the same
-   index-stride algorithm the backend already uses
-   (`flight_library.py:1999-2003`). 4,000 is 2× the `/telemetry` endpoint's
-   default `max_points` and well under its 10,000 cap, so no read path is ever
-   resolution-starved by the stored form.
+Two rules, and the order matters:
 
-`series.t_offset_s` (seconds since the first frame) is emitted **at the same
-decimated indices as every other series in the blob**, so all detail series
-share one time base and are plottable against each other without index games. It
-is also the reason the Flight Details page reads its series from
-`flight_details.series` and never from `flights.telemetry` — the two blobs have
-different resolutions and must not be cross-indexed. Stated plainly in the ADR
-consequences.
+1. **Every scalar is computed at full frame resolution** — maxima, minima, edge
+   counts and the `∫V·I dt` / `∫I dt` integrals never see a reduced array.
+2. **Every series is stored at full resolution — one value per source sample.**
+   No decimation at rest. Decimation happens only in the API layer (§4.2).
 
-Storage estimate (assumption, not measured): 13 series × 4,000 f64 rendered as
-JSON text ≈ 400 KB raw per flight, TOAST-compressed to roughly **60–150 KB**.
-Over 210 flights that is **~15–30 MB one-time**, plus ~100 KB per new flight.
-Immaterial against the existing `gps_track`/`telemetry` footprint (ADR-0019
-measured 33–44 MB *compressed* across the top 500 flights). OQ-3 asks Bill to
-confirm the 4,000 cap; raising it to full resolution is a constant-factor change
-(~3.5× on the M4TD) and nothing else.
+**Rounding is not downsampling.** Each series is emitted at physically meaningful
+precision, recorded in `flight_series.precision_dp`:
+
+| Quantity | dp | Rationale |
+|---|---|---|
+| altitude, distance (m) | 1 | 0.1 m is below any DJI sensor's real accuracy |
+| speed, climb rate (m/s) | 2 | |
+| angles (deg) | 1 | |
+| voltage (V) | 3 | mV resolution matches the crate's own `/1000.0` |
+| current (A) | 2 | |
+| signal, percent | 0 | integers as reported |
+| `t_offset_s` | 2 | 10 ms — finer than any observed cadence |
+| lat / lon | 7 | ~11 mm; beyond GPS accuracy |
+
+`193.90000000000001` → `193.9` is a ~4× reduction in stored text with **zero**
+information loss. Every sample is kept; only spurious f64 mantissa digits are
+dropped. This is what makes full resolution affordable (§1.5).
 
 ### 2.6 Event extraction and the garbled-string rule
 
-The census found ~20% of `app.tip` / `app.warn` strings arrive with a **garbled
-prefix, intact suffix**, from the crate's decrypt/append path. The rule:
+The census found ~20 % of `app.tip` / `app.warn` strings arrive with a **garbled
+prefix, intact suffix**, from the crate's decrypt/append path.
 
 1. **Trim** leading bytes that are not printable ASCII or valid UTF-8, and any
-   leading run before the first capital letter that begins a word-boundary run of
+   leading run before the first capital letter beginning a word-boundary run of
    ≥ 3 ASCII letters. Set `garbled: true` when anything was trimmed.
-2. **Dedupe on the cleaned string**, not the raw one. This is what turns the
-   M4TD's 18 separate "Remote controller disconnected. Adjust antennas" strings
-   into **one** event record with `count: 18`, `t_offset_s` = first occurrence,
-   `last_t_offset_s` = last. Without this, `events` is a spam log; with it, it is
-   the mission-report events section.
-3. **Never reconstruct** a message from a partial. If cleaning leaves fewer than
-   8 characters, emit `kind: "unparsed"` with the cleaned remnant and
-   `garbled: true` — do not guess at the original. (ADR-0028's truthfulness
-   posture: an unknown stays unknown.)
-4. Severity from the source: `app.tip` → `info`, `app.warn` → `warning`,
-   `AppSeriousWarn` (Tier 1) → `serious`. Mode transitions → `info`, kind `mode`.
+2. **Dedupe on the cleaned string.** This turns the M4TD's 18 separate "Remote
+   controller disconnected. Adjust antennas" strings into **one** record with
+   `count: 18`, `t_offset_s` = first, `last_t_offset_s` = last. Without it,
+   `events` is a spam log; with it, it is a report section.
+3. **Never reconstruct** a message from a partial. Under 8 characters after
+   cleaning → `kind: "unparsed"` with the remnant and `garbled: true`. ADR-0028's
+   posture: an unknown stays unknown.
+4. Severity from source: `app.tip` → `info`, `app.warn` → `warning`,
+   `AppSeriousWarn` → `serious`, mode transitions → `info`/`mode`.
 
-Raw strings are **not stored** — cleaned message + `garbled` flag only. Keeping
-both roughly doubles the events blob to preserve bytes nobody will read.
+Raw strings are not stored — cleaned message plus the `garbled` flag only.
 
-### 2.7 Backward compatibility summary
+### 2.7 Backward compatibility
 
-- Litchi / Airdata: `details: None`, output byte-identical, compiler-enforced.
-- Existing DJI output fields: **unchanged in value**. The only in-place changes
-  to existing fields are three currently-always-empty ones getting populated —
-  `TelemetryData.timestamps` (`dji.rs:120`), `TelemetryData.signal_strength`
-  (`dji.rs:265`), `TelemetryData.distance_from_home` (`dji.rs:266`). The
-  `/telemetry` endpoint already serves all three (`flight_library.py:2007-2015`)
-  and the frontend already types `telemetry` as `Record<string, number[]>`
-  (`FlightReplay.tsx:64`), so nothing downstream breaks — those keys go from
-  `null` to arrays.
-- `duration_secs`, `total_distance`, `max_altitude`, `max_speed`, `home_lat/lon`,
-  `point_count`, `gps_track` geometry: **untouched by every phase of this plan.**
+- Litchi / Airdata: `details: None`, byte-identical output, compiler-enforced.
+- Existing DJI field **values** unchanged. The only in-place changes are three
+  always-empty fields getting populated — `TelemetryData.timestamps`
+  (`dji.rs:120`), `signal_strength` (`dji.rs:265`), `distance_from_home`
+  (`dji.rs:266`) — all three already served by `/telemetry`
+  (`flight_library.py:2007-2015`) and already typed permissively on the frontend
+  (`FlightReplay.tsx:64`). They go from `null` to arrays.
+- `duration_secs`, `total_distance`, `max_altitude`, `max_speed`,
+  `home_lat/lon`, `point_count` and `gps_track` **geometry**: never changed by
+  the parser contract. The single exception in this whole plan is a P7 row that
+  is deliberately replaced from a recovered original (§7).
 
 ---
 
-## 3. Backfill / reprocess for the 210 retained logs
+## 3. Backfill and repair of existing rows
+
+Three separate write sets with three separate guarantees. Keeping them separate
+is the point — a bug in one cannot reach the others.
 
 ### 3.1 What exists today, and why it is the wrong tool
 
-`FlightDataTab.tsx` surfaces the reprocess mechanism (`FlightDataTab.tsx:522-560`):
-a "Need Reprocess" stat from `GET /flight-library/reprocess/status`
+`FlightDataTab.tsx:522-560` surfaces the reprocess mechanism: a "Need Reprocess"
+stat from `GET /flight-library/reprocess/status`
 (`flight_library.py:1589-1627`), a "RE-PROCESS N FLIGHTS" button hitting
 `POST /flight-library/reprocess/all` with a 600 s client timeout
-(`FlightDataTab.tsx:215`), and a "MANUAL RE-UPLOAD" fallback to
-`POST /flight-library/reprocess`. (The "Restart (Home)" / "Skip +5%" controls
-named in some notes are **not** reprocess controls — they are playback buttons in
-`FlightReplay.tsx:534,562`. Different surface.)
+(`FlightDataTab.tsx:215`), and a manual re-upload fallback. (The "Restart (Home)"
+/ "Skip +5%" controls sometimes attributed to this tab are playback buttons in
+`FlightReplay.tsx:534,562` — a different surface.)
 
-**`/reprocess/all` must not be reused here**, for two independent reasons:
+**`/reprocess/all` is not reused**, for two independent reasons:
 
-1. **Its selector doesn't match.** It targets flights with
+1. **Its selector matches none of them.** It targets
    `point_count == 0 OR point_count IS NULL OR gps_track IS NULL`
-   (`flight_library.py:1652-1658`). All 210 dji_txt flights have decoded frames
-   and tracks, so it would select **zero** of them.
-2. **Its write set is exactly what must not move.** It assigns
-   `duration_secs`, `total_distance`, `max_altitude`, `max_speed`,
-   `home_lat/lon`, `point_count`, `gps_track`, `telemetry`, `raw_metadata`
-   (`flight_library.py:1699-1709`). Those are the values ADR-0027 (header
-   airtime) and ADR-0028 (outlier gate, sanity bound) settled and that
-   migration `0004_dji_duration_name_restamp` already restamped. Re-deriving
-   them from a *different parser build* is a silent-regression generator.
+   (`flight_library.py:1652-1658`). All 210 DJI flights have decoded frames and
+   tracks.
+2. **Its write set is exactly what must not move.** It assigns `duration_secs`,
+   `total_distance`, `max_altitude`, `max_speed`, `home_lat/lon`, `point_count`,
+   `gps_track`, `telemetry`, `raw_metadata` (`flight_library.py:1699-1709`) —
+   the values ADR-0027 and ADR-0028 settled and migration `0004` restamped.
+   Re-deriving them from a different parser build is a silent-regression
+   generator.
 
-### 3.2 The new backfill, and how "nothing moves" is guaranteed
+### 3.2 Write set A — details + series (`POST /details/backfill`)
 
-`POST /api/flight-library/details/backfill?limit=25&force=false`
-(auth: `Depends(get_current_user)`, same as every neighbouring route).
+`?limit=25&force=false&dry_run=false`, auth `Depends(get_current_user)` like
+every neighbouring route.
 
 ```
 1. select(Flight.id, Flight.source_file_hash)             # COLUMNS, not the entity
      .outerjoin(FlightDetails, FlightDetails.flight_id == Flight.id)
      .where(Flight.source == "dji_txt",
             Flight.source_file_hash.is_not(None),
-            FlightDetails.flight_id.is_(None))            # force=true drops this clause
+            FlightDetails.flight_id.is_(None))            # force=true drops this
      .limit(limit)
-2. for each: _get_stored_file_path(hash)  -> skip if absent
+2. _get_stored_file_path(hash)  -> skip if absent
 3. stream the stored original to the parser from an open file handle
-     (the ADR-0028 M5 pattern at flight_library.py:1676-1683 — never read_bytes())
-4. take parsed["details"];  skip (not error) when absent
+     (ADR-0028 M5 pattern, flight_library.py:1676-1683 — never read_bytes())
+4. parsed["details"]; skip (not error) when absent
 5. async with db.begin_nested():                          # ADR-0028 C2 savepoint
-       upsert FlightDetails(flight_id=..., **details)
+       upsert FlightDetails; delete+insert FlightSeries rows for this flight
 6. return {processed, written, skipped_no_file, skipped_no_details, remaining, errors}
 ```
 
-**The guarantee is structural, not disciplinary.** The `Flight` ORM entity is
-never loaded into the session, so there is no `Flight` object to dirty and no
-attribute assignment is possible. It is not "we remembered not to write
-`duration_secs`" — there is nothing there to write to. Step 1 is also the
-ADR-0019/0025 lesson applied literally: a column-select over 210 rows loads two
-scalars each, not 210 × (gps_track + telemetry + raw_metadata).
+**Guarantee: structural.** The `Flight` ORM entity is never loaded, so there is
+no object to dirty and no attribute assignment is possible. Not "we remembered
+not to write `duration_secs`" — there is nothing there to write to. Step 1 is
+also the ADR-0019/0025 lesson applied literally.
 
-**Idempotency:** the `FlightDetails.flight_id IS NULL` clause means a second run
-processes zero rows. `force=true` re-parses and upserts (needed after a parser
-version bump); the `parser_version` / `schema_version` columns make a
-"re-backfill everything produced by parser < X" query trivial later.
+**Idempotent** via the `FlightDetails.flight_id IS NULL` clause; `force=true`
+re-parses and upserts (needed after a parser or crate bump, and
+`parser_version` / `crate_version` make "re-backfill everything below version X"
+a trivial query). Series are replaced wholesale per flight, never merged.
 
-**OOM:** peak memory per iteration is one streamed 20 MB log on the backend side
-(never fully resident — file handle streamed to httpx) and one details payload.
-The backend is on a 1536 MiB cgroup (ADR-0025 context); this is bounded and
-sequential. The real memory question is **parser-side** and is the P2 gate
-(§7 R-2). `limit=25` default keeps a single request at roughly 1–2 minutes at an
-observed ~2–4 s/parse, so the UI loops on `remaining > 0` rather than holding one
-600 s request open like `/reprocess/all` does.
+**Memory:** peak per iteration is one streamed original (never fully resident)
+plus one details payload plus its series. Sequential, one flight at a time — no
+fan-out, because the parser is a single 256 MiB container and the DJI keychain
+API is a shared external dependency. `limit=25` keeps a request to roughly 1–2
+minutes at ~2–4 s/parse, so the UI loops on `remaining > 0` instead of holding
+one 600 s request open the way `/reprocess/all` does.
 
-**Concurrency:** sequential, one flight at a time, mirroring `/reprocess/all`.
-No parallel fan-out — the parser is a single 256 MiB container and the DJI
-keychain API is a shared external dependency.
+**Measure before continuing:** after the first 25-flight batch, record
+`pg_total_relation_size('flight_series')` and `pg_column_size(values)` for the
+largest flight in `PROGRESS.md`, and compare against §1.5's estimate before
+running the remaining 185.
 
-**Prod verification of the no-move guarantee** (run on BOS-HQ against
-`droneops-standby-db`, before and after, output quoted into `PROGRESS.md`):
+### 3.3 Fleet-level invariant checksum
+
+Run on BOS-HQ against `droneops-standby-db` **before and after every write set**,
+output quoted into `PROGRESS.md`:
 
 ```sql
+-- headline scalars
 SELECT md5(string_agg(
          id::text||'|'||duration_secs||'|'||total_distance||'|'||
          max_altitude||'|'||max_speed||'|'||point_count, ',' ORDER BY id))
 FROM flights WHERE source = 'dji_txt';
+
+-- track geometry (D5a writes inside gps_track, so scalars alone are not enough)
+SELECT md5(string_agg(t.h, ',' ORDER BY t.id)) FROM (
+  SELECT f.id, md5(string_agg(
+           (p->>'lat')||'|'||(p->>'lng')||'|'||(p->>'alt'), ',' ORDER BY ord)) AS h
+  FROM flights f, LATERAL jsonb_array_elements(f.gps_track::jsonb)
+                          WITH ORDINALITY AS e(p, ord)
+  WHERE f.source = 'dji_txt' GROUP BY f.id) t;
 ```
 
-Identical hash before and after, or the backfill is reverted and re-planned.
+Both hashes identical across write sets A and B, or the pass is reverted and
+re-planned. Write set C (§7) is the one exception and is scoped explicitly there.
 
-### 3.3 The one asymmetry, stated plainly
+### 3.4 Write set B — the repair pass (D5), `POST /details/repair`
 
-Because the backfill writes **only** `flight_details`, the 210 existing flights
-do **not** get per-point timestamps written into `flights.gps_track[].timestamp`
-or `flights.telemetry.timestamps` — those live on `flights` and are therefore
-off-limits. New imports (post-P1) **do** get them.
+This one **does** write to `flights`, so the §3.2 structural guarantee does not
+apply and a different, equally strong mechanism is required.
+`?dry_run=true` by default.
 
-Result: for a window, new flights have a time-stamped `gps_track` and old ones
-don't. This is deliberate — closing it means rewriting `gps_track` on 210 rows
-that ADR-0027/0028 already settled, which is a distinct, higher-risk change that
-deserves its own gate.
+**B(a) — re-stamp `gps_track` / `telemetry` timestamps on the 210.**
 
-Mitigation so it is invisible where it matters: **the Flight Details page reads
-its time base and every series from `flight_details.series` only** (which every
-backfilled flight has). The asymmetry is confined to the legacy
-`/telemetry` + `/replay` surfaces.
+The key move: **timestamps are merged into the EXISTING stored track, never
+replaced by the new parse's track.** Coordinates therefore cannot change, because
+they never come from the new parse at all.
 
-Closing it is **FP-1 Phase 6, deferred** (§6): a `gps_track`/`telemetry`
-re-stamp gated on a before/after diff proving `duration_secs`,
-`total_distance`, `max_altitude`, `max_speed`, `point_count` and every track
-coordinate are bit-identical, with only `timestamp` keys added. Not in this
-phase, and it needs Bill's explicit go-ahead.
+```
+1. load the Flight row (unavoidable here)
+2. snapshot invariants: duration_secs, total_distance, max_altitude, max_speed,
+   home_lat, home_lon, point_count, len(gps_track),
+   and md5 of [(lat, lng, alt) for p in gps_track]
+3. re-parse the stored original
+4. PRECONDITION: len(parsed_track) == len(existing_track)
+      and len(parsed_timestamps) == len(existing_telemetry["altitude"])
+   -> if not, SKIP the row and record it. A parser build that yields a different
+      point count on the same file is exactly the signal that something moved;
+      skipping is correct, aligning would be guessing.
+5. async with db.begin_nested():
+      for i, p in enumerate(existing_track):
+          p["timestamp"] = parsed_track[i]["timestamp"]        # ONLY this key
+      existing_telemetry["timestamps"] = parsed_timestamps     # ONLY this key
+      flight_details.gps_timestamps_restamped_at = utcnow()
+      flush
+      POST-ASSERT: recompute the coordinate md5 and re-read the seven scalars;
+                   any difference -> raise -> savepoint rolls back THIS row
+```
+
+`duration_secs`, `total_distance`, `max_altitude`, `max_speed`, `point_count`
+are never assigned — they are not in the write set. Every other `telemetry` array
+is left as the stored object. `raw_metadata` is untouched; the audit stamp lives
+in `flight_details` instead.
+
+**B(b) — repair `drone_model = "Unknown(NNN)"`.**
+
+150 of 210 DJI flights carry the literal because the crate's `ProductType` enum
+predates the Mavic 4 Pro and Matrice 4 series; the real name is in
+`raw_metadata.aircraft_name`.
+
+- Predicate: `drone_model ~ '^Unknown\(\d+\)$'` — anchored, so a real model name
+  can never match — **and** `raw_metadata->>'aircraft_name'` non-empty.
+- Prior value preserved in `flight_details.drone_model_previous`.
+- Idempotent: a second run matches nothing.
+- Attribution is by serial (ADR-0007), so nothing was ever mis-attributed; this
+  is cosmetic plus queryability.
+- **Note, not a problem:** `_generate_flight_name` derives auto names from
+  `drone_model` (`flight_library.py:666`). Existing names are already persisted
+  and are **not** regenerated, so no flight is renamed and the
+  `uq_flights_autoname` index (ADR-0027) is not touched. Only hypothetical future
+  name generation would differ.
+
+**Dry-run output** (both sub-passes): counts of rows that would change, rows
+failing the length precondition, and a per-row before/after for `drone_model`.
+Bill reviews it before the real run.
 
 ---
 
@@ -541,49 +708,75 @@ phase, and it needs Bill's explicit go-ahead.
 
 ### 4.1 `GET /api/flight-library/{flight_id}/details`
 
-- **Auth:** `_user: User = Depends(get_current_user)` — identical to
-  `get_flight` / `get_telemetry` / `get_track` (`flight_library.py:1972,1987,2024`).
-- **Params:** `max_points: int = Query(2000, le=10000)` — same defaults and cap
-  as `/telemetry` (`flight_library.py:1985`); `include_series: bool = True`.
-- **404** when the flight does not exist. **200 with `{"details": null,
-  "eligible": true|false}`** when the flight exists but has no details row —
-  `eligible` is `source == "dji_txt"`, and drives the page's empty state. Not a
-  404: "this flight has no extended data yet" is a normal state with a remedy,
-  not an error.
-- **Response:** scalars flattened, plus `phases`, `events`, `config`,
-  `firmware`, `health`, `sd_card`, `serials`, and `series` (omitted entirely when
-  `include_series=false`).
-- **Downsampling:** the `downsample` closure currently defined inline inside
-  `get_telemetry` (`flight_library.py:1999-2003`) is **extracted** to
-  `backend/app/services/telemetry_downsample.py` and used by both endpoints.
-  This is the ADR-0032 lesson applied prophylactically — that ADR's standing
-  finding is that "the absence of a shared units/columns module is the standing
-  risk," and a second copy-pasted downsampler is the same defect class.
+- **Auth:** `Depends(get_current_user)` — identical to `get_flight` /
+  `get_telemetry` / `get_track` (`flight_library.py:1972,1987,2024`).
+- **Never 404s on a missing details row.** Returns
+  `{source, details: {...}|null, series_index: [...], unavailable_reason}`.
+  Per **D3** the link exists on every flight, so "no extended data" is a normal
+  response, not an error. `unavailable_reason` is one of
+  `null` / `"source_unsupported"` (litchi/airdata/manual) /
+  `"not_backfilled"` (dji_txt with no row yet) /
+  `"odl_import_no_original"` (opendronelog_import, pending P7).
+- 404 only when the **flight** does not exist.
+- `series_index` lists available series (`source`, `name`, `unit`,
+  `sample_count`) **without** their values, so the page can render section
+  availability in one round trip.
 
-### 4.2 `POST /api/flight-library/details/backfill` — §3.2.
+### 4.2 `GET /api/flight-library/{flight_id}/details/series`
 
-### 4.3 `GET /api/flight-library/details/status`
+- `?names=altitude_msl_m,rc_downlink&source=frame&max_points=2000` (cap 10000).
+- Fetches only the requested `flight_series` rows and **downsamples at read**
+  (D2) — index-stride, and `t_offset_s` for the same `source` is always returned
+  alongside at the **same indices**, so the caller never has to align anything.
+- The `downsample` closure currently inline in `get_telemetry`
+  (`flight_library.py:1999-2003`) is **extracted** to
+  `backend/app/services/telemetry_downsample.py` and shared by both endpoints.
+  This is ADR-0032's standing finding applied prophylactically — that ADR's own
+  conclusion is that the absence of a shared layer is what lets a defect class
+  recur, and a second copy-pasted downsampler would be the same mistake.
 
-Counts for the Settings surface: `{total_dji, with_details, without_details,
-without_details_with_stored_file, parser_versions: {…}}`. All `COUNT(*)` /
-`GROUP BY` — no JSON loaded. Mirrors the existing `/reprocess/status` shape so
-`FlightDataTab` gets a second card that reads the same way.
+### 4.3 Other endpoints
 
-### 4.4 How the Flights list gets a link without loading heavy columns
+- `POST /details/backfill` — §3.2. `POST /details/repair` — §3.4.
+- `GET /details/status` — `{total, by_source, with_details, without_details,
+  with_stored_file, parser_versions, crate_versions, restamped, model_repaired}`.
+  All `COUNT(*)` / `GROUP BY`; no JSON loaded. Mirrors `/reprocess/status`'s
+  shape so `FlightDataTab` gains a second card that reads the same way.
+- `POST /flights/reimport-odl` — §7.
+- **The Flights list is unchanged.** Per D3 the link renders for every row using
+  `source`, which `FlightResponse` already carries (`schemas/flight.py:65`). No
+  new column, no join, no `has_details` flag, no risk to the query ADR-0019
+  exists to protect.
 
-**Recommendation: it doesn't need one.** The "Flight Details" entry is shown
-whenever `source === 'dji_txt'` — a field `FlightResponse` already carries
-(`schemas/flight.py:65`). Zero new columns, zero new joins, zero risk to the
-list query that ADR-0019 exists to protect. Flights without a details row land on
-the page's empty state, which links straight to Settings → Flight Data to run the
-backfill — **making the backfill discoverable is a feature, not a consolation.**
+### 4.4 Report-audience guard (D1) — explicit and testable
 
-Considered and deferred: a `has_details: bool` on `FlightResponse`, via an
-`exists()` correlated subquery or a `column_property`. It is genuinely cheap (an
-index-only probe on a unique PK), but a `column_property` attaches to *every*
-`select(Flight)` in the codebase — including the report, mission, and map paths —
-to save one empty-state render. Not worth it until the empty state is actually
-common enough to annoy.
+Pilot position is now stored in full. It must not reach a client deliverable
+unless deliberately added.
+
+1. **The report engine reads nothing from these tables.** `reports.py`
+   (`generate_report:481`, `_build_flight_summaries:408`,
+   `_resolve_flight_metrics:242`) resolves live scalars from `Flight` /
+   `MissionFlight` and gains **no** access to `flight_details` or
+   `flight_series`.
+2. **A named allowlist, currently empty.** A module constant
+   `REPORT_READABLE_DETAIL_FIELDS: tuple[str, ...] = ()` in the report layer
+   documents that nothing from the details surface is report-eligible yet, and
+   makes any future addition a deliberate, reviewable, one-line diff rather than
+   an accidental import.
+3. **A test asserts it.** Report generation issues **zero** queries against
+   `flight_details` or `flight_series` — captured with a SQLAlchemy
+   `before_execute` listener, the same technique as the §6 P3 no-UPDATE test.
+4. **Exports too.** `_export_csv` / `_export_gpx` / `_export_kml`
+   (`flight_library.py:2625,2645,2668`) are client-shareable artifacts and gain
+   no pilot columns. Covered by the same test.
+5. ADR-0029 / ADR-0031 remain in force everywhere: the Details page presents
+   recorded height limits as data and never compares them to any limit, never
+   mentions 400 ft or Part 107, and emits no compliance commentary.
+
+**Consequence to accept knowingly:** pilot coordinates are PII-adjacent, live in
+a database backed up to R2 (ADR-0041), and are recoverable from those backups.
+The guard above is the mitigation, and `pilot_track_stored` makes the affected
+rows enumerable if a purge is ever wanted.
 
 ---
 
@@ -591,245 +784,366 @@ common enough to annoy.
 
 ### 5.1 Where it hangs off the Flights menu
 
-The Flights surface already exists: nav item `Flights → /flights`
-(`AppShell.tsx:41`), page `Flights.tsx`, a right-hand detail `Drawer` opened by
-clicking a row (`Flights.tsx:771`), a per-row kebab `Menu`
-(`Flights.tsx:808-829`), and a precedent for a per-flight sub-page —
-`/flights/:id/replay` (`App.tsx:125`, lazy-loaded at `App.tsx:50`, launched from
-the drawer's "FLIGHT REPLAY" button at `Flights.tsx:888-899`).
+The precedent exists: nav item `Flights → /flights` (`AppShell.tsx:41`), a
+detail `Drawer` opened by clicking a row (`Flights.tsx:771`), a per-row kebab
+`Menu` (`Flights.tsx:808-829`), and a per-flight sub-page `/flights/:id/replay`
+(`App.tsx:125`, lazy at `App.tsx:50`, launched from the drawer at
+`Flights.tsx:888-899`).
 
-**Follow that precedent exactly. No new top-level nav item** — AppShell already
-carries 12, and this is a per-flight view, not a section.
+Follow it exactly. **No new top-level nav item** — AppShell already carries 12,
+and this is a per-flight view.
 
-1. **New route** `/flights/:id/details` → `FlightDetails.tsx`, lazy, added
-   alongside the replay route in `App.tsx`.
-2. **Primary entry:** a `FLIGHT DETAILS` button in the drawer, immediately above
-   the existing `FLIGHT REPLAY` button, same Mantine styling (cyan, `light`,
-   `fullWidth`, Bebas Neue + 2px letter-spacing). Rendered when
-   `detailFlight.source === 'dji_txt'`.
-3. **Secondary entry:** a `Flight details` item at the top of the per-row kebab
-   menu, above `Edit` (`Flights.tsx:813`), so it is reachable without opening the
-   drawer.
+1. Route `/flights/:id/details` → `FlightDetails.tsx`, lazy, beside the replay
+   route.
+2. A `FLIGHT DETAILS` button in the drawer above `FLIGHT REPLAY`, same styling
+   (cyan, `light`, `fullWidth`, Bebas Neue, 2 px tracking). **Rendered
+   unconditionally** — D3.
+3. A `Flight details` item at the top of the per-row kebab menu, above `Edit`
+   (`Flights.tsx:813`).
 
-### 5.2 What the page shows (P4 scope)
+### 5.2 Sections and per-source availability (D3)
 
-Mantine `Card`s in the established dark/cyan style (`#0e1117` on `#1a1f2e`
-borders, Bebas Neue headings, Share Tech Mono for data — `Flights.tsx:905-1000`
-is the pattern to copy). Sections, in this order:
+Mantine `Card`s in the established style (`#0e1117` on `#1a1f2e`, Bebas Neue
+headings, Share Tech Mono for data — `Flights.tsx:905-1000` is the pattern).
 
 | Section | Content |
 |---|---|
-| **Summary** | Frames/records decoded, frame rate, parser version, MSL max/min + home MSL, max VPS, max distance from home, max climb/descent. AGL max stays on the existing drawer — not duplicated here. |
-| **Flight phases** | One horizontal stacked bar (plain CSS flex, no chart library) + a table of state → seconds → % . Takeoff/landing/RTH counts as badges. |
-| **Camera** | Photo count (with the header `capture_num` cross-check shown when they disagree — the M4TD census case: 5 edges vs header 4), video seconds, SD card remaining at landing. |
-| **Battery** | Start/end/min V (existing), plus max current, energy Wh, discharge mAh, cell deviation, temp min/max, pack cycle count + designed capacity (**hidden when `pack_values_plausible = false`**). |
-| **Link quality** | Downlink/uplink min/avg/max, frames at zero downlink, disconnect count, OFDM video-link average. Colour by band, no chart. |
-| **Events & warnings** | Table: `t_offset_s` (as mm:ss), severity badge, message, count. A `garbled` row is marked with a subtle indicator so a mangled string never reads as a clean fact. |
-| **Config** | Height limit in force, go-home height, max allowed height, beginner mode, failsafe action, obstacle avoidance / MVO. **No commentary, no comparison to any limit** — ADR-0029 is in force: this is a data view, and the page must never editorialize about altitude or Part 107. |
-| **Firmware & serials** | Component firmware table, full 20-char aircraft SN, RC/camera/battery SNs. |
-| **Pilot position / VLOS** | Sample count, max and average aircraft-to-pilot distance. **Coordinates are never shown** (they are never stored — OQ-2). Section hidden entirely for Goggles-generated logs (Avata 2 / FPV have no `AppGPS`). |
-| **Empty state** | When `details == null && eligible`: "No extended data for this flight yet" + a link to Settings → Flight Data. When `!eligible`: "Extended data is available for DJI logs only." |
+| **Summary** | Frames/records decoded, frame rate, parser + crate version, MSL max/min + home MSL, max VPS, max distance from home, max climb/descent. AGL max stays in the drawer, not duplicated. |
+| **Flight phases** | One horizontal stacked bar (plain CSS flex, no chart library) + a state → seconds → % table. Takeoff/landing/RTH counts as badges. |
+| **Camera** | Photo count with the header `capture_num` cross-check shown when they disagree (the M4TD census case: 5 edges vs header 4), video seconds, SD card remaining at landing. |
+| **Battery** | Start/end/min V, max current, energy Wh, discharge mAh, cell deviation, temps; pack cycle count + designed capacity **hidden when `pack_values_plausible = false`**. |
+| **Link quality** | Downlink/uplink min/avg/max, frames at zero downlink, disconnect count, OFDM average. Colour by band, no chart. |
+| **Events & warnings** | Table: `t_offset_s` as mm:ss, severity badge, message, count. `garbled` rows carry a subtle marker so a mangled string never reads as a clean fact. |
+| **Config** | Height limit in force, go-home height, max allowed height, beginner mode, failsafe, obstacle avoidance / MVO. **No commentary, no comparison** (§4.4 item 5). |
+| **Firmware & serials** | Component firmware table, 20-char aircraft SN, RC/camera/battery SNs. |
+| **Pilot position / VLOS** | Sample count, max and average aircraft-to-pilot distance. Coordinates are **stored but not displayed** on this page in P5; a pilot-position map layer is deferred (§5.3) and would be a deliberate addition. |
 
-### 5.3 Explicitly deferred (do not build in P4)
+**Per-source rendering (D3).** Every section renders one of: data, or a muted
+"Not available for `<source>` logs" line, or "No extended data yet — re-process
+this flight" with a link to Settings → Flight Data. Availability by source:
 
-Chart polish and any charting library; map overlays (link-quality-coloured
-track, gimbal footprint); mission-report integration; auto-updating the
-`batteries` table from `pack_cycle_count`; maintenance-record triggers from
-`health` flags; event→ntfy alerting; stick-position/pilot-input analysis;
-cross-flight comparison views. Each is a "later we can figure out where else to
-pull that data in" item, and each is a separate decision.
+| Source | Sections |
+|---|---|
+| `dji_txt` (backfilled) | all |
+| `dji_txt` (not yet backfilled) | none — whole-page "not backfilled" state |
+| `litchi_csv`, `airdata_csv`, `manual` | none — "not available for this source" |
+| `opendronelog_import` | none today; **all** once P7 replaces the row from a recovered original — which makes P7's value visible in the UI |
+
+### 5.3 Explicitly deferred (do not build in P5)
+
+Chart polish and any charting library; map overlays (link-quality-coloured track,
+pilot position layer, gimbal footprint); mission-report integration; maintenance
+triggers from `health` flags; event → ntfy alerting; stick-position analysis;
+cross-flight comparison views.
 
 ---
 
 ## 6. Build order, sizing, tests, versions, deploy
 
-Sizing is calendar-days of focused work, not elapsed time.
+Sizing is calendar-days of focused work.
 
 | Phase | Scope | Size | App ver | Parser ver |
 |---|---|---|---|---|
-| **P0** | Schema + read path | S (~0.5 d) | 2.82.0 | — |
-| **P1** | Tier 0 parser pass | M (~1.5 d) | 2.83.0 | 1.2.0 |
-| **P2** | Tier 1 records pass | M–L (~2 d) | 2.84.0 | 1.3.0 |
-| **P3** | Backfill | S–M (~0.5 d) | 2.85.0 | — |
-| **P4** | Flight Details UI | M (~1.5 d) | 2.86.0 | — |
-| **P5** | Battery wiring (gated) | S (~0.5 d) | 2.87.0 | — |
-| **P6** | `gps_track` re-stamp | — | **DEFERRED**, needs operator go-ahead | |
+| **P0** | Two tables + read path + encoding measurement gate | M ~1 d | 2.82.0 | — |
+| **P1** | Tier 0 parser pass, full-res series, rounding, `drone_model` fallback | M ~2 d | 2.83.0 | 1.2.0 |
+| **P-EVAL** | Crate before/after diff → report in `docs/reports/` | M ~1 d | — | — |
+| **P2** | Tier 1 records pass (spike-gated) | M–L ~2 d | 2.84.0 | 1.3.0 |
+| **P3** | Backfill — details + series | M ~1 d | 2.85.0 | — |
+| **P4** | Repair pass — timestamps + `drone_model`, dry-run first | M ~1 d | 2.86.0 | — |
+| **P5** | Flight Details UI | M ~2 d | 2.87.0 | — |
+| **P6** | Battery source of truth (un-gated per D4) | M ~1 d | 2.88.0 | — |
+| **P7** | ODL re-import / replace, dry-run first | L ~2 d | 2.89.0 | — |
 
-**Total ≈ 6–7 days**, of which P2 carries essentially all the schedule risk.
+**Total ≈ 13 days.** P2 carries the technical risk; P7 carries the schedule risk
+(blocked on §8).
 
-**P0 — schema + empty read path.** Migration `0010_flight_details` (idempotent
-per ADR-0042), `models/flight_details.py`, `Flight.details` relationship with
-`lazy="noload"`, `schemas/flight.py` additions, `GET /{id}/details` +
-`/details/status`, the extracted `telemetry_downsample` service.
-*Tests:* `backend/tests/test_flight_details_model.py` — migration no-ops on a
-fresh DB; the compiled `/flight-library` list query references neither
-`flight_details` nor any new column (mirroring
-`test_flight_library_list_defers_heavy_columns.py`, with the same
-control-test-proves-the-assertion structure); endpoint 404 / empty-shape /
-`eligible` behaviour. Inert on deploy — an empty table changes nothing.
+**Ordering notes.** **P-EVAL runs before P2** deliberately: if a newer crate
+fixes `SmartBatteryStatic` and `ProductType`, then P2's shim and part of P4(b)
+shrink or vanish, and building the shim first risks writing code we delete a day
+later. **P5 (UI) may be pulled ahead of P4** if Bill wants eyes on the page
+sooner — it depends on P3 only. **P6 depends on P2** (pack values are Tier 1).
+**P7 depends on P0–P3 and on the §8 inventory.**
 
-**P1 — Tier 0.** All of §2.2 inside the existing frame loop. `details: None`
-added to `litchi.rs` / `airdata.rs`. Backend persists `parsed["details"]` in
+**P0 — schema + read path.** Migrations `0010` (both tables) and `0011`
+(battery columns, landed early so P6 needs no migration), models,
+`Flight.details` / `Flight.series` with `lazy="noload"`, schemas, `/details`,
+`/details/series`, `/details/status`, the extracted `telemetry_downsample`
+service, and the **§1.5 encoding measurement**.
+*Tests:* migrations no-op on a fresh DB; the compiled `/flight-library` list
+query references neither new table (mirroring
+`test_flight_library_list_defers_heavy_columns.py`, control test included);
+`/details` shapes for each `unavailable_reason`. Inert on deploy.
+
+**P1 — Tier 0.** All of §2.2 in the existing frame loop, §2.5 rounding,
+`details: None` in `litchi.rs` / `airdata.rs`, the `Unknown(NNN)` →
+`aircraft_name` fallback. The backend persists `parsed["details"]` in
 `_build_flight_from_parsed` (`flight_library.py:422-534`) inside the existing
 best-effort savepoint pattern used for battery tracking
 (`flight_library.py:527-533`) — a details failure must never fail an import.
-*Tests (Rust, in `dji.rs`'s existing `#[cfg(test)] mod tests`):* phase histogram
-over a synthetic frame vector; photo counter counts **rising edges only**; event
-dedupe collapses N identical strings to one record with `count = N`; the garbled
-prefix rule trims and flags; series decimation stride is exactly the backend's;
-unit assertions per ADR-0032 (m, m/s, V, A, °C, mAh, Wh).
-*Tests (pytest):* a parsed payload with `details` writes a row; one without
-writes none; a malformed `details` is swallowed and the flight still imports.
+*Rust tests:* phase histogram over a synthetic frame vector; photo counter counts
+**rising edges only**; event dedupe collapses N identical strings to one record
+with `count = N`; garbled-prefix trim and flag; per-quantity rounding precision;
+ADR-0032 unit assertions.
+*pytest:* a payload with `details` writes one `flight_details` row and N
+`flight_series` rows; one without writes none; malformed `details` is swallowed
+and the flight still imports.
+
+**P-EVAL — library evaluation (D6).** A standalone harness, **no DB writes**.
+1. Resolve the newest published `dji-log-parser` (`cargo search` / crates.io) —
+   do not assume a version number.
+2. Build the parser twice: pinned `0.5.7` and the candidate.
+3. Run both over every retained original (the 210 in the backend container's
+   `/data/uploads/flight_logs/`, plus anything recovered per §8).
+4. Diff per flight: `duration_secs`, `total_distance`, `max_altitude`,
+   `max_speed`, `home_lat/lon`, `point_count`, **every `gps_track` coordinate**,
+   `product_type`, `frames_decoded`, `frame_count`.
+5. **Classify** each difference as *expected improvement* (e.g.
+   `Unknown(178)` → `Matrice4TD`) or *unexplained*.
+6. **Adoption rule:** adopt only if every headline metric is bit-identical, or
+   every difference is individually explained and operator-approved.
+7. **Output:** `docs/reports/2026-09-XX-dji-log-parser-upgrade-eval.md` — a new
+   `docs/reports/` directory, consistent with the existing `docs/incidents/`,
+   `docs/runbooks/`, `docs/ops/` split (this is a report, not a plan).
+8. If adopted → its own ADR (0044) + a full `force=true` re-backfill, and only
+   then is the §2.4 shim version-gated.
+
+*Scope split:* the `SmartBatteryStatic` comparison needs the records API, which
+is P2's spike — so P-EVAL's adoption gate covers headline metrics and
+`product_type` (frames only, both versions), and the pack-value comparison folds
+into P2's spike, run against whichever crate P-EVAL selected.
 
 **P2 — Tier 1.**
-*P2-a, the gate (do this first, alone):* a throwaway spike answering — what is
-0.5.7's record accessor signature, does it consume the keychains, what is peak
-RSS on the largest prod log, and does 0.6.x (if it exists) fix the
-`SmartBatteryStatic` decode and the `Unknown(178/137/139)` `ProductType`?
-Measured, not assumed. If peak RSS exceeds the parser's `mem_limit: 256m`
-(`docker-compose.yml:350`), the fix is a `mem_limit` bump to 512m in the same
-change, justified by the measurement — not a guess.
-*P2-b:* the record pass, the `>> 8` shim with its plausibility gate.
-*Tests:* the shim against all four census values (5888→23, 2304→9,
-1899520→7420, 1505282→5880) plus explicit rejection of an implausible result;
-`AppGPS`-absent logs (Goggles) produce NULL pilot fields, not zeros.
+*P2-a, the gate (first, alone):* the record accessor's signature; does it consume
+the keychains; peak RSS on the largest prod log; does the selected crate decode
+`SmartBatteryStatic` correctly. **Measured, not assumed.** If peak RSS exceeds
+the parser's `mem_limit: 256m` (`docker-compose.yml:350`, sized for an idle
+~1 MiB service), bump to 512m in the same change **justified by the
+measurement** — not pre-emptively on a guess.
+*P2-b:* the record pass, the `>> 8` shim with its plausibility gate, the pilot
+series (D1).
+*Tests:* the shim against all four census values (5888→23, 2304→9, 1899520→7420,
+1505282→5880) plus rejection of an implausible result; `AppGPS`-absent logs
+(Goggles) yield NULL pilot fields, not zeros; pilot series row count matches
+`pilot_sample_count`.
 
-**P3 — backfill.** §3.2 endpoint, plus a `FlightDataTab` card that loops
-`limit=25` batches until `remaining == 0`.
-*Tests:* a `before_execute` SQLAlchemy event listener asserts the backfill path
-emits **zero** `UPDATE` statements against `flights`; a second run reports
-`processed: 0`; a missing stored file is a skip, not an error.
-*Prod:* the §3.2 checksum before and after, quoted in `PROGRESS.md`.
+**P3 — backfill.** §3.2 endpoint plus a `FlightDataTab` card looping `limit=25`
+until `remaining == 0`.
+*Tests:* a `before_execute` listener asserts **zero** `UPDATE` against `flights`;
+a second run reports `processed: 0`; a missing stored file is a skip, not an
+error; `force=true` replaces series wholesale rather than appending.
+*Prod:* §3.3 checksums before/after, plus the §3.2 size measurement after batch 1.
 
-**P4 — UI.** Route, page, two entry points, empty state.
+**P4 — repair pass.** §3.4, `dry_run=true` by default.
+*Tests:* the length precondition skips rather than aligns; the post-assert rolls
+back a row whose coordinate hash moved (forced with a stubbed parse); `drone_model`
+predicate never matches a real model name; second run is a no-op.
+*Prod:* both §3.3 checksums identical before/after — the geometry hash is the one
+that matters here.
+
+**P5 — UI.** Route, page, two entry points, per-source availability.
 *Test:* one Vitest smoke at `frontend/src/pages/__tests__/FlightDetails.test.tsx`
-(the established location — `MissionDetail.hub.test.tsx` et al.) — renders each
-section from a fixture, and renders the empty state on `details: null`.
+(the established location) — renders each section from a fixture, and renders the
+correct message for each `unavailable_reason`.
 
-**P5 — battery wiring, gated on operator sign-off.** Fills
-`battery_logs.discharge_mah` (`models/battery.py:52`, always NULL today) and
-optionally `batteries.cycle_count` / `health_pct` from `pack_cycle_count`. Gated
-because `batteries.cycle_count` is currently a hand-incremented counter
-(`flight_library.py:2568` — `battery.cycle_count += 1` per flight) and replacing
-it with the pack's own value **changes an existing operator-visible number**.
-That is a decision, not a refactor.
+**P6 — battery source of truth (D4).** §1.6. No migration (landed in P0's `0011`).
+*Tests:* the `GREATEST` monotonic guard survives out-of-order backfill;
+`cycle_count_observed` is seeded exactly once; `health_pct` is NULL outside
+40–105 %; `pack_values_plausible = false` never becomes a source.
 
-**CI:** `.github/workflows/` contains only `auto-merge-claude.yml`,
-`secret-scan.yml`, `self-hosted-smoke-test.yml` — **there is no pytest or cargo
-job.** So each phase runs `cd flight-parser && cargo test` and
-`cd backend && pytest` locally and **quotes the output** in the commit body or
-`PROGRESS.md`. Per the fleet "verify the observable end state" rule, an exit code
-is not evidence.
+**P7 — ODL re-import.** §7, `dry_run=true` by default. Blocked on §8.
 
-**Version bumps** — CLAUDE.md requires all four on every code change:
-`README.md:5`, `frontend/package.json:4`, `backend/app/main.py:602`,
-`frontend/src/components/Layout/AppShell.tsx`. Note: AppShell carries the string
-at **two** places (lines 121 and 394 — desktop sidebar and mobile drawer); CLAUDE.md
-says "line" singular. Both must move. Additionally `flight-parser/Cargo.toml`
-(currently `1.1.0`) bumps on P1/P2 — it is **not** in CLAUDE.md's four-file list
-and should be added as a fifth marker, because `main.rs:127` already reports
-`env!("CARGO_PKG_VERSION")` on `GET /health`, which is exactly how we confirm a
-parser deploy actually landed.
+**CI:** `.github/workflows/` holds only `auto-merge-claude.yml`,
+`secret-scan.yml`, `self-hosted-smoke-test.yml` — **no pytest or cargo job.**
+Each phase runs `cd flight-parser && cargo test` and `cd backend && pytest`
+locally and **quotes the output** in the commit body or `PROGRESS.md`. An exit
+code is not evidence.
 
-**Deploy.** *Correcting a common misreading:* prod is **not** deployed by hand.
-Per **ADR-0018** and CLAUDE.md, DroneOpsCommand prod on BOS-HQ is deployed by the
-**NOC Master Control fleet deployer** (`swarmpilot_deployer`) on push to `main`;
-the `.deployer-disabled` marker in the repo root disables the retired *per-repo
-autopull*, not the fleet deployer. `update.sh` does not exist (deleted in
-`e4610b5`) — **CLAUDE.md's "Tech Stack → Deploy: `update.sh`" line is stale and
-should be corrected in a docs pass.** `flight-parser` is a `build:`-only compose
-service (`docker-compose.yml:344-347`); NOC ADR-0079 taught the deployer's digest
-gate to resolve those, so a Rust change does rebuild the image. Verify each
-parser deploy landed with `GET /health` → `version` (`main.rs:120-133`), not with
-"the push succeeded." The **demo stack** (`~/droneops-demo` on BOS-HQ) is *not*
-deployer-managed and must be updated by hand per CLAUDE.md.
+**Version bumps** — CLAUDE.md requires all four: `README.md:5`,
+`frontend/package.json:4`, `backend/app/main.py:602`, and
+`frontend/src/components/Layout/AppShell.tsx`. Note the AppShell string appears
+at **two** places (lines 121 and 394 — desktop sidebar and mobile drawer) while
+CLAUDE.md says "line" singular; both must move. Additionally
+`flight-parser/Cargo.toml` (currently `1.1.0`) bumps on P1/P2 — it is **not** in
+CLAUDE.md's four-file list and should be added as a fifth marker, because
+`main.rs:127` already reports `env!("CARGO_PKG_VERSION")` on `GET /health`, which
+is how a parser deploy is confirmed.
+
+**Deploy.** Prod is **not** deployed by hand. Per **ADR-0018** and CLAUDE.md,
+DroneOpsCommand prod on BOS-HQ is deployed by the **NOC Master Control fleet
+deployer** (`swarmpilot_deployer`) on push to `main`; the `.deployer-disabled`
+marker in the repo root disables the retired *per-repo autopull*, not the fleet
+deployer. `update.sh` does not exist (deleted in `e4610b5`) — **CLAUDE.md's
+"Tech Stack → Deploy: `update.sh`" line is stale and wants a docs pass.**
+`flight-parser` is a `build:`-only compose service
+(`docker-compose.yml:344-347`); NOC ADR-0079 taught the deployer's digest gate to
+resolve those, so a Rust change does rebuild. Verify each parser deploy with
+`GET /health` → `version` (`main.rs:120-133`), not with "the push succeeded."
+The **demo stack** (`~/droneops-demo`) is not deployer-managed and is updated by
+hand per CLAUDE.md.
 
 Docs-only commits carry `[skip-deploy]` in the subject.
 
 ---
 
-## 7. Risks
+## 7. P7 — OpenDroneLog re-import and replacement (D7)
+
+584 `opendronelog_import` rows exist with `raw_metadata = NULL` — never through
+the Rust parser (ADR-0028 baseline). Where an original DJI file is recovered
+(§8), re-import it and replace the matched row.
+
+### 7.1 Matching rule
+
+Deliberately strict: a wrong match destroys a mission attachment.
+
+For each candidate file, parse → `drone_serial`, `start_time`, `duration_secs`,
+then find rows where **all** hold:
+
+- `source == 'opendronelog_import'`
+- `drone_serial` equal — exact after trim + case-fold. A row with **no** serial
+  is never matched (the match would be too weak); it imports as new and is
+  flagged.
+- `abs(start_time - parsed_start) <= 120 s`
+- `abs(duration_secs - parsed_duration) <= max(30 s, 5 % of parsed_duration)`
+
+Then:
+
+| Candidates | Action |
+|---|---|
+| exactly 1 | **match** → replace |
+| 0 | **import as new flight** |
+| ≥ 2 | **NO MATCH** — flag for manual review, never guess |
+
+**Why the uniqueness rule is not optional.** ADR-0027 measured **44–184 s**
+battery-swap gaps between consecutive Savannah flights on the same airframe — so
+a ±120 s start window *can* reach an adjacent flight. The duration test does most
+of the disambiguation, and the "≥ 2 → abort" rule guarantees an ambiguous pair is
+rejected rather than resolved by nearest-neighbour. Tolerances are generous on
+purpose: ODL `start_time` provenance is unknown and may be ingest-derived or
+timezone-shifted (ADR-0017 is about exactly this class).
+
+**Hash collision check.** If the file's SHA-256 already exists on another flight
+(the partial unique index `uq_flights_source_file_hash`, migration `0005`), do
+**not** replace — report `duplicate_of=<flight_id>`. That means the physical
+flight exists twice (an ODL row and a DJI row); merging them is a destructive
+call for Bill, not for the importer.
+
+### 7.2 Replacement mechanism — update in place
+
+Two shapes were considered:
+
+- **(A) Update in place** — keep the existing `flights.id`, overwrite the parsed
+  fields, flip `source` to `dji_txt`, set `source_file_hash`.
+- **(B) Insert new + migrate foreign keys + delete old.**
+
+**(A), decisively.** Every carry-over Bill asked for is **free** under (A)
+because the primary key never changes: `mission_flights.flight_id`,
+`battery_logs.flight_id` and every other reference survive untouched, and
+`notes`, `tags`, `pilot_id`, `aircraft_id` persist simply by not being assigned.
+Under (B) each of those is a manual FK migration with a chance to miss one.
+
+**One wrinkle (A) creates and must handle:** `mission_flights.flight_data_cache`
+holds scalar display fields snapshotted at attach time
+(`missions.py:_scalar_cache_from_flight:85`, ADR-0025 A2). The replaced flight's
+duration/distance **will** change — that is the point — so the cache goes stale.
+Reports resolve live scalars (ADR-0028 H2) but the editor reads the cache for
+display, so **every affected `mission_flights` row's scalar cache is refreshed**
+as part of the replace, via the same helper.
+
+### 7.3 The one place "nothing moves" does not apply
+
+A replaced row's headline metrics **do** change: ODL passthrough values (some
+already sanitized by ADR-0028 C1 / migration `0006`) give way to a real DJI parse.
+That is the intent. Scoping and evidence:
+
+- It applies **only** to rows with a unique file match. Every other
+  `opendronelog_import` row is untouched.
+- The §3.3 checksum invariant covers `source = 'dji_txt'` and is therefore
+  unaffected; a separate before/after snapshot is taken over the matched ODL row
+  set specifically.
+- Prior values are preserved in `flight_details.replaced_from` — prior `source`,
+  the five headline scalars, `point_count`, and any
+  `raw_metadata.distance_sanitized` note.
+- ADR-0031 verified ODL `max_altitude` against per-point tracks for 570 flights,
+  so ODL altitudes are trustworthy today and the DJI parse should broadly agree.
+  **Large disagreements are a signal, not noise** — the dry-run reports per-match
+  metric deltas so Bill can eyeball them before committing.
+
+### 7.4 Dry run
+
+`POST /flights/reimport-odl?dry_run=true` (default) returns the full match table
+— file → candidate flight → decision (`match` / `new` / `ambiguous` /
+`duplicate` / `no_serial`) → per-metric deltas → affected `mission_flights` count
+— with **zero** writes. Nothing is committed until Bill has read it.
+
+---
+
+## 8. Log inventory — **PENDING** (hunt in progress, operator to fill in)
+
+A hunt for original DJI log files across fleet hosts was running as of
+2026-09-04. **P7 is blocked on this section.** Bill fills it in; the plan does not
+guess at what will be found.
+
+| Host | Path | Files | Date range | Airframes | Already-known hashes | Notes |
+|---|---|---|---|---|---|---|
+| _(pending)_ | | | | | | |
+
+Known baseline for comparison: **210** originals are retained in the backend
+container at `/data/uploads/flight_logs/<sha256>.txt`, one per existing `dji_txt`
+flight. Anything recovered should be hash-compared against those first — a file
+whose SHA-256 already exists is a duplicate of a flight we already have, not a
+P7 candidate.
+
+Once filled in, the counts here set P7's real size: 584 ODL rows is the ceiling
+on matches, and the number of recovered files is the actual driver.
+
+---
+
+## 9. Risks and remaining unknowns
+
+**Risks**
 
 | # | Risk | Assessment | Mitigation |
 |---|---|---|---|
-| **R-1** | The `dji-log-parser` 0.5.7 record-access API is unverified — signature, keychain consumption, return shape. | **High likelihood of friction, high impact on P2 only.** The census inferred it from crate source; it was never called. | P2-a spike is a hard gate. P0/P1/P3/P4 deliver without it. If records need a second DJI keychain fetch per flight, that is a per-flight external API call across 210 backfills and P2 stops for a re-plan. |
-| **R-2** | Parser memory. `flight-parser` runs on `mem_limit: 256m` (`docker-compose.yml:350`, sized for an idle ~1 MiB service). Frames + records resident simultaneously on a 20 MB log with 13,870 frames could exceed it. | Medium likelihood, medium impact — an OOM-killed parser fails the import loudly (`httpx.ConnectError` → "flight-parser service unavailable"), it does not corrupt data. | Measure in P2-a. Bump to 512m in the same change if measured need, with the number in the commit body. Do not pre-emptively bump on a guess. |
-| **R-3** | Tier 2 `Unknown` record types are ~30% of records in newer logs (types 5, 17, 26, 45, 48, 54, 55, 57, 63, 253, 254). | Certain, low impact. | Accepted and out of scope, unchanged from the census. Type 48 (80 bytes, once per OSD frame on M4TD/M30) is the one worth watching upstream. |
-| **R-4** | The `>> 8` shim (§2.4) rests on four data points from two airframes. | Medium likelihood of an airframe where it is wrong. | Plausibility gate + `pack_values_plausible` flag; the UI hides implausible values rather than showing a wrong cycle count. Check upstream first — if 0.6.x fixed it, version-gate the shim instead of owning it. |
-| **R-5** | The `Flight.details` relationship, if ever changed from `lazy="noload"` to `selectin`, silently reproduces ADR-0019 across the entire list path. | Low likelihood, **high impact** (that bug was a production OOM crash-loop). | The P0 test asserts the compiled list query never references `flight_details`, with a control test proving the assertion is meaningful. Same structure as the existing ADR-0019 guard. |
-| **R-6** | A crate upgrade (see OQ-4) would re-derive headline metrics for all 210 flights. | Low likelihood in this phase (explicitly out of scope), **high impact** if done casually. | Any `dji-log-parser` version bump requires its own ADR and a before/after diff of all 210 flights' headline metrics. It is not a dependency chore. |
-| **R-7** | Storage growth is an estimate (§2.5), not a measurement. | Low impact — the estimate has ~3× headroom before it matters. | Measure `pg_total_relation_size('flight_details')` after the first 25-flight backfill batch and record it in `PROGRESS.md` before continuing. |
+| **R-1** | The `dji-log-parser` record-access API is unverified — signature, keychain consumption, return shape. | High likelihood of friction, impact confined to P2/P6. | P2-a is a hard gate. P0/P1/P3/P4/P5 deliver without it. If records need a second keychain fetch per flight, that is a per-flight external call across every backfill and P2 stops for a re-plan. |
+| **R-2** | Parser memory — `mem_limit: 256m`, sized for an idle ~1 MiB service; frames + records + full-res series buffers on a 20 MB log could exceed it. | Medium/medium. An OOM-killed parser fails loudly (`httpx.ConnectError` → "flight-parser service unavailable"); it does not corrupt data. | Measure in P2-a; bump to 512m with the number in the commit body. |
+| **R-3** | Storage — §1.5 is an estimate, not a measurement, and full resolution (D2) is ~10× the original decimated design. | Low impact; ~3× headroom before it matters. | P0 encoding measurement + the mandatory `pg_total_relation_size` check after backfill batch 1, before the remaining 185. |
+| **R-4** | The `>> 8` shim rests on four data points from two airframes. | Medium likelihood of an airframe where it is wrong. | Plausibility gate + `pack_values_plausible`; the UI hides implausible values and D4 never consumes them. P-EVAL checks whether the shim is needed at all. |
+| **R-5** | `Flight.details` / `Flight.series` changed from `lazy="noload"` to `selectin` would reproduce ADR-0019 across the whole list path. | Low likelihood, **high impact** (that was a production OOM crash-loop). | P0 test asserts the compiled list query references neither table, with a control test proving the assertion is meaningful. |
+| **R-6** | **The repair pass (P4) writes to `flights`** — the first draft forbade this outright, and D5 authorizes it. | Low likelihood, **high impact**. | The §3.4 mechanism: merge-into-existing (coordinates never come from the new parse), a length precondition that skips rather than aligns, a post-write coordinate-hash assertion inside the savepoint, dry-run first, and both §3.3 checksums before/after. |
+| **R-7** | **P7 mis-matches a file to the wrong ODL flight** and overwrites a real flight's data plus its mission attachment. | Low likelihood, **highest impact in the plan**. | Serial + start + duration, all three; `≥ 2 candidates → abort`; serial-less rows never matched; hash-collision check; `replaced_from` preserves the prior values; dry-run reviewed by Bill before any write. |
+| **R-8** | Pilot coordinates are now stored and reach R2 backups. | Certain; impact is a privacy exposure, not an outage. | §4.4 report/export guard with a test; `pilot_track_stored` makes affected rows enumerable for a purge. |
+| **R-9** | Tier 2 `Unknown` record types are ~30 % of records in newer logs. | Certain, low impact. | Out of scope, unchanged from the census. Type 48 (80 bytes, once per OSD frame on M4TD/M30) is the one to watch upstream. |
+
+**Remaining unknowns — assumptions stated, not questions**
+
+- **C-1 — `take_off_altitude` units.** The census found it appears to be **10×
+  metres** on the M4TD; one airframe, one sample. **Assumption:** store raw,
+  mark `take_off_altitude_units = 'unconfirmed'`, do **not** display. Guessing
+  ×0.1 and being wrong puts a fabricated altitude on a screen, which ADR-0028's
+  posture forbids. Closes when a second airframe confirms the scale — a
+  by-product of P3, at no extra cost.
+- **C-2 — `flight_series.values` encoding.** `json` vs `float8[]` is decided by
+  the P0 measurement (§1.5), not by argument. Default `json`.
+- **C-3 — event → alerting.** **Assumption:** no. Every event here is post-hoc
+  and fails question 1 of the ADR-0037 five-question gate (actionable within 5
+  minutes). If a "compass error on last flight" nudge is wanted later it belongs
+  in the NOC digest, not as a page.
 
 ---
 
-## 8. Open questions for Bill
+## 10. What this plan deliberately does not do
 
-**OQ-1 — `take_off_altitude` units.** The census found it appears to be **10×
-metres** on the M4TD log. One airframe, one sample. *Assumption taken in this
-plan:* store the value **raw** with `take_off_altitude_units = 'unconfirmed'`
-and **do not display it** until a second airframe confirms the scale. Guessing
-×0.1 and being wrong puts a fabricated altitude on a screen, which is exactly
-what ADR-0028's truthfulness posture forbids.
-
-**OQ-2 — Pilot GPS: store the track, or only derived distance?** *Assumption
-taken:* store **derived scalars and a decimated distance series only** —
-`pilot_sample_count`, `pilot_max_distance_m`, `pilot_avg_distance_m`,
-`series.pilot_distance_m`. **Raw pilot lat/lon is not stored.** Reasoning: the
-operational value asked for (VLOS distance) is fully captured by the derived
-form; the raw form is personal location data about the PIC, it would land in a
-database that is backed up to R2 (ADR-0041) and read by client-facing report
-code, and once stored it is hard to un-store. If Bill wants the raw pilot track
-(e.g. for a "where was I standing" map layer), say so and it becomes a column —
-but it should be a deliberate yes, not a default.
-
-**OQ-3 — Series resolution.** 4,000 points per series (§2.5), ~60–150 KB
-compressed per flight. Full resolution is ~3.5× that on a 15 Hz airframe. Is
-4,000 acceptable, or is full-resolution storage wanted for future time-weighted
-analysis? *Assumption taken:* 4,000. All scalars are computed at full resolution
-regardless, so nothing measurable is lost — only replot fidelity beyond 4,000
-points, which no read path can currently request (the endpoint caps at 10,000
-and defaults to 2,000).
-
-**OQ-4 — Bump `dji-log-parser` past 0.5.7?** Not evaluated, deliberately. A
-newer crate could fix both the `Unknown(178)/(137)/(139)` `ProductType` gap and
-the `SmartBatteryStatic` decode, retiring the §2.4 shim. But it can also change
-frame decoding, and therefore `duration_secs` / `total_distance` /
-`max_altitude` / `max_speed` on all 210 flights — the numbers ADR-0027 and
-ADR-0028 fought for. *Assumption taken:* **out of scope for FP-1.** P2-a reads
-the upstream changelog for information only. Adopting a new version is its own
-ADR with a full before/after metric diff.
-
-**OQ-5 — Fix `drone_model = "Unknown(178)"` in this phase?** 150 of 210 DJI
-flights carry the literal `Unknown(178)` / `Unknown(137)` / `Unknown(139)` in
-`flights.drone_model`, while the real name ("Matrice 4TD", "DJI Mavic 4 Pro")
-sits in `raw_metadata.aircraft_name`. Attribution is by serial (ADR-0007) so
-nothing is mis-attributed — the column is just ugly. *Assumption taken:* **not
-in FP-1.** It writes to `flights.drone_model` on existing rows, which is exactly
-the class of change this plan is built to avoid mixing in. It is a small,
-clean, separate data-repair migration (fall back to `aircraft_name` when the
-product type is `Unknown(*)`) and should be one.
-
-**OQ-6 — Should any captured event page an alert?** *Assumption taken:* **no.**
-Every event here is post-hoc, discovered minutes-to-days after the flight, and
-fails question 1 of the ADR-0037 five-question gate (actionable within 5
-minutes). Capture and display only. If a "compass error on last flight" nudge is
-wanted later, it belongs in the NOC digest, not as a page.
-
-**OQ-7 — Is Flight Details reachable for non-DJI flights?** *Assumption taken:*
-**no** — the link appears only when `source === 'dji_txt'`. Litchi/Airdata/ODL
-imports have no extended data to show, and a page that is always empty for
-three-quarters of the library teaches operators to ignore it.
-
----
-
-## 9. What this plan deliberately does not do
-
-- Does not touch `duration_secs`, `total_distance`, `max_altitude`, `max_speed`,
-  `home_lat/lon`, `point_count`, or `gps_track` geometry on any existing row.
-- Does not change `flights.raw_metadata`.
+- Does not change `duration_secs`, `total_distance`, `max_altitude`,
+  `max_speed`, `point_count` or `gps_track` **coordinates** on any existing row.
+  The sole exception is a P7 row deliberately replaced from a recovered
+  original, scoped and evidenced in §7.3.
+- Does not change `flights.raw_metadata` (repair provenance lives in
+  `flight_details`).
 - Does not add a column to `flights`.
 - Does not put a chart, a map overlay, or a report section anywhere.
-- Does not reinterpret, editorialize, or compare any altitude against any limit
-  (ADR-0029 / ADR-0031 remain in full force on every surface this plan touches).
-- Does not upgrade `dji-log-parser`.
-- Does not auto-maintain the `batteries` table (P5 is separately gated).
+- Does not display pilot coordinates, or expose them to reports or exports.
+- Does not reinterpret, editorialize, or compare any altitude against any limit —
+  ADR-0029 / ADR-0031 remain in full force on every surface this plan touches.
+- Does not adopt a new `dji-log-parser` without P-EVAL's diff and its own ADR.
+- Does not redefine `battery_logs.cycles_at_time` (the pack's value gets a new
+  column instead).
