@@ -566,7 +566,7 @@ stat from `GET /flight-library/reprocess/status`
 
 1. **Its selector matches none of them.** It targets
    `point_count == 0 OR point_count IS NULL OR gps_track IS NULL`
-   (`flight_library.py:1652-1658`). All 210 DJI flights have decoded frames and
+   (`flight_library.py:1652-1658`). All 210 DJI flights have decoded frames (but only 182 have a retained file, see §8) and
    tracks.
 2. **Its write set is exactly what must not move.** It assigns `duration_secs`,
    `total_distance`, `max_altitude`, `max_speed`, `home_lat/lon`, `point_count`,
@@ -892,7 +892,7 @@ and the flight still imports.
 1. Resolve the newest published `dji-log-parser` (`cargo search` / crates.io) —
    do not assume a version number.
 2. Build the parser twice: pinned `0.5.7` and the candidate.
-3. Run both over every retained original (the 210 in the backend container's
+3. Run both over every retained original (the 182 real files in the backend container's
    `/data/uploads/flight_logs/`, plus anything recovered per §8).
 4. Diff per flight: `duration_secs`, `total_distance`, `max_altitude`,
    `max_speed`, `home_lat/lon`, `point_count`, **every `gps_track` coordinate**,
@@ -1077,24 +1077,70 @@ That is the intent. Scoping and evidence:
 
 ---
 
-## 8. Log inventory — **PENDING** (hunt in progress, operator to fill in)
+## 8. Log inventory — FILLED IN 2026-09-04 (fleet-wide hunt, read-only)
 
-A hunt for original DJI log files across fleet hosts was running as of
-2026-09-04. **P7 is blocked on this section.** Bill fills it in; the plan does not
-guess at what will be found.
+Hosts searched: HSH-HQ, BOS-HQ, svdp-dev/CHAD, Ocean, SDR Pi, Dev-Ops-2, the
+Synology RS1221+ (docker volumes, Downloads, Active Backup share listing), and
+the UNAS SMB share. Not reachable: **NEXTL3VEL** (Bill's Windows 11 PC,
+192.168.50.74, offline during the hunt).
 
-| Host | Path | Files | Date range | Airframes | Already-known hashes | Notes |
-|---|---|---|---|---|---|---|
-| _(pending)_ | | | | | | |
+### Where raw DJI logs exist
 
-Known baseline for comparison: **210** originals are retained in the backend
-container at `/data/uploads/flight_logs/<sha256>.txt`, one per existing `dji_txt`
-flight. Anything recovered should be hash-compared against those first — a file
-whose SHA-256 already exists is a duplicate of a flight we already have, not a
-P7 candidate.
+| # | Host / path | Files | Date range | Already ingested? |
+|---|---|---|---|---|
+| 1 | BOS-HQ `droneops-backend-1:/data/uploads/flight_logs` (docker volume `droneops_app_data`) | **184** = 182 real logs + 2 dummy test files (40 B / 70 B, not in DB) | 2023-12-25 → 2026-09-01 | Yes, all 182 hashes are `dji_txt` rows |
+| 2 | BOS-HQ restic repo (R2 `droneops-backups`, 48 snapshots since 2026-08-17) | union across all snapshots = the same 184 | same | Yes, nothing beyond #1 |
+| 3 | Legacy plaintext mirror `s3://obs-glitchtip-backups/droneops/uploads/flight_logs/` | 183 | same | Yes, subset of #1 |
+| 4 | Synology docker volume `droneops_app_data` (dead 2026-03 instance) and HSH `~/migration/doc_appdata.tar.gz` | 24 | 2023-12-25 → 2026-03-22 | Yes, all 24 already on BOS |
+| 5 | Synology Downloads, UNAS `\Drone LOGS` (empty folder, created 2026-04-04), UNAS `\Drone Master Archive`, svdp-dev volumes, Ocean, SDR, Dev-Ops-2, DroneOpsSync / DroneOpsMap checkouts | **0** logs (only a KML, a GPX/JSON export and an ODL signature PNG) | | |
 
-Once filled in, the counts here set P7's real size: 584 ODL rows is the ceiling
-on matches, and the number of recovered files is the actual driver.
+**Net: 182 distinct usable originals exist anywhere on the fleet, all on BOS-HQ,
+all already ingested. No archive of logs exists on any host.**
+
+### Two gaps, with evidence
+
+**(a) 28 of the 210 `dji_txt` rows have no original file.** Verified by hash
+set comparison (DB 210, files 184, DB-without-file 28, file-without-DB 2 = the
+dummies). All 28 were created 2026-03-24 → 2026-04-19 on the HSH-HQ prod era.
+The 2026-04-20 HSH→BOS migration promoted the BOS standby DB but brought up a
+fresh, empty `droneops_app_data` volume on BOS; HSH's volume was never copied
+and no longer exists; backups only began 2026-07-16. DroneOpsSync deletes the
+controller copy after a confirmed sync. **These 28 cannot be backfilled from
+file.** Their Flight Details will show "original log not retained" unless the
+files resurface. Every row from 2026-04-24 onward has its file.
+
+**(b) The 584 OpenDroneLog-era originals were never on the fleet.** ODL ran as a
+container on the Synology (`system_settings.opendronelog_url` =
+`http://192.168.50.20:3001/`, now gone). Its DuckDB survives in an orphaned
+Synology docker volume (`flights.db`, 468 MB, 548 flights, 4.66 M telemetry
+rows, last written 2026-02-28) but ODL stores only `file_name` + sha256, never
+the bytes. All 548 were imported into ODL in one batch on 2026-02-22 19:13–20:08
+PST from a folder of raw files on a client device. DroneOpsCommand then pulled
+metadata + track over ODL's REST API on 2026-03-18 (584 rows; 548 + 36 added to
+a later ODL instance whose volume is gone). Only 17 of the 548 ODL hashes are on
+BOS today (re-uploaded later as `dji_txt`).
+
+**Only remaining lead for both gaps:** the Windows PC **NEXTL3VEL** (the
+2026-02-22 import folder, and any FlightRecord copies from the phones/RCs), plus
+its Synology Active Backup for Business image repo
+(`/volume1/ActiveBackupforBusiness/ActiveBackupData/PC-NEXTL3VEL-bbarnard065-Default`,
+nightly image-level, versions 2026-05-29 → 2026-09-01; file-level restore is
+possible from the Active Backup portal, not from the shell). Unverified until
+the PC is on or the portal is searched. Also worth checking: the FlightRecord
+folders on each phone/RC (`Android/data/dji.go.v5/files/FlightRecord`,
+`Android/data/com.dji.fly/files/FlightRecord`, DJI Pilot 2's
+`DJI/com.dji.industry.pilot/FlightRecord`) for anything DroneOpsSync never saw.
+
+### Consequences for this plan
+
+- Every "210 retained originals" figure elsewhere in this plan and ADR-0043
+  reads as **182**. Backfill (A and B) and P-EVAL run over 182 files; the 28
+  file-less `dji_txt` rows are skipped and reported, never synthesised.
+- P7 currently has **zero** candidate files. It stays designed and dry-run-only
+  until NEXTL3VEL or its backups are searched. 584 remains the ceiling.
+- Recovery of either gap is an operator action (turn on NEXTL3VEL, search the
+  Active Backup portal for `DJIFlightRecord_*` / `FlightRecord_*`). If found,
+  copy the folder to a fleet host and hash-compare against the 184 before P7.
 
 ---
 

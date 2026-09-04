@@ -97,6 +97,6 @@ before any reverse-engineering. Not worth our time today.
    byte-swapped `SmartBatteryStatic` → `batteries.cycle_count`.
 3. Event log (App* messages) into the flight record and the mission report.
 4. `AppGPS` pilot track → VLOS distance series.
-5. Reprocess pass over the 210 retained logs to backfill.
+5. Reprocess pass over the retained logs to backfill. (Correction 2026-09-04: only 182 of the 210 have a retained file; see the ingestion plan §8.)
 
 Nothing here is scheduled. Operator decides.

@@ -38,7 +38,7 @@ per-point timestamps, RC link quality, distance-from-home, the flight-mode/RTH
 timeline, photo/video events, gimbal pointing, MSL altitude, battery
 current/mAh/cell balance, the human-readable warning stream, and — one call
 deeper into the raw record stream — pilot GPS, pack cycle count, component
-firmware, and failsafe configuration. All 210 production `dji_txt` flights are
+firmware, and failsafe configuration. All 210 production `dji_txt` flights are decoded, but only 182 have a retained original file (plan §8; 28 were lost in the 2026-04-20 HSH→BOS migration). All 210 production `dji_txt` flights are
 v14 logs with `frames_decoded=true` and their originals are retained at
 `/data/uploads/flight_logs/<sha256>.txt`, so every item is backfillable.
 
@@ -236,7 +236,7 @@ defers that decision cheaply: `events` is the one group with a plausible SQL
 future, it is `JSONB`, and it can be GIN-indexed in place or promoted to a child
 table later with the stored JSONB as its source.
 
-On the backfill: the hardest requirement is that re-reading 210 logs through a
+On the backfill: the hardest requirement is that re-reading the 182 retained logs through a
 *new* parser build must not move a number ADR-0027 and ADR-0028 established.
 Write set A gets a structural guarantee — the entity is never in the session.
 D5 removes that option for write set B, so B gets the strongest mechanism

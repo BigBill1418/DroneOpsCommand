@@ -7,7 +7,7 @@ reference where applicable.
 
 ## Flight-parser data expansion (research 2026-09-04)
 
-### FP-1 — Extract the untapped DJI log data into a Flight Details view — PLANNED
+### FP-1 — Extract the untapped DJI log data into a Flight Details view — PLANNED (log inventory done: 182 originals on fleet, 28 dji_txt + all 584 ODL originals not on any host; lead = NEXTL3VEL PC / its Active Backup)
 
 - **Census (input, done).** What the DJI logs carry beyond today's extraction,
   run on 7 real prod logs:
