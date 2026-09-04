@@ -7,15 +7,36 @@ reference where applicable.
 
 ## Flight-parser data expansion (research 2026-09-04)
 
-### FP-1 — Extract the untapped DJI log data — NOT STARTED (census done)
+### FP-1 — Extract the untapped DJI log data into a Flight Details view — PLANNED
 
-Census of what the DJI logs carry beyond today's extraction, run on 7 real
-prod logs: `docs/plans/2026-09-04-dji-log-untapped-data-census.md`. Headline
-items already decoded and dropped on the floor: per-point timestamps, RC
-link quality, distance-from-home, flight-mode/RTH timeline, photo/video
-events, gimbal pointing, MSL altitude, battery current/mAh/cell balance,
-app warning strings. One call deeper: pilot GPS track (VLOS distance) and
-pack cycle count (needs a byte-swap shim). Suggested build order is in the doc.
+- **Census (input, done).** What the DJI logs carry beyond today's extraction,
+  run on 7 real prod logs:
+  `docs/plans/2026-09-04-dji-log-untapped-data-census.md`. Headline items
+  already decoded and dropped on the floor: per-point timestamps, RC link
+  quality, distance-from-home, flight-mode/RTH timeline, photo/video events,
+  gimbal pointing, MSL altitude, battery current/mAh/cell balance, app warning
+  strings. One call deeper: pilot GPS track (VLOS distance) and pack cycle
+  count (needs a decode shim).
+- **Implementation plan (written 2026-09-04, nothing built).**
+  `docs/plans/2026-09-04-flight-details-data-ingestion.md` — data model,
+  parser contract, backfill design for the 210 retained logs, API, frontend
+  scope, six phases with sizing and per-phase tests, risks, and seven open
+  questions for the operator.
+- **Decision record.** `docs/adr/0043-flight-details-sidecar-table-for-extended-log-data.md`
+  — extended log data lands in a `flight_details` sidecar table (1:1 with
+  `flights`, typed scalars + JSONB groups), **not** as a fourth heavy JSON
+  column on `flights`. The backfill never loads a `Flight` entity, so the
+  headline metrics ADR-0027/0028 settled structurally cannot move.
+- **Operator ask (Bill, 2026-09-04).** "make all this extra data more
+  accessible and … pull it into the DB — even if that is just a 'Flight
+  Details' link somewhere on a flight in the 'flights' menu — then later we can
+  figure out where else to pull that data in to utilize it." Breadth of capture
+  first; presentation minimal; reports/battery/maintenance deliberately later.
+- **Trigger to start.** Operator answers the plan's open questions (§8) —
+  chiefly OQ-2 (store raw pilot GPS or derived VLOS distance only) and OQ-3
+  (series resolution cap). Phases P0/P1 do not depend on either and can start
+  ahead of the answers if desired; P2 opens with a hard spike gate on the
+  `dji-log-parser` record-access API, which is the plan's one real unknown.
 
 ## Billing follow-ups
 
