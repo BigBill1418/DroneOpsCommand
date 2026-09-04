@@ -5,6 +5,18 @@ in-flight scope is tracked in `PROGRESS.md`. This file holds only
 not-yet-started work with a clear trigger, scope, and ADR/decision
 reference where applicable.
 
+## Flight-parser data expansion (research 2026-09-04)
+
+### FP-1 — Extract the untapped DJI log data — NOT STARTED (census done)
+
+Census of what the DJI logs carry beyond today's extraction, run on 7 real
+prod logs: `docs/plans/2026-09-04-dji-log-untapped-data-census.md`. Headline
+items already decoded and dropped on the floor: per-point timestamps, RC
+link quality, distance-from-home, flight-mode/RTH timeline, photo/video
+events, gimbal pointing, MSL altitude, battery current/mAh/cell balance,
+app warning strings. One call deeper: pilot GPS track (VLOS distance) and
+pack cycle count (needs a byte-swap shim). Suggested build order is in the doc.
+
 ## Billing follow-ups
 
 ### BL-1 — Formula/markup support for pass-through rate templates — NOT STARTED
