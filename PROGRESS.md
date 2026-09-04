@@ -4,6 +4,22 @@ Maintained alongside `CHANGELOG.md` and `docs/adr/`. `CHANGELOG.md` is
 the ledger of shipped changes; this file tracks what's in-flight or
 blocked.
 
+## 2026-09-04 — FP-1 Flight Details data ingestion — PLANNED, HOLDING for operator go
+
+**State at end of day (Pacific):**
+- Census of what DJI logs carry beyond the parser: `docs/plans/2026-09-04-dji-log-untapped-data-census.md`.
+- Build plan (9 phases, ~13 d) + data-model ADR: `docs/plans/2026-09-04-flight-details-data-ingestion.md`, `docs/adr/0043-flight-details-sidecar-table-for-extended-log-data.md`. Bill's seven decisions are recorded in the plan as DECIDED (full pilot GPS track; full-resolution series in a `flight_series` table; Flight Details link on every flight; pack values become battery source of truth; backfill re-stamps timestamps and fixes `Unknown(NNN)` model names; crate bump only after a before/after diff; ODL-era flights re-imported and replaced in place).
+- **Nothing is built. No schema, parser, or DB change has been made.**
+- Log inventory (plan §8/§8a): 182 usable originals were on the fleet. **All 584 OpenDroneLog-era originals recovered** from Bill's Google Drive to BOS-HQ `~/droneops-staging/drive-logs/` (0 download failures; sha256 + header CSV alongside; `docs/plans/data/2026-09-04-drive-logs-inventory.csv`). 584/584 filenames match the `opendronelog_import` rows 1:1 → P7 matches on `original_filename`. 548 hashes equal ODL's own recorded sha256. 20 duplicate existing `dji_txt` flights; 564 new. **Staging dir is not in any backup lane yet.**
+- Still lost: 28 `dji_txt` originals from 2026-03-22..04-19 (14 Matrice 4TD, 9 Mavic 3 Pro, 3 Mini 5 Pro, 2 Matrice 30T). Cause: files lived in the HSH-HQ docker volume, which was never copied in the 2026-04-20 HSH→BOS move (DB rows replicated, files did not); backups began 2026-07-16. Only lead: FlightRecord folders on the controller/phone that flew them.
+
+**Waiting on Bill:**
+1. Go for P0 + P1.
+2. Aircraft rows for the Matrice 4T (`1581F7K3C25AA00D`, 39 recovered flights) and the second DJI FPV (`37Q7LA800BX0PN`, 7 flights) — without them ADR-0007's strict matcher leaves 46 re-imported flights unattributed.
+3. Check the M4TD controller / Mavic 3 Pro phone for the 28 missing files.
+
+**Reminder:** a one-shot cron on HSH-HQ (`~/.local/bin/droneops-fp1-reminder.sh`, fires 2026-09-11 09:00 PT, self-removes) emails Bill@BarnardHQ.com via msmtp/O365 with this summary.
+
 ## 2026-08-17 — Encrypted R2 backup (ADR-0041) — LIVE, IN PARALLEL RUN — cutover pending
 
 **The new lane is deployed, running on a timer, and verified end-to-end**
