@@ -1136,11 +1136,59 @@ folders on each phone/RC (`Android/data/dji.go.v5/files/FlightRecord`,
 - Every "210 retained originals" figure elsewhere in this plan and ADR-0043
   reads as **182**. Backfill (A and B) and P-EVAL run over 182 files; the 28
   file-less `dji_txt` rows are skipped and reported, never synthesised.
-- P7 currently has **zero** candidate files. It stays designed and dry-run-only
-  until NEXTL3VEL or its backups are searched. 584 remains the ceiling.
+- P7 now has **584 candidate files** on BOS (see §8a); 564 new, 20 duplicates.
 - Recovery of either gap is an operator action (turn on NEXTL3VEL, search the
   Active Backup portal for `DJIFlightRecord_*` / `FlightRecord_*`). If found,
   copy the folder to a fleet host and hash-compare against the 184 before P7.
+
+### 8a. RECOVERED 2026-09-04 (afternoon): the 584 OpenDroneLog originals
+
+Bill had the folder. He shared it as a Google Drive folder ("Drone LOGS",
+584 files, 2.34 GB, 2023-08-01 → 2026-03-17). Pulled to **BOS-HQ
+`~/droneops-staging/drive-logs/`** (outside the app volume, original filenames
+kept; manifest, sha256 list and header CSV alongside in `~/droneops-staging/`).
+Full inventory with hashes and header metrics:
+`docs/plans/data/2026-09-04-drive-logs-inventory.csv`.
+
+Verified facts:
+- **584 files, 584 distinct hashes, all log v14, all parse** with the current
+  crate and the production key (7-sample deep census + header pass on all 584).
+- **Filenames match the 584 `opendronelog_import` rows' `original_filename`
+  1:1** (584/584, and `original_filename` is unique across those rows). This
+  makes P7's match deterministic: **match on `original_filename` first**; the
+  serial + start + duration rule becomes the verification, not the lookup.
+- **548 of 584 hashes equal the sha256 OpenDroneLog recorded** in its DuckDB,
+  i.e. byte-identical to what ODL ingested. The remaining 36 are the flights
+  added to the later ODL instance whose DB is gone; they match by filename.
+- **20 of 584 are already on BOS** as `dji_txt` rows (hash match) → P7 must
+  treat those as duplicates of existing native flights, not replacements.
+  **564 files are new to the fleet.** None of the 28 file-less `dji_txt` rows
+  are among them (different era).
+- Airframes (by header serial, 16-char form; ODL rows carry the 20-char form):
+  Matrice 30T "Maverick" 206, Mavic 3 Pro "Badass V.2" 134, Mavic 3 Pro
+  "Bad Mother Fucker" 78 (aircraft row "M3P - DECOM"), Matrice 4TD 50,
+  Mini 5 Pro "BigThingsSmallPackages" 46 (`ProductType` 139), **Matrice 4T 39
+  (`ProductType` 150, NO aircraft row)**, Avata 2 21, DJI FPV 10 across two
+  serials (**37Q7LA800BX0PN has NO aircraft row**, 7 flights). 88 ODL rows are
+  unattributed today; the two missing aircraft rows must exist before P7 or
+  those 46 flights stay unattributed (ADR-0007 strict matcher).
+- Totals: 135.0 h airtime, 2,215 photos by header count, 238 flights of 15–30
+  min, 65 under 30 s (aborted takeoffs / tests). Header `max_height` exceeds
+  120 m AGL on 349 of 584; spot-checked against frame data on the 2023 Mavic
+  3 Pro log (500.1 m AGL, height limit 500 m) — the header values are real,
+  not a units artefact. Recorded as data only (ADR-0029: reports are not
+  compliance audits).
+- The oldest log (DJI Fly 1.11.0, 2023-08) carries 8 embedded JPEG "moment
+  pics"; newer app versions write none. Add JPEG extraction to Tier 1 as a
+  low-priority optional item.
+- `ProductType` 150 (Matrice 4T) is a third unknown code alongside 137/139/178.
+
+Open before P7 runs: (1) create aircraft rows for the Matrice 4T and the
+second FPV; (2) decide where the staging copy lives long-term — it is NOT in
+any backup lane today (restic covers the app volume only); simplest is to let
+P7 ingest it into `/data/uploads/flight_logs/` where it is backed up, then
+keep `~/droneops-staging` as the pre-import archive until a restic snapshot
+has it.
 
 ---
 
