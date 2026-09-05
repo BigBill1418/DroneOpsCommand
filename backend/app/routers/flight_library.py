@@ -620,14 +620,54 @@ def _normalize_model(name: str) -> str:
     return _DJI_ALIASES.get(s, s)
 
 
+# ── DJI serial forms (ADR-0044) ────────────────────────────────────────
+# The same airframe reports its serial in two fixed-width forms:
+#   * 16-char header form  — '1581F8HGX255P00A'      (DJI log header; what the
+#                                                     parser emits, and what
+#                                                     most fleet rows carry)
+#   * 20-char OpenDroneLog — '1581F8HGX255P00A0FEK'  (header + 4-char ODL suffix)
+# 14-char DJI FPV serials ('37Q7LA800BX0PN') carry no suffix and are
+# byte-identical in both forms.
+_DJI_SERIAL_LEN = 16
+_ODL_SERIAL_LEN = 20
+
+
+def _canonical_serial(serial: str) -> str:
+    """Reduce a DJI serial to its canonical hardware identity (ADR-0044).
+
+    Strips the 4-char OpenDroneLog suffix from serials that are **exactly**
+    ``_ODL_SERIAL_LEN`` characters, producing the ``_DJI_SERIAL_LEN``-char
+    header form. Every other length is returned unchanged (upper-cased,
+    stripped).
+
+        '1581F8HGX255P00A0FEK' → '1581F8HGX255P00A'   (20 → 16)
+        '1581F8HGX255P00A'     → '1581F8HGX255P00A'   (16, unchanged)
+        '37Q7LA800BX0PN'       → '37Q7LA800BX0PN'     (14, unchanged)
+        '1581F8HGX255'         → '1581F8HGX255'       (12, unchanged)
+
+    This is a **fixed-width truncation to a fixed width**, not a prefix test.
+    Because only 20-char inputs are shortened, and only ever to 16, a
+    truncated / partial / hand-typed serial of any other length canonicalizes
+    to itself and can therefore never become equal to a 16-char canonical.
+    That is the property that makes this safe where ADR-0007's banned
+    model-name prefix rule was not.
+    """
+    s = serial.strip().upper()
+    return s[:_DJI_SERIAL_LEN] if len(s) == _ODL_SERIAL_LEN else s
+
+
 async def _match_fleet_aircraft(db: AsyncSession, drone_serial: str | None, drone_model: str | None) -> Aircraft | None:
     """Match a parsed flight to a fleet aircraft.
 
-    Priority (strict — v2.63.14, ADR-0007):
-      1. Exact serial number match (case-insensitive). If serial is present,
-         this is the only acceptable identity — we never silently fall back
-         to model matching when a serial is provided but doesn't match a
-         fleet record (that's the bug ADR-0007 closes).
+    Priority (strict — v2.63.14 ADR-0007, amended v2.90.0 ADR-0044):
+      1a. Exact serial number match (case-insensitive), unambiguous.
+      1b. Canonical serial match (ADR-0044) — the 16-char DJI header form and
+          the 20-char OpenDroneLog form of the SAME serial are unified by
+          `_canonical_serial` and compared for full equality. Resolves only
+          when exactly one fleet aircraft matches.
+      If a serial is present, 1a/1b are the only acceptable identity — we
+      never silently fall back to model matching when a serial is provided
+      but doesn't match a fleet record (that's the bug ADR-0007 closes).
       2. Exact normalized model match — only when the fleet has exactly ONE
          aircraft of that model. If two or more share the model, attribution
          is ambiguous without a serial → return None.
@@ -644,7 +684,15 @@ async def _match_fleet_aircraft(db: AsyncSession, drone_serial: str | None, dron
     drone_serial = (drone_serial or "").strip() or None
     drone_model = (drone_model or "").strip() or None
 
-    # 1. Exact serial match — authoritative when serial is present.
+    # 1a. Exact serial match — authoritative when serial is present.
+    #
+    # `.scalars().all()` rather than `.scalar_one_or_none()`: the latter RAISES
+    # `MultipleResultsFound` if two fleet rows carry the same serial. Nothing in
+    # the schema forbids that (`aircraft.serial_number` has no unique index), and
+    # this function runs on every upload path AND in the startup backfill, where
+    # an escaping exception would be logged as a blanket "Aircraft backfill
+    # failed" and abandon every remaining row. Duplicates are treated as
+    # ambiguity — the ADR-0007 posture — not as a crash.
     if drone_serial:
         result = await db.execute(
             select(Aircraft).where(
@@ -652,18 +700,60 @@ async def _match_fleet_aircraft(db: AsyncSession, drone_serial: str | None, dron
                 func.upper(Aircraft.serial_number) == drone_serial.upper(),
             )
         )
-        match = result.scalar_one_or_none()
-        if match:
+        exact = list(result.scalars().all())
+        if len(exact) == 1:
+            match = exact[0]
             logger.info(
-                "fleet-match: serial=%s → aircraft=%s (%s)",
+                "fleet-match: serial=%s → aircraft=%s (%s) [exact]",
                 drone_serial, match.id, match.model_name,
             )
             return match
+        if len(exact) > 1:
+            logger.info(
+                "fleet-match: serial=%s ambiguous — %d fleet aircraft carry this exact "
+                "serial; leaving unattributed",
+                drone_serial, len(exact),
+            )
+            return None
+
+        # 1b. Canonical-serial match (ADR-0044). The 16-char DJI header form and
+        # the 20-char OpenDroneLog form (header + 4-char suffix) are the same
+        # airframe. Reduce both sides to the canonical form and require FULL
+        # equality — see `_canonical_serial` for why this is not the symmetric
+        # prefix rule ADR-0007 banned. Exact equality above always wins outright;
+        # this pass only runs when nothing matched exactly, and only resolves
+        # when it selects exactly one aircraft.
+        wanted = _canonical_serial(drone_serial)
+        result = await db.execute(select(Aircraft))
+        candidates = [
+            ac for ac in result.scalars().all()
+            # An aircraft row with a NULL/blank serial must never participate:
+            # its canonical is '' and would otherwise be compared as a real value.
+            if (ac.serial_number or "").strip()
+            and _canonical_serial(ac.serial_number) == wanted
+        ]
+        if len(candidates) == 1:
+            match = candidates[0]
+            logger.info(
+                "fleet-match: serial=%s → aircraft=%s (%s) [canonical serial %s; "
+                "fleet row carries %s]",
+                drone_serial, match.id, match.model_name, wanted, match.serial_number,
+            )
+            return match
+        if len(candidates) > 1:
+            logger.info(
+                "fleet-match: serial=%s canonical=%s ambiguous — %d fleet aircraft "
+                "share this canonical serial; leaving unattributed",
+                drone_serial, wanted, len(candidates),
+            )
+            return None
+
         # Serial present but no fleet record — do NOT fall back to model match.
         # Flight stays unattributed; user can attach manually from the UI.
         logger.info(
-            "fleet-match: serial=%s present but unmatched in fleet; leaving unattributed",
-            drone_serial,
+            "fleet-match: serial=%s (canonical=%s) present but unmatched in fleet; "
+            "leaving unattributed",
+            drone_serial, wanted,
         )
         return None
 

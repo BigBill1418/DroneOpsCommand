@@ -4,6 +4,61 @@ Maintained alongside `CHANGELOG.md` and `docs/adr/`. `CHANGELOG.md` is
 the ledger of shipped changes; this file tracks what's in-flight or
 blocked.
 
+## 2026-09-05 — Fleet-attribution matcher: canonical DJI serials (ADR-0044) — BUILT on a branch, NOT merged
+
+**State:** code + tests + ADR-0044 complete on branch
+`feat/serial-prefix-matcher` (worktree `~/droneops-wt-matcher`), **rebased
+onto `origin/main` `34553cf`** — i.e. on top of FP-1 P0+P1 (v2.82.0 +
+v2.83.0). Version renumbered from 2.82.0 to **2.90.0**, clear of the
+2.84.0–2.89.0 band FP-1 reserves for its P2–P7 phases. **Not pushed to
+`main`.** On this repo a push to `main` IS a production deploy via the NOC
+fleet deployer (ADR-0018), so the merge call is Bill's.
+
+- The defect and the rule are recorded in
+  `docs/adr/0044-serial-prefix-matcher-odl-canonical-serials.md`.
+- Verified against the production DB on BOS-HQ before and after writing
+  the rule: exactly 88 `aircraft_id IS NULL` flights, all
+  `opendronelog_import`, all 20-char serials
+  (`1581F8HGX255P00A0FEK` ×49, `1581F7K3C25AA00DMZMG` ×39).
+- **Merging this deploys a bulk write.** The startup backfill re-runs on
+  every container restart against `aircraft_id IS NULL` and will attribute
+  those 88 rows immediately. Verification SQL is in ADR-0044 §Consequences.
+- Depends on the aircraft rows Bill's earlier data work created
+  (`DJI Matrice 4T` / `1581F7K3C25AA00D`, `DJI FPV` / `37Q7LA800BX0PN`);
+  this change is code-only and touched no DB rows.
+- **Coordination:** FP-1 P0+P1 is already on `main`; this branch now sits
+  on top of it. The diff is confined to the matcher (`flight_library.py`),
+  its test file, ADR-0044, docs and the version markers, and it merges
+  cleanly — FP-1's `flight_library.py` edits are in the ingest, status and
+  telemetry regions, not in `_match_fleet_aircraft`. ADR **0044** is free
+  on `34553cf` (FP-1 stopped at 0043) and is claimed here.
+- Interacts with FP-1: the planned ODL-era re-import (ADR-0043) lands
+  20-char serials, which this rule is what makes attributable.
+
+**Test evidence at the rebased HEAD — there is no pytest or cargo job in CI,
+so this is local and quoted, not inferred from an exit code.** Run in
+`python:3.13.5-slim-bookworm` with the backend Dockerfile's native libs and
+`requirements.txt` + `requirements-dev.txt`, hermetic (no live Postgres, so
+the migration integration tier skips), `OTEL_EXPORTER_OTLP_ENDPOINT=""`:
+
+```
+$ python -m pytest -q
+753 passed, 17 skipped in 268.46s (0:04:28)
+
+$ python -m pytest tests/test_flight_attribution.py -q
+22 passed in 3.87s
+```
+
+Baseline on `origin/main` `34553cf`, same command and image: `743 passed,
+17 skipped`. The delta is exactly the 10 cases this branch adds. The
+`flight-parser` crate is untouched here and its suite is unchanged
+(`rust:1.85-bookworm`, matching `flight-parser/Dockerfile`):
+
+```
+$ cargo test
+test result: ok. 65 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+```
+
 ## 2026-09-05 — FP-1 Flight Details — P0 + P1 SHIPPED to branch, awaiting merge call
 
 Operator gave the go on 2026-09-05. Work is on **`feat/fp1-flight-details`**,

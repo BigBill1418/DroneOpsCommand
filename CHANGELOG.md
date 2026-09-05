@@ -4,6 +4,56 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-09-05 — v2.90.0: canonical DJI serials in the fleet matcher (ADR-0044)
+
+88 production flights (49 Matrice 4TD + 39 Matrice 4T, all
+`source = 'opendronelog_import'`) sat unattributed because DJI reports a
+serial in two fixed-width forms and the matcher only understood one:
+
+- **16-char header form** — `1581F8HGX255P00A`, what the DJI log header
+  carries and what the parser emits.
+- **20-char OpenDroneLog form** — the same serial plus a 4-char suffix,
+  `1581F8HGX255P00A0FEK`.
+
+`_match_fleet_aircraft()` compared with exact equality only, so a 20-char
+flight serial never matched a 16-char aircraft row. The Matrice 4TD row
+has existed since 2026-03-16 — this was never a missing-row problem.
+
+**Change** (`backend/app/routers/flight_library.py`): a second pass
+inside ADR-0007's serial branch. `_canonical_serial()` truncates serials
+of *exactly* 20 characters to *exactly* 16 and leaves every other length
+alone; both sides are canonicalized and compared for **full equality**.
+It is a fixed-width truncation, not a prefix test — a truncated or
+partial serial canonicalizes to itself and can never equal a 16-char
+canonical, which is why this is safe where ADR-0007's banned model-name
+prefix rule was not. 14-char DJI FPV serials carry no suffix and are
+untouched.
+
+Invariants preserved: exact equality always wins outright; a canonical
+match resolves only when it selects exactly one aircraft (two or more →
+unattributed + INFO log); a serial that is present but unmatched still
+never falls through to model matching.
+
+Also hardened: the exact-serial read moved from `scalar_one_or_none()`
+(which *raises* on duplicate fleet serials — `aircraft.serial_number`
+has no unique index) to `.scalars().all()`, so duplicates degrade to
+ambiguity instead of an exception that would abort the whole startup
+backfill. Aircraft rows with a NULL/blank serial are excluded from the
+canonical pass.
+
+**On first deploy the startup backfill will attribute 88 flights** — 49
+to `DJI Matrice 4TD`, 39 to `DJI Matrice 4T` — and normalize their empty
+`drone_model`. Both backfill paths remain scoped to
+`aircraft_id IS NULL`; no operator-curated assignment is touched.
+
+Tests: `backend/tests/test_flight_attribution.py` grew from 12 to 22
+cases. Full backend suite at this commit (rebased onto FP-1 P0+P1):
+`753 passed, 17 skipped in 268.46s`, up from `743 passed, 17 skipped` on
+`34553cf` — exactly the 10 cases added here. `flight-parser` is untouched
+by this change and its suite is unchanged: `cargo test` `65 passed; 0
+failed`. Both run locally; this repo has no pytest or cargo CI job. No
+schema change, no migration.
+
 ## 2026-09-05 — v2.83.0 / parser 1.2.0: FP-1 P1 — Tier 0 parser pass
 
 The extended DJI-log data now actually gets extracted and stored. Everything
