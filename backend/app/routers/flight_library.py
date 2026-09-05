@@ -45,6 +45,7 @@ from app.schemas.flight_details import (
 from app.schemas.flight import (
     FlightCreate, FlightDetailResponse, FlightResponse, FlightUpdate, FlightUploadResponse,
 )
+from app.services.flight_details_writer import persist_flight_details
 from app.services.flight_metrics import sanitize_odl_distance
 from app.services.ntfy import send_alert
 from app.services.telemetry_downsample import downsample, select_indices
@@ -541,6 +542,30 @@ async def _build_flight_from_parsed(
                 await _track_battery(db, flight, battery_data)
         except Exception as bat_exc:
             logger.warning("Battery tracking failed for flight %s: %s", flight.id, bat_exc)
+
+    # Extended DJI-log data (ADR-0043) — the SAME best-effort savepoint shape
+    # as battery tracking directly above, and for the same reason: the sidecar
+    # is a nice-to-have, the flight record is not. A malformed payload, a
+    # parser that starts emitting a wrong-typed field, or a constraint
+    # violation must cost the operator a missing details row and a WARN line,
+    # never a failed import of a flight they just flew.
+    details_payload = parsed.get("details")
+    if details_payload:
+        try:
+            async with db.begin_nested():
+                wrote, n_series = await persist_flight_details(
+                    db, flight.id, details_payload
+                )
+            if wrote:
+                logger.info(
+                    "Flight details stored for flight %s (%d series)", flight.id, n_series
+                )
+        except Exception as det_exc:
+            logger.warning(
+                "Flight details persistence failed for flight %s: %s — "
+                "flight import is unaffected",
+                flight.id, det_exc,
+            )
 
     return flight
 

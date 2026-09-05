@@ -185,6 +185,8 @@ pub fn parse_litchi_csv(
         source: "litchi_csv".to_string(),
         file_hash: hash.to_string(),
         original_filename: filename.to_string(),
+        // ADR-0043: this format carries no extended log data.
+        details: None,
         raw_metadata: None,
     })
 }
@@ -273,5 +275,25 @@ latitude,longitude,altitude(m),speed(mph),timestamp,datetime(utc)
         let f = parse_litchi_csv(csv.as_bytes(), "t.csv", "h").unwrap();
         assert_eq!(f.duration_secs, 60.0, "duration_secs = {}", f.duration_secs);
         assert_eq!(f.start_time.as_deref(), Some("2024-01-01 12:00:00"));
+    }
+
+    // ADR-0043 §2.7 — adding `details` to ParsedFlight must leave this
+    // format's JSON output BYTE-IDENTICAL. `skip_serializing_if` drops the
+    // key entirely when it is None, so no consumer sees a new field and the
+    // backend's "absent means no details" branch is the one that runs.
+    #[test]
+    fn litchi_output_carries_no_details_key() {
+        let csv = "\
+latitude,longitude,altitude(m),speed(mph),datetime(utc)
+45.5000,-122.6000,10.0,5.0,2024-01-01 12:00:00
+45.5001,-122.6000,12.0,10.0,2024-01-01 12:00:01
+";
+        let f = parse_litchi_csv(csv.as_bytes(), "t.csv", "h").unwrap();
+        assert!(f.details.is_none());
+        let json = serde_json::to_string(&f).unwrap();
+        assert!(
+            !json.contains("\"details\""),
+            "Litchi output must not gain a details key: {json}"
+        );
     }
 }

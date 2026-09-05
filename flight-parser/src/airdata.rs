@@ -224,6 +224,8 @@ pub fn parse_airdata_csv(
         source: "airdata_csv".to_string(),
         file_hash: hash.to_string(),
         original_filename: filename.to_string(),
+        // ADR-0043: this format carries no extended log data.
+        details: None,
         raw_metadata: None,
     })
 }
@@ -331,5 +333,23 @@ latitude,longitude,altitude_above_seaLevel(feet),speed(m/s),datetime(utc)
         let f = parse_airdata_csv(csv.as_bytes(), "t.csv", "h").unwrap();
         // 328.084 ft = 100.0 m
         assert!((f.max_altitude - 100.0).abs() < 1e-2, "max_altitude = {}", f.max_altitude);
+    }
+
+    // ADR-0043 §2.7 — see the matching Litchi test. The `details` key must not
+    // appear for a format that carries no extended log data.
+    #[test]
+    fn airdata_output_carries_no_details_key() {
+        let csv = "\
+latitude,longitude,height_above_takeoff(feet),speed(mph),datetime(utc)
+45.5000,-122.6000,32.8,5.0,2024-01-01 12:00:00
+45.5001,-122.6000,65.6,10.0,2024-01-01 12:00:01
+";
+        let f = parse_airdata_csv(csv.as_bytes(), "t.csv", "h").unwrap();
+        assert!(f.details.is_none());
+        let json = serde_json::to_string(&f).unwrap();
+        assert!(
+            !json.contains("\"details\""),
+            "Airdata output must not gain a details key: {json}"
+        );
     }
 }

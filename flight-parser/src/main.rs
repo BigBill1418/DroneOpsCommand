@@ -11,6 +11,7 @@ use std::env;
 use tower_http::cors::CorsLayer;
 use tracing_subscriber;
 
+mod details;
 mod dji;
 mod litchi;
 mod airdata;
@@ -37,6 +38,15 @@ pub struct ParsedFlight {
     pub file_hash: String,
     pub original_filename: String,
     pub raw_metadata: Option<serde_json::Value>,
+    /// Extended DJI-log data (ADR-0043). `None` for every non-DJI source.
+    ///
+    /// This is a struct literal field, so adding it was a COMPILE ERROR in
+    /// `litchi.rs` and `airdata.rs` until each declared `details: None` —
+    /// the compiler enforces the audit rather than a reviewer having to
+    /// remember. Their JSON output is byte-identical afterwards, because
+    /// `skip_serializing_if` omits the key entirely when it is `None`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub details: Option<details::FlightDetailsOut>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

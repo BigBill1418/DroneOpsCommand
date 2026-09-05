@@ -1,4 +1,10 @@
+use crate::details::{choose_time_base, DetailsAccum, HeaderExtras, TimeBase};
 use crate::{BatteryData, ParsedFlight, TelemetryData, TrackPoint};
+
+/// The `dji-log-parser` version this build links against. Recorded on every
+/// details row so "re-backfill everything decoded below version X" is a
+/// query rather than an archaeology exercise (operator decision D6).
+pub const DJI_LOG_PARSER_VERSION: &str = "0.5.7";
 
 /// Parse a DJI .txt binary flight log.
 ///
@@ -23,10 +29,29 @@ pub fn parse_dji_log(
     // ── Header metadata (always available, even for encrypted logs) ──────
     let details = &log.details;
 
+    let aircraft_name_raw = details.aircraft_name.trim();
+
+    // The crate's `ProductType` enum predates the Mavic 4 Pro and the Matrice 4
+    // series, so those airframes render as the literal `Unknown(178)`. The real
+    // name is right there in the header. Falling back to it here means new
+    // imports stop producing the literal at the source — without this, every
+    // future M4TD/Mavic-4 import re-creates the rows a repair pass just fixed.
+    //
+    // The Debug string is only overridden when it is EXACTLY the Unknown(NNN)
+    // form, so a real model name can never be displaced.
     let drone_model = {
         let raw = format!("{:?}", details.product_type);
-        // Clean up Debug representation — e.g. "Mavic3" stays, "Unknown(42)" stays
-        if raw.is_empty() { None } else { Some(raw) }
+        if raw.is_empty() {
+            None
+        } else if is_unknown_product_type(&raw) && !aircraft_name_raw.is_empty() {
+            tracing::info!(
+                "{}: product_type renders as {} — using header aircraft_name {:?} for drone_model",
+                filename, raw, aircraft_name_raw,
+            );
+            Some(aircraft_name_raw.to_string())
+        } else {
+            Some(raw)
+        }
     };
     let drone_serial = if details.aircraft_sn.is_empty() {
         None
@@ -117,7 +142,13 @@ pub fn parse_dji_log(
 
     // ── Extract GPS track and telemetry from frames ─────────────────────
     let mut track = Vec::new();
-    let timestamps = Vec::new();
+    // Three vectors that were hard-coded empty/None until ADR-0043. `/telemetry`
+    // has always served `signal_strength: null` and `distance_from_home: null`
+    // for this reason; they go from null to arrays, and the frontend already
+    // types them permissively.
+    let mut timestamps: Vec<String> = Vec::new();
+    let mut signal_strengths: Vec<f64> = Vec::new();
+    let mut distances_from_home: Vec<f64> = Vec::new();
     let mut altitudes = Vec::new();
     let mut speeds = Vec::new();
     let mut battery_pcts = Vec::new();
@@ -142,8 +173,23 @@ pub fn parse_dji_log(
     let mut min_voltage: Option<f64> = None;
     let mut max_temp: Option<f64> = None;
 
+    // ADR-0043 Tier 0. The accumulator rides the EXISTING frame loop — there is
+    // no second decode and no second keychain round-trip.
+    let time_base = choose_time_base(&frames);
+    let mut details_accum = DetailsAccum::new(time_base);
+    // Wall-clock stamps are emitted only when the log actually carries a clock.
+    // `FrameCustom::default()` is the Unix epoch, so a log with no Custom
+    // records would otherwise stamp 1970 on every point.
+    let has_wall_clock = time_base == TimeBase::DateTime;
+
     for frame in &frames {
         let osd = &frame.osd;
+        details_accum.push_frame(frame);
+        let frame_ts = if has_wall_clock {
+            Some(frame.custom.date_time.to_rfc3339())
+        } else {
+            None
+        };
         let lat = osd.latitude;
         let lon = osd.longitude;
         let alt = osd.height as f64;
@@ -154,7 +200,7 @@ pub fn parse_dji_log(
                 lat,
                 lng: lon,
                 alt,
-                timestamp: None,
+                timestamp: frame_ts.clone(),
                 speed: Some(spd),
                 heading: Some(osd.yaw as f64),
             });
@@ -182,6 +228,27 @@ pub fn parse_dji_log(
             prev_lon = Some(lon);
             prev_fly_time = Some(cur_fly_time);
         }
+
+        if let Some(ts) = &frame_ts {
+            timestamps.push(ts.clone());
+        }
+        // 0.0 is the honest value here: `/telemetry` serves plain f64 arrays
+        // with no null encoding, and these two are index-aligned with
+        // `altitude`. The nullable, provenance-carrying form of the same
+        // quantities lives in flight_series, which is the surface that can
+        // represent "not reported".
+        signal_strengths.push(frame.rc.downlink_signal.unwrap_or(0) as f64);
+        distances_from_home.push(
+            if frame.home.latitude.abs() > 0.001
+                && frame.home.longitude.abs() > 0.001
+                && lat.abs() > 0.001
+                && lon.abs() > 0.001
+            {
+                haversine(frame.home.latitude, frame.home.longitude, lat, lon)
+            } else {
+                0.0
+            },
+        );
 
         altitudes.push(alt);
         speeds.push(spd);
@@ -262,8 +329,8 @@ pub fn parse_dji_log(
             battery_voltage: if battery_voltages.is_empty() { None } else { Some(battery_voltages) },
             battery_temp: if battery_temps.is_empty() { None } else { Some(battery_temps) },
             satellites: if satellites_vec.is_empty() { None } else { Some(satellites_vec) },
-            signal_strength: None,
-            distance_from_home: None,
+            signal_strength: if signal_strengths.is_empty() { None } else { Some(signal_strengths) },
+            distance_from_home: if distances_from_home.is_empty() { None } else { Some(distances_from_home) },
         })
     } else {
         None
@@ -294,6 +361,33 @@ pub fn parse_dji_log(
         "{}: final → duration={:.0}s distance={:.0}m maxAlt={:.0}m maxSpd={:.1}m/s points={} frames={} dropped_segs={} (from_frames={})",
         filename, final_duration, final_distance, final_max_alt, final_max_speed,
         point_count, frames.len(), dropped_segments, has_frames,
+    );
+
+    // ── Tier 0 details payload (ADR-0043) ───────────────────────────────
+    let flight_details = details_accum.finish(HeaderExtras {
+        crate_version: DJI_LOG_PARSER_VERSION.to_string(),
+        max_vertical_speed_ms: Some(details.max_vertical_speed as f64),
+        capture_num: Some(details.capture_num as i64),
+        video_time_s: Some(details.video_time as f64),
+        take_off_altitude_raw: Some(details.take_off_altitude as f64),
+        app_platform: Some(format!("{:?}", details.app_platform)),
+        serials: serde_json::json!({
+            "rc_sn": &details.rc_sn,
+            "camera_sn": &details.camera_sn,
+            "battery_sn": &battery_serial,
+            "aircraft_sn_header": &drone_serial,
+        }),
+    });
+
+    tracing::info!(
+        "{}: details → frames={} hz={:?} photos={:?} events={:?} phases={} series={}",
+        filename,
+        flight_details.frame_count.unwrap_or(0),
+        flight_details.frame_hz_est,
+        flight_details.photo_count,
+        flight_details.event_count,
+        flight_details.phases.len(),
+        flight_details.series.len(),
     );
 
     Ok(ParsedFlight {
@@ -333,7 +427,23 @@ pub fn parse_dji_log(
             "frame_count": frames.len(),
             "dropped_segments": dropped_segments,
         })),
+        details: Some(flight_details),
     })
+}
+
+/// Is this Debug rendering of `ProductType` the `Unknown(NNN)` placeholder?
+///
+/// Anchored on both ends, so a genuine model name can never match — the same
+/// discipline the repair pass's `^Unknown\(\d+\)$` predicate uses on the
+/// database side. "UnknownThing" and "Unknown(x)" are both rejected.
+pub(crate) fn is_unknown_product_type(rendered: &str) -> bool {
+    let Some(inner) = rendered
+        .strip_prefix("Unknown(")
+        .and_then(|r| r.strip_suffix(')'))
+    else {
+        return false;
+    };
+    !inner.is_empty() && inner.chars().all(|c| c.is_ascii_digit())
 }
 
 /// Choose the flight's airtime in seconds (ADR-0027).
@@ -382,7 +492,7 @@ fn frame_battery_voltage(volts: f32) -> f64 {
 }
 
 /// Haversine distance in meters between two lat/lon points
-fn haversine(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
+pub(crate) fn haversine(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
     let r = 6371000.0;
     let dlat = (lat2 - lat1).to_radians();
     let dlon = (lon2 - lon1).to_radians();
@@ -394,7 +504,7 @@ fn haversine(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{choose_duration, frame_battery_voltage};
+    use super::{choose_duration, frame_battery_voltage, is_unknown_product_type};
 
     // dji-log-parser already returns FrameBattery.voltage in VOLTS (its record
     // parsers apply /1000.0). The old inline `battery.voltage as f64 / 1000.0`
@@ -447,5 +557,46 @@ mod tests {
     fn no_header_no_frames_yields_zero() {
         assert_eq!(choose_duration(0.0, None, None), 0.0);
         assert_eq!(choose_duration(0.0, Some(0.0), Some(0.0)), 0.0);
+    }
+
+    // ── ADR-0043 §2.2: the Unknown(NNN) → aircraft_name fallback ───────
+    //
+    // The crate's ProductType enum predates the Mavic 4 Pro and Matrice 4
+    // series, so 150 of 210 stored DJI flights carry the literal
+    // "Unknown(178)" as their model. The predicate that decides whether to
+    // substitute the header's aircraft_name must be anchored on BOTH ends —
+    // a real model name that merely starts with "Unknown" must never be
+    // displaced by it. Same discipline as the repair pass's
+    // `^Unknown\(\d+\)$` predicate on the database side.
+
+    #[test]
+    fn unknown_product_type_matches_only_the_exact_placeholder_form() {
+        assert!(is_unknown_product_type("Unknown(178)"));
+        assert!(is_unknown_product_type("Unknown(0)"));
+        assert!(is_unknown_product_type("Unknown(255)"));
+    }
+
+    #[test]
+    fn a_real_model_name_is_never_treated_as_the_placeholder() {
+        for name in [
+            "Mavic3",
+            "Matrice30",
+            "Matrice350RTK",
+            "Avata2",
+            "FPV",
+            "Unknown",
+            "UnknownThing",
+            "Unknown()",
+            "Unknown(x)",
+            "Unknown(17a)",
+            "Unknown(178) Pro",
+            "Not Unknown(178)",
+            "",
+        ] {
+            assert!(
+                !is_unknown_product_type(name),
+                "{name:?} must not be treated as the Unknown(NNN) placeholder"
+            );
+        }
     }
 }
