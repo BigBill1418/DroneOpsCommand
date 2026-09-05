@@ -19,6 +19,19 @@ class Battery(Base):
     model: Mapped[str | None] = mapped_column(String(255), nullable=True)  # e.g. "TB65"
     purchase_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     cycle_count: Mapped[int] = mapped_column(Integer, default=0)
+    # ── Battery source-of-truth columns (operator decision D4, ADR-0043) ──
+    # Landed by migration 0011 alongside the flight-details schema so the
+    # phase that actually switches the semantics needs no migration of its
+    # own. INERT until then: nothing reads or writes these yet.
+    #
+    # ``cycle_count`` today is a counter incremented once per imported flight
+    # — it counts *flights we have logs for*, not the pack's lifetime cycles.
+    # When D4 lands, the pack's own reported count becomes the displayed
+    # value and the legacy increment continues here, so the two stay
+    # comparable instead of one silently overwriting the other's history.
+    cycle_count_observed: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # 'observed' (legacy per-import increment) | 'pack' (the pack's own value)
+    metrics_source: Mapped[str | None] = mapped_column(String(16), nullable=True)
     last_voltage: Mapped[float | None] = mapped_column(Float, nullable=True)
     health_pct: Mapped[float | None] = mapped_column(Float, nullable=True)  # 0-100
     status: Mapped[str] = mapped_column(String(50), default="active")  # active, retired, service
@@ -48,7 +61,12 @@ class BatteryLog(Base):
     end_voltage: Mapped[float | None] = mapped_column(Float, nullable=True)
     min_voltage: Mapped[float | None] = mapped_column(Float, nullable=True)
     max_temp: Mapped[float | None] = mapped_column(Float, nullable=True)  # Celsius
+    # ``cycles_at_time`` keeps its existing meaning (the OBSERVED counter).
+    # The pack's own reported count gets its own column below — silently
+    # redefining this one mid-history would corrupt the series it already
+    # holds.
     cycles_at_time: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    pack_cycle_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     discharge_mah: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     battery = relationship("Battery", back_populates="logs")

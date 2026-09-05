@@ -4,21 +4,199 @@ Maintained alongside `CHANGELOG.md` and `docs/adr/`. `CHANGELOG.md` is
 the ledger of shipped changes; this file tracks what's in-flight or
 blocked.
 
-## 2026-09-04 — FP-1 Flight Details data ingestion — PLANNED, HOLDING for operator go
+## 2026-09-05 — FP-1 Flight Details — P0 SHIPPED to branch, P1 in progress
 
-**State at end of day (Pacific):**
-- Census of what DJI logs carry beyond the parser: `docs/plans/2026-09-04-dji-log-untapped-data-census.md`.
-- Build plan (9 phases, ~13 d) + data-model ADR: `docs/plans/2026-09-04-flight-details-data-ingestion.md`, `docs/adr/0043-flight-details-sidecar-table-for-extended-log-data.md`. Bill's seven decisions are recorded in the plan as DECIDED (full pilot GPS track; full-resolution series in a `flight_series` table; Flight Details link on every flight; pack values become battery source of truth; backfill re-stamps timestamps and fixes `Unknown(NNN)` model names; crate bump only after a before/after diff; ODL-era flights re-imported and replaced in place).
-- **Nothing is built. No schema, parser, or DB change has been made.**
-- Log inventory (plan §8/§8a): 182 usable originals were on the fleet. **All 584 OpenDroneLog-era originals recovered** from Bill's Google Drive to BOS-HQ `~/droneops-staging/drive-logs/` (0 download failures; sha256 + header CSV alongside; `docs/plans/data/2026-09-04-drive-logs-inventory.csv`). 584/584 filenames match the `opendronelog_import` rows 1:1 → P7 matches on `original_filename`. 548 hashes equal ODL's own recorded sha256. 20 duplicate existing `dji_txt` flights; 564 new. **Staging dir is not in any backup lane yet.**
-- Still lost: 28 `dji_txt` originals from 2026-03-22..04-19 (14 Matrice 4TD, 9 Mavic 3 Pro, 3 Mini 5 Pro, 2 Matrice 30T). Cause: files lived in the HSH-HQ docker volume, which was never copied in the 2026-04-20 HSH→BOS move (DB rows replicated, files did not); backups began 2026-07-16. Only lead: FlightRecord folders on the controller/phone that flew them.
+Operator gave the go on 2026-09-05. Work is on **`feat/fp1-flight-details`**,
+NOT merged and NOT deployed — a push to `main` IS a production deploy on this
+repo (ADR-0018, NOC fleet deployer), so the branch waits for Bill's call.
+
+### P0 — schema + read path (v2.82.0) — DONE, inert
+
+Migrations `0010_flight_details` (both tables) and `0011_battery_src_truth`
+(three nullable battery columns, landed a phase early so the battery
+source-of-truth phase needs no migration). Models, `Flight.details` /
+`Flight.series` at `lazy="noload"`, schemas, `/details`, `/details/series`,
+`/details/status`, the extracted `telemetry_downsample` service, and the §4.4
+report-audience guard. **Nothing writes to the new tables yet; no existing
+response changes.**
+
+**Test evidence — there is no pytest or cargo job in CI, so this is local and
+quoted, not inferred from an exit code.**
+
+Hermetic suite (`cd backend && pytest -q`):
+
+```
+723 passed, 7 skipped in 75.24s (0:01:15)
+```
+
+Full suite with a live Postgres 16, which un-skips the migration integration
+tier (`docker run -d --name doc-mig-test -e POSTGRES_USER=doc -e
+POSTGRES_PASSWORD=test -e POSTGRES_DB=doc -p 55432:5432 postgres:16-alpine`;
+then `DOC_TEST_PG_URL=postgresql+asyncpg://doc:test@127.0.0.1:55432/doc
+DATABASE_URL=$DOC_TEST_PG_URL pytest -q`):
+
+```
+729 passed, 1 skipped in 89.70s (0:01:29)
+```
+
+Baseline before this work, same command, same container, from a clean
+`origin/main` export: `618 passed, 1 skipped`. So P0 adds 111 passing tests
+and breaks nothing.
+
+**A gap in the pre-existing migration tests, closed.** `test_db_migrations.py`
+builds every test database with `create_all` from the LIVE models first. Since
+the models now declare the new tables, that tier only ever exercises 0010/0011's
+*idempotency guards* — `op.create_table` and `op.add_column` are never reached,
+so a typo in either DDL body would have sat green through the whole suite and
+first appeared as a BOS-HQ crash loop. `tests/test_migration_0010_0011_upgrade_path.py`
+reproduces the actual production shape instead (full legacy schema, new objects
+dropped, stamped at 0009) and upgrades, covering the CREATE branch, the FK
+`ON DELETE CASCADE`, "primary key only, no secondary indexes", a second run
+being a no-op, and an empty autogenerate diff against `Base.metadata`.
+
+**One self-inflicted defect found and fixed during that work,** worth recording
+because it is the ADR-0042 hazard biting from a new direction: the first draft
+of that test stamped 0009 with `alembic.command.stamp(_alembic_config(), ...)`.
+A bare `Config` has no `connection` attribute, so `alembic/env.py` takes its CLI
+branch and runs `fileConfig()`, which defaults to `disable_existing_loggers=True`
+and killed every `doc.*` logger for the rest of the pytest process — making
+three unrelated log-assertion tests fail depending on file ordering. They passed
+in isolation and failed only in the full run. Confirmed mine rather than
+pre-existing by running the same command against a clean `origin/main` export
+(618 passed, 0 failures). Fixed by writing the `alembic_version` row with SQL.
+**Anything that calls Alembic programmatically outside `run_migrations_sync`
+needs the same care.**
+
+**§1.5 / C-2 encoding measurement — DECIDED by measurement, `json` stands.**
+Run against real `postgres:16-alpine`, synthesising the census's largest flight
+(M4TD, 13,870 frames) with a realistic climb/cruise/descent profile and §2.5
+per-quantity rounding, each series written three ways:
+
+| series | n | dp | raw json | `json` | `jsonb` | `float8[]` |
+|---|---:|---:|---:|---:|---:|---:|
+| altitude_msl_m | 13,870 | 1 | 81,187 | **23,490** | 32,656 | 24,937 |
+| t_offset_s | 13,870 | 2 | 90,817 | **40,894** | 47,724 | 45,410 |
+| battery_current_a | 13,870 | 2 | 77,134 | **32,707** | 42,650 | 36,415 |
+| pilot_lat | 657 | 7 | 7,165 | **1,921** | 2,346 | 3,134 |
+| **total** | | | 256,303 | **99,012** | 125,376 | 109,896 |
+
+Read + parse of 13,870 samples to a Python list, best of 60:
+`json` **4.34 ms**, `jsonb` 7.28 ms, `float8[]` 9.43 ms.
+
+Conclusions, including two that correct the plan:
+- `json` wins on **both** axes — 11 % smaller than `float8[]` and ~2.2x faster
+  to read. The plan's §1.5 speculation that a native float array "needs no JSON
+  parse in Python and maps straight to a list" and might therefore be faster is
+  **wrong as measured**: psycopg2's array parser is slower than the C
+  `json.loads`. C-2 is closed; `values` stays `json`.
+- Compression is **2.59:1**, not the plan's assumed 3–5x. So the largest
+  flight is ~500 KB compressed rather than 260–430 KB, and 210 flights land
+  nearer **35–70 MB** than the plan's 25–60 MB. Same order, still comfortable,
+  but the estimate should not be quoted at the optimistic end.
+- Caveat on the caveat: this is synthetic data with gaussian noise, which is
+  roughly a worst case for compressing digit runs. Real sensor data at 1 dp
+  with slow drift should do slightly better. The measurement is a floor.
+- Unexpected: `t_offset_s` is the **largest** series, bigger than altitude —
+  monotonically increasing 2-dp values have high digit entropy. If storage ever
+  needs trimming, storing a start + cadence instead of a full time base is the
+  cheapest win available. Not done; out of scope.
+
+Script kept at `/tmp/claude-1000/.../enc_measure.py` for the session only —
+it writes nothing outside a scratch table on a throwaway container, and touched
+no production database.
+
+### Corrections to the plan from live prod data (2026-09-05)
+
+Found by a parallel session verifying the matcher contract against the BOS-HQ
+prod DB. **Note the prod DB is `droneops-standby-db` (db `droneops`), the
+promoted standby — NOT `droneops-db-1`, which is an `alpine:3` placeholder.**
+
+1. **DJI serials exist in two forms and the plan conflates them.** Every
+   OpenDroneLog-era `drone_serial` is the 16-char header serial plus a 4-char
+   suffix — e.g. `1581F8HGX255P00A` + `0FEK` (Matrice 4TD),
+   `1581F5BK7241J00B` + `A040` (M30T). The 14-char FPV serials carry no suffix
+   and are identical in both forms. **§7.1 as written matches zero of the 584
+   files**, because it requires the parsed 16-char header serial to be *equal*
+   to the stored 20-char row value. §7.1 now states the serial check is a
+   **16-char-prefix comparison**, not equality. The plan file is corrected on
+   this branch.
+2. **The "88 unattributed ODL rows" have a different cause than the plan
+   states.** Verified: 49 Matrice 4TD + 39 Matrice 4T. The 4TD's aircraft row
+   has existed since 2026-03-16 with serial `1581F8HGX255P00A`; those 49 are
+   unattributed purely because of the 16-vs-20-char mismatch, not a missing
+   row. The plan's claim that the two missing aircraft rows account for 46
+   unattributed flights is wrong.
+3. **Relevant to P1:** the parser stamps `drone_serial` from the DJI log
+   header (`details.aircraft_sn`, 16 bytes for log version > 5), so newly
+   imported flights carry the **16-char** form. `_match_fleet_aircraft`
+   (`flight_library.py` branch 1) does `func.upper(Aircraft.serial_number) ==
+   drone_serial.upper()` via `scalar_one_or_none()` — **exact equality, no
+   prefix logic.** P0/P1 deliberately do NOT change the matcher and build
+   nothing that assumes the two forms interoperate. The 20-char form is where
+   `flight_details.aircraft_sn_full` will land in the Tier-1 phase, which is
+   the natural place to reconcile them later.
+
+### Production data changes applied 2026-09-05 (by the parallel session, not by this branch)
+
+All on the BOS-HQ prod DB, verified by reading the rows back:
+
+1. **Created** aircraft `DJI Matrice 4T`, serial `1581F7K3C25AA00D` (16-char
+   header form), `image_filename` NULL — **there is no `dji_m4t_official.png`
+   in `/app/app/static/aircraft/`; one is needed before the fleet tile renders
+   properly.**
+2. **Created** aircraft `DJI FPV`, serial `37Q7LA800BX0PN`, image
+   `dji_fpv_official.png`.
+3. **Renamed** the pre-existing row with serial `37QBJ5WBD100DN` from
+   `DJI FPV` to `DJI FPV - DECOM` (ODL's own label is "DJI FPV (DECOM)"; also
+   required so branch 2 of `_match_fleet_aircraft`, the no-serial model
+   fallback, does not go ambiguous on two identically-named rows).
+4. **Re-pointed 9 flights** with `drone_serial = '37Q7LA800BX0PN'` from the
+   DECOM airframe (`f09558d1-…`) to the new active row
+   (`007e1483-e5e3-45f9-9610-378f61f5523d`) — they had been fuzzy-matched to
+   the wrong airframe pre-ADR-0007. 7 `opendronelog_import`, 2 `dji_txt`.
+   Blast radius verified nil first: 0 `mission_flights`, 0
+   `maintenance_records`, 0 `maintenance_schedules`, 0 `batteries` referenced
+   the DECOM row; the 9 `battery_logs` derive their airframe through
+   `Flight.aircraft_id` and follow automatically. Post-assert inside the
+   transaction required exactly 9 moved / 0 stragglers. Final: DECOM 3
+   flights, active 9.
+
+Also filled `specs` on the Matrice 4T from DJI's published enterprise page.
+**The M4T is not IP-rated and its figures legitimately differ from the M4TD**
+(49 vs 54 min, 1219 g vs 1850 g, 6000 m vs 6500 m ceiling, no QZSS) — the 4TD
+is the heavier dock-compatible variant. A future reader should not "correct"
+one to match the other.
+
+Consequences: the startup backfill in `main.py` only touches
+`aircraft_id IS NULL`, so none of the above shifts on the next container
+restart, and the new M4T row will **not** pick up the 39 existing ODL rows
+(20-char serial mismatch, per correction 1). Aircraft table is now 11 rows,
+zero duplicate serials.
+
+### Log inventory (unchanged from 2026-09-04)
+
+- 182 usable `dji_txt` originals on the fleet. **All 584 OpenDroneLog-era
+  originals recovered** from Bill's Google Drive to BOS-HQ
+  `~/droneops-staging/drive-logs/` (0 download failures; sha256 + header CSV
+  alongside; `docs/plans/data/2026-09-04-drive-logs-inventory.csv`). 584/584
+  filenames match the `opendronelog_import` rows 1:1 → P7 matches on
+  `original_filename`. 548 hashes equal ODL's own recorded sha256. 20
+  duplicate existing `dji_txt` flights; 564 new. **Staging dir is not in any
+  backup lane yet.**
+- Still lost: 28 `dji_txt` originals from 2026-03-22..04-19 (14 Matrice 4TD,
+  9 Mavic 3 Pro, 3 Mini 5 Pro, 2 Matrice 30T). Cause: files lived in the
+  HSH-HQ docker volume, never copied in the 2026-04-20 HSH→BOS move (DB rows
+  replicated, files did not); backups began 2026-07-16. Only lead: FlightRecord
+  folders on the controller/phone that flew them.
 
 **Waiting on Bill:**
-1. Go for P0 + P1.
-2. Aircraft rows for the Matrice 4T (`1581F7K3C25AA00D`, 39 recovered flights) and the second DJI FPV (`37Q7LA800BX0PN`, 7 flights) — without them ADR-0007's strict matcher leaves 46 re-imported flights unattributed.
-3. Check the M4TD controller / Mavic 3 Pro phone for the 28 missing files.
+1. Merge call on `feat/fp1-flight-details` (a merge to `main` deploys).
+2. Check the M4TD controller / Mavic 3 Pro phone for the 28 missing files.
+3. A `dji_m4t_official.png` asset for the new Matrice 4T fleet tile.
 
-**Reminder:** a one-shot cron on HSH-HQ (`~/.local/bin/droneops-fp1-reminder.sh`, fires 2026-09-11 09:00 PT, self-removes) emails Bill@BarnardHQ.com via msmtp/O365 with this summary.
+**Reminder:** a one-shot cron on HSH-HQ (`~/.local/bin/droneops-fp1-reminder.sh`,
+fires 2026-09-11 09:00 PT, self-removes) emails Bill@BarnardHQ.com via
+msmtp/O365 with this summary.
 
 ## 2026-08-17 — Encrypted R2 backup (ADR-0041) — LIVE, IN PARALLEL RUN — cutover pending
 

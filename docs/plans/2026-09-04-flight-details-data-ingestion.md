@@ -999,9 +999,10 @@ For each candidate file, parse → `drone_serial`, `start_time`, `duration_secs`
 then find rows where **all** hold:
 
 - `source == 'opendronelog_import'`
-- `drone_serial` equal — exact after trim + case-fold. A row with **no** serial
-  is never matched (the match would be too weak); it imports as new and is
-  flagged.
+- `drone_serial` matches on a **16-char prefix**, after trim + case-fold —
+  **NOT equality.** See the correction note below; equality matches zero rows.
+  A row with **no** serial is never matched (the match would be too weak); it
+  imports as new and is flagged.
 - `abs(start_time - parsed_start) <= 120 s`
 - `abs(duration_secs - parsed_duration) <= max(30 s, 5 % of parsed_duration)`
 
@@ -1020,6 +1021,50 @@ of the disambiguation, and the "≥ 2 → abort" rule guarantees an ambiguous pa
 rejected rather than resolved by nearest-neighbour. Tolerances are generous on
 purpose: ODL `start_time` provenance is unknown and may be ingest-derived or
 timezone-shifted (ADR-0017 is about exactly this class).
+
+**CORRECTION (2026-09-05, verified against the BOS-HQ prod DB
+`droneops-standby-db`, db `droneops` — note that is the promoted standby, not
+`droneops-db-1`, which is an `alpine:3` placeholder).** The first draft of this
+rule said `drone_serial` must be **equal**. It cannot be, and as written the
+rule matched **zero of the 584 files**:
+
+DJI serials exist in two forms in this database. Every `opendronelog_import`
+row carries the 16-char header serial **plus a 4-char suffix**:
+
+| Airframe | header (16) | stored ODL form (20) |
+|---|---|---|
+| Matrice 30T | `1581F5BK7241J00B` | `1581F5BK7241J00BA040` |
+| Mavic 3 Pro | `1581F67QC23CN014` | `1581F67QC23CN014E4Z8` |
+| Matrice 4TD | `1581F8HGX255P00A` | `1581F8HGX255P00A0FEK` |
+| Mini 5 Pro | `1581F9DEC257N029` | `1581F9DEC257N0293HSX` |
+| Matrice 4T | `1581F7K3C25AA00D` | `1581F7K3C25AA00DMZMG` |
+| Avata 2 | `1581F6W8A242N0A3` | `1581F6W8A242N0A3YVZ8` |
+| M3P (DECOM) | `1581F67QE236L00A` | `1581F67QE236L00A0027` |
+
+The 14-char FPV serials carry no suffix and are identical in both forms. A
+re-parsed file yields the **16-char header** form (`details.aircraft_sn` is 16
+bytes for log version > 5), so the comparison against a stored 20-char value
+must be a prefix test. §8a already moved the *primary* lookup to
+`original_filename` (1:1, 584/584); this correction fixes the serial
+**verification** step, which would otherwise have rejected every match §8a
+found.
+
+Two knock-on corrections to this document:
+
+- The claim elsewhere that the two missing aircraft rows account for **46**
+  unattributed flights is **wrong**. The verified breakdown of the 88
+  unattributed ODL rows is 49 Matrice 4TD + 39 Matrice 4T. The 4TD's aircraft
+  row has existed since 2026-03-16 with serial `1581F8HGX255P00A`; those 49 are
+  unattributed *solely* because of this 16-vs-20-char mismatch, not a missing
+  row.
+- `_match_fleet_aircraft` (`flight_library.py`, branch 1) compares
+  `func.upper(Aircraft.serial_number) == drone_serial.upper()` via
+  `scalar_one_or_none()` — **exact equality, no prefix logic.** Nothing in
+  P0–P1 changes it, and nothing built there assumes the two forms interoperate.
+  `flight_details.aircraft_sn_full` (Tier 1, §2.3) is where the 20-char form
+  will land and is the natural place to reconcile the two later — as a
+  deliberate change with its own decision record, not a silent widening of the
+  matcher.
 
 **Hash collision check.** If the file's SHA-256 already exists on another flight
 (the partial unique index `uq_flights_source_file_hash`, migration `0005`), do
@@ -1167,11 +1212,29 @@ Verified facts:
 - Airframes (by header serial, 16-char form; ODL rows carry the 20-char form):
   Matrice 30T "Maverick" 206, Mavic 3 Pro "Badass V.2" 134, Mavic 3 Pro
   "Bad Mother Fucker" 78 (aircraft row "M3P - DECOM"), Matrice 4TD 50,
-  Mini 5 Pro "BigThingsSmallPackages" 46 (`ProductType` 139), **Matrice 4T 39
-  (`ProductType` 150, NO aircraft row)**, Avata 2 21, DJI FPV 10 across two
-  serials (**37Q7LA800BX0PN has NO aircraft row**, 7 flights). 88 ODL rows are
-  unattributed today; the two missing aircraft rows must exist before P7 or
-  those 46 flights stay unattributed (ADR-0007 strict matcher).
+  Mini 5 Pro "BigThingsSmallPackages" 46 (`ProductType` 139), Matrice 4T 39
+  (`ProductType` 150), Avata 2 21, DJI FPV 10 across two serials.
+
+  **CORRECTED 2026-09-05 (verified on prod).** Both missing aircraft rows were
+  created on 2026-09-05 with the 16-char header serial — `DJI Matrice 4T` /
+  `1581F7K3C25AA00D` and `DJI FPV` / `37Q7LA800BX0PN` — and the pre-existing
+  `37QBJ5WBD100DN` row was renamed `DJI FPV - DECOM` so branch 2 of
+  `_match_fleet_aircraft` (the no-serial model fallback) cannot go ambiguous on
+  two identically-named rows. 9 flights on `37Q7LA800BX0PN` were re-pointed
+  from the DECOM airframe to the new active one (they had been fuzzy-matched
+  pre-ADR-0007; blast radius verified nil first). Aircraft table is now 11
+  rows, zero duplicate serials.
+
+  **The earlier claim that creating those two rows would attribute 46 flights
+  was wrong.** The 88 unattributed ODL rows are 49 Matrice 4TD + 39 Matrice
+  4T, and the Matrice 4TD has had an aircraft row since 2026-03-16. Both
+  groups are unattributed for one reason only: the ODL rows store the 20-char
+  serial while the aircraft rows store the 16-char header form, and
+  `_match_fleet_aircraft` compares for **exact equality**. Creating rows does
+  not fix that and was never going to. The new rows are the correct identity
+  for P7's **re-imported** flights, which arrive carrying header serials — so
+  they pay off at re-import, not today. Reconciling the existing 88 is a
+  separate, deliberate decision (see the §7.1 correction).
 - Totals: 135.0 h airtime, 2,215 photos by header count, 238 flights of 15–30
   min, 65 under 30 s (aborted takeoffs / tests). Header `max_height` exceeds
   120 m AGL on 349 of 584; spot-checked against frame data on the 2023 Mavic

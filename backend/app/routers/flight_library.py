@@ -19,6 +19,7 @@ import httpx
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select, func, desc
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import defer
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,13 +32,22 @@ from app.models.aircraft import Aircraft
 from app.models.battery import Battery, BatteryLog
 from app.models.device_api_key import DeviceApiKey
 from app.models.flight import Flight
+from app.models.flight_details import FlightDetails, FlightSeries
 from app.models.system_settings import SystemSetting
 from app.models.user import User
+from app.schemas.flight_details import (
+    FlightDetailsResponse,
+    FlightSeriesIndexEntry,
+    FlightDetailsStatus,
+    FlightSeriesResponse,
+    details_unavailable_reason,
+)
 from app.schemas.flight import (
     FlightCreate, FlightDetailResponse, FlightResponse, FlightUpdate, FlightUploadResponse,
 )
 from app.services.flight_metrics import sanitize_odl_distance
 from app.services.ntfy import send_alert
+from app.services.telemetry_downsample import downsample, select_indices
 from app.utils.timezone import iso_utc, local_date_compact
 
 logger = logging.getLogger("doc.flights")
@@ -1627,6 +1637,97 @@ async def reprocess_status(
     }
 
 
+# ── Flight-details coverage (ADR-0043 §4.3) ───────────────────────
+# NOTE: literal path — must be registered before /{flight_id} or the UUID
+# route swallows it, the same shadowing trap /stats/summary calls out.
+@router.get("/details/status", response_model=FlightDetailsStatus)
+async def flight_details_status(
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """Coverage counters for the extended-log sidecar.
+
+    Every value is a COUNT / GROUP BY over indexed or small columns — no
+    ``gps_track``, ``telemetry``, ``raw_metadata`` or ``flight_series.values``
+    is ever loaded. Mirrors ``/reprocess/status``'s shape so the operator
+    reads the two Settings cards the same way.
+    """
+    total = (await db.execute(select(func.count(Flight.id)))).scalar() or 0
+
+    by_source_rows = (
+        await db.execute(
+            select(Flight.source, func.count(Flight.id)).group_by(Flight.source)
+        )
+    ).all()
+    by_source = {row[0] or "unknown": row[1] for row in by_source_rows}
+
+    with_details = (
+        await db.execute(select(func.count(FlightDetails.flight_id)))
+    ).scalar() or 0
+
+    # Stored-original coverage is a filesystem question, so it is scoped to
+    # the flights that could ever be re-parsed (DJI rows carrying a hash)
+    # rather than stat()ing the whole library.
+    hashes = [
+        row[0]
+        for row in (
+            await db.execute(
+                select(Flight.source_file_hash).where(
+                    Flight.source == "dji_txt",
+                    Flight.source_file_hash.is_not(None),
+                )
+            )
+        ).all()
+        if row[0]
+    ]
+    with_stored_file = sum(1 for h in hashes if _get_stored_file_path(h) is not None)
+
+    parser_versions = {
+        (row[0] or "unknown"): row[1]
+        for row in (
+            await db.execute(
+                select(FlightDetails.parser_version, func.count())
+                .group_by(FlightDetails.parser_version)
+            )
+        ).all()
+    }
+    crate_versions = {
+        (row[0] or "unknown"): row[1]
+        for row in (
+            await db.execute(
+                select(FlightDetails.crate_version, func.count())
+                .group_by(FlightDetails.crate_version)
+            )
+        ).all()
+    }
+    restamped = (
+        await db.execute(
+            select(func.count(FlightDetails.flight_id)).where(
+                FlightDetails.gps_timestamps_restamped_at.is_not(None)
+            )
+        )
+    ).scalar() or 0
+    model_repaired = (
+        await db.execute(
+            select(func.count(FlightDetails.flight_id)).where(
+                FlightDetails.drone_model_previous.is_not(None)
+            )
+        )
+    ).scalar() or 0
+
+    return FlightDetailsStatus(
+        total=total,
+        by_source=by_source,
+        with_details=with_details,
+        without_details=max(total - with_details, 0),
+        with_stored_file=with_stored_file,
+        parser_versions=parser_versions,
+        crate_versions=crate_versions,
+        restamped=restamped,
+        model_repaired=model_repaired,
+    )
+
+
 # ── Reprocess ALL from stored files ──────────────────────────────
 @router.post("/reprocess/all")
 async def reprocess_all_from_stored(
@@ -1995,13 +2096,11 @@ async def get_telemetry(
     if not telemetry:
         return {"message": "No telemetry data available", "data": {}}
 
-    # Downsample if needed
-    def downsample(arr, target):
-        if not arr or len(arr) <= target:
-            return arr
-        step = (len(arr) - 1) / (target - 1)
-        return [arr[int(i * step)] for i in range(target)]
-
+    # ``downsample`` used to be a closure right here. It now lives in
+    # app.services.telemetry_downsample and is shared with the flight-series
+    # read path, so the two endpoints cannot drift into disagreeing about
+    # which source index a returned point came from (ADR-0032's standing
+    # finding: a second copy is how this defect class recurs).
     return {
         "timestamps": downsample(telemetry.get("timestamps", []), max_points),
         "altitude": downsample(telemetry.get("altitude", []), max_points),
@@ -2013,6 +2112,167 @@ async def get_telemetry(
         "signal_strength": downsample(telemetry.get("signal_strength", []), max_points),
         "distance_from_home": downsample(telemetry.get("distance_from_home", []), max_points),
     }
+
+
+# ── Flight details (ADR-0043 §4.1/§4.2) ───────────────────────────────
+# Columns of ``flight_details`` that are serialised into the ``details``
+# payload. Derived from the mapper, minus the join key, so a column added to
+# the model is exposed automatically and cannot be forgotten here.
+_DETAILS_PAYLOAD_COLUMNS: tuple[str, ...] = tuple(
+    c.key for c in sa_inspect(FlightDetails).mapper.column_attrs if c.key != "flight_id"
+)
+
+# Hard ceiling on how many series one request may name. Bounds the response
+# and the detoast set; the page asks for 1-4.
+_MAX_SERIES_PER_REQUEST = 24
+
+
+def _serialize_details(row: FlightDetails) -> dict:
+    """Flatten a details row to JSON-ready primitives."""
+    out: dict = {}
+    for key in _DETAILS_PAYLOAD_COLUMNS:
+        value = getattr(row, key)
+        out[key] = iso_utc(value) if isinstance(value, _dt) else value
+    return out
+
+
+@router.get("/{flight_id}/details", response_model=FlightDetailsResponse)
+async def get_flight_details(
+    flight_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """Extended log data for one flight, plus an index of available series.
+
+    **Never 404s on missing details** (operator decision D3): the Flight
+    Details link renders on every flight, so "no extended data" is a normal
+    response carrying an ``unavailable_reason`` the UI turns into a specific
+    message. A 404 means the FLIGHT does not exist.
+
+    The flight row is read column-explicitly (``Flight.source`` only) so this
+    route never detoasts ``gps_track`` / ``telemetry`` / ``raw_metadata``, and
+    the series index selects every column EXCEPT ``values`` — the whole point
+    of the split table (plan §1.5).
+    """
+    source = (
+        await db.execute(select(Flight.source).where(Flight.id == flight_id))
+    ).scalar_one_or_none()
+    if source is None:
+        raise HTTPException(status_code=404, detail="Flight not found")
+
+    details_row = (
+        await db.execute(
+            select(FlightDetails).where(FlightDetails.flight_id == flight_id)
+        )
+    ).scalar_one_or_none()
+
+    index_rows = (
+        await db.execute(
+            select(
+                FlightSeries.source,
+                FlightSeries.name,
+                FlightSeries.unit,
+                FlightSeries.sample_count,
+                FlightSeries.precision_dp,
+            )
+            .where(FlightSeries.flight_id == flight_id)
+            .order_by(FlightSeries.source, FlightSeries.name)
+        )
+    ).all()
+
+    return FlightDetailsResponse(
+        flight_id=flight_id,
+        source=source,
+        details=_serialize_details(details_row) if details_row is not None else None,
+        series_index=[
+            FlightSeriesIndexEntry(
+                source=r[0], name=r[1], unit=r[2], sample_count=r[3], precision_dp=r[4]
+            )
+            for r in index_rows
+        ],
+        unavailable_reason=details_unavailable_reason(source, details_row is not None),
+    )
+
+
+@router.get("/{flight_id}/details/series", response_model=FlightSeriesResponse)
+async def get_flight_details_series(
+    flight_id: UUID,
+    names: str = Query(..., description="Comma-separated series names"),
+    source: str = Query("frame", description="Series group: frame | pilot | ofdm | camera"),
+    max_points: int = Query(2000, ge=1, le=10000),
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """Fetch named series, downsampled at READ time (operator decision D2).
+
+    Stored resolution is full — every recorded sample. Reduction happens only
+    here, by index stride via the shared ``telemetry_downsample`` service, so
+    a returned point is always a real recorded sample and never a synthesised
+    average.
+
+    ``t_offset_s`` for the requested ``source`` is always returned alongside.
+    Series in one ``source`` group are index-aligned by construction, so a
+    same-length series and its time base get the SAME stride indices and the
+    caller never has to align anything. (A series whose length differs from
+    the time base — which would mean a write-side bug — gets its own honest
+    stride rather than being silently forced onto another series' indices.)
+    """
+    exists = (
+        await db.execute(select(Flight.id).where(Flight.id == flight_id))
+    ).scalar_one_or_none()
+    if exists is None:
+        raise HTTPException(status_code=404, detail="Flight not found")
+
+    requested = [n.strip() for n in names.split(",") if n.strip()]
+    if not requested:
+        raise HTTPException(status_code=400, detail="names must list at least one series")
+    if len(requested) > _MAX_SERIES_PER_REQUEST:
+        raise HTTPException(
+            status_code=400,
+            detail=f"at most {_MAX_SERIES_PER_REQUEST} series per request",
+        )
+
+    # The time base is always fetched, even when not asked for — it is what
+    # makes the returned values interpretable.
+    wanted = set(requested) | {"t_offset_s"}
+    rows = (
+        await db.execute(
+            select(
+                FlightSeries.name,
+                FlightSeries.unit,
+                FlightSeries.values,
+            ).where(
+                FlightSeries.flight_id == flight_id,
+                FlightSeries.source == source,
+                FlightSeries.name.in_(wanted),
+            )
+        )
+    ).all()
+
+    stored = {r[0]: (r[1], r[2] or []) for r in rows}
+    base_len = len(stored["t_offset_s"][1]) if "t_offset_s" in stored else 0
+    if not base_len and stored:
+        base_len = max(len(v) for _, v in stored.values())
+
+    series: dict[str, list] = {}
+    units: dict[str, str | None] = {}
+    for name, (unit, values) in stored.items():
+        idx = select_indices(len(values), max_points)
+        series[name] = [values[i] for i in idx]
+        units[name] = unit
+
+    returned = len(series.get("t_offset_s", next(iter(series.values()), [])))
+
+    return FlightSeriesResponse(
+        flight_id=flight_id,
+        source=source,
+        max_points=max_points,
+        sample_count=base_len,
+        returned_points=returned,
+        series=series,
+        units=units,
+        missing=sorted(n for n in requested if n not in stored),
+    )
 
 
 # ── Get GPS track ─────────────────────────────────────────────────────

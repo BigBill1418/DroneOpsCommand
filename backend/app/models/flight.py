@@ -56,3 +56,21 @@ class Flight(Base):
     aircraft = relationship("Aircraft", lazy="selectin")
     pilot = relationship("Pilot", lazy="selectin")
     battery_logs = relationship("BatteryLog", back_populates="flight", lazy="noload")
+
+    # CRITICAL (ADR-0019 / ADR-0043): ``lazy="noload"`` is load-bearing, not a
+    # style choice. These sidecars hold the extended DJI-log data — the series
+    # table alone is ~100-300 KB compressed per flight. Switching either to
+    # ``selectin`` would join them into EVERY ``select(Flight)`` in the
+    # codebase, including the 500-row mission-picker list query whose eager
+    # loading of heavy JSON is exactly what OOM-killed the API worker in the
+    # 2026-06-10 outage. ``noload`` matches ``battery_logs`` above; readers go
+    # through the dedicated /details and /details/series routes.
+    # Guarded by backend/tests/test_flight_details_sidecar_not_joined.py.
+    details = relationship(
+        "FlightDetails", back_populates="flight",
+        uselist=False, lazy="noload", cascade="all, delete-orphan",
+    )
+    series = relationship(
+        "FlightSeries", back_populates="flight",
+        lazy="noload", cascade="all, delete-orphan",
+    )

@@ -31,6 +31,27 @@ logger = logging.getLogger("doc.reports")
 router = APIRouter(prefix="/api/missions", tags=["reports"])
 
 
+# ── Report-audience guard for the extended-log surface (ADR-0043 §4.4, D1) ──
+#
+# Operator decision D1 stores the pilot's raw position track. A mission report
+# is a CLIENT deliverable (ADR-0029), so nothing from the ``flight_details`` /
+# ``flight_series`` sidecars may reach one unless it is deliberately added.
+#
+# This allowlist is EMPTY and the report layer reads neither table. It exists
+# so that adding the first report-eligible field is a reviewable one-line diff
+# against a named constant, rather than an incidental ``from app.models...``
+# import that nobody notices. Adding a name here is a decision; forgetting the
+# constant exists is not a way to bypass it, because the guard test asserts on
+# the modules, not on this tuple.
+#
+# ADR-0029 also remains in force on every surface this touches: no altitude is
+# ever compared to a limit, and no Part-107 / exceedance commentary is emitted
+# anywhere. Recorded height limits are data, never a verdict.
+#
+# Guarded by backend/tests/test_report_excludes_flight_details_adr0043.py.
+REPORT_READABLE_DETAIL_FIELDS: tuple[str, ...] = ()
+
+
 async def _load_mission_with_flights(db: AsyncSession, mission_id: UUID) -> Mission:
     """Load a mission with flights and aircraft eagerly loaded."""
     result = await db.execute(

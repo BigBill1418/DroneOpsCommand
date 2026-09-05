@@ -43,7 +43,7 @@ def _script_dir():
 def test_migration_tree_has_single_linear_head():
     script = _script_dir()
     heads = script.get_heads()
-    assert heads == ["0009_mission_dl_email_sent_at"], heads
+    assert heads == ["0011_battery_src_truth"], heads
 
 
 def test_baseline_is_the_root_revision():
@@ -57,6 +57,8 @@ def test_revision_chain_is_baseline_then_indexes():
     # Walk from head back to base; expect exactly the revisions, in order.
     revs = [r.revision for r in script.walk_revisions()]
     assert revs == [
+        "0011_battery_src_truth",
+        "0010_flight_details",
         "0009_mission_dl_email_sent_at",
         "0008_report_dl_payment_override",
         "0007_strip_legacy_cache_track",
@@ -478,7 +480,7 @@ def test_brownfield_stamp_and_upgrade_matches_base_metadata():
     with eng.connect() as c:
         head = c.execute(text("SELECT version_num FROM alembic_version")).scalar()
     eng.dispose()
-    assert head == "0009_mission_dl_email_sent_at", head
+    assert head == "0011_battery_src_truth", head
 
     # Idempotent: a second run is a no-op.
     assert run_migrations_sync() == "noop"

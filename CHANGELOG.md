@@ -4,6 +4,70 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-09-05 — v2.82.0: FP-1 P0 — flight-details schema + read path (inert)
+
+First phase of FP-1 (ADR-0043, plan
+`docs/plans/2026-09-04-flight-details-data-ingestion.md`). **Nothing writes to
+the new tables yet and no existing behaviour changes** — the schema and the
+read surface land first so the parser phase has somewhere to put data.
+
+**Schema — two sidecar tables, not more columns on `flights`.**
+`flights` is the subject of three OOM ADRs and already carries three heavy
+JSON columns; widening it would make every `select(Flight)` heavier, protected
+only by remembering to `defer()`. Migration `0010_flight_details` creates
+`flight_details` (1:1, ~76 typed scalars + eight JSONB groups) and
+`flight_series` (one row per named series, PK `(flight_id, source, name)`).
+Migration `0011_battery_src_truth` adds three nullable battery columns
+(`batteries.cycle_count_observed`, `batteries.metrics_source`,
+`battery_logs.pack_cycle_count`) one phase early, so the phase that actually
+switches battery semantics needs no migration of its own. Both migrations are
+idempotent per ADR-0042 — `0001` builds fresh databases from the live models,
+so on a fresh install both must no-op instead of raising.
+
+`Flight.details` / `Flight.series` are declared `lazy="noload"`. That is
+load-bearing: `selectin` would join the sidecars into every `select(Flight)`
+including the 500-row mission-picker query, which is ADR-0019's production OOM
+with a larger payload.
+
+**Read path.** `GET /{id}/details`, `GET /{id}/details/series`,
+`GET /details/status`. `/details` never 404s on a missing row — per operator
+decision D3 the link renders on every flight, so "no extended data" is a
+normal response carrying an `unavailable_reason` (`source_unsupported` /
+`not_backfilled` / `odl_import_no_original`). The flight row is read
+column-explicitly and the series index selects every column except `values`.
+
+**`downsample` extracted** from the closure inside `get_telemetry` to
+`app/services/telemetry_downsample.py`, now shared by `/telemetry` and
+`/details/series`. ADR-0032's own conclusion is that the absence of a shared
+layer is what lets a unit-defect class recur; a second copy-pasted
+downsampler would be the same mistake. Behaviour is pinned identical to the
+old closure by a parity sweep over 60 (length, target) pairs. **One
+deliberate difference:** `max_points=1` used to raise `ZeroDivisionError` (a
+500 from a query string clients are free to send, since `/telemetry` declares
+no lower bound); it now returns the first sample.
+
+**Report-audience guard (ADR-0043 §4.4 / D1).** Operator decision D1 stores
+the pilot's raw position track. `reports.REPORT_READABLE_DETAIL_FIELDS` is an
+empty allowlist documenting that nothing from the details surface is
+report-eligible, and a guard test asserts the six client-artifact-producing
+modules reference neither table, plus a runtime test that the CSV/GPX/KML
+exporters emit no pilot fields. ADR-0029 unchanged: no altitude is compared
+to any limit anywhere in this work.
+
+**Encoding measured, not argued (plan §1.5 / C-2).** One flight's series
+written both ways into scratch tables on a real `postgres:16-alpine`, 13,870
+samples: `json` 99,012 B vs `float8[]` 109,896 B vs `jsonb` 125,376 B, and
+`json` read+parse 4.34 ms vs `float8[]` 9.43 ms. **`json` confirmed** — it is
+both smaller and ~2.2x faster, overturning the plan's speculation that a
+native float array might read faster. Numbers in `PROGRESS.md`.
+
+Tests: +113 (`729 passed, 1 skipped` with a live Postgres; `723 passed,
+7 skipped` hermetic). Includes a real-Postgres tier covering the *production*
+upgrade path — an existing DB stamped at 0009 with the objects absent, which
+is the only path that executes the `create_table` / `add_column` bodies at
+all; the pre-existing fresh-DB tier only ever exercises the idempotency
+guards.
+
 ## 2026-09-01 — v2.81.0: six new billable-rate templates
 
 Operator-directed expansion of the seeded billable rates (PV/solar
