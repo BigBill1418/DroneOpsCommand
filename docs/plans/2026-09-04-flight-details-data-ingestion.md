@@ -1165,6 +1165,50 @@ metadata + track over ODL's REST API on 2026-03-18 (584 rows; 548 + 36 added to
 a later ODL instance whose volume is gone). Only 17 of the 548 ODL hashes are on
 BOS today (re-uploaded later as `dji_txt`).
 
+**CORRECTED 2026-09-05 — the recovery hunt finished; several facts above are
+wrong, and the mechanism behind gap (a) is now proven rather than inferred.**
+
+*Counts moved (re-verified against the live prod DB on 2026-09-05, not taken
+from this section):* `dji_txt` is **218**, not 210 — 8 flights were uploaded
+2026-09-04 23:47 PDT. Retained originals are **192**, not 184/182. The S3
+mirror holds **184**, not 183. **The 28 file-less rows are unchanged.** Every
+"182" in the bullets below and elsewhere in this document should be read as
+**192 minus the 2 dummies = 190 real originals**; re-derive from the database
+rather than from any figure written here.
+
+*Gap (a)'s cause is firmer than "backups only began 2026-07-16".* Of the 52
+`dji_txt` rows created 2026-03-23 → 2026-04-19, exactly 24 have files, and that
+set of 24 is byte-identical to the contents of `~/migration/doc_appdata.tar.gz`.
+**The survival boundary is not a date — it is "was the file inside the migration
+tarball."** Decisive evidence: HSH's `~/backups/pg-backup.sh` still exists and
+runs only `pg_dump` plus an n8n sqlite `.backup`; it never touched
+`/data/uploads` or the app-data volume. The HSH prod era therefore had **no
+file-level backup of flight logs at all** — the bytes were never captured. The
+28 are unrecoverable from any fleet source.
+
+*The `original_filename` values for all 28 are recovered and follow **three
+distinct naming patterns**,* so a hunt for `DJIFlightRecord*` alone misses 12 of
+them. Manifest and full report live in the recovery session's scratchpad
+(`missing_28_full.tsv`, `FP1-log-recovery-hunt-2026-09-05.md`); the manifest
+should be copied into `docs/plans/data/` before that scratchpad is reaped.
+
+*Two claims in this section are simply wrong and are corrected here:*
+
+- **DroneOpsSync is an Android APK that runs on the controller, not a Windows
+  companion app** — a Windows companion was formally *rejected* in DroneOpsSync
+  ADR-0007. **NEXTL3VEL was never in the ingest path**, which weakens it
+  considerably as a lead. (The likely seed of the confusion is a comment at
+  `backend/tests/test_flight_ingest_consolidated.py:11` describing it as "the
+  Windows companion"; corrected on this branch.)
+- **The Synology Active Backup version range is wrong.** Not
+  2026-05-29 → 2026-09-01: there are exactly **10 versions, 2026-05-29 →
+  2026-06-07** (verified on the NAS), retention is 10 versions, and the task has
+  logged missed backups **daily since 2026-06-08**. Shell enumerability of that
+  repo is **nil** — each version holds only `0.img.delta`, `backup_db.sqlite`
+  and `device_spec`, and the sqlite carries no file catalog, so the Active
+  Backup portal is the only path. `device_spec` shows the image covers disk0 /
+  one NTFS `C:\` only.
+
 **Only remaining lead for both gaps:** the Windows PC **NEXTL3VEL** (the
 2026-02-22 import folder, and any FlightRecord copies from the phones/RCs), plus
 its Synology Active Backup for Business image repo
@@ -1178,9 +1222,12 @@ folders on each phone/RC (`Android/data/dji.go.v5/files/FlightRecord`,
 
 ### Consequences for this plan
 
-- Every "210 retained originals" figure elsewhere in this plan and ADR-0043
-  reads as **182**. Backfill (A and B) and P-EVAL run over 182 files; the 28
-  file-less `dji_txt` rows are skipped and reported, never synthesised.
+- Every "210 retained originals" figure elsewhere in this plan and ADR-0043 is
+  stale. **Re-derive the count from the live database at run time** rather than
+  hard-coding one: it was 182 on 2026-09-04 and 190 on 2026-09-05, and it moves
+  every time Bill uploads. Backfill (A and B) and P-EVAL run over whatever has
+  a stored file; the file-less `dji_txt` rows are skipped and reported, never
+  synthesised.
 - P7 now has **584 candidate files** on BOS (see §8a); 564 new, 20 duplicates.
 - Recovery of either gap is an operator action (turn on NEXTL3VEL, search the
   Active Backup portal for `DJIFlightRecord_*` / `FlightRecord_*`). If found,
@@ -1246,12 +1293,31 @@ Verified facts:
   low-priority optional item.
 - `ProductType` 150 (Matrice 4T) is a third unknown code alongside 137/139/178.
 
-Open before P7 runs: (1) create aircraft rows for the Matrice 4T and the
-second FPV; (2) decide where the staging copy lives long-term — it is NOT in
-any backup lane today (restic covers the app volume only); simplest is to let
-P7 ingest it into `/data/uploads/flight_logs/` where it is backed up, then
-keep `~/droneops-staging` as the pre-import archive until a restic snapshot
-has it.
+Open before P7 runs — **both items updated 2026-09-05:**
+
+1. ~~Create aircraft rows for the Matrice 4T and the second FPV.~~ **DONE** on
+   2026-09-05, with the 16-char header serial; see the correction note above.
+   Note this does **not** attribute the 88 existing unattributed ODL rows — the
+   20-char serial mismatch is a separate decision (§7.1 correction).
+2. ~~The staging copy is in no backup lane.~~ **CLOSED** 2026-09-05: the 584
+   recovered originals in BOS `~/droneops-staging/` are now in the existing
+   droneops restic repo under tag `staging` — snapshot `4c08afa7`, 2.181 GiB,
+   in R2, independently verified. The source was mounted read-only; nothing was
+   moved, deleted or reconfigured, so there is nothing for the deployer to
+   clobber.
+
+   **Caveat to carry:** that is a **one-shot snapshot of a static archive, not a
+   recurring lane.** Anything added to `~/droneops-staging/` after 2026-09-05 is
+   unprotected. The durable fix is still P7 ingesting the files into
+   `/data/uploads/flight_logs/`, which the recurring lane already covers.
+
+**New P7 lead (a lead, not a dependency).** `2026-03-06_20-38-33_Open_Dronelog.db.backup`
+(95.6 MB, md5 `56a156aa…`) exists in two Synology Downloads archives alongside
+`OpenDroneLog_Signature_576flights.png`. It is a week newer than the DuckDB
+§8a cites and reports **576** flights, so it may carry recorded sha256s for
+some of the 36 files that currently match by filename only — which would
+upgrade those from a filename match to a **hash** match in §7.1's verification
+step. Worth opening before P7's dry run; not required for P7 to proceed.
 
 ---
 

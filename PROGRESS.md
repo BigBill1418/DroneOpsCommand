@@ -286,26 +286,78 @@ restart, and the new M4T row will **not** pick up the 39 existing ODL rows
 (20-char serial mismatch, per correction 1). Aircraft table is now 11 rows,
 zero duplicate serials.
 
-### Log inventory (unchanged from 2026-09-04)
+### Log inventory — corrected 2026-09-05 (recovery hunt finished)
 
-- 182 usable `dji_txt` originals on the fleet. **All 584 OpenDroneLog-era
-  originals recovered** from Bill's Google Drive to BOS-HQ
-  `~/droneops-staging/drive-logs/` (0 download failures; sha256 + header CSV
-  alongside; `docs/plans/data/2026-09-04-drive-logs-inventory.csv`). 584/584
-  filenames match the `opendronelog_import` rows 1:1 → P7 matches on
-  `original_filename`. 548 hashes equal ODL's own recorded sha256. 20
-  duplicate existing `dji_txt` flights; 564 new. **Staging dir is not in any
-  backup lane yet.**
-- Still lost: 28 `dji_txt` originals from 2026-03-22..04-19 (14 Matrice 4TD,
-  9 Mavic 3 Pro, 3 Mini 5 Pro, 2 Matrice 30T). Cause: files lived in the
-  HSH-HQ docker volume, never copied in the 2026-04-20 HSH→BOS move (DB rows
-  replicated, files did not); backups began 2026-07-16. Only lead: FlightRecord
-  folders on the controller/phone that flew them.
+**Counts re-verified by me against the live prod DB on 2026-09-05, not taken
+from the plan:**
+
+```
+$ docker exec droneops-standby-db psql -U droneops -d droneops -tAc \
+    "SELECT source, count(*) FROM flights GROUP BY source ORDER BY 2 DESC"
+opendronelog_import|584
+dji_txt|218
+$ docker exec droneops-backend-1 sh -c 'ls /data/uploads/flight_logs | wc -l'
+192
+```
+
+So: `dji_txt` is **218** (not 210 — 8 uploaded 2026-09-04 23:47 PDT), retained
+files **192** (not 184), of which 2 are dummy test files → **190 real
+originals**. The S3 mirror holds 184, not 183. **The 28 file-less rows are
+unchanged.** Anything in the plan that hard-codes 210 or 182 is stale by
+construction — the backfill and the crate evaluation should re-derive the
+count at run time, because it moves every time Bill uploads.
+
+- **All 584 OpenDroneLog-era originals recovered** from Bill's Google Drive to
+  BOS-HQ `~/droneops-staging/drive-logs/` (0 download failures; sha256 + header
+  CSV alongside; `docs/plans/data/2026-09-04-drive-logs-inventory.csv`).
+  584/584 filenames match the `opendronelog_import` rows 1:1 → P7 matches on
+  `original_filename`. 548 hashes equal ODL's own recorded sha256. 20 duplicate
+  existing `dji_txt` flights; 564 new.
+- **The staging backup gap is CLOSED** (2026-09-05): those 584 files are in the
+  existing droneops restic repo under tag `staging` — snapshot `4c08afa7`,
+  2.181 GiB, in R2, independently verified. Source mounted read-only; nothing
+  moved or reconfigured, so there is nothing for the deployer to clobber.
+  **Caveat: this is a one-shot snapshot of a static archive, not a recurring
+  lane.** Files added after 2026-09-05 are unprotected; the durable fix is P7
+  ingesting them into `/data/uploads/flight_logs/`.
+- **The 28 missing `dji_txt` originals are unrecoverable, and the mechanism is
+  now proven rather than inferred.** Of the 52 rows created 2026-03-23 →
+  2026-04-19, exactly 24 have files, and that set of 24 is byte-identical to
+  `~/migration/doc_appdata.tar.gz`. **The survival boundary is not a date — it
+  is "was the file inside the migration tarball."** HSH's `~/backups/pg-backup.sh`
+  still exists and runs only `pg_dump` plus an n8n sqlite `.backup`; it never
+  touched `/data/uploads`. The HSH prod era had **no file-level backup of
+  flight logs at all** — the bytes were never captured. This is firmer than the
+  plan's "backups began 2026-07-16" and it closes the question.
+- Their `original_filename` values are recovered and follow **three distinct
+  naming patterns**, so a search for `DJIFlightRecord*` alone misses 12 of 28.
+  Manifest (`missing_28_full.tsv`) and report
+  (`FP1-log-recovery-hunt-2026-09-05.md`) are in the recovery session's
+  scratchpad — **they should be copied into `docs/plans/data/` before that
+  scratchpad is reaped.** I have not done that: they are another session's
+  files and I did not want to commit artifacts I had not produced or read in
+  full.
+- **Two long-standing facts were wrong and are corrected in the plan.**
+  DroneOpsSync is an **Android APK on the controller**, not a Windows companion
+  — a Windows companion was formally rejected in its ADR-0007, and NEXTL3VEL
+  was never in the ingest path, which largely dissolves it as a lead. The seed
+  of that misconception looks like a comment in
+  `backend/tests/test_flight_ingest_consolidated.py`, **fixed on this branch**.
+  Separately, the Synology Active Backup range is 10 versions,
+  2026-05-29 → 2026-06-07 (not → 2026-09-01), with missed backups logged daily
+  since 2026-06-08, and its repo is not shell-enumerable — the portal is the
+  only path.
+- **New P7 lead (not a dependency):** `2026-03-06_20-38-33_Open_Dronelog.db.backup`
+  (95.6 MB, md5 `56a156aa…`) in two Synology Downloads archives, reporting
+  **576** flights — a week newer than the DuckDB the plan cites. It may carry
+  sha256s for some of the 36 files that currently match by filename only, which
+  would upgrade them to hash matches in P7's verification step.
 
 **Waiting on Bill:**
 1. Merge call on `feat/fp1-flight-details` (a merge to `main` deploys).
-2. Check the M4TD controller / Mavic 3 Pro phone for the 28 missing files.
-3. A `dji_m4t_official.png` asset for the new Matrice 4T fleet tile.
+2. A `dji_m4t_official.png` asset for the new Matrice 4T fleet tile.
+3. Nothing further on the 28 missing logs — they are gone, and the reason is
+   now evidenced rather than assumed.
 
 **Reminder:** a one-shot cron on HSH-HQ (`~/.local/bin/droneops-fp1-reminder.sh`,
 fires 2026-09-11 09:00 PT, self-removes) emails Bill@BarnardHQ.com via

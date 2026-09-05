@@ -8,7 +8,14 @@ upload.read()``: the whole uploaded log materialized as one ``bytes`` object.
 That is the same OOM class that killed image uploads (missions.py v2.68.7)
 and backup uploads (backup.py ``_save_upload_to_disk``). Flight-log upload is
 the operator's PRIMARY field workflow, so the contract is frozen: DroneOpsSync
-(the Windows companion) and the mobile flows POST these endpoints.
+and the mobile flows POST these endpoints.
+
+(Corrected 2026-09-05: this comment previously called DroneOpsSync "the Windows
+companion". It is an **Android APK that runs on the controller** — a Windows
+companion was formally REJECTED in DroneOpsSync ADR-0007, and no Windows PC has
+ever been in the ingest path. The wrong description here appears to have seeded
+a fleet-wide misconception that sent a log-recovery hunt after a Windows
+machine that never held the files.)
 
 These tests exercise all three routes through the full FastAPI ASGI stack
 (``TestClient`` + ``app.dependency_overrides``) — house pattern per
