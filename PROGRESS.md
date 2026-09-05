@@ -59,6 +59,17 @@ $ cargo test
 test result: ok. 65 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 ```
 
+**Repo defect found while doing this, fixed in its own commit on this
+branch:** `aiosqlite` was declared in neither `backend/requirements.txt` nor
+`backend/requirements-dev.txt`, yet seven test modules build engines on
+`sqlite+aiosqlite://`. It is missing on `main` too — pre-existing, not
+something this branch or FP-1 introduced. A clean-room install loses those
+modules at *setup*, so pytest reports ERROR rather than FAIL: measured at
+this commit, `724 passed, 17 skipped, 29 errors` without it vs `753 passed,
+17 skipped` with it. Now pinned `aiosqlite==0.20.0` in
+`requirements-dev.txt`. Kept as a separate commit so it can be reverted
+independently of the matcher change.
+
 ## 2026-09-05 — FP-1 Flight Details — P0 + P1 SHIPPED to branch, awaiting merge call
 
 Operator gave the go on 2026-09-05. Work is on **`feat/fp1-flight-details`**,

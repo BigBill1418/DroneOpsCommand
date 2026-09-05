@@ -54,6 +54,38 @@ by this change and its suite is unchanged: `cargo test` `65 passed; 0
 failed`. Both run locally; this repo has no pytest or cargo CI job. No
 schema change, no migration.
 
+## 2026-09-05 — chore(tests): declare `aiosqlite` in `requirements-dev.txt`
+
+Pre-existing test-infrastructure gap, present on `main` (`34553cf`) before
+this branch — not introduced by FP-1 or by ADR-0044. Seven test modules
+build SQLAlchemy engines on `sqlite+aiosqlite://`, but `aiosqlite` was
+declared in neither `requirements.txt` nor `requirements-dev.txt`. It
+happened to be installed in the environments where the suite had been run,
+so nobody hit it; a clean-room
+`pip install -r requirements.txt -r requirements-dev.txt` loses those
+modules at *setup*, which pytest reports as ERROR rather than FAIL — a
+quieter failure than a red test. There is no pytest job in CI to catch it.
+
+Measured, not assumed. Same image, same commit, `aiosqlite` uninstalled:
+
+```
+724 passed, 17 skipped, 29 errors in 36.46s
+```
+
+and with it declared and installed:
+
+```
+753 passed, 17 skipped in 268.46s (0:04:28)
+```
+
+Exactly 29 tests across 7 modules were silently not running.
+
+Pinned `aiosqlite==0.20.0` — the release contemporaneous with the pinned
+`sqlalchemy[asyncio]==2.0.36` — in `requirements-dev.txt`, **not**
+`requirements.txt`: production runs asyncpg against Postgres and must not
+gain a SQLite driver. No runtime code changed and the prod image installs
+`requirements.txt` only, so this cannot affect a deploy.
+
 ## 2026-09-05 — v2.83.0 / parser 1.2.0: FP-1 P1 — Tier 0 parser pass
 
 The extended DJI-log data now actually gets extracted and stored. Everything

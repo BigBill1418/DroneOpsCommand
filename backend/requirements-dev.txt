@@ -7,3 +7,10 @@
 pytest==8.3.4
 pytest-asyncio==0.24.0
 fakeredis==2.26.1
+# Async SQLite driver. Seven test modules build engines on
+# `sqlite+aiosqlite://`; without it SQLAlchemy raises at create_engine and
+# those modules ERROR at setup rather than fail, so a clean-room install
+# silently loses 29 tests. Prod never uses SQLite (asyncpg only), which is
+# why this belongs here and not in requirements.txt. Pinned to the release
+# contemporaneous with sqlalchemy[asyncio]==2.0.36.
+aiosqlite==0.20.0
