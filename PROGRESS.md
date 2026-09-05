@@ -4,15 +4,31 @@ Maintained alongside `CHANGELOG.md` and `docs/adr/`. `CHANGELOG.md` is
 the ledger of shipped changes; this file tracks what's in-flight or
 blocked.
 
-## 2026-09-05 — Fleet-attribution matcher: canonical DJI serials (ADR-0044) — BUILT on a branch, NOT merged
+## 2026-09-05 — Fleet-attribution matcher: canonical DJI serials (ADR-0044) — **LIVE IN PRODUCTION**
 
-**State:** code + tests + ADR-0044 complete on branch
-`feat/serial-prefix-matcher` (worktree `~/droneops-wt-matcher`), **rebased
-onto `origin/main` `34553cf`** — i.e. on top of FP-1 P0+P1 (v2.82.0 +
-v2.83.0). Version renumbered from 2.82.0 to **2.90.0**, clear of the
-2.84.0–2.89.0 band FP-1 reserves for its P2–P7 phases. **Not pushed to
-`main`.** On this repo a push to `main` IS a production deploy via the NOC
-fleet deployer (ADR-0018), so the merge call is Bill's.
+**State: MERGED AND LIVE.** Operator gave the go on 2026-09-05.
+`feat/serial-prefix-matcher` was fast-forwarded onto `main`
+(`34553cf` → **`dfc7054`**) and pushed; the fleet deployer built and
+recreated the stack. Version **2.90.0**, deliberately clear of the
+2.84.0–2.89.0 band FP-1 reserves for P2–P7.
+
+**Post-deploy verification, read off the running system (not a log line):**
+
+| Check | Observed |
+|---|---|
+| `openapi.json` → `info.version` | **2.90.0** |
+| flight-parser `GET /health` → `version` | 1.2.0 (unchanged) |
+| alembic head | `0011_battery_src_truth` (unchanged — this change adds no migration) |
+| flights with `aircraft_id IS NULL` and a serial | **0** (was 88) |
+| attributed to `DJI Matrice 4TD` (`1581F8HGX255P00A`) | **50** |
+| attributed to `DJI Matrice 4T` (`1581F7K3C25AA00D`) | **39** |
+| aircraft rows / duplicate serials | 11 / 0 |
+| backend ERROR or CRITICAL since startup | **0** |
+
+Backend startup logged `STARTUP: Aircraft backfill — 88/88 unlinked matched`.
+The 4TD total reads 50 rather than the 49 predicted because one of its ODL
+rows was already attributed before this change; 49 newly linked + 39 = the 88
+the log reports, so the counts reconcile exactly.
 
 - The defect and the rule are recorded in
   `docs/adr/0044-serial-prefix-matcher-odl-canonical-serials.md`.
@@ -20,14 +36,15 @@ fleet deployer (ADR-0018), so the merge call is Bill's.
   the rule: exactly 88 `aircraft_id IS NULL` flights, all
   `opendronelog_import`, all 20-char serials
   (`1581F8HGX255P00A0FEK` ×49, `1581F7K3C25AA00DMZMG` ×39).
-- **Merging this deploys a bulk write.** The startup backfill re-runs on
-  every container restart against `aircraft_id IS NULL` and will attribute
-  those 88 rows immediately. Verification SQL is in ADR-0044 §Consequences.
+- **This deployed as a bulk write, as designed.** The startup backfill runs
+  on every container restart against `aircraft_id IS NULL`; it attributed all
+  88 rows on the first restart after the merge. Note the corollary recorded in
+  ADR-0044: the backfill will not re-evaluate a row once `aircraft_id` is set,
+  so correcting any one of those 88 is now a manual detach through the UI.
 - Depends on the aircraft rows Bill's earlier data work created
   (`DJI Matrice 4T` / `1581F7K3C25AA00D`, `DJI FPV` / `37Q7LA800BX0PN`);
   this change is code-only and touched no DB rows.
-- **Coordination:** FP-1 P0+P1 is already on `main`; this branch now sits
-  on top of it. The diff is confined to the matcher (`flight_library.py`),
+- **Coordination:** FP-1 P0+P1 merged first; this landed on top of it. The diff is confined to the matcher (`flight_library.py`),
   its test file, ADR-0044, docs and the version markers, and it merges
   cleanly — FP-1's `flight_library.py` edits are in the ingest, status and
   telemetry regions, not in `_match_fleet_aircraft`. ADR **0044** is free
@@ -70,13 +87,100 @@ this commit, `724 passed, 17 skipped, 29 errors` without it vs `753 passed,
 `requirements-dev.txt`. Kept as a separate commit so it can be reverted
 independently of the matcher change.
 
-## 2026-09-05 — FP-1 Flight Details — P0 + P1 SHIPPED to branch, awaiting merge call
+## 2026-09-05 — FP-1 Flight Details — P0 + P1 **LIVE IN PRODUCTION**
 
-Operator gave the go on 2026-09-05. Work is on **`feat/fp1-flight-details`**,
-NOT merged and NOT deployed — a push to `main` IS a production deploy on this
-repo (ADR-0018, NOC fleet deployer), so the branch waits for Bill's call.
+Operator gave the go on 2026-09-05. `feat/fp1-flight-details` was
+fast-forwarded onto `main` (`9f502e0` → **`34553cf`**) and pushed at
+**02:35 PDT**. A push to `main` IS a production deploy on this repo
+(ADR-0018, NOC fleet deployer), so that push deployed BOS-HQ.
 
-### P0 — schema + read path (v2.82.0) — DONE, inert
+**Deploy verified live — see "Production verification" below for the
+container-content evidence.** Both phases remain behaviourally inert as
+designed: the new tables exist and are empty, and details are only written
+by imports that happen from now on.
+
+### Production verification (2026-09-05, ~02:35–02:40 PDT)
+
+Verified by **container content and live DB**, never by a deployer log line
+(the silent-stale-deploy class). Every value below was read off the running
+system on BOS-HQ.
+
+**Deployer handling of the push** — it did NOT go pull-only. The two HEAD-most
+commits carry `[skip-deploy]`, but the gate is `allCommitsSkipDeploy`, and the
+two code commits beneath them do not carry it, so the range deployed:
+
+```
+"from":"9f502e0a","to":"34553cf3","msg":"Changes detected — starting deploy"
+"msg":"Building all services on remote..."
+"changed":["backend","frontend","worker"],"msg":"Image-digest gate passed (ADR-0056)"
+"msg":"Recreating changed services on remote (up -d, no down — ADR-0066)..."
+"msg":"Smoke test PASSED"
+"status":"success","duration":"267368ms","services_actually_rebuilt":["backend","frontend","worker"]
+```
+
+**Live artifacts, as actually served:**
+
+| Check | Expected | Observed |
+|---|---|---|
+| `droneops.barnardhq.com/openapi.json` → `info.version` | 2.83.0 | **2.83.0** |
+| flight-parser `GET :8100/health` → `version` | 1.2.0 | **1.2.0** |
+| alembic head (`droneops-standby-db`) | `0011_battery_src_truth` | **`0011_battery_src_truth`** |
+| `flight_details` table | exists | **exists, 77 columns, 0 rows** |
+| `flight_series` table | exists | **exists, 7 columns, 0 rows** |
+| `0011` battery columns | 3 added | **`batteries.cycle_count_observed`, `batteries.metrics_source`, `battery_logs.pack_cycle_count`** |
+| read-path routes in live OpenAPI | 3 | **`/api/flight-library/{flight_id}/details`, `/details/series`, `/api/flight-library/details/status`** |
+
+Container recreation confirmed by timestamp, not by log: `backend`,
+`frontend`, `worker`, `beat` and `flight-parser` all recreated 02:38:02–02:38:03
+PDT from images built 02:37:03–02:37:09 PDT.
+
+**Migrations applied cleanly**, from the backend's own startup log — a single
+forward run under the ADR-0035 advisory lock, no errors:
+
+```
+MIGRATIONS: upgrading schema from 0009_mission_dl_email_sent_at to head 0011_battery_src_truth (ADR-0022).
+Running upgrade 0009_mission_dl_email_sent_at -> 0010_flight_details, ADR-0043 — flight_details + flight_series sidecar tables
+Running upgrade 0010_flight_details -> 0011_battery_src_truth, ADR-0043 D4 — battery source-of-truth columns (landed early, inert)
+MIGRATIONS: upgraded complete (head=0011_battery_src_truth)
+```
+
+**Prod data invariants held across the deploy** (pre-swap → post-swap):
+`aircraft` 11 → **11** rows, duplicate serials 0 → **0**, and flights with
+`aircraft_id IS NULL` **88 → 88, unchanged**. The startup aircraft-backfill ran
+and deliberately left all 88 unattributed, logging INFO (not error) for exactly
+two serials that account for the whole set:
+
+```
+39  serial=1581F7K3C25AA00DMZMG
+49  serial=1581F8HGX255P00A0FEK
+```
+
+Both are the log-side **superset** form of a fleet serial (e.g. fleet
+`1581F7K3C25AA00D` vs log `…00DMZMG`), which is precisely the mismatch the
+matcher change addresses. **Superseded later the same day:** ADR-0044 shipped
+in `dfc7054` and the startup backfill attributed all 88 — see the matcher
+section above. The 88 recorded here is the state of *this* deploy
+(`34553cf`), not the current state, which is 0. `grep -ci 'error|exception|traceback|critical'`
+over the backend log since startup: **0**.
+
+**One residual to fix separately — `flight-parser` is absent from the
+deployer's `build_map`** for this repo (`noc-master/data/config.yml` maps only
+`backend`, `frontend`, `worker`). The ADR-0056 digest gate and the
+`services_actually_rebuilt` field are both computed *over `build_map`*, so the
+parser is structurally invisible to them — which is why a deploy that
+demonstrably rebuilt and recreated the parser still reports
+`services_actually_rebuilt: ["backend","frontend","worker"]`.
+
+The parser went live anyway because both surrounding steps are unscoped: with
+no `external_build_cmd` configured the build is a bare `docker compose build`
+(all services), and the recreate is a bare `up -d --remove-orphans`, which
+recreates anything whose image ID changed. So the outcome was correct, but it
+was correct *incidentally* — the gate that exists to catch a silent stale
+parser cannot see the parser. Adding a `flight-parser` entry to `build_map`
+would close that. **Not tested:** whether a parser-ONLY change (no
+`backend/`/`frontend/` diff) still deploys; that path was not exercised here.
+
+### P0 — schema + read path (v2.82.0) — LIVE, inert
 
 Migrations `0010_flight_details` (both tables) and `0011_battery_src_truth`
 (three nullable battery columns, landed a phase early so the battery
@@ -171,7 +275,7 @@ Script kept at `/tmp/claude-1000/.../enc_measure.py` for the session only —
 it writes nothing outside a scratch table on a throwaway container, and touched
 no production database.
 
-### P1 — Tier 0 parser pass (app v2.83.0, parser v1.2.0) — DONE
+### P1 — Tier 0 parser pass (app v2.83.0, parser v1.2.0) — LIVE
 
 All of §2.2 in the existing frame loop, §2.5 per-quantity rounding, full-
 resolution series, `details: None` in `litchi.rs` / `airdata.rs`, the
@@ -420,14 +524,17 @@ count at run time, because it moves every time Bill uploads.
   would upgrade them to hash matches in P7's verification step.
 
 **Waiting on Bill:**
-1. Merge call on `feat/fp1-flight-details` (a merge to `main` deploys).
+1. ~~Merge call on `feat/fp1-flight-details`~~ — **DONE 2026-09-05 02:35 PDT**,
+   merged and deployed (verified below).
 2. A `dji_m4t_official.png` asset for the new Matrice 4T fleet tile.
 3. Nothing further on the 28 missing logs — they are gone, and the reason is
    now evidenced rather than assumed.
 
 **Reminder:** a one-shot cron on HSH-HQ (`~/.local/bin/droneops-fp1-reminder.sh`,
 fires 2026-09-11 09:00 PT, self-removes) emails Bill@BarnardHQ.com via
-msmtp/O365 with this summary.
+msmtp/O365 with this summary. **Now stale** — it was written to chase the
+merge call, which has happened. It is harmless (one mail, then self-removes)
+but its text will read as though the merge is still pending.
 
 ## 2026-08-17 — Encrypted R2 backup (ADR-0041) — LIVE, IN PARALLEL RUN — cutover pending
 
