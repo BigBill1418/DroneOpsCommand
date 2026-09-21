@@ -248,3 +248,94 @@ rollout, so the Worker never sends a header an already-reverted origin
 doesn't expect (harmless either order in practice, since an unrecognized
 header is simply ignored by both old and new code, but stated for
 completeness).
+
+## Correction — 2026-09-21 (same day): `client_ip.py` only trusted one hop
+
+**Item 1 (trusted-proxy IP resolution) did not actually close the defect it
+claims to close.** Found by `noc-master`'s
+`docs/plans/2026-09-21-marketing-droneops-interaction-map.md` §2.1, which
+live-verified the real BOS-HQ production chain against
+`docker logs droneops-frontend-1` and `docker network inspect
+droneops_default` rather than trusting `docker compose config` (the
+verification method this ADR originally cited).
+
+**What was wrong.** The chain in front of uvicorn is **two** proxy hops,
+not one: `Cloudflare edge → cloudflared (droneops-cloudflared-1) → frontend
+(nginx, droneops-frontend-1) → uvicorn`. nginx's own direct peer
+(`$remote_addr`) is always `cloudflared`'s container IP — confirmed live in
+nginx's access log on every Cloudflare-tunnel-routed request — and nginx's
+`X-Forwarded-For $proxy_add_x_forwarded_for` appends that IP onto whatever
+arrived, so the chain uvicorn receives is genuinely two entries deep:
+`"<real caller>, <cloudflared's IP>"`. The original `client_ip.py` correctly
+recognized `frontend` as the trusted direct peer, and correctly walked
+`X-Forwarded-For` rightmost-first — but it only ever resolved **one**
+trusted hostname (`TRUSTED_PROXY_HOSTNAME`, singular), so the rightmost
+entry it checked (`cloudflared`'s IP) was never in the trusted set, and got
+returned as "the client" on every single internet request. **This
+reproduced, verbatim, the defect item 1 exists to close** — every per-IP
+rate limit and the login lockout collapsed into one bucket keyed on a
+constant container IP, just relocated from `frontend`'s address to
+`cloudflared`'s.
+
+**Why the original verification missed it.** This ADR's Rollout section
+(above) cites `docker compose config` against both compose files as the
+verification method — confirming the new `backend.environment` block
+*renders* correctly. It does not, and cannot, confirm the *live network
+path* matches the code's trust assumption. This is the same class of gap
+`docs/adr/0247-....md` Amendments 1–4 (noc-master) document repeatedly: a
+fix can verify correct under one method (syntax/render) and be wrong under
+the one that actually matters (the live system). No live container, no
+live log, and no `docker network inspect` was run against the actual
+BOS-HQ deployment before this ADR's original "Accepted" status — the
+two-hop chain was never independently confirmed, only assumed from reading
+`frontend/nginx.conf` in isolation.
+
+**A second topology this module must also be correct under, found during
+the same review**: managed-tenant instances
+(`droneops-managed/templates/Caddyfile.client`, BOS-HQ, outside this repo)
+route `/api/*` from a per-tenant `caddy` sidecar straight to that tenant's
+own `backend:8000`, bypassing that tenant's `frontend` (nginx) entirely —
+so uvicorn's direct peer for a managed tenant is `caddy`, never `frontend`,
+a third distinct identity the single-hostname default could never have
+covered either. This is a live-verified structural fact (`docker inspect`
+of `droneops-managed-gateway`'s and `droneops-managed-tunnel`'s networks,
+and the tenant-provisioning template `docker-compose.managed.yml`, both
+read on BOS-HQ this session) though no managed tenant is currently
+provisioned to observe traffic through it end to end — see
+`docs/managed-hosting.md` for the exact required operator configuration.
+
+**The fix.** `TRUSTED_PROXY_HOSTNAME` now accepts a **comma-separated
+list** of hostnames, each independently DNS-resolved and cached — not a
+single string. Default for this repo's own compose topology is
+`"frontend,cloudflared"` (both real hops, no operator action needed,
+verified against the live chain above). `FORWARDED_ALLOW_IPS` (already
+existing, unchanged in shape) covers hops that can't be resolved by
+hostname from the caller's own Docker network — this is how the managed
+topology's shared-gateway hop must be trusted, since a tenant's isolated
+network cannot resolve a name on a different Docker network. The
+fail-closed invariant is unchanged and was never the defect: an
+unconfigured or partially-configured deployment still degrades to the raw
+TCP peer, never to blindly trusting a client-supplied header — see
+`app/utils/client_ip.py`'s module docstring for the full per-topology
+reasoning, and `backend/tests/test_client_ip.py`'s
+`TestTwoHopNginxCloudflaredChain` and `TestManagedCaddyDirectChain` classes
+for tests modeling both chains explicitly (positive real-caller resolution,
+spoofed-header-from-untrusted-peer rejection, and client-injected-leftmost-
+hop rejection, for each topology).
+
+**Verification re-run after the fix**: `cd backend && pytest -q` —
+795 passed, 17 skipped (was 784 passed, 17 skipped before this correction;
+11 new tests, zero regressions, zero failures). Re-verify post-deploy the
+same way this defect was found: `docker logs droneops-frontend-1` should
+show requests whose resolved-client audit-log field is a real external
+caller IP, never the constant `172.19.0.11` (or whatever `cloudflared`'s
+current container IP is — it is not guaranteed stable across a recreate).
+
+**Not fixed by this correction, by decision:** the managed-tenant topology
+requires an operator action (`docker-compose.managed.yml` on BOS-HQ, a
+file outside this repo) that this branch cannot make — `docs/managed-
+hosting.md` documents the exact required values
+(`TRUSTED_PROXY_HOSTNAME=caddy` + `FORWARDED_ALLOW_IPS=<shared-gateway
+CIDR>`) and states plainly that an unconfigured managed tenant fails
+closed to the pre-Phase-7-equivalent single-bucket behavior for that one
+tenant, not to a spoofable or worse state.

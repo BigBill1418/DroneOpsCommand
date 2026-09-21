@@ -50,15 +50,23 @@ class Settings(BaseSettings):
     upload_dir: str = "/data/uploads"
     reports_dir: str = "/data/reports"
 
-    # Trusted-proxy IP resolution (Phase 7 hardening, ADR-0045). See
+    # Trusted-proxy IP resolution (Phase 7 hardening, ADR-0045; corrected
+    # 2026-09-21 — the first version trusted only one hop and was reproducing
+    # the bug it closed against this repo's real two-hop chain). See
     # app/utils/client_ip.py for the full rationale. `trusted_proxy_hostname`
-    # is the Docker Compose service name resolved via embedded DNS on every
-    # rate-limit / lockout check — default "frontend" (nginx) needs no
-    # operator action. `forwarded_allow_ips` is an optional additional
-    # comma-separated allowlist of literal IPs/CIDRs for non-default
-    # topologies; empty means "trust only the dynamically-resolved proxy
-    # plus loopback."
-    trusted_proxy_hostname: str = "frontend"
+    # is a COMMA-SEPARATED list of Docker Compose service names, each
+    # resolved independently via embedded DNS on every rate-limit / lockout
+    # check — default "frontend,cloudflared" (nginx + the tunnel sidecar)
+    # matches this compose file's actual topology and needs no operator
+    # action. Managed-tenant deployments (a different topology entirely —
+    # see docs/managed-hosting.md) MUST override this to "caddy". `
+    # forwarded_allow_ips` is an optional additional comma-separated
+    # allowlist of literal IPs/CIDRs for non-default topologies or a hop
+    # that can't be resolved by hostname from the caller's own Docker
+    # network (e.g. a managed tenant trusting the shared gateway's subnet);
+    # empty means "trust only the dynamically-resolved proxies plus
+    # loopback."
+    trusted_proxy_hostname: str = "frontend,cloudflared"
     forwarded_allow_ips: str = ""
 
     # Operator timezone (ADR-0017). Defines the calendar date of a flight:

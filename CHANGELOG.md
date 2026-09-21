@@ -4,6 +4,49 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-09-21 — Correction: Phase 7's trusted-proxy fix only trusted one hop (ADR-0045)
+
+**Same-day correction to the entry directly below.** `app/utils/client_ip.py`
+(item 1 of the Phase 7 hardening pass) reproduced the exact defect it was
+meant to close, live-verified on BOS-HQ. Real production chain is two proxy
+hops (`cloudflared` → `frontend`/nginx → uvicorn), not one; the original
+code only ever trusted one configured hostname, so walking
+`X-Forwarded-For` rightmost-first stopped at `cloudflared`'s constant
+container IP and returned that as "the client" for every internet request
+— one shared bucket for every rate limiter and the login lockout, just
+relocated one hop from where item 1 found it. Root-caused by
+`noc-master/docs/plans/2026-09-21-marketing-droneops-interaction-map.md`
+§2.1 (live `docker logs` + `docker network inspect` against BOS-HQ, not
+`docker compose config` — the method the original fix was verified
+against, which confirms syntax renders, not that the live topology
+matches).
+
+- `TRUSTED_PROXY_HOSTNAME` now accepts a **comma-separated list** of
+  hostnames (was a single string), each independently DNS-resolved.
+  Default for this repo's compose topology: `"frontend,cloudflared"` — no
+  operator action needed, matches the live-verified two-hop chain.
+- Also designed and documented (not code-fixable from this repo) for the
+  **managed-tenant** topology, a third distinct trust boundary found during
+  the same review: `droneops-managed/templates/Caddyfile.client` (BOS-HQ,
+  outside this repo) routes `/api/*` from a per-tenant `caddy` sidecar
+  straight to that tenant's backend, bypassing `frontend` entirely — see
+  `docs/managed-hosting.md` for the required operator config
+  (`TRUSTED_PROXY_HOSTNAME=caddy` + `FORWARDED_ALLOW_IPS=<gateway CIDR>`)
+  and the explicit statement that an unconfigured managed tenant fails
+  closed, not open.
+- Full correction narrative, including why the original verification
+  method missed this: `docs/adr/0045-phase7-customer-surface-hardening.md`
+  → "Correction — 2026-09-21" section (appended, original ADR body
+  unchanged).
+- Tests: 11 new cases in `backend/tests/test_client_ip.py`
+  (`TestTwoHopNginxCloudflaredChain`, `TestManagedCaddyDirectChain`),
+  modeling both chains with a spoofed header from an untrusted peer and a
+  client-injected leftmost hop through genuinely trusted proxies, for each
+  topology. `cd backend && pytest -q` → **795 passed, 17 skipped** (was
+  784 passed, 17 skipped before this correction).
+- Still shipped to worktree branch `security/phase7-customer-hardening`
+  only — **not merged, not deployed.**
+
 ## 2026-09-21 — Phase 7 customer-surface hardening — v2.91.0 (ADR-0045)
 
 Fleet SSO-conversion fan-out Wave 2B (noc-master

@@ -176,15 +176,19 @@ services:
       - UPLOAD_DIR=/data/uploads
       - REPORTS_DIR=/data/reports
       - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3080}
-      # Phase 7 hardening (ADR-0045) — trusted-proxy IP resolution for every
-      # rate limiter + the login lockout. TRUSTED_PROXY_HOSTNAME defaults to
-      # "frontend" (nginx), resolved via Docker's embedded DNS at call time —
-      # correct for this compose file's topology with NO operator action.
-      # FORWARDED_ALLOW_IPS is an optional ADDITIONAL comma-separated
-      # allowlist of literal IPs/CIDRs, empty by default, for operators
-      # running behind a different/additional proxy layer. See
-      # app/utils/client_ip.py.
-      - TRUSTED_PROXY_HOSTNAME=${TRUSTED_PROXY_HOSTNAME:-frontend}
+      # Phase 7 hardening (ADR-0045; corrected 2026-09-21) — trusted-proxy
+      # IP resolution for every rate limiter + the login lockout.
+      # TRUSTED_PROXY_HOSTNAME is a comma-separated list, defaulting to
+      # "frontend,cloudflared" — this compose file's REAL two-hop chain
+      # (cloudflared -> nginx -> uvicorn), each resolved independently via
+      # Docker's embedded DNS at call time — correct for this topology with
+      # NO operator action. A single-hostname default here previously
+      # reproduced the one-shared-bucket bug it was meant to close (see
+      # ADR-0045's correction entry). FORWARDED_ALLOW_IPS is an optional
+      # ADDITIONAL comma-separated allowlist of literal IPs/CIDRs, empty by
+      # default, for operators running behind a different/additional proxy
+      # layer. See app/utils/client_ip.py.
+      - TRUSTED_PROXY_HOSTNAME=${TRUSTED_PROXY_HOSTNAME:-frontend,cloudflared}
       - FORWARDED_ALLOW_IPS=${FORWARDED_ALLOW_IPS:-}
       # Phase 7 hardening (ADR-0045) — how long a signed-TOS download link
       # (GET /api/tos/signed/by-token/{token}) stays valid after acceptance.
