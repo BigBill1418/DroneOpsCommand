@@ -176,6 +176,20 @@ services:
       - UPLOAD_DIR=/data/uploads
       - REPORTS_DIR=/data/reports
       - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3080}
+      # Phase 7 hardening (ADR-0045) — trusted-proxy IP resolution for every
+      # rate limiter + the login lockout. TRUSTED_PROXY_HOSTNAME defaults to
+      # "frontend" (nginx), resolved via Docker's embedded DNS at call time —
+      # correct for this compose file's topology with NO operator action.
+      # FORWARDED_ALLOW_IPS is an optional ADDITIONAL comma-separated
+      # allowlist of literal IPs/CIDRs, empty by default, for operators
+      # running behind a different/additional proxy layer. See
+      # app/utils/client_ip.py.
+      - TRUSTED_PROXY_HOSTNAME=${TRUSTED_PROXY_HOSTNAME:-frontend}
+      - FORWARDED_ALLOW_IPS=${FORWARDED_ALLOW_IPS:-}
+      # Phase 7 hardening (ADR-0045) — how long a signed-TOS download link
+      # (GET /api/tos/signed/by-token/{token}) stays valid after acceptance.
+      # See app/config.py for the full rationale.
+      - TOS_SIGNED_DOWNLOAD_EXPIRE_DAYS=${TOS_SIGNED_DOWNLOAD_EXPIRE_DAYS:-730}
       # Phase-5 observability — all DSN/endpoint gated (unset = no-op).
       - SENTRY_DSN=${SENTRY_DSN:-}
       - SENTRY_TRACES_SAMPLE_RATE=${SENTRY_TRACES_SAMPLE_RATE:-0.05}

@@ -10,7 +10,6 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Request
 from slowapi import Limiter
-from slowapi.util import get_remote_address
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,19 +19,17 @@ from app.database import get_db
 from app.models.customer import Customer
 from app.models.user import User
 from app.schemas.customer import IntakeFormData, IntakePublicResponse, IntakeTokenResponse
+from app.utils.client_ip import get_trusted_client_ip
 
 logger = logging.getLogger("doc.intake")
 
 router = APIRouter(prefix="/api/intake", tags=["intake"])
-limiter = Limiter(key_func=get_remote_address)
-
-
-def _client_ip(request: Request) -> str:
-    """Extract client IP from request, respecting X-Forwarded-For for reverse proxies."""
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    return request.client.host if request.client else "unknown"
+# v2.91.0 (Phase 7 hardening) — was get_remote_address; see
+# app/utils/client_ip.py. This is the PII-bearing public form surface
+# (customer name/email/phone/address) — a shared, IP-keyed bucket here
+# meant the 30/min limit on GET /form/{token} was a GLOBAL cap shared by
+# every visitor, not a per-caller one.
+limiter = Limiter(key_func=get_trusted_client_ip)
 
 
 # --- Admin endpoints (require JWT) ---
@@ -47,7 +44,7 @@ async def initiate_services(
     """Create a customer stub + intake token. Email is optional — when omitted the
     operator gets a copy-and-text-able link instead of an email-send flow."""
     start = time.perf_counter()
-    client_ip = _client_ip(request)
+    client_ip = get_trusted_client_ip(request)
     email = data.get("email", "").strip() or None
 
     logger.info("[INTAKE-INIT] Admin initiated services for email=%s from ip=%s", email or "<none>", client_ip)
@@ -121,7 +118,7 @@ async def send_intake_email_endpoint(
 ):
     """Send the intake form link to an existing customer via email."""
     start = time.perf_counter()
-    client_ip = _client_ip(request)
+    client_ip = get_trusted_client_ip(request)
     from app.services.email_service import send_intake_email
 
     logger.info("[INTAKE-EMAIL] Admin requesting intake email for customer_id=%s from ip=%s", customer_id, client_ip)
@@ -192,7 +189,7 @@ async def upload_tos_pdf(
     _user: User = Depends(get_current_user),
 ):
     """Upload a TOS PDF for a specific customer or as the default."""
-    client_ip = _client_ip(request)
+    client_ip = get_trusted_client_ip(request)
     logger.info("[INTAKE-TOS-UPLOAD] Customer-specific TOS upload for customer_id=%s, filename=%s from ip=%s", customer_id, file.filename, client_ip)
 
     result = await db.execute(select(Customer).where(Customer.id == customer_id))
@@ -252,7 +249,7 @@ async def upload_default_tos(
     _user: User = Depends(get_current_user),
 ):
     """Upload the default TOS PDF used for all new customers."""
-    client_ip = _client_ip(request)
+    client_ip = get_trusted_client_ip(request)
     logger.info("[INTAKE-TOS-DEFAULT] Default TOS upload, filename=%s from ip=%s", file.filename, client_ip)
 
     content = await file.read()
@@ -310,7 +307,7 @@ async def get_intake_form(
 ):
     """Public endpoint: Get intake form data for a token."""
     start = time.perf_counter()
-    client_ip = _client_ip(request)
+    client_ip = get_trusted_client_ip(request)
     token_preview = token[:8] + "..." if len(token) > 8 else token
 
     logger.info("[INTAKE-FORM-GET] Form requested for token=%s from ip=%s user_agent=%s", token_preview, client_ip, request.headers.get("user-agent", "unknown")[:100])
@@ -369,7 +366,7 @@ async def serve_tos_pdf(
     """Public endpoint: Serve the TOS PDF for a given token."""
     from fastapi.responses import FileResponse
 
-    client_ip = _client_ip(request)
+    client_ip = get_trusted_client_ip(request)
     token_preview = token[:8] + "..." if len(token) > 8 else token
 
     logger.info("[INTAKE-TOS-SERVE] TOS PDF requested for token=%s from ip=%s", token_preview, client_ip)
@@ -408,7 +405,7 @@ async def submit_intake_form(
 ):
     """Public endpoint: Submit the intake form."""
     start = time.perf_counter()
-    client_ip = _client_ip(request)
+    client_ip = get_trusted_client_ip(request)
     token_preview = token[:8] + "..." if len(token) > 8 else token
 
     logger.info("[INTAKE-SUBMIT] Form submission from ip=%s for token=%s, name=%s, email=%s", client_ip, token_preview, data.name, data.email)
@@ -580,7 +577,7 @@ async def get_signed_tos(
     """Admin endpoint: Serve the TOS PDF with the customer's signature composited onto it."""
     from fastapi.responses import StreamingResponse
 
-    client_ip = _client_ip(request)
+    client_ip = get_trusted_client_ip(request)
     logger.info("[SIGNED-TOS] Requested for customer_id=%s from ip=%s", customer_id, client_ip)
 
     result = await db.execute(select(Customer).where(Customer.id == customer_id))

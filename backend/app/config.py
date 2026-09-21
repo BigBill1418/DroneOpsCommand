@@ -50,6 +50,17 @@ class Settings(BaseSettings):
     upload_dir: str = "/data/uploads"
     reports_dir: str = "/data/reports"
 
+    # Trusted-proxy IP resolution (Phase 7 hardening, ADR-0045). See
+    # app/utils/client_ip.py for the full rationale. `trusted_proxy_hostname`
+    # is the Docker Compose service name resolved via embedded DNS on every
+    # rate-limit / lockout check — default "frontend" (nginx) needs no
+    # operator action. `forwarded_allow_ips` is an optional additional
+    # comma-separated allowlist of literal IPs/CIDRs for non-default
+    # topologies; empty means "trust only the dynamically-resolved proxy
+    # plus loopback."
+    trusted_proxy_hostname: str = "frontend"
+    forwarded_allow_ips: str = ""
+
     # Operator timezone (ADR-0017). Defines the calendar date of a flight:
     # a flight's stored instant is UTC, but its *date* is the date in this
     # timezone. Flights flown in the evening in the Pacific zone otherwise
@@ -59,6 +70,17 @@ class Settings(BaseSettings):
     # Customer intake
     frontend_url: str = "http://localhost:3080"
     intake_token_expire_days: int = 7
+
+    # Signed-TOS download link (ADR-0045, Phase 7 hardening). The intake
+    # token doubles as the bearer credential for GET
+    # /api/tos/signed/by-token/{token} so the customer keeps durable access
+    # to their own signed copy after the (much shorter) intake window
+    # closes — but "durable" previously meant literally unbounded: a token
+    # that ever leaked (shared inbox, proxy log, forwarded email) remained a
+    # valid PII-download credential forever, with no operator remedy. This
+    # bounds it generously (default ~2 years) rather than removing the
+    # durable-access property outright.
+    tos_signed_download_expire_days: int = 730
 
     # Client portal
     client_token_expire_days: int = 30

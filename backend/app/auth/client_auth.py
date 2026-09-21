@@ -109,5 +109,61 @@ async def get_current_client(
             detail="Customer not found",
         )
 
+    # v2.91.0 (Phase 7 hardening, ADR-0045) — the ONLY revocation check in
+    # this dependency, until now. Client JWTs are stateless and self-
+    # contained: this function previously verified the signature + exp and
+    # nothing else, so `DELETE .../client-link/{token_id}` (client_portal.py)
+    # stamping `ClientAccessToken.revoked_at` had NO effect on requests —
+    # the row was written but nothing at auth time ever read it, and a
+    # "revoked" link stayed fully functional for up to
+    # `settings.client_token_expire_days` (default 30) after revocation.
+    # `token_hash` is already populated on every issuance path
+    # (client_portal.py's `_get_or_create_client_link`, missions.py) for
+    # exactly this lookup — it was simply never queried here. Constant-time
+    # is not needed for this comparison: token_hash is looked up by
+    # equality as a DB index (like any other credential-hash lookup in this
+    # codebase, e.g. DeviceApiKey.key_hash), not compared byte-by-byte
+    # against a secret held in this process.
+    token_hash = hash_token(token)
+    token_row_result = await db.execute(
+        select(ClientAccessToken).where(ClientAccessToken.token_hash == token_hash)
+    )
+    token_row = token_row_result.scalar_one_or_none()
+    if token_row is None:
+        # Every current issuance path writes a ClientAccessToken row
+        # alongside the JWT (see client_portal.py, missions.py). A valid
+        # signature with no matching row means the row was deleted or the
+        # token was never legitimately issued — reject rather than fall
+        # back to trusting the JWT alone.
+        logger.warning("[CLIENT-AUTH] No ClientAccessToken row for presented token (customer=%s)", customer_id)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired client token",
+        )
+    if token_row.revoked_at is not None:
+        logger.warning(
+            "[CLIENT-AUTH] Rejected REVOKED token: customer=%s token_id=%s revoked_at=%s",
+            customer_id, token_row.id, token_row.revoked_at,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="This link has been revoked",
+        )
+    if token_row.expires_at <= datetime.utcnow():
+        # Belt-and-suspenders against the JWT's own `exp`: the DB row is
+        # the operator-controlled, revocable source of truth, so honour it
+        # even if the two ever disagree (e.g. expiry shortened after issue).
+        logger.warning(
+            "[CLIENT-AUTH] Rejected EXPIRED token row: customer=%s token_id=%s expires_at=%s",
+            customer_id, token_row.id, token_row.expires_at,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired client token",
+        )
+
+    token_row.last_accessed_at = datetime.utcnow()
+    await db.commit()
+
     logger.debug("[CLIENT-AUTH] Authenticated customer=%s, missions=%s", customer_id, mission_ids)
     return ClientContext(customer_id=customer_id, mission_ids=mission_ids, customer=customer)

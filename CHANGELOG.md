@@ -4,6 +4,59 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-09-21 — Phase 7 customer-surface hardening — v2.91.0 (ADR-0045)
+
+Fleet SSO-conversion fan-out Wave 2B (noc-master
+`docs/plans/2026-09-21-sso-fanout-dispatch.md`). Customer logins stay
+app-local permanently (ADR-0246 decision 5) — this closes four concrete
+defects underneath, not an SSO migration. **Shipped to worktree branch
+`security/phase7-customer-hardening`, not merged/deployed** — operator-
+gated, prepared for review.
+
+- **Root cause underneath three of the four findings:** every rate limiter
+  and the login lockout keyed on `request.client.host`, which is nginx's
+  own container IP on every request (nginx always sits in front of
+  uvicorn) — one shared global bucket fleet-wide. A stranger's failed
+  logins could lock the operator out of their own instance. New
+  `app/utils/client_ip.get_trusted_client_ip` trusts `X-Forwarded-For`
+  only from a verified proxy (dynamic DNS resolution of `frontend`, no
+  compose changes needed, + optional static `FORWARDED_ALLOW_IPS`) and
+  takes the rightmost non-client-controlled hop. Wired into `main.py`,
+  `auth.py`, `tos.py`, `client_portal.py`, `intake.py`.
+- **`POST /api/tos/accept` unauthenticated write closed.** `customer_id` is
+  now resolved FROM a validated, unexpired `intake_token` (mirrors
+  `intake.py`'s own pattern) rather than trusted from the caller —
+  previously any caller who knew a customer UUID could write a signed TOS
+  acceptance and overwrite that customer's name/email with attacker-
+  supplied data.
+- **Signed-TOS download link bounded + rate-limited.** Was permanently
+  valid with no rate limit; now `TOS_SIGNED_DOWNLOAD_EXPIRE_DAYS` (default
+  730) from `accepted_at`, `10/minute` limit added.
+- **Revoked client-portal links now actually revoke.** `get_current_client`
+  previously verified only the JWT signature + `exp`; `DELETE
+  .../client-link/{token_id}` stamping `revoked_at` had zero effect on
+  auth. `token_hash` was already populated at issuance for exactly this
+  lookup — now read at auth time. Auditing this surfaced a real would-have-
+  shipped regression: `client_login` (password-based repeat-customer
+  login) minted a fresh aggregated JWT with no matching `ClientAccessToken`
+  row, which would now 401 on first use — fixed in the same commit, with a
+  dedicated round-trip regression test.
+- **CS-Public's unauthenticated origin search (`cs-api.barnardhq.com`)
+  patch prepared, not landed** — separate repo (`~/repos/CallSignPublic`,
+  confirmed not `~/callsign`), delivered as a reviewed patch per dispatch
+  instruction not to create a worktree there. Fail-closed design (mirrors
+  that repo's `ingest.py`): merging without first provisioning
+  `ORIGIN_SEARCH_SECRET` (Worker) + `search.worker_origin_token` (origin
+  settings) 503s all archive search, including the legitimate path.
+
+Tests: `test_client_ip.py`, `test_auth_lockout_per_client.py`,
+`test_tos_accept_forgery_prevention.py`, `test_tos_signed_download_expiry.py`,
+`test_client_portal_revocation.py`, `test_client_login_issues_valid_token.py`
+(all new) + `test_tos_customer_sync.py` / `test_tos_accept_route_body.py`
+(updated — their fixtures exercised exactly the insecure shape this closes).
+Full suite: 784 passed, 17 skipped (quoted, not inferred from exit code).
+Full reasoning, consequences, rollout and rollback: `docs/adr/0045-phase7-customer-surface-hardening.md`.
+
 ## 2026-09-12 — the backup lane had one provider; it now has two (noc-master ADR-0232) [skip-deploy]
 
 Docs only. No script, unit, credential, retention setting or schedule in this repo changed, and
