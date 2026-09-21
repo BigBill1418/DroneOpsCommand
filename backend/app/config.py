@@ -133,6 +133,36 @@ class Settings(BaseSettings):
     # CTAs hide themselves (templates gate on truthiness).
     google_review_url: str = "https://g.page/r/Cbblmcdaz3GfEBM/review"
 
+    # Cloudflare Access SSO for the OPERATOR surface only (ADR-0047; under
+    # noc-master ADR-0246 decision 2, fleet-sso-conversion-roadmap Phase
+    # 4.4). The customer-facing client portal / intake / TOS routes never
+    # read these — they stay app-local permanently (ADR-0246 decision 5).
+    #
+    # Verification requires BOTH of the next two to be non-empty (mirrors
+    # the marketing pilot's structural gate, ADR-0099) — the Access app for
+    # droneops.barnardhq.com already exists at the edge, but until an
+    # operator sets both of these on the running container the CF-Access
+    # branch of get_current_user() never runs, jose/httpx never makes a
+    # network call, and this ships as a no-op for every request. Empty by
+    # default so a self-hosted / OSS install (which has no Cloudflare
+    # Access at all) and the public demo instance are entirely unaffected.
+    cf_access_team_domain: str = ""
+    cf_access_aud: str = ""
+    # Comma-separated allow-list — defence in depth, independent of
+    # Cloudflare's own Access policy. Defaults to the canonical BarnardHQ
+    # operator identity (ADR-0055) when unset.
+    cf_access_allowed_emails: str = ""
+
+    # Step B kill switch (ADR-0047) — OFF by default everywhere, including
+    # BarnardHQ's own production compose file. Only an operator flipping
+    # this explicitly, after CF Access verification has been proven live
+    # (roadmap Phase 4.4 Step A soak), disables local username/password
+    # login. Self-hosted/OSS installs and the public demo instance
+    # (docker-compose.demo.yml, no Cloudflare Access) never set it, so
+    # they keep local login as their only auth path, unchanged. See
+    # app/routers/auth.py.
+    local_login_disabled: bool = False
+
     @property
     def database_url_sync(self) -> str:
         """Synchronous database URL for Celery tasks."""

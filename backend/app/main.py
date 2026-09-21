@@ -15,6 +15,7 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from starlette.formparsers import MultiPartParser
 
+from app.auth.cf_access import log_cf_access_startup_state
 from app.config import settings
 from app.database import async_session, engine, get_db
 from app.utils.client_ip import get_trusted_client_ip
@@ -530,6 +531,11 @@ async def _startup_body() -> None:
     if settings.jwt_secret_key == "changeme_generate_a_random_secret":
         logger.warning("SECURITY: JWT_SECRET_KEY is using the default value — change it in production!")
 
+    # ADR-0047 — one-line, secret-free confirmation of whether operator
+    # Cloudflare Access SSO verification is wired up. Safe to call before
+    # the DB is reachable (reads settings only, no I/O).
+    log_cf_access_startup_state()
+
     # Wait for dependencies to be ready (handles restart race conditions)
     await _wait_for_db()
     await _wait_for_redis()
@@ -603,7 +609,7 @@ logger.info("MultiPartParser spool threshold set to 4 MB (large uploads spool to
 app = FastAPI(
     title="D.O.C — Drone Operations Command",
     description="Self-hosted mission management, flight log analysis, AI report generation, invoicing, telemetry visualization, and real-time airspace monitoring for commercial drone operators.",
-    version="2.92.1",
+    version="2.93.0",
     lifespan=lifespan,
 )
 

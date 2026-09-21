@@ -12,28 +12,51 @@ lookup in ``get_current_user``. Eliminates the per-request
 ``SELECT * FROM users`` for back-to-back authenticated calls (the
 Settings page alone fan-outs 34 of these). Token revocation latency
 becomes <=60s; documented in ADR-0005.
+
+ADR-0047 (operator Cloudflare Access SSO, noc-master ADR-0246 decision 2 /
+fleet-sso-conversion-roadmap Phase 4.4): ``get_current_user`` is the single
+dependency all 25 operator routers use (verified — the customer-facing
+client portal / intake / TOS-acceptance surfaces use the entirely separate
+``app.auth.client_auth`` module and never import this one). It is therefore
+the one place a CF-Access-verified identity needs to be wired in for every
+operator route to pick it up automatically — additive, same shape as the
+marketing pilot's Express ``authMiddleware``.
 """
 
 import asyncio
 import logging
 import re
+import secrets
 import time
 from datetime import datetime, timedelta
 
 import bcrypt
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.cf_access import (
+    extract_cf_access_token,
+    is_cf_access_configured,
+    verify_cf_access_assertion,
+)
 from app.config import settings
 from app.database import get_db
+from app.models.cf_access_identity import CfAccessIdentity
 from app.models.user import User
 
 logger = logging.getLogger("doc.auth")
 
-security = HTTPBearer()
+# auto_error=False: a request authenticating purely via Cloudflare Access
+# carries NO `Authorization: Bearer ...` header at all (the identity rides
+# the separate `Cf-Access-Jwt-Assertion` header instead). With the default
+# auto_error=True, FastAPI's HTTPBearer dependency would 403 such a request
+# before get_current_user's body ever ran. We resolve auth explicitly below
+# instead.
+security = HTTPBearer(auto_error=False)
 
 # ── Password complexity requirements ──────────────────────────────────
 PASSWORD_MIN_LENGTH = 10
@@ -158,10 +181,104 @@ def _user_cache_evict_expired(now: float) -> None:
         _user_cache.pop(k, None)
 
 
+# ── Cloudflare Access identity resolution (ADR-0047; modeled on the
+# marketing pilot's `resolveCfAccessUser`, marketing ADR-0099, corrected
+# 2026-09-21 after a security review found that pilot's first draft
+# auto-granted 'admin' and could silently adopt an unrelated local account
+# by matching `users.username` against the verified email) ────────────────
+#
+# A CF-Access-authenticated request never carries a local session/JWT — it
+# has no `users.id` to point at. Without one, any route reading `user.id`
+# would crash or misbehave. The fix is the SAME as marketing's: a dedicated
+# mapping table (`cf_access_identities`, email -> users.id), populated ONLY
+# here, never by a `WHERE username = <email>` lookup. A DroneOpsCommand
+# operator CAN rename their local username to anything (this app places no
+# charset restriction on `PUT /api/auth/account`, unlike marketing's) —
+# meaning a local row could coincidentally hold the exact string this
+# function would otherwise try to use, so resolution here NEVER trusts
+# `users.username` as an identity key, only the mapping table's `user_id`
+# foreign key. A newly-provisioned shadow row's username is namespaced
+# (`cf-access:<email>`) purely for human-readable log lines (see
+# app/routers/reports.py's audit log) — it is NEVER looked up by string.
+#
+# This app has no `role` column on `users` at all (single-operator tool —
+# no route reads a role to permit/deny anything), so unlike marketing there
+# is no admin-grant question here. The shadow row's password is a random,
+# never-returned, never-derivable value; it exists only so downstream
+# `user.id` references have a real foreign key, never as a usable local
+# login credential.
+async def resolve_cf_access_user(db: AsyncSession, email: str) -> User:
+    result = await db.execute(
+        select(User)
+        .join(CfAccessIdentity, CfAccessIdentity.user_id == User.id)
+        .where(CfAccessIdentity.email == email)
+    )
+    existing = result.scalar_one_or_none()
+    if existing is not None:
+        return existing
+
+    shadow_password = await hash_password_async(secrets.token_urlsafe(48))
+    shadow_username = f"cf-access:{email}"
+    new_user = User(username=shadow_username, hashed_password=shadow_password, is_active=True)
+    db.add(new_user)
+    try:
+        await db.flush()  # assigns new_user.id, surfaces a UNIQUE violation now
+        db.add(CfAccessIdentity(email=email, user_id=new_user.id))
+        await db.flush()
+        await db.commit()
+        logger.info("[CF-ACCESS] provisioned shadow user for email=%s", email)
+        return new_user
+    except IntegrityError:
+        # Either `cf_access_identities.email` (a concurrent request
+        # provisioned it first) or `users.username` (something else already
+        # holds the exact `cf-access:<email>` string) raced us. Roll back
+        # our attempt and re-check the mapping table — the only source of
+        # truth for CF-Access identity resolution.
+        await db.rollback()
+        result = await db.execute(
+            select(User)
+            .join(CfAccessIdentity, CfAccessIdentity.user_id == User.id)
+            .where(CfAccessIdentity.email == email)
+        )
+        winner = result.scalar_one_or_none()
+        if winner is not None:
+            return winner
+        # A genuine `users.username` collision with no matching mapping row
+        # — never silently adopt whatever holds that username. Deny loudly.
+        logger.error(
+            "[CF-ACCESS] shadow-user provisioning failed for email=%s "
+            "(username collision on '%s' with no cf_access_identities row)",
+            email, shadow_username,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Access identity provisioning failed — contact the operator",
+        )
+
+
 async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
     db: AsyncSession = Depends(get_db),
 ) -> User:
+    # Cloudflare Access JWT (ADR-0047, additive). Structurally dark until
+    # CF_ACCESS_TEAM_DOMAIN + CF_ACCESS_AUD are both set — see
+    # app/auth/cf_access.py. A failed/absent Access credential falls
+    # through to the local bearer-token path below rather than 401ing
+    # immediately: Access not applying to THIS credential does not mean
+    # the request is unauthenticated, only that this one credential didn't
+    # work, and a session token remains fully valid until Step B
+    # (LOCAL_LOGIN_DISABLED) explicitly turns it off.
+    if is_cf_access_configured():
+        assertion = extract_cf_access_token(request)
+        if assertion:
+            result = await verify_cf_access_assertion(assertion)
+            if result.ok:
+                return await resolve_cf_access_user(db, result.email)
+
+    if credentials is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+
     token = credentials.credentials
     try:
         payload = jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])

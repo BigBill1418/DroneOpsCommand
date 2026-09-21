@@ -4,6 +4,41 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-09-21 — v2.93.0 — Operator Cloudflare Access SSO, Step A (ADR-0047)
+
+**NOT DEPLOYED — lands on `feat/operator-sso` in a dedicated worktree, per operator
+instruction. No push, no merge, no Cloudflare API calls.**
+
+### Added
+
+- **`backend/app/auth/cf_access.py`** — RS256/JWKS verification of Cloudflare Access's
+  `Cf-Access-Jwt-Assertion` header, ported from the marketing pilot
+  (`~/marketing/api/cf-access.js`, ADR-0099). Fail-closed on every path (unreachable JWKS
+  denies, never falls back to a stale keyset past its TTL); 33 tests using a real generated
+  RSA keypair.
+- **`cf_access_identities` table** (migration `0012_cf_access_ident`) — Cloudflare Access
+  email -> local `users.id` mapping, populated only by `resolve_cf_access_user()`. Fixes,
+  pre-emptively, the exact "silently adopts a pre-existing local account by username match"
+  defect a security review found in the marketing pilot's first draft — and this app's
+  `PUT /api/auth/account` has no username charset restriction at all, making that collision
+  surface live here rather than theoretical. 6 tests against a real disposable Postgres
+  container prove the non-adoption invariant directly.
+- **`get_current_user`** (the single dependency all 25 operator routers use) now accepts a
+  verified Access identity as an additional credential alongside the existing session-token
+  path — additive, same shape as the marketing pilot's `authMiddleware`. Structurally dark
+  until an operator sets both `CF_ACCESS_TEAM_DOMAIN` and `CF_ACCESS_AUD` — zero behavior
+  change for self-hosted/OSS installs and the public demo instance by construction.
+- `LOCAL_LOGIN_DISABLED` kill switch (`backend/app/config.py`) — implemented but **off by
+  default everywhere**, gating `login`/`setup`/`account`/`refresh` when an operator
+  explicitly enables it after the Step A soak. Full cutover + rollback runbook in
+  `docs/adr/0047-operator-cloudflare-access-sso.md`.
+
+### Verification
+
+Full backend suite: 895 passed, 23 skipped (up from the 855/17 baseline verified at session
+start; the 8 new skips are the real-Postgres identity-resolution tier, opt-in via
+`DOC_TEST_PG_URL`). `test_app_version_parity.py` green at 2.93.0.
+
 ## 2026-09-21 — v2.92.1 — Sentry release tags read the source-of-truth version
 
 ### Fixed

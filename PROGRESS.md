@@ -10,6 +10,31 @@ blocked.
 > the archive is the record. The authoritative open-items + operator to-do list
 > as of today is `docs/reports/2026-09-21-open-items-inventory.md`.
 
+## 2026-09-21 — Operator Cloudflare Access SSO — **BUILT, NOT DEPLOYED (worktree `~/wt-droneops-sso`, branch `feat/operator-sso`)**
+
+**State: code + tests complete for Step A (verification, additive) and Step B (local-login
+kill switch, off by default). No push, no merge, no deploy, no Cloudflare API calls per the
+operator's explicit constraint for this task.** ADR-0047. Full detail, cutover runbook, and
+rollback-per-step in `docs/adr/0047-operator-cloudflare-access-sso.md`.
+
+**What's done:**
+
+| Piece | State |
+|---|---|
+| RS256/JWKS Access-JWT verifier (`backend/app/auth/cf_access.py`) | Done, 33 tests |
+| `cf_access_identities` mapping table + migration `0012_cf_access_ident` | Done, 6 real-Postgres tests |
+| `get_current_user` wired additively | Done, 7 tests |
+| `LOCAL_LOGIN_DISABLED` kill switch | Done, off by default |
+| Login/Setup screen modernized for SSO + email fix + CallSignLane-style footer | Done |
+| Version bump 2.92.1 -> 2.93.0 (Step A) | Done, `test_app_version_parity` green |
+
+**Operator action required before any of this takes effect:** set
+`CF_ACCESS_TEAM_DOMAIN`/`CF_ACCESS_AUD` on BOS-HQ (Step A), soak, then set
+`LOCAL_LOGIN_DISABLED=true` (Step B) — see the ADR's cutover runbook. Until then this is a
+complete no-op for the live app, and a complete no-op forever for self-hosted/OSS installs
+and the public demo instance (neither has Cloudflare Access; both env vars stay unset by
+design).
+
 ## 2026-09-21 — Basemap migration off CARTO + tile-health probe — **LIVE IN PRODUCTION**
 
 **State: MERGED, PUSHED AND DEPLOYED.** `72dd1a9` went to `main`; the fleet

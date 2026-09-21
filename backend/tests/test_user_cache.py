@@ -53,6 +53,13 @@ def _fake_credentials(token: str):
     return SimpleNamespace(credentials=token)
 
 
+def _fake_request():
+    """Minimal stand-in for FastAPI's ``Request`` — get_current_user only
+    touches ``request.headers`` on the CF-Access branch, which is inert in
+    these tests (no CF_ACCESS_TEAM_DOMAIN/AUD set, per conftest env)."""
+    return SimpleNamespace(headers={})
+
+
 def _fake_token(username: str = "alice") -> str:
     """Mint a real JWT so jwt.decode succeeds in get_current_user."""
     from app.config import settings as cfg
@@ -81,8 +88,8 @@ async def test_cache_miss_then_hit_skips_second_db_call(monkeypatch):
     token = _fake_token("alice")
     creds = _fake_credentials(token)
 
-    out1 = await jwt_mod.get_current_user(credentials=creds, db=db)
-    out2 = await jwt_mod.get_current_user(credentials=creds, db=db)
+    out1 = await jwt_mod.get_current_user(request=_fake_request(), credentials=creds, db=db)
+    out2 = await jwt_mod.get_current_user(request=_fake_request(), credentials=creds, db=db)
 
     assert out1.username == "alice"
     assert out2.username == "alice"
@@ -97,7 +104,7 @@ async def test_inactive_user_rejected(monkeypatch):
     creds = _fake_credentials(_fake_token("alice"))
 
     with pytest.raises(HTTPException) as ei:
-        await jwt_mod.get_current_user(credentials=creds, db=db)
+        await jwt_mod.get_current_user(request=_fake_request(), credentials=creds, db=db)
     assert ei.value.status_code == 401
     # Inactive user must not be cached.
     assert len(jwt_mod._user_cache) == 0
@@ -109,7 +116,7 @@ async def test_invalidate_specific_user(monkeypatch):
     db = _fake_db_returning(user)
     creds = _fake_credentials(_fake_token("alice"))
 
-    await jwt_mod.get_current_user(credentials=creds, db=db)
+    await jwt_mod.get_current_user(request=_fake_request(), credentials=creds, db=db)
     assert len(jwt_mod._user_cache) == 1
 
     jwt_mod.invalidate_user_cache("bob")
@@ -123,6 +130,7 @@ async def test_invalidate_specific_user(monkeypatch):
 async def test_invalidate_all(monkeypatch):
     db = _fake_db_returning(_fake_user("alice"))
     await jwt_mod.get_current_user(
+        request=_fake_request(),
         credentials=_fake_credentials(_fake_token("alice")),
         db=db,
     )
@@ -137,13 +145,13 @@ async def test_ttl_expiry_triggers_refresh(monkeypatch):
     db = _fake_db_returning(user)
     creds = _fake_credentials(_fake_token("alice"))
 
-    await jwt_mod.get_current_user(credentials=creds, db=db)
+    await jwt_mod.get_current_user(request=_fake_request(), credentials=creds, db=db)
     assert db.execute.await_count == 1
 
     # Force every cached entry's expiry to the past.
     for k, (payload, _) in list(jwt_mod._user_cache.items()):
         jwt_mod._user_cache[k] = (payload, 0.0)
 
-    await jwt_mod.get_current_user(credentials=creds, db=db)
+    await jwt_mod.get_current_user(request=_fake_request(), credentials=creds, db=db)
     # Second call had to re-query the DB because the entry was expired.
     assert db.execute.await_count == 2

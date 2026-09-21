@@ -164,6 +164,13 @@ services:
       - JWT_ALGORITHM=${JWT_ALGORITHM:-HS256}
       - JWT_ACCESS_TOKEN_EXPIRE_MINUTES=${JWT_ACCESS_TOKEN_EXPIRE_MINUTES:-30}
       - JWT_REFRESH_TOKEN_EXPIRE_DAYS=${JWT_REFRESH_TOKEN_EXPIRE_DAYS:-30}
+      # Operator Cloudflare Access SSO (ADR-0047). Both blank = fully dark,
+      # no behavior change, no network calls — safe default for self-hosted/
+      # OSS installs. See .env.example for the full explanation.
+      - CF_ACCESS_TEAM_DOMAIN=${CF_ACCESS_TEAM_DOMAIN:-}
+      - CF_ACCESS_AUD=${CF_ACCESS_AUD:-}
+      - CF_ACCESS_ALLOWED_EMAILS=${CF_ACCESS_ALLOWED_EMAILS:-}
+      - LOCAL_LOGIN_DISABLED=${LOCAL_LOGIN_DISABLED:-false}
       - DEMO_ADMIN_USERNAME=${DEMO_ADMIN_USERNAME:-}
       - DEMO_ADMIN_PASSWORD=${DEMO_ADMIN_PASSWORD:-}
       - SMTP_HOST=${SMTP_HOST:-}
@@ -202,7 +209,7 @@ services:
       - OTEL_SERVICE_NAME=droneops-api
       - TENANT=${TENANT:-shared}
       - ENV=${ENV:-prod}
-      - APP_VERSION=${APP_VERSION:-2.92.1}
+      - APP_VERSION=${APP_VERSION:-2.93.0}
       # ADR-0002 §5 + ADR-0003 alerts via ntfy (ADR-0036).
       # Unset = no-op (structured JSON logs still emit).
       - NTFY_DRONEOPS_PUBLISHER_TOKEN=${NTFY_DRONEOPS_PUBLISHER_TOKEN:-}
@@ -303,7 +310,7 @@ services:
       - OTEL_SERVICE_NAME=droneops-worker
       - TENANT=${TENANT:-shared}
       - ENV=${ENV:-prod}
-      - APP_VERSION=${APP_VERSION:-2.92.1}
+      - APP_VERSION=${APP_VERSION:-2.93.0}
       # ADR-0002 §5 + ADR-0003 alerts from silence watchdog task via
       # ntfy (ADR-0036).
       - NTFY_DRONEOPS_PUBLISHER_TOKEN=${NTFY_DRONEOPS_PUBLISHER_TOKEN:-}
@@ -342,7 +349,7 @@ services:
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - TENANT=${TENANT:-shared}
       - ENV=${ENV:-prod}
-      - APP_VERSION=${APP_VERSION:-2.92.1}
+      - APP_VERSION=${APP_VERSION:-2.93.0}
       # ADR-0036 — beat scheduler enqueues silence watchdog and rotation
       # finalizer; the watchdog task itself emits the alert via ntfy.
       - NTFY_DRONEOPS_PUBLISHER_TOKEN=${NTFY_DRONEOPS_PUBLISHER_TOKEN:-}
@@ -392,7 +399,7 @@ services:
         # any `VITE_*` var that's in scope when `npm run build` runs.
         VITE_SENTRY_DSN: ${VITE_SENTRY_DSN:-}
         VITE_SENTRY_ENVIRONMENT: ${VITE_SENTRY_ENVIRONMENT:-production}
-        VITE_APP_VERSION: "${APP_VERSION:-2.92.1}"
+        VITE_APP_VERSION: "${APP_VERSION:-2.93.0}"
     restart: unless-stopped
     # BOS-HQ 2026-06-05 sweep: static nginx SPA (~8 MiB) → 256M floor.
     # Health interval kept at 30s — customer edge + the probed :3080 target.
