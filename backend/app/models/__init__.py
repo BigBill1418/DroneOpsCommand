@@ -17,6 +17,7 @@ from app.models.pilot import Pilot
 from app.models.device_api_key import DeviceApiKey
 from app.models.client_portal import ClientAccessToken
 from app.models.tos_acceptance import TosAcceptance
+from app.models.cf_access_identity import CfAccessIdentity
 
 __all__ = [
     "Customer",
@@ -46,4 +47,5 @@ __all__ = [
     "DeviceApiKey",
     "ClientAccessToken",
     "TosAcceptance",
+    "CfAccessIdentity",
 ]

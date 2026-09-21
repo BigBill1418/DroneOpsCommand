@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from pydantic import BaseModel
 
+from app.auth.cf_access import is_cf_access_configured
 from app.auth.jwt import (
     create_access_token,
     create_refresh_token,
@@ -97,6 +98,21 @@ def _clear_failures(ip: str) -> None:
     _lockouts.pop(ip, None)
 
 
+def _require_local_login_enabled() -> None:
+    """ADR-0047 Step B guard. Raises 403 when an operator has explicitly
+    retired local login (LOCAL_LOGIN_DISABLED=true) — false by default
+    everywhere, including self-hosted/OSS installs and the public demo
+    instance, so this is a no-op for them. Only the routes that MINT new
+    local credentials call this; get_current_user's bearer-token
+    VERIFICATION logic is left completely intact so this is a config
+    flip, not a code deletion — see docs/adr/0047-*.md."""
+    if settings.local_login_disabled:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Local login is disabled on this instance — sign in via SSO",
+        )
+
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 class SetupRequest(BaseModel):
     username: str
@@ -105,21 +121,38 @@ class SetupRequest(BaseModel):
 
 @router.get("/setup-status")
 async def setup_status(db: AsyncSession = Depends(get_db)):
-    """Public endpoint — returns whether initial setup is needed.
+    """Public endpoint — returns whether initial setup is needed, plus the
+    two SSO flags the login screen needs BEFORE it can decide whether to
+    attempt a silent Access probe or show the password form at all
+    (ADR-0047). Both flags are safe to expose publicly: they say only
+    whether an operator has wired Cloudflare Access, never a secret.
 
     Managed instances skip the setup wizard — admin is pre-created on startup.
+    Local-login-disabled instances also skip it — there is no reason to run
+    the wizard for a local account that could never be used to log in.
     """
-    if settings.managed_instance:
-        return {"needs_setup": False}
+    sso_configured = is_cf_access_configured()
+    local_login_disabled = settings.local_login_disabled
+    if settings.managed_instance or local_login_disabled:
+        return {
+            "needs_setup": False,
+            "sso_configured": sso_configured,
+            "local_login_disabled": local_login_disabled,
+        }
     result = await db.execute(select(User))
     users = result.scalars().all()
-    return {"needs_setup": len(users) == 0}
+    return {
+        "needs_setup": len(users) == 0,
+        "sso_configured": sso_configured,
+        "local_login_disabled": local_login_disabled,
+    }
 
 
 @router.post("/setup")
 @limiter.limit("5/minute")
 async def initial_setup(request: Request, body: SetupRequest, db: AsyncSession = Depends(get_db)):
     """Create the first admin user. Only works when no users exist."""
+    _require_local_login_enabled()
     client_ip = get_trusted_client_ip(request)
     result = await db.execute(select(User))
     existing = result.scalars().all()
@@ -155,6 +188,7 @@ async def initial_setup(request: Request, body: SetupRequest, db: AsyncSession =
 @router.post("/login")
 @limiter.limit("10/minute")
 async def login(request: Request, body: LoginRequest, db: AsyncSession = Depends(get_db)):
+    _require_local_login_enabled()
     client_ip = get_trusted_client_ip(request)
     logger.info("Login attempt: user='%s' ip=%s", body.username, client_ip)
 
@@ -213,6 +247,7 @@ async def update_account(
     db: AsyncSession = Depends(get_db),
 ):
     """Update username and/or password. Requires current password for verification."""
+    _require_local_login_enabled()
     if not await verify_password_async(body.current_password, user.hashed_password):
         raise HTTPException(status_code=403, detail="Current password is incorrect")
 
@@ -296,6 +331,7 @@ async def get_password_rules():
 
 @router.post("/refresh", response_model=TokenResponse)
 async def refresh(request: RefreshRequest, db: AsyncSession = Depends(get_db)):
+    _require_local_login_enabled()
     try:
         payload = jwt.decode(
             request.refresh_token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm]

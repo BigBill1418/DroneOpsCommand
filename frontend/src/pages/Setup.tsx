@@ -167,7 +167,7 @@ export default function Setup({ onSetupComplete }: SetupProps) {
       </Card>
       <Stack align="center" gap={4}>
         <Text size="xs" c="#5a6478" style={{ fontFamily: "'Share Tech Mono', monospace", letterSpacing: '1px' }}>
-          Created by Bill Barnard — <Anchor href="mailto:me@barnardHQ.com" c="#5a6478" size="xs" style={{ fontFamily: "'Share Tech Mono', monospace" }}>me@barnardHQ.com</Anchor>
+          Created by Bill Barnard — <Anchor href="mailto:Bill@BarnardHQ.com" c="#5a6478" size="xs" style={{ fontFamily: "'Share Tech Mono', monospace" }}>Bill@BarnardHQ.com</Anchor>
         </Text>
         <Anchor href="https://www.barnardHQ.com" target="_blank" c="#00d4ff" size="xs" style={{ fontFamily: "'Share Tech Mono', monospace", letterSpacing: '1px' }}>
           www.barnardHQ.com

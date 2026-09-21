@@ -28,6 +28,98 @@ three code comments with drifted line-number cites (`backend/app/main.py`
 "ADR-0035" → 0036) — comment-only edits would trigger a production rebuild;
 fold them into the next code change.
 
+## 2026-09-21 — v2.94.0 — Operator Cloudflare Access SSO, Step B kill switch (ADR-0047)
+
+**NOT DEPLOYED, and `LOCAL_LOGIN_DISABLED` is OFF by default everywhere — including
+`docker-compose.bos-prod.yml`, untouched by this commit.**
+
+### Added
+
+- `LOCAL_LOGIN_DISABLED=true` now actually gates `POST /api/auth/login`,
+  `POST /api/auth/setup`, `PUT /api/auth/account`, and `POST /api/auth/refresh` — all four
+  return `403` and mint no tokens. `GET /api/auth/setup-status` reports `needs_setup: false`
+  unconditionally when set (same shape as the existing `managed_instance` short-circuit).
+- **Deliberately NOT gated:** `GET /api/auth/account` (read-only identity info, and the exact
+  endpoint the frontend's silent SSO probe calls — gating it would lock an operator out even
+  while genuinely authenticated via a working Access session) and `get_current_user`'s
+  bearer-token verification logic itself (only the routes that *mint* new local credentials
+  are gated, so re-enabling local login is a single env-var flip, not a code revert).
+- Self-hosted/OSS installs and the public demo instance are unaffected: the flag defaults to
+  `false` and neither deployment topology has any reason to ever set it.
+
+### Verification
+
+Full backend suite: 907 passed, 23 skipped. 9 new tests in
+`backend/tests/test_local_login_disabled.py` cover both states: the default (false) is proven
+a byte-identical no-op for all four routes, and the gated (true) state is proven to 403 all
+four while leaving `GET /account` reachable. `test_app_version_parity.py` green at 2.94.0.
+
+Full cutover runbook (enable Step A, soak, then enable this) and per-step rollback:
+`docs/adr/0047-operator-cloudflare-access-sso.md`.
+
+## 2026-09-21 — v2.93.1 — Login screen modernized for SSO (ADR-0047 Part 2)
+
+**NOT DEPLOYED — `feat/operator-sso` worktree branch only.**
+
+### Changed
+
+- **Email fixed** on the login and setup screens: `me@barnardHQ.com` -> `Bill@BarnardHQ.com`
+  (exact capitalization, both the `mailto:` href and the visible text).
+- **Login footer now matches CallSignLane's pattern** — an anchor to `https://www.barnardhq.com`
+  wrapping "A software solution by:" plus the real BarnardHQ wordmark
+  (`frontend/public/barnardhq-logo.svg`, copied byte-for-byte from CallSignPublic).
+- **Silent SSO.** `useAuth` now reads `sso_configured` off `GET /api/auth/setup-status`
+  (extended to carry it, alongside `local_login_disabled`, in this commit) and, when true,
+  probes `GET /api/auth/account` with no bearer token via a bare `axios` call before ever
+  showing the password form — Cloudflare Access injects its JWT header automatically on every
+  proxied request, so a real operator browsing to `droneops.barnardhq.com` never types a
+  password. Fully inert (zero extra network round trip) when `sso_configured` is false — the
+  self-hosted/OSS and public-demo default.
+- Login screen now renders an "Access" card above the password form when SSO is configured
+  (Step A additive state) and hides the password form entirely once an operator also sets
+  `local_login_disabled` (Step B).
+
+### Verification
+
+Full frontend suite: 91 passed (14 new: `useAuth` 7, `Login` 6, `Setup` 1 — up from the 77
+baseline). `npx tsc --noEmit` clean. Backend: 898 passed, 23 skipped (`setup-status` SSO-flag
+coverage; local-login gating itself is a separate commit).
+
+## 2026-09-21 — v2.93.0 — Operator Cloudflare Access SSO, Step A (ADR-0047)
+
+**NOT DEPLOYED — lands on `feat/operator-sso` in a dedicated worktree, per operator
+instruction. No push, no merge, no Cloudflare API calls.**
+
+### Added
+
+- **`backend/app/auth/cf_access.py`** — RS256/JWKS verification of Cloudflare Access's
+  `Cf-Access-Jwt-Assertion` header, ported from the marketing pilot
+  (`~/marketing/api/cf-access.js`, ADR-0099). Fail-closed on every path (unreachable JWKS
+  denies, never falls back to a stale keyset past its TTL); 33 tests using a real generated
+  RSA keypair.
+- **`cf_access_identities` table** (migration `0012_cf_access_ident`) — Cloudflare Access
+  email -> local `users.id` mapping, populated only by `resolve_cf_access_user()`. Fixes,
+  pre-emptively, the exact "silently adopts a pre-existing local account by username match"
+  defect a security review found in the marketing pilot's first draft — and this app's
+  `PUT /api/auth/account` has no username charset restriction at all, making that collision
+  surface live here rather than theoretical. 6 tests against a real disposable Postgres
+  container prove the non-adoption invariant directly.
+- **`get_current_user`** (the single dependency all 25 operator routers use) now accepts a
+  verified Access identity as an additional credential alongside the existing session-token
+  path — additive, same shape as the marketing pilot's `authMiddleware`. Structurally dark
+  until an operator sets both `CF_ACCESS_TEAM_DOMAIN` and `CF_ACCESS_AUD` — zero behavior
+  change for self-hosted/OSS installs and the public demo instance by construction.
+- `LOCAL_LOGIN_DISABLED` kill switch (`backend/app/config.py`) — implemented but **off by
+  default everywhere**, gating `login`/`setup`/`account`/`refresh` when an operator
+  explicitly enables it after the Step A soak. Full cutover + rollback runbook in
+  `docs/adr/0047-operator-cloudflare-access-sso.md`.
+
+### Verification
+
+Full backend suite: 895 passed, 23 skipped (up from the 855/17 baseline verified at session
+start; the 8 new skips are the real-Postgres identity-resolution tier, opt-in via
+`DOC_TEST_PG_URL`). `test_app_version_parity.py` green at 2.93.0.
+
 ## 2026-09-21 — v2.92.1 — Sentry release tags read the source-of-truth version
 
 ### Fixed
