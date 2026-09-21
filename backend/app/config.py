@@ -50,6 +50,25 @@ class Settings(BaseSettings):
     upload_dir: str = "/data/uploads"
     reports_dir: str = "/data/reports"
 
+    # Trusted-proxy IP resolution (Phase 7 hardening, ADR-0045; corrected
+    # 2026-09-21 — the first version trusted only one hop and was reproducing
+    # the bug it closed against this repo's real two-hop chain). See
+    # app/utils/client_ip.py for the full rationale. `trusted_proxy_hostname`
+    # is a COMMA-SEPARATED list of Docker Compose service names, each
+    # resolved independently via embedded DNS on every rate-limit / lockout
+    # check — default "frontend,cloudflared" (nginx + the tunnel sidecar)
+    # matches this compose file's actual topology and needs no operator
+    # action. Managed-tenant deployments (a different topology entirely —
+    # see docs/managed-hosting.md) MUST override this to "caddy". `
+    # forwarded_allow_ips` is an optional additional comma-separated
+    # allowlist of literal IPs/CIDRs for non-default topologies or a hop
+    # that can't be resolved by hostname from the caller's own Docker
+    # network (e.g. a managed tenant trusting the shared gateway's subnet);
+    # empty means "trust only the dynamically-resolved proxies plus
+    # loopback."
+    trusted_proxy_hostname: str = "frontend,cloudflared"
+    forwarded_allow_ips: str = ""
+
     # Operator timezone (ADR-0017). Defines the calendar date of a flight:
     # a flight's stored instant is UTC, but its *date* is the date in this
     # timezone. Flights flown in the evening in the Pacific zone otherwise
@@ -59,6 +78,17 @@ class Settings(BaseSettings):
     # Customer intake
     frontend_url: str = "http://localhost:3080"
     intake_token_expire_days: int = 7
+
+    # Signed-TOS download link (ADR-0045, Phase 7 hardening). The intake
+    # token doubles as the bearer credential for GET
+    # /api/tos/signed/by-token/{token} so the customer keeps durable access
+    # to their own signed copy after the (much shorter) intake window
+    # closes — but "durable" previously meant literally unbounded: a token
+    # that ever leaked (shared inbox, proxy log, forwarded email) remained a
+    # valid PII-download credential forever, with no operator remedy. This
+    # bounds it generously (default ~2 years) rather than removing the
+    # durable-access property outright.
+    tos_signed_download_expire_days: int = 730
 
     # Client portal
     client_token_expire_days: int = 30

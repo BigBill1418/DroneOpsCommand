@@ -41,13 +41,14 @@ from typing import Annotated
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse, Response
 from slowapi import Limiter
-from slowapi.util import get_remote_address
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.jwt import get_current_user
+from app.config import settings
 from app.database import get_db
 from app.models.customer import Customer
+from app.utils.client_ip import get_trusted_client_ip
 from app.models.tos_acceptance import TosAcceptance
 from app.models.user import User
 from app.schemas.tos_acceptance import (
@@ -67,26 +68,18 @@ from app.services.tos_template import get_active_tos_template, signed_pdf_dir
 logger = logging.getLogger("doc.tos")
 
 router = APIRouter(prefix="/api/tos", tags=["tos"])
-limiter = Limiter(key_func=get_remote_address)
+# v2.91.0 (Phase 7 hardening) — was get_remote_address; see
+# app/utils/client_ip.py. The old local _client_ip() helper below (removed)
+# trusted the LEFTMOST X-Forwarded-For hop unconditionally, which a client
+# can set itself — get_trusted_client_ip only honours the header from a
+# verified proxy and takes the rightmost untrusted hop.
+limiter = Limiter(key_func=get_trusted_client_ip)
 
 # v2.66.0 — match `Pending Intake YYYY-MM-DD` placeholder name set by
 # `intake.initiate_services` on the no-email path. When the customer
 # completes TOS, we replace this stub with their real typed name so the
 # operator can email them a portal link afterwards.
 _PENDING_INTAKE_NAME_RE = re.compile(r"^Pending Intake \d{4}-\d{2}-\d{2}$")
-
-
-def _client_ip(request: Request) -> str:
-    """Honour X-Forwarded-For first hop (CF tunnel + nginx pass it).
-
-    The first IP in the comma-separated chain is the customer's edge
-    address as Cloudflare saw it. Falls back to ``request.client``
-    (which is the tunnel/proxy IP, only useful for local-host tests).
-    """
-    fwd = request.headers.get("x-forwarded-for", "")
-    if fwd:
-        return fwd.split(",", 1)[0].strip()
-    return request.client.host if request.client else "0.0.0.0"
 
 
 # ── Public routes ────────────────────────────────────────────────────
@@ -162,7 +155,7 @@ async def accept_terms(
     locked in.
     """
     start = time.perf_counter()
-    ip = _client_ip(request)
+    ip = get_trusted_client_ip(request)
     ua = request.headers.get("user-agent", "")[:1000]
 
     logger.info(
@@ -172,7 +165,59 @@ async def accept_terms(
         ip,
     )
 
-    tpl = get_active_tos_template(payload.customer_id)
+    # v2.91.0 (Phase 7 hardening, ADR-0045) — this route used to trust
+    # payload.customer_id outright: any caller who knew (or enumerated) a
+    # customer UUID could POST arbitrary name/email/company here and this
+    # handler would write a signed TOS acceptance AND overwrite that
+    # customer's stub name/email/tos_signed fields below — an
+    # unauthenticated write against a real customer record. The intake_token
+    # is the actual credential (it is what the customer's link carries —
+    # see TosAcceptance.tsx and intake.py's `get_intake_form`, which already
+    # derives the customer FROM the token rather than trusting a client-
+    # supplied id). Mirror that pattern here: resolve customer_id from a
+    # validated, unexpired token, and reject any customer_id the token does
+    # not itself resolve to. A customer_id with no token at all is rejected
+    # outright — the documented "cold visitor" path (see
+    # TosAcceptanceRequest's docstring) is customer_id=None AND
+    # intake_token=None, never customer_id alone.
+    resolved_customer_id = None
+    if payload.intake_token:
+        token_result = await db.execute(
+            select(Customer).where(Customer.intake_token == payload.intake_token)
+        )
+        token_customer = token_result.scalar_one_or_none()
+        if token_customer is None:
+            logger.warning(
+                "[TOS-ACCEPT-POST] INVALID intake_token=%s… ip=%s — rejecting",
+                payload.intake_token[:8], ip,
+            )
+            raise HTTPException(404, "Invalid or expired link")
+        if (
+            token_customer.intake_token_expires_at
+            and token_customer.intake_token_expires_at < datetime.utcnow()
+        ):
+            logger.warning(
+                "[TOS-ACCEPT-POST] EXPIRED intake_token for customer=%s ip=%s",
+                token_customer.id, ip,
+            )
+            raise HTTPException(410, "This link has expired. Please contact us for a new one.")
+        if payload.customer_id is not None and payload.customer_id != token_customer.id:
+            logger.warning(
+                "[TOS-ACCEPT-POST] customer_id mismatch: payload=%s token_resolves_to=%s "
+                "ip=%s — rejecting (possible forged/copy-pasted link)",
+                payload.customer_id, token_customer.id, ip,
+            )
+            raise HTTPException(404, "Invalid or expired link")
+        resolved_customer_id = token_customer.id
+    elif payload.customer_id is not None:
+        logger.warning(
+            "[TOS-ACCEPT-POST] customer_id=%s supplied with no intake_token ip=%s "
+            "— rejecting unauthenticated write",
+            payload.customer_id, ip,
+        )
+        raise HTTPException(400, "customer_id requires a matching intake_token")
+
+    tpl = get_active_tos_template(resolved_customer_id)
     if tpl is None:
         # Expected client-facing config state (e.g. the DEMO instance has no TOS
         # template seeded), NOT a server bug. Log at WARNING so the GlitchTip
@@ -181,7 +226,7 @@ async def accept_terms(
         # on a real instance a missing template is a genuine misconfiguration the
         # operator must fix, but it is surfaced to the client, not reported as a
         # crash.
-        logger.warning("[TOS-ACCEPT-POST] No TOS template available for customer_id=%s", payload.customer_id)
+        logger.warning("[TOS-ACCEPT-POST] No TOS template available for customer_id=%s", resolved_customer_id)
         raise HTTPException(503, "No TOS template configured")
 
     client = ClientIdentity(
@@ -215,7 +260,7 @@ async def accept_terms(
 
     row = TosAcceptance(
         audit_id=record.audit_id,
-        customer_id=payload.customer_id,
+        customer_id=resolved_customer_id,
         intake_token=payload.intake_token,
         client_name=record.field_values["client_name"],
         client_email=record.field_values["client_email"],
@@ -250,9 +295,9 @@ async def accept_terms(
     # reality. The legacy ``tos_pdf_path`` column stays untouched: the
     # new flow keeps the signed PDF under ``tos_acceptances.signed_pdf_path``
     # and the operator UI looks it up via the latest acceptance row.
-    if payload.customer_id is not None:
+    if resolved_customer_id is not None:
         cust_result = await db.execute(
-            select(Customer).where(Customer.id == payload.customer_id)
+            select(Customer).where(Customer.id == resolved_customer_id)
         )
         customer = cust_result.scalar_one_or_none()
         if customer is not None:
@@ -283,13 +328,13 @@ async def accept_terms(
                 "[CLIENT-PORTAL] Synced customer name/email from TOS acceptance "
                 "customer_id=%s audit_id=%s email_synced=%s name_synced=%s "
                 "tos_signed=True",
-                payload.customer_id, row.audit_id, email_synced, name_synced,
+                resolved_customer_id, row.audit_id, email_synced, name_synced,
             )
         else:
             logger.warning(
                 "[TOS-ACCEPT-POST] customer_id=%s referenced but not found "
                 "(audit row preserved)",
-                payload.customer_id,
+                resolved_customer_id,
             )
 
     # Best-effort email; never roll back the audit row if SMTP fails.
@@ -327,17 +372,29 @@ async def accept_terms(
 
 
 @router.get("/signed/by-token/{intake_token}")
+@limiter.limit("10/minute")
 async def download_signed_by_token(
     intake_token: str,
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> FileResponse:
     """Customer pulls their signed copy using the intake token they hold.
 
-    The token IS the credential here — no operator login needed. We
-    keep this path open for as long as the row exists; intake-token
-    expiry on ``customers.intake_token_expires_at`` does not gate this
-    download because the customer needs durable access to their own
-    signed copy.
+    The token IS the credential here — no operator login needed, and we
+    intentionally do NOT gate this on ``customers.intake_token_expires_at``
+    (the much shorter *intake* window) because the customer needs durable
+    access to their own signed copy well after intake closes, and rotating
+    the customer's intake token for a later job must not sever access to an
+    already-signed document.
+
+    v2.91.0 (Phase 7 hardening, ADR-0045): "durable" is now bounded rather
+    than infinite (``settings.tos_signed_download_expire_days``, default
+    ~2 years from ``accepted_at``) and this route is rate-limited like
+    every other public route in this file — both were previously true only
+    of the *intake* token, not of this download path, which had neither.
+    A leaked intake_token was otherwise a permanent, unlimited-rate,
+    unrevocable PII-download credential for that customer's signed TOS
+    (name, email, company, address).
     """
     if not intake_token or len(intake_token) > 64:
         raise HTTPException(404, "Not found")
@@ -352,6 +409,17 @@ async def download_signed_by_token(
     if row is None:
         logger.info("[TOS-SIGNED-TOKEN] No acceptance row for token=%s…", intake_token[:8])
         raise HTTPException(404, "Not found")
+
+    accepted_at = row.accepted_at
+    if accepted_at.tzinfo is None:
+        accepted_at = accepted_at.replace(tzinfo=timezone.utc)
+    age_days = (datetime.now(timezone.utc) - accepted_at).total_seconds() / 86400.0
+    if age_days > settings.tos_signed_download_expire_days:
+        logger.info(
+            "[TOS-SIGNED-TOKEN] EXPIRED download link: audit_id=%s age_days=%.1f > %d",
+            row.audit_id, age_days, settings.tos_signed_download_expire_days,
+        )
+        raise HTTPException(410, "This link has expired. Please contact us for a fresh copy.")
 
     return FileResponse(
         row.signed_pdf_path,

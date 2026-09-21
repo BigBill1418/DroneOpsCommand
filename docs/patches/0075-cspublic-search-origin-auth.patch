@@ -1,0 +1,146 @@
+--- a/backend/app/api/archive.py
++++ b/backend/app/api/archive.py
+@@ -16,16 +16,35 @@
+ the visible archive boundary is honest even if purge is briefly behind. The
+ floor is applied by clamping ``date_from`` up to it; a range entirely older than
+ the floor returns an empty page, never an error and never stale rows.
++
++**Edge-bypass hardening (ADR-0075, Wave 2B):** the comment above ("Turnstile +
++Worker rate-limit sit at the edge, ahead of this") was an assumption, not an
++enforced property. `cs-api.barnardhq.com` — this origin's own tunnel hostname
++— answers this route directly: the cloudflared ingress allowlist admits
++`/api/archive/search` (it has to; the Worker itself fetches through it), and
++nothing distinguishes a request relayed by the Worker (past Turnstile, past
++the per-IP limiter) from one that hit `cs-api.barnardhq.com` straight from the
++internet. Verified from BOS-HQ (outside every Cloudflare bypass): `GET
++/api/archive/search` on the origin hostname answers with a real result,
++Turnstile never in the loop. `worker/api/src/index.ts`'s `handleSearch` now
++forwards a constant-time Bearer the Worker alone holds
++(`ORIGIN_SEARCH_SECRET`); `_require_worker_bearer` below is that check,
++mirroring `ingest.py`'s established `_require_receiver_bearer` pattern
++(settings-store-backed shared secret, `hmac.compare_digest`, 503 when
++unconfigured rather than a silent pass). This does not touch Cloudflare Access,
++Workers routing, or the tunnel ingress allowlist — Wave 2B's constraint is
++that the fix stand alone at the application layer.
+ """
+ 
+ from __future__ import annotations
+ 
+ import base64
++import hmac
+ from datetime import UTC, date, datetime, timedelta
+ from uuid import UUID
+ from zoneinfo import ZoneInfo
+ 
+-from fastapi import APIRouter, Depends, Query, Response
++from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
+ from sqlalchemy import and_, exists, func, or_, select, text
+ from sqlalchemy.ext.asyncio import AsyncSession
+ 
+@@ -43,6 +62,41 @@
+ 
+ router = APIRouter()
+ 
++#: Settings-store key for the Worker->origin shared secret (ADR-0075). Set
++#: via the operator Settings UI, same mechanism and same encrypted-at-rest
++#: storage as `audio.transmission_ingest_token` (ingest.py) — NOT a
++#: wrangler.toml var; the Worker side is `env.ORIGIN_SEARCH_SECRET`, set with
++#: `wrangler secret put ORIGIN_SEARCH_SECRET` (worker/api/, never committed).
++#: Deliberately a DIFFERENT secret from `SEARCH_PASS_SECRET` (worker/api/src/
++#: index.ts) — that one is browser-facing (HMAC of ip|exp, lets a solved
++#: Turnstile challenge cover repeat searches); this one is Worker-to-origin
++#: only and never reaches a client.
++_SEARCH_ORIGIN_TOKEN_KEY = "search.worker_origin_token"
++
++
++async def _require_worker_bearer(authorization: str) -> None:
++    """The Worker->origin credential check for the search route.
++
++    Mirrors `ingest.py`'s `_require_receiver_bearer` exactly (settings-store
++    token, `hmac.compare_digest`, 503 when unconfigured rather than a 401 —
++    so the operator's log points at the missing settings row, not a bearer
++    mismatch). Kept as its own small function rather than importing the
++    ingest one: receiver-write trust and worker-search-read trust are
++    different trust domains even though the mechanics are identical, and
++    ingest.py's own docstring is explicit that its helper is "the shared
++    receiver credential check for every route on THIS router" — extending
++    it to a different router's different caller would widen what a change
++    to the receiver check silently affects.
++    """
++    token = await store.get(_SEARCH_ORIGIN_TOKEN_KEY, "")
++    if not token:
++        archive_search_total.labels(result="unauthorized").inc()
++        raise HTTPException(status_code=503, detail="search_origin_auth_not_configured")
++    if not hmac.compare_digest(authorization or "", f"Bearer {token}"):
++        archive_search_total.labels(result="unauthorized").inc()
++        raise HTTPException(status_code=401, detail="unauthorized")
++
++
+ DEFAULT_RETENTION_DAYS = 365
+ MAX_SPAN_DAYS = 366
+ DEFAULT_LIMIT = 50
+@@ -169,10 +223,18 @@
+             "OPT-IN: omitted, the response is byte-identical to before."
+         ),
+     ),
++    authorization: str = Header(default=""),
+ ) -> dict:
+     """Search cleared calls over the last 12 months by the ADR-0018 §3 fields."""
+     from fastapi import HTTPException
+ 
++    # ADR-0075 (Wave 2B) — the FIRST thing this route does, before any query
++    # work. This origin hostname (cs-api.barnardhq.com) is directly
++    # internet-reachable, so Turnstile + the per-IP limiter at the Worker
++    # are NOT a guarantee for every caller of this function — only for
++    # callers that went through cs.barnardhq.com. See the module docstring.
++    await _require_worker_bearer(authorization)
++
+     # ADR-0017 §1: archive surfaces are reachable but not crawled into
+     # third-party indexes. The clip-download responses carry the same header at
+     # the edge Worker.
+--- a/worker/api/src/index.ts
++++ b/worker/api/src/index.ts
+@@ -43,6 +43,18 @@
+    *  and the two budgets describe different human behaviours. Optional for the
+    *  same reason as the others — a config regression fails OPEN. */
+   PUSH_RATE_LIMITER?: { limit(opts: { key: string }): Promise<{ success: boolean }> };
++  /** Worker->origin shared secret for the search fetch (ADR-0075, Wave 2B).
++   *  Set with `wrangler secret put ORIGIN_SEARCH_SECRET` — never committed,
++   *  never in wrangler.toml. The origin's matching value lives in its
++   *  Settings UI under `search.worker_origin_token` (same encrypted-at-rest
++   *  mechanism as `audio.transmission_ingest_token`, backend/app/api/
++   *  ingest.py). Optional here in the type only so a missing binding fails
++   *  as the origin's OWN 503 (`search_origin_auth_not_configured`) rather
++   *  than a TypeScript build break — operationally this must be set before
++   *  the origin-side check ships, or genuine search traffic 503s. See the
++   *  rollout note in docs/adr/0075-*.md. Distinct from SEARCH_PASS_SECRET
++   *  above, which is browser-facing and never reaches the origin. */
++  ORIGIN_SEARCH_SECRET?: string;
+ }
+ 
+ /** Public sitekey for the cs.barnardhq.com Turnstile widget — safe to expose
+@@ -353,11 +365,23 @@
+ 
+   const url = new URL(request.url);
+   const originUrl = env.ORIGIN + url.pathname + canonicalSearch(url);
++  // ADR-0075 (Wave 2B) — a constant-time Bearer only this Worker holds,
++  // mirroring handleIngest's `authorization` forwarding below. This is a
++  // FIXED value per deployment (never derived from the caller's request),
++  // so adding it does not affect the edge cache key or vary the cached
++  // response by caller — every cached entry was already generated with
++  // this same header. Without it, cs-api.barnardhq.com answers this same
++  // query directly to anyone who finds the hostname, Turnstile and the
++  // rate limiter above never in the loop (verified live from BOS-HQ,
++  // outside every Cloudflare bypass — see the origin's archive.py
++  // module docstring).
++  const originHeaders: Record<string, string> = { accept: "application/json" };
++  if (env.ORIGIN_SEARCH_SECRET) originHeaders["authorization"] = `Bearer ${env.ORIGIN_SEARCH_SECRET}`;
+   // Edge cache the read (ADR-0002 origin-cost-bounded). cacheTtl caches only
+   // 2xx; a 400 (rejected query) is not cached, so a fixed query re-validates.
+   const resp = await fetch(originUrl, {
+     method: request.method,
+-    headers: { accept: "application/json" },
++    headers: originHeaders,
+     cf: { cacheEverything: true, cacheTtl: SEARCH_TTL_S },
+   });
+   const out = relay(resp);

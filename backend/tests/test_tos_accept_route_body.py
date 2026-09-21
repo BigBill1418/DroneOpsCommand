@@ -167,6 +167,24 @@ def test_tos_accept_post_with_full_frontend_payload_returns_201(tmp_path):
     record = _mk_record()
     signed_bytes = b"%PDF-1.4 signed"
 
+    # v2.91.0 (Phase 7 hardening, ADR-0045): accept_terms now resolves
+    # customer_id FROM a validated intake_token rather than trusting the
+    # caller's customer_id outright, so the fake DB must answer the
+    # token-resolution lookup with a customer row whose id matches what
+    # the payload additionally claims. Queued twice: the token-resolution
+    # SELECT, then the post-commit customer-sync SELECT by id.
+    cust_id = uuid.uuid4()
+    token_customer = SimpleNamespace(
+        id=cust_id,
+        email=None,
+        name="Pending Intake 2026-05-03",
+        tos_signed=False,
+        tos_signed_at=None,
+        intake_token="TESTONLY-intake-token-TESTONLY-0000000000A",
+        intake_token_expires_at=None,  # no expiry configured — not rejected
+    )
+    app.state._fake_db._results = [token_customer, token_customer]
+
     with patch.object(tos_module, "get_active_tos_template", return_value=_mk_template()), \
          patch.object(tos_module, "accept_tos", return_value=(signed_bytes, record)), \
          patch.object(tos_module, "signed_pdf_dir", return_value=tmp_path), \
@@ -185,7 +203,7 @@ def test_tos_accept_post_with_full_frontend_payload_returns_201(tmp_path):
                 "company": "",
                 "title": "",
                 "confirm": True,
-                "customer_id": str(uuid.uuid4()),
+                "customer_id": str(cust_id),
                 # Obviously-fake, low-entropy stand-in (same URL-safe-base64
                 # alphabet/length shape). A realistic random literal here trips
                 # the gitleaks generic-api-key rule and reds every CI run.

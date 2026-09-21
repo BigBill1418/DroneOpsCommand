@@ -12,7 +12,6 @@ from collections import defaultdict
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from jose import JWTError, jwt
 from slowapi import Limiter
-from slowapi.util import get_remote_address
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -34,6 +33,7 @@ from app.config import settings
 from app.database import get_db
 from app.models.user import User
 from app.schemas.auth import LoginRequest, RefreshRequest, TokenResponse
+from app.utils.client_ip import get_trusted_client_ip
 
 logger = logging.getLogger("doc.auth")
 
@@ -55,7 +55,12 @@ _failed_attempts: dict[str, list[float]] = defaultdict(list)
 _lockouts: dict[str, float] = {}
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
-limiter = Limiter(key_func=get_remote_address)
+# v2.91.0 (Phase 7 hardening) — was get_remote_address (nginx's own IP on
+# every request, see app/utils/client_ip.py). The login lockout below keys
+# on this same function's output, so this was the mechanism by which a
+# stranger's failed logins could lock the operator out of their own
+# instance: every caller shared one IP-keyed bucket.
+limiter = Limiter(key_func=get_trusted_client_ip)
 
 
 def _check_lockout(ip: str) -> None:
@@ -115,7 +120,7 @@ async def setup_status(db: AsyncSession = Depends(get_db)):
 @limiter.limit("5/minute")
 async def initial_setup(request: Request, body: SetupRequest, db: AsyncSession = Depends(get_db)):
     """Create the first admin user. Only works when no users exist."""
-    client_ip = get_remote_address(request)
+    client_ip = get_trusted_client_ip(request)
     result = await db.execute(select(User))
     existing = result.scalars().all()
     if len(existing) > 0:
@@ -150,7 +155,7 @@ async def initial_setup(request: Request, body: SetupRequest, db: AsyncSession =
 @router.post("/login")
 @limiter.limit("10/minute")
 async def login(request: Request, body: LoginRequest, db: AsyncSession = Depends(get_db)):
-    client_ip = get_remote_address(request)
+    client_ip = get_trusted_client_ip(request)
     logger.info("Login attempt: user='%s' ip=%s", body.username, client_ip)
 
     _check_lockout(client_ip)

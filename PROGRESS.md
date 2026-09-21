@@ -4,6 +4,31 @@ Maintained alongside `CHANGELOG.md` and `docs/adr/`. `CHANGELOG.md` is
 the ledger of shipped changes; this file tracks what's in-flight or
 blocked.
 
+## 2026-09-21 — Phase 7 customer-surface hardening — AWAITING OPERATOR MERGE
+
+**State: code + tests complete and green, committed to worktree branch
+`security/phase7-customer-hardening`. NOT merged to `main`, NOT deployed.**
+Full detail: `docs/adr/0045-phase7-customer-surface-hardening.md` +
+`CHANGELOG.md` 2026-09-21 entry.
+
+Blocking items for Bill:
+1. **Review + merge this branch** (no destructive changes, no migration,
+   full test suite green — 784 passed, 17 skipped, quoted in the commit).
+2. **CS-Public item is a PATCH, not a commit** —
+   `docs/patches/0075-cspublic-*` in this repo. Needs a worktree created in
+   `~/repos/CallSignPublic` (per dispatch instruction, not created by this
+   session) before it can land. **Read `0075-cspublic-README.md`'s
+   rollout-order section before merging** — deploying it without first
+   setting `search.worker_origin_token` (origin) and
+   `ORIGIN_SEARCH_SECRET` (Worker secret) 503s ALL archive search,
+   including the legitimate path.
+3. **Open, deliberately unactioned recommendation:** a CAPTCHA on
+   `/api/intake/form/{token}` would need a new Cloudflare Turnstile site
+   key (operator/dashboard action) — not added this pass; the 256-bit
+   intake token already makes brute-force guessing infeasible, so this is
+   lower-priority than it reads in the original audit line item. See
+   ADR-0045 Consequences.
+
 ## 2026-09-11 — FP-1 **P-EVAL complete**: no crate bump exists; P2 is unblocked on `0.5.7`
 
 **State: EVIDENCE DELIVERED, awaiting Bill's call on §8's follow-ups.** Nothing

@@ -12,7 +12,7 @@ and email send. The router's customer-sync logic is the unit under test.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -67,7 +67,18 @@ class FakeQueueAsyncSession:
             obj.accepted_at = datetime.now(timezone.utc)
 
 
-def _mk_payload(*, customer_id, email, full_name="Casey Operator"):
+_TEST_INTAKE_TOKEN = "TESTONLY-intake-token-TESTONLY-0000000000A"
+
+
+def _mk_payload(*, customer_id, email, full_name="Casey Operator", intake_token=None):
+    # v2.91.0 (Phase 7 hardening, ADR-0045): a customer_id with no
+    # intake_token is now an unauthenticated write and rejected outright
+    # (accept_terms resolves customer_id FROM a validated token, mirroring
+    # intake.py's get_intake_form pattern). Every fixture below that sets
+    # customer_id therefore also needs a token — default it here so call
+    # sites that only care about the sync behaviour don't need to change.
+    if customer_id is not None and intake_token is None:
+        intake_token = _TEST_INTAKE_TOKEN
     return SimpleNamespace(
         full_name=full_name,
         email=email,
@@ -75,7 +86,7 @@ def _mk_payload(*, customer_id, email, full_name="Casey Operator"):
         title="",
         confirm=True,
         customer_id=customer_id,
-        intake_token=None,
+        intake_token=intake_token,
     )
 
 
@@ -154,13 +165,15 @@ async def test_tos_accept_syncs_email_when_customer_email_null(tmp_path):
     cust_id = uuid.uuid4()
     customer = SimpleNamespace(
         id=cust_id,
+        intake_token="TESTONLY-intake-token-TESTONLY-0000000000A",
+        intake_token_expires_at=datetime.utcnow() + timedelta(days=1),
         email=None,
         name="Pending Intake 2026-05-03",
         tos_signed=False,
         tos_signed_at=None,
     )
 
-    db = FakeQueueAsyncSession(results=[customer])
+    db = FakeQueueAsyncSession(results=[customer, customer])
     payload = _mk_payload(customer_id=cust_id, email="casey@example.com")
 
     record = _mk_record()
@@ -200,13 +213,15 @@ async def test_tos_accept_does_not_overwrite_existing_email(tmp_path):
     cust_id = uuid.uuid4()
     customer = SimpleNamespace(
         id=cust_id,
+        intake_token="TESTONLY-intake-token-TESTONLY-0000000000A",
+        intake_token_expires_at=datetime.utcnow() + timedelta(days=1),
         email="prior@example.com",  # already populated
         name="Real Name",            # not the placeholder
         tos_signed=False,
         tos_signed_at=None,
     )
 
-    db = FakeQueueAsyncSession(results=[customer])
+    db = FakeQueueAsyncSession(results=[customer, customer])
     payload = _mk_payload(customer_id=cust_id, email="new@example.com")
 
     record = _mk_record()
@@ -236,13 +251,15 @@ async def test_tos_accept_replaces_pending_intake_name_only(tmp_path):
     cust_id = uuid.uuid4()
     customer = SimpleNamespace(
         id=cust_id,
+        intake_token="TESTONLY-intake-token-TESTONLY-0000000000A",
+        intake_token_expires_at=datetime.utcnow() + timedelta(days=1),
         email="prior@example.com",
         name="Pending Intake 2026-05-03",
         tos_signed=False,
         tos_signed_at=None,
     )
 
-    db = FakeQueueAsyncSession(results=[customer])
+    db = FakeQueueAsyncSession(results=[customer, customer])
     payload = _mk_payload(
         customer_id=cust_id, email="new@example.com",
         full_name="Real Customer Name",
@@ -295,13 +312,15 @@ async def test_tos_accept_flips_tos_signed_to_true(tmp_path):
     cust_id = uuid.uuid4()
     customer = SimpleNamespace(
         id=cust_id,
+        intake_token="TESTONLY-intake-token-TESTONLY-0000000000A",
+        intake_token_expires_at=datetime.utcnow() + timedelta(days=1),
         email="prior@example.com",
         name="Existing Customer",
         tos_signed=False,
         tos_signed_at=None,
     )
 
-    db = FakeQueueAsyncSession(results=[customer])
+    db = FakeQueueAsyncSession(results=[customer, customer])
     payload = _mk_payload(customer_id=cust_id, email="prior@example.com",
                           full_name="Existing Customer")
 
@@ -339,6 +358,8 @@ async def test_tos_accept_idempotent_on_already_signed_customer(tmp_path):
     old_ts = datetime(2024, 1, 1, tzinfo=timezone.utc)
     customer = SimpleNamespace(
         id=cust_id,
+        intake_token="TESTONLY-intake-token-TESTONLY-0000000000A",
+        intake_token_expires_at=datetime.utcnow() + timedelta(days=1),
         email="prior@example.com",
         name="Existing Customer",
         tos_signed=True,
@@ -346,7 +367,7 @@ async def test_tos_accept_idempotent_on_already_signed_customer(tmp_path):
         tos_pdf_path="/legacy/canvas/path.pdf",
     )
 
-    db = FakeQueueAsyncSession(results=[customer])
+    db = FakeQueueAsyncSession(results=[customer, customer])
     payload = _mk_payload(customer_id=cust_id, email="prior@example.com",
                           full_name="Existing Customer")
 

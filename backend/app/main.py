@@ -13,11 +13,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi.staticfiles import StaticFiles
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
-from slowapi.util import get_remote_address
 from starlette.formparsers import MultiPartParser
 
 from app.config import settings
 from app.database import async_session, engine, get_db
+from app.utils.client_ip import get_trusted_client_ip
 import app.models  # noqa: F401 — register all models on Base.metadata (Alembic + legacy helpers read it)
 from app.routers import auth, customers, aircraft, missions, flights, maps, reports, invoices, rate_templates, llm, system_settings, financials, weather, intake, flight_library, batteries, maintenance, backup, device_keys, pilots, client_portal, stripe_webhook, business_signals, admin_device_rotation, tos
 
@@ -584,7 +584,11 @@ async def _startup_body() -> None:
                 )
 
 
-limiter = Limiter(key_func=get_remote_address)
+# v2.91.0 (Phase 7 hardening) — key_func was get_remote_address, which reads
+# request.client.host. Since nginx always sits in front of uvicorn, that is
+# nginx's OWN container IP on every request, collapsing every caller into one
+# shared bucket fleet-wide. See app/utils/client_ip.py.
+limiter = Limiter(key_func=get_trusted_client_ip)
 
 # Multipart SPOOL threshold — NOT a size cap. Starlette backs each file part
 # with SpooledTemporaryFile(max_size=max_file_size): parts beyond it roll over
@@ -599,7 +603,7 @@ logger.info("MultiPartParser spool threshold set to 4 MB (large uploads spool to
 app = FastAPI(
     title="D.O.C — Drone Operations Command",
     description="Self-hosted mission management, flight log analysis, AI report generation, invoicing, telemetry visualization, and real-time airspace monitoring for commercial drone operators.",
-    version="2.90.0",
+    version="2.91.0",
     lifespan=lifespan,
 )
 

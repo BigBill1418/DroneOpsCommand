@@ -20,7 +20,6 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Request
 from jose import JWTError, jwt
 from slowapi import Limiter
-from slowapi.util import get_remote_address
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -57,11 +56,14 @@ from app.schemas.client_portal import (
     ClientPaymentResponse,
     ClientTokenValidateResponse,
 )
+from app.utils.client_ip import get_trusted_client_ip
 
 logger = logging.getLogger("doc.client_portal")
 
 router = APIRouter(tags=["client_portal"])
-limiter = Limiter(key_func=get_remote_address)
+# v2.91.0 (Phase 7 hardening) — was get_remote_address; see
+# app/utils/client_ip.py.
+limiter = Limiter(key_func=get_trusted_client_ip)
 
 
 # Mission states at which the customer is allowed to see the invoice
@@ -72,13 +74,6 @@ INVOICE_VISIBLE_STATUSES: frozenset[MissionStatus] = frozenset({
     MissionStatus.COMPLETED,
     MissionStatus.SENT,
 })
-
-
-def _client_ip(request: Request) -> str:
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    return request.client.host if request.client else "unknown"
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -93,7 +88,7 @@ async def validate_client_token(
 ):
     """Public: validate a client JWT and return context. Token in Authorization header."""
     start = time.perf_counter()
-    client_ip = _client_ip(request)
+    client_ip = get_trusted_client_ip(request)
 
     auth_header = request.headers.get("authorization", "")
     if not auth_header.startswith("Bearer "):
@@ -152,7 +147,7 @@ async def client_login(
 ):
     """Public: password-based login for repeat clients who set a portal password."""
     start = time.perf_counter()
-    client_ip = _client_ip(request)
+    client_ip = get_trusted_client_ip(request)
 
     logger.info("[CLIENT-LOGIN] Attempt for email=%s from ip=%s", data.email, client_ip)
 
@@ -196,6 +191,25 @@ async def client_login(
 
     mission_ids_list = sorted(all_mission_ids)
     access_token = create_client_token(customer.id, mission_ids_list, settings.client_token_expire_days)
+    exp = datetime.utcnow() + timedelta(days=settings.client_token_expire_days)
+
+    # v2.91.0 (Phase 7 hardening, ADR-0045) — this handler mints a FRESH
+    # JWT (aggregating mission_ids across the customer's existing active
+    # tokens) but, pre-fix, never recorded a ClientAccessToken row for it.
+    # That was invisible before because get_current_client never checked
+    # the table at all; now that it does (revocation actually revokes),
+    # every issuance path needs a matching row or the token it just handed
+    # the customer would 401 on first use. Mirrors
+    # `_get_or_create_client_link`'s / `_send_portal_email_for_mission`'s
+    # existing row-creation shape exactly.
+    db.add(ClientAccessToken(
+        customer_id=customer.id,
+        token_hash=hash_token(access_token),
+        mission_scope=mission_ids_list,
+        expires_at=exp,
+        ip_address=client_ip,
+    ))
+    await db.flush()
 
     elapsed = time.perf_counter() - start
     logger.info(
@@ -203,7 +217,6 @@ async def client_login(
         customer.id, customer.email, len(mission_ids_list), client_ip, elapsed,
     )
 
-    exp = datetime.utcnow() + timedelta(days=settings.client_token_expire_days)
     return ClientLoginResponse(
         access_token=access_token,
         customer_name=customer.name,
@@ -220,7 +233,7 @@ async def list_client_missions(
 ):
     """Client auth: list missions within the token's scope."""
     start = time.perf_counter()
-    client_ip = _client_ip(request)
+    client_ip = get_trusted_client_ip(request)
 
     logger.info("[CLIENT-MISSIONS] List requested by customer=%s from ip=%s", client.customer_id, client_ip)
 
@@ -260,7 +273,7 @@ async def get_client_mission(
 ):
     """Client auth: get single mission detail (scoped)."""
     start = time.perf_counter()
-    client_ip = _client_ip(request)
+    client_ip = get_trusted_client_ip(request)
 
     logger.info("[CLIENT-MISSION] Detail requested for mission=%s by customer=%s from ip=%s", mission_id, client.customer_id, client_ip)
 
@@ -364,7 +377,7 @@ async def get_client_invoice(
     table client-side.
     """
     start = time.perf_counter()
-    client_ip = _client_ip(request)
+    client_ip = get_trusted_client_ip(request)
 
     if not client.can_access_mission(str(mission_id)):
         logger.warning("[CLIENT-INVOICE] ACCESS DENIED — customer=%s cannot access mission=%s", client.customer_id, mission_id)
@@ -599,7 +612,7 @@ async def create_client_deposit_payment(
     the deposit is required and not yet collected — does not require
     the mission to be completed."""
     start = time.perf_counter()
-    client_ip = _client_ip(request)
+    client_ip = get_trusted_client_ip(request)
     logger.info(
         "[CLIENT-PAY-DEPOSIT] Requested mission=%s customer=%s ip=%s",
         mission_id, client.customer_id, client_ip,
@@ -676,7 +689,7 @@ async def create_client_balance_payment(
     not required), and invoice must not already be paid in full.
     """
     start = time.perf_counter()
-    client_ip = _client_ip(request)
+    client_ip = get_trusted_client_ip(request)
     logger.info(
         "[CLIENT-PAY-BALANCE] Requested mission=%s customer=%s ip=%s",
         mission_id, client.customer_id, client_ip,
@@ -769,7 +782,7 @@ async def create_client_payment(
     working through this endpoint.
     """
     start = time.perf_counter()
-    client_ip = _client_ip(request)
+    client_ip = get_trusted_client_ip(request)
     logger.info(
         "[CLIENT-PAY] Legacy alias hit for mission=%s customer=%s ip=%s",
         mission_id, client.customer_id, client_ip,
@@ -900,7 +913,7 @@ async def create_client_link(
 ):
     """Operator auth: generate (or reuse) a client portal token/URL for a mission."""
     start = time.perf_counter()
-    client_ip = _client_ip(request)
+    client_ip = get_trusted_client_ip(request)
 
     logger.info(
         "[CLIENT-LINK-CREATE] Operator creating link for mission=%s, expires_days=%d from ip=%s",
@@ -948,7 +961,7 @@ async def send_client_link(
 ):
     """Operator auth: email the client portal link to the customer."""
     start = time.perf_counter()
-    client_ip = _client_ip(request)
+    client_ip = get_trusted_client_ip(request)
 
     logger.info("[CLIENT-LINK-SEND] Sending portal link for mission=%s from ip=%s", mission_id, client_ip)
 
@@ -1025,7 +1038,7 @@ async def revoke_client_link(
 ):
     """Operator auth: revoke a client portal token."""
     start = time.perf_counter()
-    client_ip = _client_ip(request)
+    client_ip = get_trusted_client_ip(request)
 
     logger.info("[CLIENT-LINK-REVOKE] Revoking token=%s for mission=%s from ip=%s", token_id, mission_id, client_ip)
 
