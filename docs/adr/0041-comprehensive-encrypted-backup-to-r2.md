@@ -544,7 +544,14 @@ matrix. Everything in **Decision** shipped as written except where noted below.
    therefore safe, and the slot was confirmed `active` both before and after
    the restart.
 
-### Not done, deliberately
+### Not done, deliberately — **§5.7 SINCE EXECUTED, see Amendment 2**
+
+> **Superseded 2026-09-21.** The paragraph below describes the state as of
+> 2026-08-17. **§5.7 was executed on 2026-09-21 at ~14:55 PDT** by
+> `scripts/droneops-backup-cutover.sh` (commit `d153623`). Details, and the
+> root cause of the 2026-08-28 automatic abort, are in **Amendment 2** at the
+> foot of this ADR. Retained verbatim because the criteria it states are what
+> the cutover was gated on.
 
 **§5.7 cutover was not executed.** The legacy `snapshot.sh` cron (03:23 UTC),
 its local dumps, and the old `s3://obs-glitchtip-backups/droneops/` prefixes
@@ -554,7 +561,14 @@ commands and criteria are in `PROGRESS.md`.
 
 ### Residual operator actions
 
-1. **Cutover after three green days** — see `PROGRESS.md`.
+> **Status as of 2026-09-21:** item 1 is **CLOSED** (executed — Amendment 2).
+> Item 2 is **now unblocked and still open** (ROADMAP `BK-3`). Item 3 is
+> **CLOSED** — executed 2026-08-18, see ROADMAP `BK-2`. Of item 4, the 7-year
+> retention question is **CLOSED** (answered "indefinite", `KEEP_YEARLY=unlimited`,
+> 2026-08-18) and the legacy-volume question is **CLOSED** (volumes archived and
+> removed 2026-08-18); the `n8n_*.sqlite` disposal remains **OPEN** for Bill.
+
+1. **Cutover after three green days** — ~~see `PROGRESS.md`~~ **DONE 2026-09-21.**
 2. **Grafana rule descriptions** for `obs-rule-droneops-backup-stale` still
    tell the operator to run `snapshot.sh` and read `backups/snapshot.log`.
    Correct today; update to `droneops-backup.service` / `journalctl` at
@@ -566,8 +580,15 @@ commands and criteria are in `PROGRESS.md`.
    flipping it needs a restart of the standby. Tracked in `ROADMAP.md`.
 4. **Open questions 3–5 in the plan** (7-year retention posture, the ~840 MB
    root-owned `n8n_*.sqlite` on droneops-server, legacy volume disposal)
-   remain for Bill. Retention shipped at 7 years per D4; it is trivially
-   changeable either way.
+   remain for Bill. ~~Retention shipped at 7 years per D4~~ — **superseded
+   2026-08-18: Bill answered "retention is indefinite", so `KEEP_YEARLY` went
+   7 → `unlimited` in `droneops-backup.sh` (D4 amended, CHANGELOG 2026-08-18).
+   Any "7-year retention" phrasing elsewhere in this ADR is historical.**
+   **Legacy volumes: CLOSED 2026-08-18** — `droneops_postgres_data` (46 MB) was
+   archived into the restic repo (tag `legacy-bos-primary-pgdata`, snapshot
+   `66ed2135`, restore-read verified) then removed, along with the empty
+   `droneops-demo_ollama_data`; the live demo stack was not touched.
+   **Still open: the `n8n_*.sqlite` disposal.**
 
 ---
 
@@ -687,3 +708,86 @@ is never pruned at all — so a deletion obligation that must reach every copy i
 retention decision, not a `restic forget` (which the bucket refuses anyway). Restore
 procedure: `docs/runbooks/droneops-backup-restore.md` §13 →
 `noc-master/docs/runbooks/fleet-b2-backup.md`.
+
+---
+
+## Amendment 2 (2026-09-21) — §5.7 cutover EXECUTED, and why the automatic attempt aborted
+
+Recorded after the fact. **No decision in this ADR is retracted.** §5.7 always
+said the legacy lane retires once the new one proves three consecutive green
+days; that is what happened. What this amendment adds is (a) the execution
+record and (b) the root cause of a 24-day delay that was never a backup problem.
+
+### What was executed
+
+`scripts/droneops-backup-cutover.sh` ran on **2026-09-21 at ~14:55 PDT**
+(commit `d153623`), re-verified every gate over ssh before mutating anything,
+and then:
+
+1. **Removed the legacy cron line** on BOS-HQ
+   (`~/droneops/scripts/snapshot.sh`). **CallSign's `snapshot.sh` line at
+   `30 3 * * *` was left untouched** — the two are different repos sharing a
+   script name, and this is the foot-gun the `grep -v` targets by full path.
+   Verified after: the operator crontab holds the CallSign line and the
+   `demo-nightly-reset.sh` line, and no droneops snapshot line.
+2. **Deleted the plaintext R2 prefix** `s3://obs-glitchtip-backups/droneops/`
+   (~2.3 GiB, 229 objects).
+3. **Removed `scripts/snapshot.sh`** from the repo (git history preserves it).
+
+### The deleted prefix is not actually gone — and that is by design
+
+Since **2026-09-11/12** the fleet runs a second backup provider underneath all
+of this (noc-master **ADR-0232**). Its `fleetbackup-r2-mirror` lane
+`rclone copy`s — **never `sync`** — every R2 bucket into Backblaze B2
+`barnardhq-fleet-nightly` under **Object Lock compliance, 90 days,
+keep-all-versions, never pruned**. `obs-glitchtip-backups/droneops/` had already
+been copy-forwarded there before today's delete. So:
+
+- The deleted plaintext prefix **still exists in immutable B2** and is not
+  purgeable for at least 90 days. Today's `s3 rm` removed the live copy, not
+  every copy.
+- That is the correct posture for a retirement (nothing was lost), and it is the
+  wrong assumption for a *deletion obligation*. This repository deliberately
+  holds executed TOS PDFs and invoice records. **Deleting data out of R2 no
+  longer deletes it everywhere** — that is an operator retention decision, never
+  a `restic forget` or an `s3 rm` (see Amendment 1 and the ADR-0232 NEVER list).
+
+### Root cause of the 2026-08-28 automatic abort
+
+The one-shot timer fired as designed and **correctly refused to mutate**,
+reporting `only 5/6 completed runs in last 3 days`. **The backup lane was not
+the problem — it was green twice daily throughout the entire window.** The gate
+was.
+
+Gate 1 counted `done.` lines out of **journald**:
+
+```
+journalctl -u droneops-backup.service --since "3 days ago" | grep -c "done\."
+```
+
+**journald on BOS-HQ retains under three days.** The oldest completion in a
+72-hour window had simply rotated out of the journal before the gate read it, so
+a healthy 6-of-6 lane reported 5. The gate was measuring *log retention*, not
+*backup success* — a false negative that is structurally guaranteed to recur
+every time the journal is shorter than the window being asserted.
+
+**Fix (in `d153623`'s tree, committed 2026-09-21):** count the lane's **own
+output** instead of its logs — `restic snapshots --tag db --json`, filtered to
+snapshots whose timestamp is inside the last 72 h. Retention
+(`forget --keep-daily`) collapses the two daily runs into one kept `db`
+snapshot per day, so **≥3 snapshots in 72 h *is* "three consecutive green
+days"**, measured against the artifact the backup exists to produce. The
+journald figure is still gathered and printed, but only as context in the log
+line — it can no longer abort the run. The same `snapshots` call now serves
+Gate 4, so the script makes one restic call instead of two.
+
+**The generalizable rule:** a gate that asserts "N events happened in the last
+T" must read a store whose retention exceeds T. Logs are the wrong store by
+default; the lane's durable output is the right one.
+
+### Also retired the same day
+
+The spent one-shot timer `droneops-backup-cutover.timer` (**user** scope on
+HSH-HQ / droneops-server, not system scope) was disabled. It is a one-shot that
+had already fired; leaving it enabled serves nothing and invites a second
+execution against a repo that no longer has anything to cut over.

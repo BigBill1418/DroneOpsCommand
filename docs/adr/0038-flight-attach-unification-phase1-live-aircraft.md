@@ -135,3 +135,11 @@ rebuild. Ship via a **manual rebuild on BOS-HQ**
 (`docker compose build backend worker beat flight-parser && up -d --no-deps …`)
 and verify the container build time / public `openapi.json` version (`2.76.4`),
 **not** `deployer-state.json` (per ADR-0033's deploy note).
+
+> **Correction (2026-09-21):** the `.deployer-disabled` premise above is wrong and was
+> wrong when written. **Nothing in the fleet deployer reads that marker** — it disabled the
+> *retired per-repo autopull*, which no longer exists. This repo **is** continuously deployed
+> on push to `main` (ADR-0018); the way to pause deploys is
+> `noc-master/data/soak-pause/<repo>.pause`. See CLAUDE.md § "Deployment topology". The
+> deploy-verification advice in the same paragraph (check the running version / container
+> build time, never `deployer-state.json`) stands on its own and is still correct.

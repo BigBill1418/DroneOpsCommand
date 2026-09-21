@@ -247,6 +247,14 @@ FU-AI-RUNTIME-GATE flipped IN PROGRESS → SHIPPED; ADR-0015 §Decision-5
 updated with the same hash. Deploy is gated on the operator's 24h soak
 preference; `.deployer-disabled` keeps SwarmPilot out of the way.
 
+> **Correction (2026-09-21):** the `.deployer-disabled` premise above is wrong and was
+> wrong when written. **Nothing in the fleet deployer reads that marker** — it disabled the
+> *retired per-repo autopull*, which no longer exists. This repo **is** continuously deployed
+> on push to `main` (ADR-0018); the way to pause deploys is
+> `noc-master/data/soak-pause/<repo>.pause`. See CLAUDE.md § "Deployment topology". The
+> deploy-verification advice in the same paragraph (check the running version / container
+> build time, never `deployer-state.json`) stands on its own and is still correct.
+
 ### Related improvement — clear stale draft on Generate click (commit `700c9b0`)
 
 Small UX follow-up landed in the same close-out cycle as the audience

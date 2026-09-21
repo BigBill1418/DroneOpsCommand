@@ -131,6 +131,14 @@ backend worker beat flight-parser && up -d --no-deps …`) and verification of
 container build time, **not** deployer status (ADR-0033 deploy note). Migrations
 run at backend startup on the writable primary only (ADR-0021 recovery guard).
 
+> **Correction (2026-09-21):** the `.deployer-disabled` premise above is wrong and was
+> wrong when written. **Nothing in the fleet deployer reads that marker** — it disabled the
+> *retired per-repo autopull*, which no longer exists. This repo **is** continuously deployed
+> on push to `main` (ADR-0018); the way to pause deploys is
+> `noc-master/data/soak-pause/<repo>.pause`. See CLAUDE.md § "Deployment topology". The
+> deploy-verification advice in the same paragraph (check the running version / container
+> build time, never `deployer-state.json`) stands on its own and is still correct.
+
 ### Phase 0 — Instrument & freeze (no schema change)
 - Add a one-shot startup **census log**: count rows by class
   (`native = flight_id NOT NULL`, `odl = flight_id NULL AND

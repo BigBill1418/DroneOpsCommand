@@ -1,7 +1,31 @@
 # Flight Details — pull the untapped DJI log data into the DB and give it a page
 
-**Status:** PLANNED, nothing built. Implementation plan for ROADMAP **FP-1**.
+**Status (updated 2026-09-21):** **P0 + P1 SHIPPED AND LIVE; P-EVAL closed;
+P2–P7 remain.** Was "PLANNED, nothing built" — stale since 2026-09-05. P0 shipped
+**v2.82.0** (`8b29ef9`), P1 shipped **v2.83.0** + parser **1.2.0** (`439b952`),
+alembic head `0011_battery_src_truth`. P-EVAL closed 2026-09-11 — no crate bump
+exists (`../reports/2026-09-11-dji-log-parser-upgrade-eval.md`). Implementation
+plan for ROADMAP **FP-1**, which carries the live status.
 **Date:** 2026-09-04 (revised same day to fold in operator decisions)
+
+> **Every log count in this plan is stale by construction — re-derive, do not
+> read.** The numbers move every time Bill uploads. Authoritative snapshot
+> (2026-09-11): **198** real originals on the fleet
+> (`/data/uploads/flight_logs` holds 200 files, 2 of which are dummy test
+> files; 198 is the hash-set intersection with `flights.source_file_hash`), and
+> **226** `dji_txt` rows. Every "182" / "184" / "190" / "192" / "210" figure in
+> this plan and in ADR-0043 predates that and is wrong. The backfill, the repair
+> pass and the ODL re-import must all count at run time. Canonical note:
+> `ROADMAP.md` § FP-1 "Log inventory".
+>
+> **§8's log-inventory hunt is CLOSED** (2026-09-04/05), so the PENDING table it
+> left for the operator is answered:
+> `../reports/2026-09-05-fp1-log-recovery-hunt.md` plus the manifest
+> `data/2026-09-05-missing-28-dji-originals.tsv`. **P7 is no longer blocked on
+> it.** 584 OpenDroneLog-era originals recovered to BOS-HQ
+> `~/droneops-staging/drive-logs/` and covered by restic/R2 under tag `staging`;
+> **28 `dji_txt` originals are unrecoverable from any fleet source.** One
+> time-critical operator lead remains — see that report.
 **Decision record:** [ADR-0043](../adr/0043-flight-details-sidecar-table-for-extended-log-data.md)
 **Input:** [`2026-09-04-dji-log-untapped-data-census.md`](2026-09-04-dji-log-untapped-data-census.md)
 — the primary-source census of what the logs actually carry. This plan does not
@@ -941,7 +965,9 @@ into P2's spike, run against whichever crate P-EVAL selected.
 *P2-a, the gate (first, alone):* the record accessor's signature; does it consume
 the keychains; peak RSS on the largest prod log; does the selected crate decode
 `SmartBatteryStatic` correctly. **Measured, not assumed.** If peak RSS exceeds
-the parser's `mem_limit: 256m` (`docker-compose.yml:350`, sized for an idle
+the parser's `mem_limit: 256m` (the `flight-parser` service in
+`docker-compose.yml` — line 368 as of 2026-09-21, was cited as 350; match the
+**symbol**, not the line number, they drift; sized for an idle
 ~1 MiB service), bump to 512m in the same change **justified by the
 measurement** — not pre-emptively on a guess.
 *P2-b:* the record pass, the `>> 8` shim with its plausibility gate, the pilot
@@ -998,7 +1024,9 @@ DroneOpsCommand prod on BOS-HQ is deployed by the **NOC Master Control fleet
 deployer** (`swarmpilot_deployer`) on push to `main`; the `.deployer-disabled`
 marker in the repo root disables the retired *per-repo autopull*, not the fleet
 deployer. `update.sh` does not exist (deleted in `e4610b5`) — **CLAUDE.md's
-"Tech Stack → Deploy: `update.sh`" line is stale and wants a docs pass.**
+"Tech Stack → Deploy: `update.sh`" line was stale; FIXED 2026-09-11 in `e4cc6c0`.**
+CLAUDE.md now states the deployer path and says plainly that `update.sh` does not
+exist, so this call-to-action is closed.
 `flight-parser` is a `build:`-only compose service
 (`docker-compose.yml:344-347`); NOC ADR-0079 taught the deployer's digest gate to
 resolve those, so a Rust change does rebuild. Verify each parser deploy with

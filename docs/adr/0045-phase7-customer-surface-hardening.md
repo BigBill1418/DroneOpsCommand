@@ -1,9 +1,11 @@
 # ADR-0045: Phase 7 customer-surface hardening
 
 **Date:** 2026-09-21
-**Status:** Accepted — code + tests shipped to this worktree branch
-(`security/phase7-customer-hardening`); **not deployed** (operator-gated,
-Bill asleep at dispatch time). Governed by noc-master's
+**Status:** Accepted — **MERGED AND DEPLOYED 2026-09-21.** Bill merged
+`security/phase7-customer-hardening` at `d30eb5b` (13:53 PDT); the fleet
+deployer built and recreated the stack, and **v2.91.0 was live on BOS-HQ at
+13:58 PDT**. (Superseded posture: this line previously read "not deployed
+(operator-gated, Bill asleep at dispatch time)".) Governed by noc-master's
 `docs/plans/2026-09-21-sso-fanout-dispatch.md` (Wave 2B) and
 `docs/adr/0246-fleet-auth-posture-standard-and-the-ip-bypass-decision.md`
 decision 5.
@@ -330,6 +332,15 @@ same way this defect was found: `docker logs droneops-frontend-1` should
 show requests whose resolved-client audit-log field is a real external
 caller IP, never the constant `172.19.0.11` (or whatever `cloudflared`'s
 current container IP is — it is not guaranteed stable across a recreate).
+
+> **Still open after the 2026-09-21 deploy — operator action (P7-6).** This
+> post-deploy check could **not** be performed from a session. `droneops.barnardhq.com`
+> sits behind Cloudflare Access, so an agent-side request is answered with a 302
+> to the Access login page and never reaches the app — **only a request from
+> Bill's own authenticated browser session produces a log line carrying a real
+> external client IP.** One-line operator check: open the app in a browser, then
+> `ssh 10.99.0.4 'docker logs --tail 50 droneops-frontend-1'` and confirm the
+> resolved-client field shows his own public IP, not `172.19.0.11`.
 
 **Not fixed by this correction, by decision:** the managed-tenant topology
 requires an operator action (`docker-compose.managed.yml` on BOS-HQ, a

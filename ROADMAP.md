@@ -173,11 +173,18 @@ surviving lead is time-critical and is an operator action: see
   P2 Tier 1 records → P3 backfill → P4 repair → P5 UI → P6 battery → P7 ODL
   re-import. Three destructive-capable passes (P4, P7 and any `force` re-backfill)
   default to `dry_run=true`.
-- **Trigger to start.** P0/P1 are unblocked now. P2 opens with a hard spike gate
-  on the `dji-log-parser` record-access API — the plan's one real unknown.
-  **P7 is BLOCKED** on the log-inventory hunt across fleet hosts (plan §8, a
-  PENDING table for the operator to fill in): 584 `opendronelog_import` rows are
-  the ceiling on matches, and the count of recovered originals is the real driver.
+- **Trigger to start.** P0/P1 shipped and are live. P2 opens with a hard spike
+  gate on the `dji-log-parser` record-access API — the plan's one real unknown
+  (peak RSS against the parser's `mem_limit: 256m`, still unmeasured).
+  **P7 is NOT blocked** — corrected 2026-09-21. It read "P7 is BLOCKED on the
+  log-inventory hunt (plan §8, a PENDING table)"; **that hunt was filled in on
+  2026-09-04/05** (`docs/reports/2026-09-05-fp1-log-recovery-hunt.md` + the
+  manifest `docs/plans/data/2026-09-05-missing-28-dji-originals.tsv`). What P7
+  inherits is a settled inventory: 584 `opendronelog_import` rows are the
+  ceiling on matches, all 584 originals are recovered to BOS-HQ
+  `~/droneops-staging/drive-logs/` and covered by restic/R2 under tag `staging`,
+  and **28 `dji_txt` originals are unrecoverable from any fleet source**. P7 is
+  gated on P2–P6 landing first, not on information.
 
 ## Billing follow-ups
 
@@ -215,30 +222,35 @@ surviving lead is time-critical and is an operator action: see
   mostly-empty padded segments to protect ~1 MB/day of change.
 - **Reference.** ADR-0041 D5 + Option D.
 
-### BK-2 — Standby `archive_mode` on `10.99.0.2` — ✅ DONE 2026-08-18
+### BK-3 — Grafana `obs-rule-droneops-backup-stale` description text — **OPEN, UNBLOCKED 2026-09-21**
 
-- **Scope.** The droneops standby (`droneops-db-standby` on svdp-dev) still
-  carries `archive_mode = 'on'` and the old
-  `archive_command = cp %p …/wal_archive/%f` in its `postgresql.auto.conf`,
-  inherited from the base backup.
-- **Why it matters.** Inert today — `on` does not archive during recovery, only
-  `always` does. **But a promotion would immediately recreate ADR-0041 Gap 7 on
-  that host**, silently accumulating an unpruned archive inside the pgdata
-  volume it is supposed to protect.
-- **Fix.** `ALTER SYSTEM SET archive_mode='off'; ALTER SYSTEM RESET
-  archive_command;` then restart the standby (archive_mode needs a restart, not
-  a reload) and confirm it resumes streaming and the slot returns to `active`.
-- **Trigger.** Next planned maintenance window on svdp-dev, or immediately
-  before any deliberate failover drill. Deferred here only because it needs a
-  standby restart, which was out of scope for the backup change.
-- **Executed 2026-08-18 (operator-approved).** `ALTER SYSTEM` is unavailable in
-  recovery, so `postgresql.auto.conf` was edited directly (`archive_mode='off'`,
-  `archive_command` line removed) followed by a container restart. Also found
-  and deleted **1.5 GiB / 99 stale WAL segments** already sitting in the
-  standby's own `wal_archive` (inherited from the seeding basebackup) — pgdata
-  2.3 G → 851 M. Verified after: `pg_is_in_recovery()=t`, `archive_mode=off`,
-  wal receiver `streaming`, primary slot `chad_hq_standby` active with empty
-  `replay_lag`. A promotion can no longer recreate Gap 7.
+- **Scope.** The rule's `description` still tells the operator to
+  `tail ~/droneops/backups/snapshot.log` and re-run `snapshot.sh`. Both are gone
+  as of the §5.7 cutover. Replace with
+  `journalctl -u droneops-backup.service -n 50` and
+  `sudo systemctl start droneops-backup.service`.
+- **Where.** `/opt/infrawatch/grafana/provisioning/alerting/observability-alerts.yml`
+  — **in `~/noc-master`, not in this repo.** That is why the cutover script could
+  not do it and why it survived the cutover.
+- **Hard constraint.** Change the **`description` text only.** The metric names
+  and expressions are a contract with `droneops_backup_last_success_timestamp_seconds`
+  and must not move.
+- **Trigger.** Was "at cutover". The cutover happened 2026-09-21, so this is
+  unblocked now. Until it is done, the alert that fires during a backup outage
+  hands the operator two commands that no longer exist — a runbook that fails
+  exactly when it is needed.
+- **Source.** `PROGRESS.md` §"Also at cutover (do not forget)"; ADR-0041 residual 2.
+- **Owner.** TBD. ~15 minutes.
+
+### BK-4 — `~/backups/n8n_*.sqlite` on droneops-server — **OPEN, operator decision**
+
+- **Scope.** ~840 MB, root-owned, last written 2026-04-15. Untouched by every
+  backup change so far and deliberately out of ADR-0041's scope. The final n8n
+  database snapshot is already archived into this repo's restic repository under
+  tag `legacy-n8n`, so the copy under `~/backups/` is redundant — but deleting
+  someone's data is not an agent decision.
+- **Trigger.** Bill says keep or delete.
+- **Source.** ADR-0041 residual 4; `PROGRESS.md` §"Open, for Bill".
 
 ## Observability + Fleet Hygiene (follow-ups from ADR-0002, 2026-04-24)
 
@@ -267,19 +279,6 @@ a different controller.
   observed APK version (if known), and upgrade plan (OTA-capable vs
   sideload-required).
 - **Owner.** TBD. Likely ~1 eng day.
-
-### FU-2 — Unauthenticated `GET /health` shim — ✅ SHIPPED v2.63.4 (2026-04-24)
-
-- Delivered as a plain JSON alias (same payload as `/api/health`).
-  Reasoning for deviating from the spec'd "update-required" banner: a
-  pre-v2.34 Gson client with `setLenient(false)` would choke on any
-  payload that doesn't match its expected shape, so custom banner
-  fields buy nothing on the failing client and are confusing to
-  modern clients. The WARN log on auth-failure in
-  `backend/app/auth/device.py` is the actual stale-client tripwire
-  (key_prefix + IP + user-agent + path); FU-3's Grafana panel consumes
-  that stream directly. FU-2 rate-limiting not needed since `/health`
-  never triggers the WARN path.
 
 ### FU-3 — Grafana stale-client tripwire
 
@@ -346,12 +345,6 @@ a different controller.
 
 ---
 
-## Older roadmap items
-
-None yet captured here. When a new forward-looking plan is drafted,
-append it under its own heading with the same Scope / Trigger /
-Deliverable / Owner block structure.
-
 ## LLM-assisted report surface (follow-ups from ADR-0015, 2026-05-14)
 
 **Context.** ADR-0015 (Accepted 2026-05-14) pinned the contract:
@@ -368,51 +361,6 @@ retrospective surface (FU-AI-1) as a follow-up. The operator confirmed
 at close-out that no operator debrief was ever requested; FU-AI-1 is
 **dropped**, not deferred. See ADR-0015 §"Rejected alternative" for the
 rationale.
-
-### FU-AI-RUNTIME-GATE — Runtime audience-leak soft-block — ✅ SHIPPED at commit `4953edf` (2026-05-14, local; deploy pending operator review)
-
-- **Scope.** Wire `report_audience.has_audience_leak()` (shipped at
-  commit `22469ed` as a callable module) as a post-generation gate on
-  every LLM-produced report draft. On leak detection: flag the draft
-  (do not silently pass), surface the offending phrasings in the
-  `MissionReportEdit` editorial UI banner, allow operator override
-  ("soft-block" — never block the operator from shipping, but never
-  let the leak be invisible). Tripwire on top of the corrected prompt,
-  not a substitute for it.
-- **Delivered as.** Wire-in lives at the persistence site, not the
-  per-provider call paths: `_apply_audience_findings(report, llm_content)`
-  in `backend/app/tasks/celery_tasks.py:150-189` runs the detector after
-  every LLM generation and persists findings into two new `Report`
-  columns (`has_audience_leak BOOL`, `audience_leak_details JSONB`)
-  added via the idempotent `_add_missing_columns` migration path in
-  `backend/app/main.py:114-122`. Helper never raises (detector failure
-  logs and leaves defaults so generation never 500s). No regen loop
-  per operator directive — detection + surfacing only, with a
-  doc-string-lock test preventing drift toward retry-clean. Yellow
-  `IconAlertTriangle` Mantine `Alert` banner above the FINAL REPORT
-  editor in `MissionReportEdit.tsx` lists each matched phrase with its
-  rule name; Save / PDF / Send remain enabled (editorial review IS the
-  gate). Test coverage: 10 new hermetic tests in
-  `backend/tests/services/test_audience_leak_persistence.py` (10/10
-  green); existing 17-test audience suite stays green; full backend
-  suite 240 passed, 1 skipped, 2 pre-existing unrelated failures.
-- **Deploy status.** Personal-instance only; no deploy yet
-  (`.deployer-disabled` per fleet convention). 24h soak with a real
-  report generated against the new gate before any push to
-  managed-hosting tenants, per operator's standing close-out preference.
-
-### FU-AI-2 — Prompt regression fixture — ✅ SHIPPED at commit `22469ed` (2026-05-14)
-
-- **Delivered as `backend/tests/services/test_report_audience_guard.py`**
-  rather than the originally proposed `test_llm_report_audience.py` path.
-  17-test suite: Layer 1 (4 tests) locks structural guarantees of the
-  system prompt (audience pin, operator-address ban, Section-5 reframe,
-  operator-notes framing); Layer 2 (13 tests) exercises the deterministic
-  regex-based detector against nine representative bad phrasings, a
-  known-clean third-person sample, empty input, diagnostic snippet
-  shape, and the verbatim shape of the operator-reported leak.
-  Hermetic — no network, no LLM, no DB. Runs ~1.8s. All 17/17 passing
-  on Python 3.12.3.
 
 ### FU-AI-3 — Prompt source-of-truth relocation — ⚠ DE-PRIORITIZED (2026-05-14)
 
@@ -499,6 +447,145 @@ rationale.
   suite for any new structural guarantees added during the pass.
 - **Owner.** TBD. Operator scopes when ready.
 
+## Repo hygiene
+
+### H-1 — Parity test for the compose `APP_VERSION` defaults — **NOT STARTED**
+
+- **Why this exists.** `backend/app/version.py` is guarded by
+  `tests/test_app_version_parity.py`, so a missed bump there is red. **The five
+  compose `APP_VERSION` defaults are guarded by nothing**, and they sat at
+  `2.67.3` from ~v2.67 until 2026-09-21 — **25 minor versions**. They are not
+  the app's reported version, but they *are* what tags the **Sentry/GlitchTip
+  release** on both halves (`backend/app/observability/sentry.py:110`,
+  `frontend/src/lib/sentry.ts:33`) and what the Login/Setup page footers render.
+  So every error grouped by release since ~v2.67 has been mis-tagged, silently.
+- **Scope.** A test that parses `docker-compose.yml` (×4: backend, worker,
+  flight-parser, frontend build-arg) and `docker-compose.demo.yml` (×1) and
+  asserts each `${APP_VERSION:-X.Y.Z}` default equals `app.version.APP_VERSION`.
+  Same shape as the existing parity test, which is the proof the shape works.
+- **Also needs an operator/deploy action, and the test cannot cover it.** The
+  host `.env` on BOS-HQ **overrides** the default and is itself hand-set:
+  `APP_VERSION=2.67.4` as of 2026-09-21, confirmed inside the running
+  `droneops-backend-1`. **Fixing the default does not fix production.** Either
+  set it to the live version at each bump, or delete the line so the compose
+  default wins — the second is the one that stops drifting. Note the frontend
+  half is a **build ARG** (`VITE_APP_VERSION`), so it only changes on a rebuild.
+- **Deliverable.** `backend/tests/test_compose_version_parity.py`, a CLAUDE.md
+  line (added 2026-09-21), and the host `.env` decision.
+- **Owner.** TBD. ~1 hour.
+
+---
+
+## Completed
+
+Closed work, moved here on **2026-09-21** so the sections above hold only open
+items. Entries are **verbatim**; nothing was rewritten. Index first, full text
+below.
+
+| ID | Closed | Delivered as |
+|---|---|---|
+| `BK-2` | 2026-08-18 | Standby `archive_mode` on `10.99.0.2` turned off + 1.5 GiB / 99 stale WAL segments deleted; pgdata 2.3 G → 851 M. A promotion can no longer recreate ADR-0041 Gap 7. |
+| `FU-2` | 2026-04-24 | Unauthenticated `GET /health` shim — v2.63.4. |
+| `FU-7` | 2026-04-24 | Zero-touch device API key rotation — v2.63.6 + DroneOpsSync v1.3.25 (ADR-0003). |
+| `FU-8` | 2026-06-11 | Ground-up audit residuals — v2.70.0 / v2.70.1. Live residue (device-upload Celery decoupling, `pg_trgm`) is listed inside the entry. |
+| `FU-AI-RUNTIME-GATE` | 2026-05-14 | Runtime audience-leak soft-block — `4953edf`; **deployed and live** (re-verified 2026-09-21 against the running system). |
+| `FU-AI-2` | 2026-05-14 | Prompt regression fixture — `22469ed`, `backend/tests/services/test_report_audience_guard.py` (17 tests). |
+
+**Also closed but not moved, because they live inside a still-open parent:**
+`FP-1 P0` (v2.82.0 `8b29ef9`), `FP-1 P1` (v2.83.0 + parser 1.2.0 `439b952`) and
+`FP-1 P-EVAL` (closed 2026-09-11, no crate bump exists) — all under § FP-1, whose
+P2–P7 remain open. `BK-CUT` (the ADR-0041 §5.7 cutover) was never a ROADMAP item;
+it lived in `PROGRESS.md` and was **executed 2026-09-21**.
+
+### BK-2 — Standby `archive_mode` on `10.99.0.2` — ✅ DONE 2026-08-18
+
+- **Scope.** The droneops standby (`droneops-db-standby` on svdp-dev) still
+  carries `archive_mode = 'on'` and the old
+  `archive_command = cp %p …/wal_archive/%f` in its `postgresql.auto.conf`,
+  inherited from the base backup.
+- **Why it matters.** Inert today — `on` does not archive during recovery, only
+  `always` does. **But a promotion would immediately recreate ADR-0041 Gap 7 on
+  that host**, silently accumulating an unpruned archive inside the pgdata
+  volume it is supposed to protect.
+- **Fix.** `ALTER SYSTEM SET archive_mode='off'; ALTER SYSTEM RESET
+  archive_command;` then restart the standby (archive_mode needs a restart, not
+  a reload) and confirm it resumes streaming and the slot returns to `active`.
+- **Trigger.** Next planned maintenance window on svdp-dev, or immediately
+  before any deliberate failover drill. Deferred here only because it needs a
+  standby restart, which was out of scope for the backup change.
+- **Executed 2026-08-18 (operator-approved).** `ALTER SYSTEM` is unavailable in
+  recovery, so `postgresql.auto.conf` was edited directly (`archive_mode='off'`,
+  `archive_command` line removed) followed by a container restart. Also found
+  and deleted **1.5 GiB / 99 stale WAL segments** already sitting in the
+  standby's own `wal_archive` (inherited from the seeding basebackup) — pgdata
+  2.3 G → 851 M. Verified after: `pg_is_in_recovery()=t`, `archive_mode=off`,
+  wal receiver `streaming`, primary slot `chad_hq_standby` active with empty
+  `replay_lag`. A promotion can no longer recreate Gap 7.
+
+### FU-2 — Unauthenticated `GET /health` shim — ✅ SHIPPED v2.63.4 (2026-04-24)
+
+- Delivered as a plain JSON alias (same payload as `/api/health`).
+  Reasoning for deviating from the spec'd "update-required" banner: a
+  pre-v2.34 Gson client with `setLenient(false)` would choke on any
+  payload that doesn't match its expected shape, so custom banner
+  fields buy nothing on the failing client and are confusing to
+  modern clients. The WARN log on auth-failure in
+  `backend/app/auth/device.py` is the actual stale-client tripwire
+  (key_prefix + IP + user-agent + path); FU-3's Grafana panel consumes
+  that stream directly. FU-2 rate-limiting not needed since `/health`
+  never triggers the WARN path.
+
+### FU-AI-RUNTIME-GATE — Runtime audience-leak soft-block — ✅ SHIPPED `4953edf` (2026-05-14) and **LIVE IN PRODUCTION**
+
+- **Scope.** Wire `report_audience.has_audience_leak()` (shipped at
+  commit `22469ed` as a callable module) as a post-generation gate on
+  every LLM-produced report draft. On leak detection: flag the draft
+  (do not silently pass), surface the offending phrasings in the
+  `MissionReportEdit` editorial UI banner, allow operator override
+  ("soft-block" — never block the operator from shipping, but never
+  let the leak be invisible). Tripwire on top of the corrected prompt,
+  not a substitute for it.
+- **Delivered as.** Wire-in lives at the persistence site, not the
+  per-provider call paths: `_apply_audience_findings(report, llm_content)`
+  in `backend/app/tasks/celery_tasks.py:150-189` runs the detector after
+  every LLM generation and persists findings into two new `Report`
+  columns (`has_audience_leak BOOL`, `audience_leak_details JSONB`)
+  added via the idempotent `_add_missing_columns` migration path in
+  `backend/app/main.py:114-122`. Helper never raises (detector failure
+  logs and leaves defaults so generation never 500s). No regen loop
+  per operator directive — detection + surfacing only, with a
+  doc-string-lock test preventing drift toward retry-clean. Yellow
+  `IconAlertTriangle` Mantine `Alert` banner above the FINAL REPORT
+  editor in `MissionReportEdit.tsx` lists each matched phrase with its
+  rule name; Save / PDF / Send remain enabled (editorial review IS the
+  gate). Test coverage: 10 new hermetic tests in
+  `backend/tests/services/test_audience_leak_persistence.py` (10/10
+  green); existing 17-test audience suite stays green; full backend
+  suite 240 passed, 1 skipped, 2 pre-existing unrelated failures.
+- **Deploy status — corrected 2026-09-21.** This read *"Personal-instance only;
+  no deploy yet (`.deployer-disabled` per fleet convention)"* for four months.
+  Both halves were wrong. `.deployer-disabled` never disabled the fleet deployer
+  (ADR-0018), and the gate has been deployed continuously since `4953edf`
+  (2026-05-14) — every push to `main` since then has rebuilt and recreated the
+  stack. **Verified on the running system 2026-09-21:**
+  `_apply_audience_findings` is wired at
+  `backend/app/tasks/celery_tasks.py:307`, and both `reports.has_audience_leak`
+  and `reports.audience_leak_details` exist in the production database on
+  BOS-HQ. The 24h-soak precondition is long satisfied.
+
+### FU-AI-2 — Prompt regression fixture — ✅ SHIPPED at commit `22469ed` (2026-05-14)
+
+- **Delivered as `backend/tests/services/test_report_audience_guard.py`**
+  rather than the originally proposed `test_llm_report_audience.py` path.
+  17-test suite: Layer 1 (4 tests) locks structural guarantees of the
+  system prompt (audience pin, operator-address ban, Section-5 reframe,
+  operator-notes framing); Layer 2 (13 tests) exercises the deterministic
+  regex-based detector against nine representative bad phrasings, a
+  known-clean third-person sample, empty input, diagnostic snippet
+  shape, and the verbatim shape of the operator-reported leak.
+  Hermetic — no network, no LLM, no DB. Runs ~1.8s. All 17/17 passing
+  on Python 3.12.3.
+
 ### FU-7 — Zero-touch device API key rotation — **CLOSED 2026-04-24** (v2.63.6 / DroneOpsSync v1.3.25)
 
 - **Status.** PR open against `main` on this repo (`claude/zero-touch-key-rotation-backend`); paired DroneOpsSync PR open against `main` (`claude/auto-rotation-client`). Operator reviews + merges.
@@ -529,49 +616,50 @@ rationale.
   fix, v2.68.8 event-loop unblocking sweep + eager-load scoping, v2.69.0
   standby-safe startup + hot-path indexes + streaming flight ingest).
   Full findings: `docs/plans/2026-06-11-ground-up-audit.md`; ADR-0021.
-- **Remaining items (deliberately deferred, in priority order):**
+- **Remaining items — the stale list was DELETED 2026-09-21; the correction below
+  is what remains.** That six-item "deliberately deferred" list was written when
+  FU-8 was *opened* and never trimmed when FU-8 was *closed*, so the two halves
+  of this entry contradicted each other for months. Keeping the superseded list
+  beside its own correction only ever gave a reader two answers. The correction,
+  verified against the code at HEAD, is retained verbatim:
 
-  > **Corrected 2026-08-03 — this list is stale; nearly all of it SHIPPED.**
-  > It was written when FU-8 was opened and was never trimmed when FU-8 was
-  > closed, so the two halves of this entry now contradict each other (the
-  > CLOSED note above already names the same work as delivered). Verified
-  > against the code at HEAD, not against prose:
+  > **Corrected 2026-08-03 — that list was stale; nearly all of it SHIPPED.**
+  > Verified against the code at HEAD, not against prose:
   >
   > - **#1 lean mission list** — shipped; `app/routers/missions.py` strips the
   >   heavy `flight_data_cache` keys (`_strip_cache_heavy_keys`,
   >   `_scalar_cache_from_flight`).
   > - **#2 Alembic** — shipped (ADR-0022, v2.70.0). `backend/alembic/versions/`
   >   holds `0001_baseline_schema` … `0009_mission_dl_email_sent_at`, all nine
-  >   are present inside the running `droneops-backend-1` container on BOS-HQ,
-  >   and ADR-0036 made the advisory-locked Alembic boot the single schema
-  >   path. **Anything that still says "DroneOpsCommand has no Alembic; add
-  >   columns to `_add_missing_columns()` in `main.py`" is describing the
-  >   pre-v2.70.0 repo and must not be followed.**
+  >   present inside the running `droneops-backend-1` container on BOS-HQ, and
+  >   ADR-0036 made the advisory-locked Alembic boot the single schema path.
+  >   **Anything that still says "DroneOpsCommand has no Alembic; add columns to
+  >   `_add_missing_columns()` in `main.py`" is describing the pre-v2.70.0 repo
+  >   and must not be followed.** (Alembic head is `0011_battery_src_truth` as of
+  >   2026-09-21.)
   > - **#3 per-call `StripeClient`** — shipped;
   >   `app/services/stripe_service.py::stripe_client()`, consumed by
   >   `client_portal.py` and `stripe_webhook.py`.
-  > - **#4 backup/restore as a Celery job** — shipped;
-  >   `run_backup_job_task` in `app/tasks/celery_tasks.py` (comment there still
-  >   cites "FU-8 #4").
-  > - **#5** — `_save_original_file` no longer exists in `backend/app`; only
-  >   the optional `/reprocess` refactor half may remain.
+  > - **#4 backup/restore as a Celery job** — shipped; `run_backup_job_task` in
+  >   `app/tasks/celery_tasks.py` (the comment there still cites "FU-8 #4").
+  > - **#5** — `_save_original_file` no longer exists in `backend/app`; only the
+  >   optional `/reprocess` refactor half may remain.
   > - **#6 P2/P3 index audit** — shipped as Alembic revision `0002_p2_p3_indexes`.
 
-  1. Mission Hub list payload is still O(track) — `flight_data_cache`
-     duplicates the GPS track in every list row; needs a lean list schema or
-     pagination (contract change → frontend work in the same pass).
-  2. Adopt Alembic for schema migrations; move the startup
-     `create_all`/`_add_missing_columns`/index block into versioned
-     migrations (ADR-0021 future-work section).
-  3. Stripe: migrate module-global `stripe.api_key` to per-call
-     `StripeClient` instances (closes the key-rotation interleave window
-     noted in the v2.68.8 verification).
-  4. Backup/restore as a Celery job with progress polling (currently
-     executor-offloaded in-request; contract change).
-  5. `/reprocess` new-flight branch could reuse `_build_flight_from_parsed`
-     if its divergent log lines are acceptable; delete now-unused
-     `_save_original_file`.
-  6. Audit P2/P3 index candidates (e.g. `flights.start_time`) once Alembic
-     lands.
+  Two things the correction flagged as genuinely *not* done, and they are the
+  only live residue of FU-8 — both are already named in the CLOSED note above:
+  * **Device-upload Celery decoupling (audit P2-2, full leg)** — designed
+    2026-06-15 (ADR-0023 + DroneOpsSync ADR-0008 +
+    `docs/plans/2026-06-15-device-upload-async-decoupling.md`), **not started**.
+    Requires a DroneOpsSync client release. Recommended fast-follow: ship the
+    DroneOpsSync socket-timeout-is-per-file fix standalone (one line,
+    backend-independent) ahead of the full async route.
+  * **Trigram (`pg_trgm`) indexes** for the leading-wildcard ILIKE searches —
+    rejected from migration `0002` because B-tree cannot serve them. Revisit
+    only if flight search slows at scale.
+  * The optional half of #5 (refactoring `/reprocess`'s new-flight branch onto
+    `_build_flight_from_parsed`) may also remain; `_save_original_file` itself
+    is gone.
+
 - **Trigger to act.** Operator-driven, or the next perf session.
 - **Owner.** TBD.

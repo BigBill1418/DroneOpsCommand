@@ -58,6 +58,14 @@ lines:
 3. **DOC is `.deployer-disabled`** — schema changes ship via Alembic at startup
    and require a manual BOS-HQ rebuild (verify container build time, not deployer
    status — ADR-0033 note).
+
+> **Correction (2026-09-21):** the `.deployer-disabled` premise above is wrong and was
+> wrong when written. **Nothing in the fleet deployer reads that marker** — it disabled the
+> *retired per-repo autopull*, which no longer exists. This repo **is** continuously deployed
+> on push to `main` (ADR-0018); the way to pause deploys is
+> `noc-master/data/soak-pause/<repo>.pause`. See CLAUDE.md § "Deployment topology". The
+> deploy-verification advice in the same paragraph (check the running version / container
+> build time, never `deployer-state.json`) stands on its own and is still correct.
 4. **References, not copies.** The flight-attach incident family (ADR-0025/0026/
    0033, see `2026-07-03-flight-attach-unification.md`) is a direct lesson:
    attach-time *copies* go stale. Cross-system links must store an **id/key

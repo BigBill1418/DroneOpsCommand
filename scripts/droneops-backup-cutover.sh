@@ -2,12 +2,28 @@
 # droneops-backup-cutover.sh — one-shot §5.7 cutover: retire the legacy backup
 # lane once the ADR-0041 restic lane has its 3-green-day soak.
 #
+# SPENT — EXECUTED 2026-09-21 ~14:55 PDT. Kept for the record and because the
+# gate rewrite below is the durable lesson. It is idempotent-ish but NOT a no-op:
+# a re-run would re-attempt the deletes and its PROGRESS.md `sed` would silently
+# match nothing (that heading has already been flipped). Do not re-run.
+#
 # Runs on droneops-server (HSH-HQ) — it needs ssh to BOS-HQ *and* push
 # credentials for the repo, which is why it does not run on BOS itself.
-# Scheduled via /etc/systemd/system/droneops-backup-cutover.timer for
-# 2026-08-20 04:12 UTC (after that morning's 03:23 run). Operator-approved
-# 2026-08-18 ("sure handle it now"). Cancel with:
-#   sudo systemctl disable --now droneops-backup-cutover.timer
+# Scheduled via a **user-scope** unit,
+# ~/.config/systemd/user/droneops-backup-cutover.timer, for 2026-08-20 04:12 UTC
+# (after that morning's 03:23 run). Operator-approved 2026-08-18 ("sure handle
+# it now"). **DISABLED 2026-09-21** (verified `systemctl --user is-enabled` →
+# `disabled`, 0 timers listed). Cancel/inspect with:
+#   systemctl --user disable --now droneops-backup-cutover.timer
+# NOT `sudo systemctl ...` — this header said /etc/systemd/system until
+# 2026-09-21 and it was never there; the sudo form returns "Unit not found",
+# which reads as "already gone" when it means "you looked in the wrong scope."
+#
+# 2026-08-28: the timer fired and ABORTED on Gate 1 ("only 5/6 completed runs
+# in last 3 days"). The lane was green twice daily throughout — the gate read
+# journald, and journald on BOS-HQ retains under three days, so the oldest
+# completion had rotated out. Gate 1 now counts the lane's own restic snapshots
+# instead. Full record: ADR-0041 Amendment 2.
 #
 # Every failure path notifies ntfy at high and exits non-zero having changed
 # as little as possible. Verification gates come BEFORE any mutation.
@@ -38,9 +54,36 @@ fail() {
 }
 
 # ---------- Gate 1: soak criteria (PROGRESS.md 'Cutover criteria') ----------
-done_count=$(ssh -o BatchMode=yes "${BOS}" \
+# 2026-09-21: the journal count was the wrong source of truth. The 2026-08-28 run
+# aborted "5/6" while the lane was green twice a day — journald on BOS-HQ retains
+# under three days, so the oldest completion had simply rotated out. Count the
+# lane's own output instead: restic `db` snapshots in the repository whose
+# timestamp is within the last 72 h. Retention (`forget --keep-daily`) collapses
+# the two daily runs to one kept `db` snapshot per day, so three snapshots in
+# 72 h IS the "three consecutive green days" criterion. The journal figure is
+# kept for the log line only.
+journal_done=$(ssh -o BatchMode=yes "${BOS}" \
   'journalctl -q -u droneops-backup.service --since "3 days ago" --no-pager | grep -c "done\."' || echo 0)
-[ "${done_count}" -ge 6 ] || fail "only ${done_count}/6 completed runs in last 3 days"
+snap_json=$(ssh -o BatchMode=yes "${BOS}" 'set -a; . ~/.droneops-secrets/restic-droneops.env; set +a;
+  docker run --rm --network host \
+    -e RESTIC_REPOSITORY="s3:${R2_ENDPOINT}/${R2_BUCKET}/restic" \
+    -e RESTIC_PASSWORD -e AWS_ACCESS_KEY_ID="${R2_ACCESS_KEY_ID}" \
+    -e AWS_SECRET_ACCESS_KEY="${R2_SECRET_ACCESS_KEY}" \
+    restic/restic:0.17.3 snapshots --tag db --json')
+done_count=$(printf '%s' "${snap_json}" | python3 -c '
+import json, sys, datetime as dt
+snaps = json.load(sys.stdin)
+cut = dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=72)
+def ts(s):
+    t = s["time"]
+    if "." in t:  # restic emits nanoseconds; Python parses at most microseconds
+        head, tail = t.split(".", 1)
+        frac = "".join(c for c in tail if c.isdigit())[:6]
+        zone = tail[len("".join(c for c in tail if c.isdigit())):]
+        t = f"{head}.{frac}{zone}"
+    return dt.datetime.fromisoformat(t.replace("Z", "+00:00"))
+print(sum(1 for s in snaps if ts(s) >= cut))')
+[ "${done_count}" -ge 3 ] || fail "only ${done_count}/3 daily restic db snapshots in the last 72h (journal shows ${journal_done} completions)"
 
 metric=$(ssh -o BatchMode=yes "${BOS}" \
   "awk '/^droneops_backup_last_success_timestamp_seconds/ {print \$2}' /var/lib/node_exporter/textfile_collector/droneops_backup.prom")
@@ -51,15 +94,10 @@ age_h=$(( (now - ${metric%.*}) / 3600 ))
 svc_result=$(ssh -o BatchMode=yes "${BOS}" 'systemctl show droneops-backup.service -p Result --value')
 [ "${svc_result}" = "success" ] || fail "droneops-backup.service Result=${svc_result}"
 
-new_snap_count=$(ssh -o BatchMode=yes "${BOS}" 'set -a; . ~/.droneops-secrets/restic-droneops.env; set +a;
-  docker run --rm --network host \
-    -e RESTIC_REPOSITORY="s3:${R2_ENDPOINT}/${R2_BUCKET}/restic" \
-    -e RESTIC_PASSWORD -e AWS_ACCESS_KEY_ID="${R2_ACCESS_KEY_ID}" \
-    -e AWS_SECRET_ACCESS_KEY="${R2_SECRET_ACCESS_KEY}" \
-    restic/restic:0.17.3 snapshots --tag db --json' | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')
+new_snap_count=$(printf '%s' "${snap_json}" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')
 [ "${new_snap_count}" -ge 4 ] || fail "restic repo has only ${new_snap_count} db snapshots"
 
-echo "Gates passed: ${done_count} completions / metric ${age_h}h old / Result=success / ${new_snap_count} db snapshots"
+echo "Gates passed: ${done_count} db snapshots in 72h (journal ${journal_done}) / metric ${age_h}h old / Result=success / ${new_snap_count} db snapshots"
 if [ "${DRY_RUN}" = 1 ]; then echo "DRY RUN — stopping before any mutation."; exit 0; fi
 
 # ---------- Step 2: retire the legacy cron (leaves CallSign's line intact) ----------
@@ -94,7 +132,7 @@ sed -i 's/— LIVE, IN PARALLEL RUN — cutover pending/— LIVE — cutover exe
   echo ""
   echo "### Cutover executed ${TODAY} (automated)"
   echo ""
-  echo "All gates passed (≥6 completions, metric fresh, Result=success, restic"
+  echo "All gates passed (≥3 daily db snapshots in 72h, metric fresh, Result=success, restic"
   echo "db snapshots present). Legacy cron removed (CallSign line untouched),"
   echo "plaintext \`s3://obs-glitchtip-backups/droneops/\` prefix deleted,"
   echo "\`scripts/snapshot.sh\` removed from the repo (history preserves it)."

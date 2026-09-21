@@ -18,7 +18,7 @@ If the answer to ANY of these is yes — either find an alternative approach tha
 
 Every commit that changes application code MUST include a version bump. Use semantic versioning (MAJOR.MINOR.PATCH). Bump PATCH for fixes/tweaks, MINOR for new features, MAJOR for breaking changes.
 
-Update the version in ALL of these — **5 files, 6 locations**:
+Update the version in ALL of these — **6 files, 7 locations**:
 
 1. `README.md` — line near top: `**Version X.Y.Z**`
 2. `frontend/package.json` — `"version": "X.Y.Z"`
@@ -31,8 +31,25 @@ Update the version in ALL of these — **5 files, 6 locations**:
    `flight-parser/src/main.rs` reports `env!("CARGO_PKG_VERSION")` on
    `GET /health`, and that endpoint is the **only** reliable confirmation that a
    parser deploy actually landed — so an un-bumped parser is an unverifiable one.
+6. `backend/app/version.py` — `APP_VERSION = "X.Y.Z"`. Added by ADR-0046
+   (2026-09-21) to build the outbound `User-Agent` the OSM Tile Usage Policy
+   requires. `backend/tests/test_app_version_parity.py` parses `app/main.py`
+   and fails on drift, so a missed bump here is red, not silent.
 
 Verify each line number against the current file before editing; they drift.
+
+**Also refresh the compose `APP_VERSION` defaults at each bump** — five
+locations, `docker-compose.yml` ×4 (backend, worker, flight-parser, frontend
+build-arg) and `docker-compose.demo.yml` ×1. They are *not* the app's reported
+version (`main.py`'s literal is), but `APP_VERSION` / `VITE_APP_VERSION` is what
+tags the **Sentry/GlitchTip release** on both halves
+(`backend/app/observability/sentry.py:110`, `frontend/src/lib/sentry.ts:33`) and
+what the Login/Setup page footers render. They sat at `2.67.3` from ~v2.67 until
+2026-09-21 — 25 minor versions of mis-tagged error releases — because nothing
+checks them. **Nothing checks them yet:** ROADMAP `H-1` is the parity test that
+would. The host `.env` on BOS-HQ overrides the default and is *also* hand-set
+(`APP_VERSION=2.67.4` as of 2026-09-21), so the default alone does not fix
+production.
 
 Include the version tag in the commit message (e.g. `— v1.7.8`).
 

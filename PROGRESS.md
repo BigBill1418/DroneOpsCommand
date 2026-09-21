@@ -4,10 +4,40 @@ Maintained alongside `CHANGELOG.md` and `docs/adr/`. `CHANGELOG.md` is
 the ledger of shipped changes; this file tracks what's in-flight or
 blocked.
 
-## 2026-09-21 — Basemap migration off CARTO + tile-health probe — SHIPPED, PENDING DEPLOY
+> **Archive (2026-09-21).** Closed history older than **2026-08-01** now lives in
+> `docs/archive/PROGRESS-2026-H1.md`, verbatim. Nothing was summarised away and
+> nothing in-flight or blocked was moved — this file is the *open* surface, and
+> the archive is the record. The authoritative open-items + operator to-do list
+> as of today is `docs/reports/2026-09-21-open-items-inventory.md`.
 
-**State: complete, tests green, committed to `main` locally. NOT pushed** — the
-orchestrator reviews, pushes and verifies the deploy. v2.92.0, ADR-0046.
+## 2026-09-21 — Basemap migration off CARTO + tile-health probe — **LIVE IN PRODUCTION**
+
+**State: MERGED, PUSHED AND DEPLOYED.** `72dd1a9` went to `main`; the fleet
+deployer built and recreated the stack and **v2.92.0 was live on BOS-HQ at
+14:52 PDT**. ADR-0046. (Superseded state: "SHIPPED, PENDING DEPLOY / NOT
+pushed".)
+
+**Post-deploy verification, read off the running system:**
+
+| Check | Observed |
+|---|---|
+| `openapi.json` → `info.version` | **2.92.0** |
+| flight-parser `GET /health` → `version` | 1.2.0 (unchanged — no Rust change) |
+| served leaflet chunk | contains the Esri endpoints; **zero `cartocdn`** across all 44 chunks |
+| probe run inside `droneops-worker-1` | `ok: true`, `layers_ok: 5` |
+| probe ntfy | **OFF** by design (MP-2, earliest 2026-10-05) |
+| first *scheduled* probe run | 2026-09-22 15:47 UTC |
+
+**Demo stack updated by hand the same day (14:57 PDT).** `~/droneops-demo` on
+BOS-HQ is **not** deployer-managed (only prod is), so it was pulled
+`--ff-only` to `d153623` and rebuilt: `compose up -d --build --no-deps frontend
+backend flight-parser`. It went **v2.80.4 → v2.92.0**. `cloudflared`, `db` and
+`redis` were deliberately left running (4-week uptime intact); the demo
+**worker and beat stay stopped on purpose** — a running demo beat is the
+dunning-email hazard recorded in ADR-0042. Verified: demo backend reports
+2.92.0, all three rebuilt containers healthy, served bundle carries the Esri
+endpoints and zero `cartocdn`. The **CHAD-HQ demo clone is a different clone**,
+still on `dfad0a3`, and remains open.
 
 Every map's default Dark layer had been serving CARTO tiles watermarked
 "API KEY REQUIRED" since ~2026-08-28 — HTTP 200 with correct headers, so
@@ -51,16 +81,21 @@ Evidence quoted in the commit body. Verification done this session:
    $20/month or Protomaps on R2 (MP-1), and the registry makes either a
    one-line change.
 
-## 2026-09-21 — Phase 7 customer-surface hardening — AWAITING OPERATOR MERGE
+## 2026-09-21 — Phase 7 customer-surface hardening — **MERGED AND LIVE**
 
-**State: code + tests complete and green, committed to worktree branch
-`security/phase7-customer-hardening`. NOT merged to `main`, NOT deployed.**
-Full detail: `docs/adr/0045-phase7-customer-surface-hardening.md` +
-`CHANGELOG.md` 2026-09-21 entry.
+**State: MERGED AND DEPLOYED.** Bill merged
+`security/phase7-customer-hardening` at **`d30eb5b` (13:53 PDT)**; the fleet
+deployer built and recreated the stack and **v2.91.0 was live on BOS-HQ at
+13:58 PDT**. A same-day correction (`a226c93`, ADR-0045 correction — the
+trusted-proxy fix trusted only one hop) is in the same merged range.
+(Superseded state: "AWAITING OPERATOR MERGE / NOT merged to `main`, NOT
+deployed".) Full detail: `docs/adr/0045-phase7-customer-surface-hardening.md`
++ `CHANGELOG.md` 2026-09-21 entries.
 
-Blocking items for Bill:
-1. **Review + merge this branch** (no destructive changes, no migration,
-   full test suite green — 784 passed, 17 skipped, quoted in the commit).
+Remaining items for Bill:
+1. ~~**Review + merge this branch**~~ — **DONE 2026-09-21 13:53 PDT** (`d30eb5b`),
+   deployed 13:58 PDT. (Suite was 784 passed / 17 skipped at branch time, 795
+   passed / 17 skipped after the one-hop correction.)
 2. **CS-Public item is a PATCH, not a commit** —
    `docs/patches/0075-cspublic-*` in this repo. Needs a worktree created in
    `~/repos/CallSignPublic` (per dispatch instruction, not created by this
@@ -75,6 +110,15 @@ Blocking items for Bill:
    intake token already makes brute-force guessing infeasible, so this is
    lower-priority than it reads in the original audit line item. See
    ADR-0045 Consequences.
+4. **P7-6 — the post-deploy client-IP check is still OPEN, and only Bill can
+   do it.** `droneops.barnardhq.com` sits behind Cloudflare Access, so any
+   agent-side request is answered with a 302 to the Access login page and never
+   reaches the app. Only a request from Bill's own authenticated browser
+   session produces a log line carrying a real external client IP. One-liner:
+   open the app in a browser, then
+   `ssh 10.99.0.4 'docker logs --tail 50 droneops-frontend-1'` and confirm the
+   resolved-client field is his own public IP, **not** the constant
+   `172.19.0.11`. Source: ADR-0045 §"Verification re-run after the fix".
 
 ## 2026-09-11 — FP-1 **P-EVAL complete**: no crate bump exists; P2 is unblocked on `0.5.7`
 
@@ -694,20 +738,15 @@ count at run time, because it moves every time Bill uploads.
 3. Nothing further on the 28 missing logs — they are gone, and the reason is
    now evidenced rather than assumed.
 
-**Reminder:** a one-shot cron on HSH-HQ (`~/.local/bin/droneops-fp1-reminder.sh`,
-fires 2026-09-11 09:00 PT, self-removes) emails Bill@BarnardHQ.com via
-msmtp/O365 with this summary. **Now stale** — it was written to chase the
-merge call, which has happened. It is harmless (one mail, then self-removes)
-but its text will read as though the merge is still pending.
 
-## 2026-08-17 — Encrypted R2 backup (ADR-0041) — LIVE — cutover executed 2026-09-21
+## 2026-08-17 — Encrypted R2 backup (ADR-0041) — LIVE — **§5.7 CUTOVER EXECUTED 2026-09-21**
 
 **The new lane is deployed, running on a timer, and verified end-to-end**
-(V1–V12, see ADR-0041 "Implementation outcome"). **The old lane is still
-running and has not been touched.** Both write every day. That is deliberate:
-the plan requires **three consecutive green days** on the new lane before the
-old one is removed. Removing it early is the one way to turn a working backup
-into no backup at all.
+(V1–V12, see ADR-0041 "Implementation outcome"). **The legacy lane is retired as
+of 2026-09-21 ~14:55 PDT** — see "Cutover executed" at the end of this section.
+Everything between here and there describes the parallel-run window that has now
+closed, and is kept because the criteria it states are what the cutover was
+gated on.
 
 **Green-day window opened:** 2026-08-17 (first timer-driven run 15:23 UTC).
 
@@ -734,11 +773,37 @@ Cancel with: `systemctl --user disable --now droneops-backup-cutover.timer`
 satisfied by the manual deep-read checks in V2 + the DR rehearsal (both clean);
 the first in-script Sunday run lands 2026-08-23, after cutover — accepted.
 
+> **What actually happened — the automatic attempt ABORTED on 2026-08-28.** The
+> timer fired and the script **correctly refused to mutate**, reporting
+> `only 5/6 completed runs in last 3 days`. **The backup lane was never the
+> problem — it was green twice daily throughout.** Gate 1 counted `done.` lines
+> out of **journald**, and **journald on BOS-HQ retains under three days**, so the
+> oldest completion in a 72 h window had rotated out before the gate read it: a
+> healthy 6-of-6 lane reported 5. The gate was measuring *log retention*, not
+> *backup success*, and would have re-failed on every retry.
+>
+> **Gate rewritten 2026-09-21** (in `scripts/droneops-backup-cutover.sh`): count
+> the lane's **own output** — `restic snapshots --tag db --json` filtered to the
+> last 72 h. `forget --keep-daily` collapses the two daily runs to one kept `db`
+> snapshot per day, so **≥3 snapshots in 72 h *is* "three consecutive green
+> days"**. The journald figure is still gathered but only printed as context; it
+> can no longer abort the run. The same `snapshots` call now also serves Gate 4,
+> so the script makes one restic call instead of two.
+>
+> **Rule this generalises to:** a gate asserting "N events in the last T" must
+> read a store whose retention exceeds T. Logs are the wrong store by default;
+> the lane's durable output is the right one. Full record: ADR-0041 Amendment 2.
+> The spent one-shot timer was **disabled** on 2026-09-21.
+
 Also archived into this repo's restic repository during the window: the final
 n8n database snapshot, tag `legacy-n8n` (see CHANGELOG 2026-08-17 entry and the
 runbook lane table).
 
-### Cutover criteria — ALL must hold before running §5.7
+### Cutover criteria — ALL must hold before running §5.7 — **ALL SATISFIED 2026-09-21**
+
+> Criterion 1's *check command* below is the one that was wrong (journald
+> retention < 3 days). The criterion itself — three green days — held, and was
+> re-measured against restic `db` snapshots instead. See the note above.
 
 1. Three consecutive days with `droneops_backup_last_success_timestamp_seconds`
    advancing after **timer-driven** runs (not hand runs). Check:
@@ -752,7 +817,7 @@ runbook lane table).
    would already have paged).
 4. A Sunday `--read-data-subset=5%` run has completed at least once.
 
-### Cutover commands (run on BOS-HQ `10.99.0.4`, in this order)
+### Cutover commands (run on BOS-HQ `10.99.0.4`, in this order) — **ALL RUN 2026-09-21**
 
 ```bash
 # 1. Retire the legacy cron line (leaves CallSign's line intact)
@@ -772,7 +837,8 @@ docker run --rm --network host \
 ```
 
 Then confirm the freshness metric keeps advancing for **three more days**
-before declaring done.
+before declaring done. — **this post-cutover watch is the one piece still
+running: the three-day window opened 2026-09-21 and closes 2026-09-24.**
 
 ### 2026-08-17 later the same day — cold DR rehearsal PASSED, four defects fixed
 
@@ -796,8 +862,12 @@ Retention was challenged and **upheld**: a synthetic 40-day twice-daily corpus
 converged exactly as designed. This does **not** change the three-green-days
 cutover gate below — it remains the criterion.
 
-### Also at cutover (do not forget)
+### Also at cutover (do not forget) — **status 2026-09-21**
 
+- **OPEN, now unblocked (ROADMAP `BK-3`): update the two Grafana rule
+  descriptions.** This lives in `~/noc-master`, **not in this repo**, which is
+  why the cutover script could not do it. It was blocked on the cutover
+  happening; it no longer is.
 - **Update the two Grafana rule descriptions.** `obs-rule-droneops-backup-stale`
   still instructs the operator to `tail ~/droneops/backups/snapshot.log` and
   re-run `snapshot.sh`. Replace with
@@ -810,66 +880,65 @@ cutover gate below — it remains the criterion.
   retired; it is the documented break-glass path that needs no
   `RESTIC_PASSWORD`.
 
-### Open, for Bill
+### Open, for Bill — **reconciled 2026-09-21: one of four still open**
 
 - **ntfy topic** stayed `infrawatch-alerts` per the 2026-07-14 "no new topics"
   decision, rather than the new `droneops-backup` topic the brief proposed.
-- **7-year yearly retention** shipped per ADR-0041 D4, driven by the executed
-  TOS PDFs and invoice records. Costs essentially nothing either way; confirm
-  it matches the intended legal posture.
-- **`~/backups/n8n_*.sqlite` on droneops-server** (~840 MB, root-owned, stops
-  2026-04-15) — untouched, out of scope, needs a separate decision.
-- **Legacy volumes** `droneops_postgres_data` (46 MB) and the `droneops-demo`
-  stack — keep indefinitely, or schedule removal?
+  *(Informational — decided, not a question.)*
+- ~~**7-year yearly retention**~~ — **CLOSED 2026-08-18.** Bill: *"retention is
+  indefinite."* `KEEP_YEARLY` 7 → `unlimited` in `droneops-backup.sh`; yearly
+  snapshots are never pruned (ADR-0041 D4 amended, CHANGELOG 2026-08-18). Daily/
+  weekly/monthly unchanged (14/8/24). **Any "7-year retention" phrasing left in
+  ADR-0041's older sections is historical.** Note the ADR-0232 consequence: the
+  B2 copy is never pruned at all, so retention here no longer bounds how long
+  the bytes exist anywhere.
+- **STILL OPEN — `~/backups/n8n_*.sqlite` on droneops-server** (~840 MB,
+  root-owned, stops 2026-04-15) — untouched, out of scope, needs a separate
+  keep-or-delete decision from Bill.
+- ~~**Legacy volumes**~~ — **CLOSED 2026-08-18.** `droneops_postgres_data`
+  (46 MB) was archived into the encrypted restic repo first (tag
+  `legacy-bos-primary-pgdata`, snapshot `66ed2135`, restore-read verified:
+  1,204 entries incl. `PG_VERSION`), then removed; the empty
+  `droneops-demo_ollama_data` was removed with nothing to archive. **The demo
+  stack itself was NOT touched** — it is live and tunnel-exposed and its
+  volumes are in active use, not legacy. CHANGELOG 2026-08-18.
 
-## 2026-07-06 — Download-link payment gate + automated delivery — SHIPPED (v2.79.0–v2.80.1, ADR-0039/0040)
+### Cutover executed 2026-09-21 — §5.7 DONE
 
-**Complete and live on BOS-HQ.** Policy: clients never receive the
-mission-footage download link until the invoice is paid in full; once it is,
-delivery is fully automated (follow-up email + client-portal unlock) with no
-operator steps. Both halves shipped, tested (delivery/gate suites incl.
-endpoint-level e2e tests), and deployed. Verification pass on 2026-07-06
-caught and fixed two bugs before they could bite: the SMTP-unconfigured path
-stamping a delivery that never went out, and the `Mission.invoice`
-lazy="noload" identity-map trap silently disabling the webhook/mission-update
-triggers. Nothing in-flight; the only operator residual is outside the app
-(revoking the pre-gate UI Drop share sent to River M. on 2026-07-02, and
-re-minting it once paid — after which the automation takes over).
+Ran at **~14:55 PDT** by `scripts/droneops-backup-cutover.sh`. The script
+re-verified every gate over ssh before touching anything, then executed §5.7:
 
-## 2026-06-24 — Async device-upload cross-container temp-handoff fix — SHIPPED + OPERATOR-CONFIRMED (v2.72.1)
+1. **Legacy cron line removed** on BOS-HQ (`~/droneops/scripts/snapshot.sh`).
+   **CallSign's own `snapshot.sh` line at `30 3 * * *` was left intact** — two
+   different repos share that script name, which is why the `grep -v` matches
+   the full path. Verified after: the operator crontab holds exactly the
+   CallSign line and the `demo-nightly-reset.sh` line.
+2. **Plaintext R2 prefix deleted** — `s3://obs-glitchtip-backups/droneops/`
+   (~2.3 GiB / 229 objects).
+3. **`scripts/snapshot.sh` removed** from the repo (git history preserves it).
 
-**Deployed live to BOS-HQ 22:44 PDT 2026-06-24** (droneops.barnardhq.com →
-2.72.1, healthy). **Operator-confirmed end-to-end the same evening:** a real
-DJI Mavic 4 Pro flight log uploaded from the controller and **imported
-successfully** — closing the ADR-0023 §5 operator gate. Because the log
-imported (not merely uploaded), the DJI v13+ AES decryption path
-(`dji_api_key` → `X-DJI-Api-Key` on `flight-parser`) is also confirmed working;
-that dependency had never been exercised before because the file never reached
-the parser. **ADR-0023 is now fully satisfied.**
+**The deleted prefix is not gone from everywhere, on purpose.** The fleet's
+second provider (noc-master **ADR-0232**, live since 2026-09-11/12) runs a
+`fleetbackup-r2-mirror` lane that `rclone copy`s — never `sync`s — every R2
+bucket into Backblaze B2 `barnardhq-fleet-nightly` under **Object Lock
+compliance, 90 days, keep-all-versions, never pruned**. That prefix had already
+been copy-forwarded before today's delete, so the retired plaintext dumps still
+exist in immutable B2 and are not purgeable for at least 90 days. Right posture
+for a *retirement*; wrong assumption for a *deletion obligation* — this repo
+holds executed TOS PDFs and invoice records, and an `s3 rm` no longer reaches
+every copy.
 
-The shipped ADR-0023 async path failed for every real upload: the API
-container handed the worker a `/tmp` spool **path**, but the worker runs in a
-**separate container** and can't see that `/tmp` (`[Errno 2] … '/tmp/flight_upload_*'`).
-Field-reported on a DJI Mavic 4 Pro log (2026-06-24). Fixed by having the
-worker read the original from the **shared `app_data` hash store**
-(`_get_stored_file_path`), plus closing the now-redundant `/tmp` spool in the
-route (it was leaking on the backend). Two regression tests added that cross
-the container boundary the old harness mocked away. Full suite green
-(433 passed, 3 skipped). Detail: CHANGELOG 2026-06-24 + **ADR-0023 §6**.
+**Correction to the record the script wrote:** it stamped "via systemd timer".
+It was **run by hand on 2026-09-21**. The timer's own firing on **2026-08-28
+aborted** — see the abort note above — and the spent one-shot timer (user scope
+on HSH-HQ / droneops-server) was **disabled** today.
 
-**Closed:**
-- ✅ Live on BOS-HQ + operator-confirmed M4P upload imported (see header).
-- ✅ DJI v13+ AES decryption path (`dji_api_key` → `X-DJI-Api-Key`) confirmed
-  working — the import succeeded, so the parser decrypted the log.
+**Committed as `d153623`** (already pushed). The gate rewrite that unblocked it
+is in this same sweep's commit.
 
-**Closed follow-up:**
-- ✅ **v2.72.2** — hardened: the async route verifies the original is resolvable
-  on the shared store before enqueueing; if not, the file is `error` in the 202
-  body and no job is enqueued (no 202 for a file the worker can't read).
-  `_spool_upload`'s fail-soft contract unchanged (legacy sync route unaffected).
-  See CHANGELOG 2026-06-24 + ADR-0023 §6.
-
-_No open follow-ups remain for the async device-upload work._
+**Still to do:** the post-cutover three-day freshness watch closes 2026-09-24,
+and ROADMAP `BK-3` (the two Grafana rule descriptions in `~/noc-master`) is
+now unblocked and open.
 
 ## 2026-06-15 — Device-upload async decoupling (audit P2-2) — DESIGNED (not started)
 
@@ -908,231 +977,6 @@ designed. Analysis + docs only; no application code touched.
 - **Owner:** aegis (backend leg) + fleet-mobile-engineer/aegis (client leg).
   Not started.
 
-## 2026-06-02 — Flight date timezone fix + deploy-path correction — SHIPPED (live)
-
-**Flight date bug (v2.68.1, ADR-0017).** An evening flight flown 2026-06-01
-20:27 PDT displayed and was named `..._20260602_...`. The instant was captured
-correctly (stored naive-UTC `2026-06-02 03:27` *is* `2026-06-01 20:27 PDT`); the
-bug was reducing that UTC instant to a date with no operator-timezone
-conversion, in two places. Fix: `backend/app/utils/timezone.py` (single
-UTC↔operator-local source, `OPERATOR_TIMEZONE` default `America/Los_Angeles`);
-all flight datetimes serialize UTC-aware (`iso_utc`, `+00:00`); frontend
-`src/lib/datetime.ts` formats pinned to the operator TZ (viewer-independent);
-`_generate_flight_name` uses local date. Backfill `scripts/backfill_flight_local_dates.py`
-re-stamped 29 existing names (idempotent, auto-resequences collisions).
-Display self-corrects retroactively; PDFs unaffected (use `mission_date`).
-Built + deployed to BOS-HQ, verified live (the flight now reads "Jun 1, 2026,
-8:27 PM PDT"). 6/6 new tests pass.
-
-**Deploy path corrected (ADR-0018 + NOC-Master ADR-0079).** Discovered the repo
-was in a half-migrated state: the per-repo `update.sh` was deleted in `e4610b5`
-(migrate to the NOC fleet deployer) but `autopull.sh` + the systemd units were
-left behind referencing it — dead, misleading. Retired them (ADR-0018). The
-*actual* reason pushes weren't going live: the NOC deployer's image-digest gate
-was structurally blind to this repo's `build:`-only compose services (no
-`image:` name), so it reported "success" while rebuilding nothing — a silent
-stale deploy. Root-caused + fixed deployer-side in **NOC-Master ADR-0079**
-(`extractImageRefFromCompose` now resolves the compose-default
-`<project>-<service>:latest`). Verified: a push now rebuilds + recreates on
-BOS-HQ automatically. **Deploy path of record = the NOC fleet deployer
-(`swarmpilot_deployer` on HSH-HQ); watch at
-https://noc-mastercontrol.barnardhq.com/deploys. There is no per-repo autopull
-anymore — do not recreate it.**
-
-## 2026-05-25 — AI report-gen Celery async-loop bug fixed + Opus 4.7 — SHIPPED
-
-Report generation was flaky/failing: the Celery tasks doing async DB work reused
-the module-global `async_session` across per-task event loops → asyncpg
-`got Future attached to a different loop` / `Event loop is closed`. `generate_report`
-only recovered on retry (hard-fail after 3); `send_payment_reminders` (dunning) had
-no retry and silently failed. Fixed via `app/tasks/async_db.py` (fresh loop +
-task-local NullPool engine per task); both tasks migrated; `send_report_email`
-unaffected (no DB). Provider/key/model were already correct (claude + key set);
-made `claude_model` a per-instance DB setting and set this instance to
-`claude-opus-4-7`. 3 new regression tests; suite 279 passed.
-
-## 2026-05-24 — business-signals tz bug fixed — SHIPPED (06365ef)
-
-`GET /api/v1/business-signals` compared tz-aware window bounds
-(`datetime.now(timezone.utc)`) against tz-naive `paid_at`/`updated_at`/
-`created_at` columns; asyncpg raised `DataError`, `_safe_scalar` swallowed it,
-and every windowed metric silently returned 0/null. Project J.A.R.V.I.S. (the
-consumer) had been getting zeroed innovation signals. Fixed via a new
-`_utc_windows()` helper returning tz-naive UTC bounds (+ `generated_at` now
-carries `Z`); 3 regression tests pin the invariant. Read-only query fix — no
-schema/writes/failover impact. Verified live on BOS-HQ: `invoice_paid_usd` 30d
-`0 → 1216.36`, `missions_completed` `null → 1`. Also unblocked the marketing
-revenue bridge's 30/90-day windows (it had routed around this via
-`financials/summary`).
-
-## 2026-05-24 — Invoicing hardening + dunning + portal/nginx fixes — SHIPPED (v2.67.7)
-
-All shipped to `main` and deployed to the public instance
-(droneops.barnardhq.com); images rebuilt 2026-05-24.
-
-- **Invoice engine:** recompute-at-charge + atomic save (stale-total fix),
-  live exact-50% deposit, decimal hours + "Hours" label, tax-rate 100x fix,
-  legacy-wizard atomic save; mobile invoice-editor + Mission Hub card UX.
-- **Dunning (payment reminders):** 48h gentle reminder + 7d final notice +
-  operator-overdue email (email-only, no ntfy). Daily Celery-beat sweep at
-  16:00 UTC, themed emails, sign-off "Bill Barnard — BarnardHQ". Banks invoice
-  BARNARDHQ-2026-0002 enrolled; BOS cron confirms the 48h fire 2026-05-26
-  16:35 UTC.
-- **Client-portal links:** broken plural `/client/missions/` route fixed in
-  the Stripe success/cancel redirect + dunning fallback (→ `/client/mission/`);
-  `?payment=cancelled`→`cancel`.
-- **nginx resilience:** `frontend/nginx.conf` uses `resolver` + variable
-  `proxy_pass` so a backend rebuild no longer 502s `/api` (verified by forcing
-  a real backend IP change). Closed a live 502 that surfaced as a false
-  "link expired".
-
-### Deployment state (all current as of 2026-05-24)
-- **Public** (`~/droneops`, https://droneops.barnardhq.com) — ✅ v2.67.7.
-- **Demo** (`~/droneops-demo`, https://command-demo.barnardhq.com) — ✅ updated
-  to v2.67.7 on 2026-05-24 (backend/frontend/flight-parser rebuilt; DB
-  self-migrated via the `main.py` `_add_missing_columns` startup helper).
-  **worker/beat intentionally left stopped** so the demo never sends real
-  dunning email — re-confirm they stay down on any future demo `up`.
-- **Managed** (`~/droneops-managed`) has **zero active clients**; the managed
-  template builds from `droneops-backend:latest`/`droneops-frontend:latest`
-  (rebuilt today), so future clients auto-inherit these fixes.
-
-### Open / follow-ups
-- **SECURITY (operator action):** scrubbed plaintext GH tokens from
-  `~/droneops/.git/config` and `~/droneops-demo/.git/config` on BOS (now bare
-  URLs + credential helper). The exposed `ghp_…` token should be **rotated at
-  GitHub** — overwrite the single line in `~/.secrets/git-credentials` after.
-- **Deferred:** SMS reminders (Phase 2); deployer self-roll fix (queued in
-  noc-master).
-
-## 2026-05-14 — Mission Report: clear stale draft on Generate click — CLOSED
-
-Single-file UX tweak on top of the ADR-0015 work. `handleGenerate` in
-`frontend/src/pages/MissionReportEdit.tsx` now clears `reportContent`,
-`hasAudienceLeak`, and `audienceLeakDetails` immediately before firing
-the POST so the operator gets instant visual confirmation. PDF + Send
-naturally disable during the in-flight window via their existing
-`!reportContent` guards (no new disabled-state logic introduced).
-Re-entrant Generate clicks were already a no-op via the existing
-`disabled={generating || !narrative}`.
-
-Verification:
-
-- 8/8 tests in `frontend/src/pages/__tests__/MissionReportEdit.test.tsx`
-  pass (new test `Generate Report clears the existing draft content
-  immediately` locks the behavior; CONTRACT test reordered so Generate
-  runs LAST — load-bearing claim unaffected).
-- `tsc --noEmit` clean on the frontend.
-
-Out of scope this round (operator flagged for future iteration):
-broader **report quality** is "ok for now but needs to get better."
-That's prompt-quality + detector-coverage work for a later pass.
-
-## 2026-05-14 — Mission-report audience leak — CLOSED on docs + RCA + prompt fix; runtime gate IN-FLIGHT
-
-Quality defect on the LLM-generated mission report. Operator-only catch,
-no customer impact. Planned-work close-out workflow.
-
-**Status:**
-
-- **RCA + prompt fix (aegis) — COMPLETE at commit `22469ed`.**
-  - System prompt rewritten in `backend/app/services/ollama.py:9-38`
-    (names CLIENT as reader, names operator as upstream author, forbids
-    second-person address + four common leak phrases, reframes Section
-    5 to "Client Follow-Up Items" with OMIT-fallback).
-  - User-prompt block in both providers updated
-    (`ollama.py:75-89` + `claude_llm.py:52-66`) — operator notes
-    labeled `CONTEXT ONLY` with translation instruction; trailing
-    "Generate the client-facing after-action report" with audience
-    constraint repeated. Belt-and-suspenders against drift on long
-    contexts.
-  - New regression suite: `backend/tests/services/test_report_audience_guard.py`,
-    17/17 passing on Python 3.12.3. Layer 1 (4 tests) locks prompt
-    structure; Layer 2 (13 tests) exercises the deterministic detector
-    against representative bad phrasings + the verbatim shape of the
-    operator-reported leak. Hermetic, ~1.8s. Pre-existing 2 failures
-    in `test_health_stripe_db_lookup.py` reproduce on pristine `main`
-    HEAD; out of scope.
-  - New detector module: `backend/app/services/report_audience.py`
-    (`detect_audience_leaks`, `has_audience_leak`, `AudienceLeak`
-    dataclass — nine rule categories). Exposed as stable callable to
-    enable the runtime gate without re-implementing the rules.
-  - `SYSTEM_PROMPT_TEMPLATE` deliberately left in `ollama.py` for this
-    commit; aegis's CHANGELOG entry calls out that the relocation to
-    `llm_prompts.py` is left for a follow-up to keep the surgical
-    surface tight. FU-AI-3 status on ROADMAP updated accordingly.
-
-- **Documentation close-out (Terry) — COMPLETE.**
-  - `docs/adr/0015-mission-report-audience-separation.md` — flipped
-    Proposed → Accepted with the stronger scope ("operator-facing
-    coaching is explicitly out of scope"); added §"Rejected
-    alternative: operator-facing debrief surface" capturing the
-    operator's verbatim rejection; added decision #5 for the runtime
-    soft-block gate.
-  - `docs/incidents/2026-05-14-mission-report-audience-leak.md` — §9
-    open questions reconciled against aegis's findings (Q1 closed at
-    `22469ed`, Q2/Q3 operator-action open, Q4 deferred low-priority,
-    Q5 24h-soak cadence decided); new §10 "Decisions made post-RCA"
-    captures both operator decisions verbatim.
-  - `ROADMAP.md` — FU-AI-1 (operator retrospective) removed entirely;
-    FU-AI-2 marked SHIPPED at `22469ed`; FU-AI-3 marked
-    DE-PRIORITIZED with standalone rationale; FU-AI-4 retained with
-    explicit standalone justification (tenant tone-override is not
-    tied to the dropped surface); new FU-AI-RUNTIME-GATE item added.
-  - `CHANGELOG.md` — narrative `[unreleased]` entry recording the two
-    operator decisions, sequenced above aegis's code entry to reflect
-    that the decisions resolve the "Out of scope (flagged for operator
-    decision)" items aegis flagged.
-
-- **Runtime soft-block gate wire-in (aegis) — COMPLETE at commit
-  `4953edf` (2026-05-14, local; deploy pending operator review).**
-  - Detector wired into the **persistence site** of report generation
-    rather than the per-provider call paths. Both providers
-    (`claude_llm.py`, `ollama.py`) funnel through `llm_provider.generate_report`
-    which returns a plain string; `generate_report_task` in
-    `backend/app/tasks/celery_tasks.py` is the sole place that string
-    becomes a row — one wire-in covers both providers.
-  - New helper `_apply_audience_findings(report, llm_content)` runs the
-    detector after `final_content` is set on the row and persists results
-    into two new `Report` columns:
-    - `has_audience_leak BOOLEAN NOT NULL DEFAULT FALSE`
-    - `audience_leak_details JSONB NOT NULL DEFAULT '[]'::jsonb`
-  - Migration via the existing idempotent `_add_missing_columns` path
-    in `backend/app/main.py:114-122` (repo convention; no Alembic).
-    Failover-safe per CLAUDE.md §Failover Guard.
-  - Helper **never raises** — detector failure logs + leaves flags at
-    defaults so generation never 500s. **No regen loop** per operator
-    directive; doc-string-lock test prevents drift toward retry-clean.
-  - `ReportResponse` schema + frontend `Report` type carry the new
-    fields; `MissionReportEdit.tsx` renders a yellow `IconAlertTriangle`
-    Mantine `Alert` banner above the FINAL REPORT editor when the flag
-    is true, listing each matched phrase with its rule name. Save / PDF
-    / Send remain enabled — editorial review IS the gate.
-  - Test coverage: 10 new hermetic tests in
-    `backend/tests/services/test_audience_leak_persistence.py`
-    (helper behavior + Pydantic round-trip + soft-block doc lock).
-    Existing 17-test audience suite stays green. Full backend suite:
-    240 passed, 1 skipped, 2 failed (the pre-existing
-    `test_health_stripe_db_lookup.py` failures, unchanged).
-  - Operator-debrief surface DROPPED per operator decision (Terry's
-    ROADMAP edit captures the rejection). The detector + banner pair
-    is the chosen final surface.
-
-- **Verification gate.** Personal-instance soak 24h with a real report
-  generated against the new prompt before any push to managed-hosting
-  tenants. No same-day fan-out. Operator decision per the planned-work
-  close-out preference.
-
-**Coordination note for aegis on shared touch surface:** aegis already
-landed a CHANGELOG entry for `22469ed` (the code patch); Terry's
-narrative entry on the operator decisions is intentionally
-**separate** rather than amended to aegis's, so the *decisions* (drop
-debrief surface, approve soft-block) read cleanly in the ledger as
-their own narrative beat. When aegis's runtime-gate code commits, the
-CHANGELOG entry for that commit should be a third `[unreleased]`
-block referenced from ADR-0015 §Decision-5 — not folded into either
-of the existing two.
-
 ## 2026-05-14 — Mission-report overall quality — OPEN BACKLOG (watching brief)
 
 Operator feedback at the ADR-0015 close-out, verbatim: *"its ok for
@@ -1153,301 +997,15 @@ improved. Candidate areas captured on the ROADMAP entry are inference
 for kickoff, not a committed punch-list. Trigger to act is
 operator-driven.
 
-## 2026-05-03 — v2.66.0 backend hardening (Agent A — IN-FLIGHT, awaiting orchestrator merge)
-
-Branch: `feat/v266-backend-hardening`. All 8 P0/P1 fixes implemented;
-27 new tests pass; full suite 143/143 green. ADR-0011 written; CHANGELOG
-entry added; version bumped in all 4 files (README, package.json,
-backend/main.py, AppShell.tsx).
-
-Cuts decided:
-
-- **Cut 1 (duplicate operator routes):** DONE. ~165 lines of dead code
-  removed from `routers/client_portal.py`. Route registry now shows
-  exactly 3 client-link routes.
-- **Cut 2 (managed_instance auto-provision):** KEEP. Used in 5 places.
-- **Cut 3 (Ollama):** KEEP. `droneops-ollama-1` healthy on BOS-HQ.
-- **Cut 4 (Demo middleware):** KEEP. `droneops-demo-*` running.
-- **Cut 5 (/api/branding):** KEEP. `useBranding.ts` consumes it.
-
-Coordination notes for orchestrator:
-
-- Agent B will also touch `frontend/src/components/Layout/AppShell.tsx`
-  (frontend P0/P1). I bumped the v2.65.1 → v2.66.0 footer string in
-  both occurrences. Merge mine first; Agent B rebases.
-
-## 2026-04-24 LATE — COMPLETE: Performance audit fix series (ADR-0004/0005)
-
-Executed the 5-fix plan from `docs/plans/2026-04-24-perf-audit.md`.
-All 5 fixes shipped as separate commits, each with version bump,
-auto-merged into main, deployed to BOS-HQ via NOC autopull, and
-verified live with the §6 acceptance commands. ADR-0004 + ADR-0005
-both `accepted`.
-
-- **FIX-1 — v2.63.7:** weather `asyncio.gather` + 5-min Redis cache
-  (failure-open). Cold 7.4-8.3 s → **1.09 s** (6.8-7.6×); warm 7.4 s
-  → **6-19 ms** (~390-1200×). 6 cache tests green.
-- **FIX-2 — v2.63.8:** pool 5+10 → 20+20; 60 s in-process cache around
-  `get_current_user`; explicit invalidate on password/username change.
-  30-parallel `/api/customers` cold p95 0.67 s, warm p95 **0.27 s**.
-  5 user-cache tests green.
-- **FIX-3 — v2.63.9:** 17 main pages → `React.lazy` + Vite
-  `manualChunks` for vendor bundles. Main `index-*.js` 1.9 MB →
-  **81.4 KB** (23.5×).
-- **FIX-4 — v2.63.10:** `useApiCache` hook + Dashboard + Flights/aircraft
-  adoption with mutation invalidation. Bundle unchanged (no regression).
-  Settings deliberately scoped out (large mutation surface; explicit
-  scope decision, not a stopgap — see ADR-0005 §FIX-4).
-- **FIX-5 — v2.63.11:** ADR-0004 + ADR-0005 finalized; CHANGELOG +
-  PROGRESS finalized. Audit series complete.
-
-All three §6 acceptance thresholds passed. Failover guard never
-violated. No new dependencies. No deferred fixes (only scope decisions
-with explicit rationale).
-
-## 2026-04-24 EVENING — SHIPPED PR: Zero-touch device API key rotation (ADR-0003 / FU-7)
-
-Backend v2.63.6, paired with DroneOpsSync v1.3.25. Closes the manual key-paste step that the 2026-04-24 morning incident required.
-
-**Branch:** `claude/zero-touch-key-rotation-backend` (PR open, **not merged** — operator reviews per the routine spec).
-
-**What landed:**
-
-- Two nullable columns on `device_api_keys` (`rotated_to_key_hash`, `rotation_grace_until`); additive, failover-safe per CLAUDE.md §Failover Guard.
-- Dual-key auth in `validate_device_api_key` during grace.
-- New admin endpoint `POST /api/admin/devices/{device_id}/rotate-key`.
-- Redis side-channel for the raw new-key hint (`app.services.rotation_hint`); fail-closed if Redis is down.
-- Device-health response emits `rotated_key` + `rotation_grace_until` ONLY for OLD-key auth during grace; transparent to existing clients.
-- Celery finalizer task on 15-min beat (`finalize_key_rotations_task`).
-- Single Pushover FYI per rotation; env-gated like the rest of ADR-0002 §5.
-- 15 unit tests, all green; `backend/tests/` infrastructure bootstrapped (`pytest.ini`, `conftest.py`, `requirements-dev.txt`).
-
-**Notable about the routine handoff:** Claude Code remote routine `trig_01KiBK88vqs6vtRf75rkxcw8` shipped an empty branch on its first run. aegis re-ran the spec from this conversation and produced both PRs. ROADMAP FU-7 closed.
-
-**Not deployed yet** — operator merge → `update.sh` rebuild on BOS-HQ → Celery beat picks up the new task on next worker restart.
-
-## 2026-04-24 — SHIPPED: DroneOpsSync prevention mechanisms + landscape lock (ADR-0002 §5)
-
-Backend v2.63.5 / companion v2.62.1. Bill's uploads are recoverable per §4.1 (operator paste the rotated `M4TD` key on his RC Pro); this follow-up makes the class of failure non-recurrent.
-
-**Landscape lock** — `patch-android.cjs` injects `sensorLandscape` + `configChanges` on every `<activity>` after `npx cap sync android`, with a build-time fail-hard if any `portrait` survives. DJI RC Pro is physically landscape-only; a rotate reflow would destroy the WebView.
-
-**Layered silent-drift watchdog (all on by default):**
-1. Companion pairing banner on launch via `checkPairing()` — persistent red banner when `serverUrl` or `apiKey` is missing/malformed. Blocks auto-sync that could only fail.
-2. Companion preflight health gate via `preflightHealth()` — structured `{ok, code, message}`; failures surface as banner copy, not silent retries.
-3. Server silence watchdog — hourly Celery beat (`check_device_silence_task`). Recently-active keys silent > 48h fire a Pushover alert, deduped 12h. New `beat` compose service.
-4. First-401 Pushover alert — `validate_device_api_key` on any `/device-*` path, deduped 1h per `(key_prefix, ip)`.
-
-Push alerting is env-gated: `NTFY_DRONEOPS_PUBLISHER_TOKEN`. Unset = structured JSON log only (still observable via Loki). No flag-gating anywhere. **Migrated from Pushover to ntfy on 2026-04-26 per ADR-0036 + ADR-0006 addendum** — same dedup, same Redis suppression, same `send_alert` signature; only the transport changed (now `https://ntfy.barnardhq.com/droneops-watchdog` with publisher-side fallback to `ntfy.sh`).
-
-**Open action for operator:**
-- Drop `NTFY_DRONEOPS_PUBLISHER_TOKEN` into BOS-HQ `~/droneops/.env` to turn on phone alerts (already populated by ADR-0036 Wave 2 bootstrap). Without it, the watchdog still runs (visible in `droneops-beat` logs + Loki) but Bill's phone stays quiet.
-- Next APK install will apply the landscape lock + banner. Pending: GitHub Actions on `main` will publish `DroneOpsSync-2.62.1.apk` via the self-hosted BOS-HQ runner (ADR-0029).
-
-## 2026-04-24 — Awaiting operator action on Bill's 3 pending flight records (ADR-0002 §4.1)
-
-Status: server healthy, `M4TD` key rotated + verified (HTTP 200 end-to-end from HSH-HQ to BOS-HQ via CF). The stale-APK RCA in the v2.63.4 commit was wrong; the actual root cause is Capacitor `Preferences` state on Bill's RC Pro. Second-pass evidence in `docs/adr/0002-droneopssync-upload-auth.md` §4.1.
-
-Pending: Bill paste `doc_m4td_i8Qt9OJDogxjbgXgz2LRH4a0MrzTSxcVa8ltHxoS0Us` into DroneOpsSync → Settings on his RC Pro, tap Test Connection (green = M4TD), tap Sync Now. The three `DJIFlightRecord_2026-04-23_*.txt` files upload. Follow-up telemetry: `M4TD.last_used_at` should advance past `2026-04-19 23:07:44` and three `device_upload` INFO log lines should appear in `droneops-backend-1`.
-
-Follow-up (not blocking today's records): v2.62.0 APK install to pre-bake `DEFAULT_SERVER_URL = https://droneops.barnardhq.com` so future Preferences wipes can't silently break uploads on any device in the fleet.
-
-## 2026-04-24 — DroneOpsSync upload auth + HTTPS-only base URL (ADR-0002)
-
-Operator's personal DJI RC Pro (no camera) could not upload 3 post-flight
-logs (~17 MB) to `http://droneops.barnardhq.com`. Two-symptom failure:
-
-1. `/health` GET returned HTML (CF HTTP→HTTPS redirect body); stale APK's
-   Gson client crashed at `line 1 column 1` because it ran with default
-   `setLenient(false)`.
-2. Upload POST returned `403 {"detail":"Not authenticated"}` — FastAPI's
-   default `get_current_user` JWT rejection, i.e. stale APK hit a
-   JWT-gated endpoint instead of the current `X-Device-Api-Key`-gated
-   `POST /api/flight-library/device-upload`.
-
-Root cause: the APK on the controller is pre-v2.33.0, pre-dates the
-Capacitor rewrite, and uses a Gson-based client against legacy paths.
-The current server surface is correct — device-health and device-upload
-endpoints are already wired to `validate_device_api_key`
-(`backend/app/auth/device.py`) with SHA-256 hash lookup.
-
-**Status — SHIPPED 2026-04-24 by aegis.** Backend v2.63.4, companion
-v2.62.0. Scope delivered:
-- Companion: `validateServerUrl()` in `sync.ts` rejects plaintext public
-  URLs with RFC-1918 + loopback carve-out; `DEFAULT_SERVER_URL`
-  pre-baked to `https://droneops.barnardhq.com`;
-  `App.tsx::saveAndSync` catches validation errors into the Settings
-  test-status banner. Footer bumped. APK will be cut by
-  `companion-apk.yml` on BOS-HQ self-hosted runner on push.
-- Server: top-level `GET /health` alias (JSON, same payload as
-  `/api/health`); structured INFO log on `/device-upload` and WARN log
-  on device-auth failure (`key_prefix` only — never the raw key).
-- Operator: existing `M4TD` row in `device_api_keys` is already valid
-  (last used 2026-04-19); no rotation. Bill reuses the raw key value
-  he already has.
-
-**Pending operator action**: install `DroneOpsSync-2.62.0.apk` from the
-upcoming release on the RC Pro; paste server URL + existing `M4TD` key;
-tap SAVE & SYNC. The 3 pending DJIFlightRecord files upload.
-
-Docs:
-- **ADR-0002** (`docs/adr/0002-droneopssync-upload-auth.md`) — auth-model
-  decision + HTTPS-only + forward path for managed-tenant discovery
-  (deferred; pattern copy from EyesOn ADR-0020 when first tenant ships).
-- **CHANGELOG** — 2026-04-24 entry above ADR-0029.
-- **ROADMAP** — follow-up items (fleet audit, `/health` shim, Grafana
-  stale-client tripwire) filed under "Observability + Fleet Hygiene".
-
-Hardware constraint: DJI RC Pro has no usable rear camera for field
-operation. No QR / visual pairing ever. Auth model aligns with EyesOn
-ADR-0019 (keypad / non-visual enrollment). See
-`feedback_dji_rc_pro_no_camera.md`.
-
-## 2026-04-20 — Maintenance type vocabulary unified (v2.63.3)
-
-Fixes a long-standing bug where overdue schedule alerts (Compass
-Calibration et al.) could not be cleared via "+ Log Maintenance".
-
-- Frontend `MAINTENANCE_TYPES` now mirrors backend
-  `DJI_MAINTENANCE_DEFAULTS` exactly — 10 DJI categories + `General
-  Service` + `Other`, Title-Case as both value and label.
-- Migration script `scripts/migrate_maintenance_type_vocab.py` rewrites
-  legacy snake_case record rows → canonical Title-Case. Idempotent.
-
-**Status** — HSH-HQ prod: v2.63.3 live `2026-04-20`, 5 legacy records
-remapped to Title-Case via the migration script. User logs a Compass
-Calibration record per affected aircraft through the UI to clear the
-three overdue schedules (now possible because the dropdown has the
-option and the backend schedule-match will fire).
-
-**Deferred — CHAD-HQ demo:** still on `dfad0a3`. `git pull` blocked by
-uncommitted operational fixes on `docker-compose.demo.yml`,
-`docker-compose.standby.yml`, `.env.demo` (port-binding hardening +
-primary_conninfo IP correction). Demo has **zero maintenance records**
-so the migration would be a no-op there anyway. The frontend fix for
-demo can land when someone reconciles the uncommitted compose edits
-— scope for a separate session.
-
-## 2026-04-19 — Zombie-leak incident (RESOLVED)
-
-Completed: zombie-leak fixes + Redis-heartbeat healthcheck.
-
-- **v2.63.2** (commit `897c78a`) — Redis-heartbeat docker healthcheck.
-  Replaces `celery inspect ping` subprocess (which re-imported the full OTel
-  chain every 60s) with a lightweight Redis age check. Worker's
-  `worker_heartbeat` signal writes unix-ts to `droneops:worker:heartbeat`
-  (120s TTL); healthcheck is `redis-cli GET + age < 60s`. Interval 30s,
-  timeout 5s, start_period 30s. Fast path, resilient to Redis brief outages.
-
-- **Ops** (commit `98f7309`) — Backend zombie-leak fix (follow-up).
-  Investigation found 3 fresh `<defunct>` curl children accumulating under
-  uvicorn master. Same SIGCHLD reap leak pattern as worker, different
-  container. Added `init: true` (tini PID 1) to backend service in compose.
-
-- **Ops** (commit `9ae3c95`) — Worker zombie-leak fix (primary).
-  HSH-HQ high-load incident found 33 defunct celery children accumulating
-  ~2/hr over 18h. Root cause: celery prefork master loses occasional SIGCHLD
-  reaps on Python 3.12. Added `init: true` (tini) + `--max-tasks-per-child=50`
-  to worker service. Per-child task cap keeps leaked children short-lived;
-  tini as PID 1 makes the leak structurally impossible.
-
-### Repair quality
-- All changes compose-only; no application code touched.
-- Failover-safe: per-container health signals, no cross-container state.
-- Docker inspect: confirms `redis-cli` present in new backend image.
-- Roundtrip tested: SETEX/GET on redis:7 (stack image).
-- Incident log: `~/noc-master/docs/incidents/2026-04-19-hsh-hq-high-load.md`.
-
-## 2026-04-18 — Observability Phase 5 (COMPLETE on code side)
-
-Ships in two functional commits + one doc commit:
-
-- **v2.63.0** (commit `6b7e626`) — structured JSON logging pre-req.
-  Replaces plain `logging.basicConfig` with `python-json-logger` on
-  root + Celery `after_setup_logger` signals.
-- **v2.63.1** (commit `d4df8e7`) — Sentry + OTel SDKs + compose labels.
-  Backend `app/observability/` package, frontend `src/lib/sentry.ts`,
-  `com.barnardhq.*` labels on every service, demo override pins CHAD-HQ
-  Alloy + `env=demo`.
-- **docs** (this commit) — ADR-0001, PROGRESS.md, CHANGELOG.md entries.
-
-### Deploy + verification
-
-1. NOC Master (swarmpilot) picks up the push on `main` and runs the
-   prod build/up sweep on HSH-HQ.
-2. Demo build on CHAD-HQ: `cd ~/droneops && ./bootstrap.sh` (or the
-   documented `docker compose -p droneops-demo -f docker-compose.yml -f
-   docker-compose.demo.yml --env-file .env.demo up -d --build`).
-3. Verify on BOTH hosts per `reference_droneops_topology.md`:
-   - Loki: `{service="droneops-api",env="prod",host="hsh-hq"}` +
-     `{service="droneops-api",env="demo",host="chad-hq"}` return JSON
-     lines.
-   - GlitchTip: issue in `droneops` project tagged `env=prod` and
-     `env=demo` (separate).
-   - Tempo: `service.name=droneops-api` trace on an `/api/health` hit.
-   - `docker exec <container> curl localhost:8000/api/health` returns
-     200 on both hosts.
-
-### Env vars required at deploy time
-
-On each host's `.env` / `.env.demo`:
-
-- `SENTRY_DSN` — from
-  `/home/bbarnard065/.secrets/observability-dsns.env::DRONEOPS_API_SENTRY_DSN`.
-- `VITE_SENTRY_DSN` — from that same file::`DRONEOPS_FRONTEND_SENTRY_DSN`.
-- `OTEL_EXPORTER_OTLP_ENDPOINT=http://10.99.0.1:4317` on HSH-HQ,
-  `http://10.99.0.2:4317` on CHAD-HQ (or leave the demo override's
-  default).
-
-Unset = no-op. Nothing in the app code fails if these are absent.
-
-## Follow-ups
-
-- **Companion APK instrumentation.** Per
-  `feedback_droneops_companion_apk.md`, the Android companion at
-  `~/droneops/companion/` (Kotlin) is not instrumented in Phase 5. If
-  the companion needs `SentryAndroid.init`, that's a separate commit +
-  an APK rebuild + release — flagged for the user, not scoped here.
-- ~~**Managed-hosting branch.**~~ Resolved: `managed-hosting-v2` merged
-  `2026-04-10` as v2.62.0 (merge commit `85f28e9`). `.env.example` already
-  carries the observability block (`SENTRY_DSN`, `OTEL_EXPORTER_OTLP_ENDPOINT`,
-  `VITE_SENTRY_DSN`, etc.), so managed instances get the hooks by default;
-  operators just paste the DSN.
-- **Dashboards (Aegis-F / Phase 7).** DroneOps-specific Grafana
-  dashboards aren't in scope for this phase; Aegis-F is planning them.
-
----
-
-## 2026-04-24 PM — Capacitor companion abandoned; Kotlin path restored; v1.3.25 queued
-
-### Completed
-- `companion/` directory deleted from this repo (commit `4b87e65`, 20 files / 5,306 lines). Abandoned Capacitor fork had zero device installs after 4 weeks of parallel-track work. ADR-0002 §7 added cross-linking DroneOpsSync ADR-0001. Workflow `.github/workflows/companion-apk.yml` removed.
-- Three orphan GH releases (`companion-v2.61.5`, `companion-v2.62.0`, `companion-v2.62.1`) edited with `⚠ ABANDONED` banner pointing at DroneOpsSync repo.
-- BOS-HQ Pushover watchdog verified end-to-end. `~/droneops/.env` already had `PUSHOVER_TOKEN` + `PUSHOVER_USER_KEY` set this morning (06:51Z); container `droneops-backend-1` has both vars loaded; `curl api.pushover.net/1/users/validate.json` returns `status:1, devices:["PrimaryPhoneS25"]`. Smoke-test notification `3eac9d51-fc67-4248-8a8a-038daac5a023` delivered to Bill's phone. ADR-0002 §5 layers 3+4 can now page the operator.
-
-### Scheduled (not yet executed)
-- Remote routine `trig_01KiBK88vqs6vtRf75rkxcw8` (https://claude.ai/code/routines/trig_01KiBK88vqs6vtRf75rkxcw8, fired 2026-04-24T18:58Z) will open PRs for zero-touch device API key rotation. This repo lands ADR-0003 + backend grace-window + dual-key auth + celery finalizer + Pushover FYI. Paired with DroneOpsSync v1.3.25 that parses the `rotated_key` field from preflight response.
-
-### Decisions
-- Real DroneOps companion app lives in `BigBill1418/DroneOpsSync` (native Kotlin), NOT in this repo. A future session that wants to "fix the companion" MUST work there. `feedback_verify_before_planning` applied — verifying which codebase actually runs on Bill's RC Pro before planning should have been step 1 this morning, not step N.
-- Pushover token in `~/droneops/.env` is a dedicated DroneOps app (distinct from NOC's), giving DroneOps its own rate-limit bucket and notification identity on Bill's phone. USER_KEY matches NOC canonical.
-
-### Evidence
-- DroneOpsCommand `main` HEAD: `4b87e65` (companion removal).
-- DroneOpsSync `main` HEAD: `832585c` (v1.3.24 released, 4 commits land since `cae8c30`).
-- DroneOpsSync release v1.3.24: https://github.com/BigBill1418/DroneOpsSync/releases/tag/v1.3.24 — signer fingerprint identical to v1.3.23.
-
-### Next
-- Wait for `trig_01KiBK88vqs6vtRf75rkxcw8`; review + squash-merge PRs when they arrive.
-- No backend changes land until those PRs merge. Current HEAD is production-stable.
-
-<!-- ADR-0121 autosync verification probe 2026-06-13 — docs-only, no code impact -->
-
-### Cutover executed 2026-09-21 (automated)
-
-All gates passed (≥3 daily db snapshots in 72h, metric fresh, Result=success, restic
-db snapshots present). Legacy cron removed (CallSign line untouched),
-plaintext `s3://obs-glitchtip-backups/droneops/` prefix deleted,
-`scripts/snapshot.sh` removed from the repo (history preserves it).
-Executed by `scripts/droneops-backup-cutover.sh` via systemd timer on
-droneops-server; this entry written by the same script.
+## Follow-ups (Observability Phase 5, 2026-04-18 — open residue only)
+
+Trimmed 2026-09-21; the two resolved bullets moved to
+`docs/archive/PROGRESS-2026-H1.md` with the rest of that section.
+
+- **Companion APK instrumentation — STILL OPEN.** Per
+  `feedback_droneops_companion_apk.md`, the Android companion is not
+  instrumented in Phase 5. **Note the path in the original bullet
+  (`~/droneops/companion/`) is dead** — `companion/` was deleted from this repo
+  in `4b87e65` and the real companion lives in `BigBill1418/DroneOpsSync`
+  (native Kotlin). If it needs `SentryAndroid.init`, that is a commit + APK
+  rebuild + release **in that repo**, not this one.

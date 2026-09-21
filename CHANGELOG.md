@@ -4,6 +4,84 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-09-21 — Stale-docs sweep + demo stack to v2.92.0 + backup-cutover gate fix [skip-deploy]
+
+Documentation and ops reconciliation after three things shipped the same day.
+**No application code changed**, so no version bump: the live app stays 2.92.0
+and the parser 1.2.0.
+
+### Ops
+
+- **Demo stack `~/droneops-demo` on BOS-HQ updated by hand, 14:57 PDT —
+  v2.80.4 → v2.92.0.** It is **not** deployer-managed (the NOC deployer targets
+  prod only), so it was `git pull --ff-only` to `d153623` then
+  `compose up -d --build --no-deps frontend backend flight-parser`.
+  `cloudflared`, `db` and `redis` were deliberately left alone (4-week uptime
+  intact) and the demo **worker + beat stay stopped on purpose** — a running
+  demo beat is the dunning-email hazard recorded in ADR-0042. Verified: demo
+  backend reports 2.92.0, all three rebuilt containers healthy, served bundle
+  carries the Esri endpoints and **zero `cartocdn`**. The CHAD-HQ demo is a
+  different clone, still on `dfad0a3`, and remains open.
+- **Backup-cutover gate rewritten** in `scripts/droneops-backup-cutover.sh`.
+  The 2026-08-28 automatic attempt aborted with `only 5/6 completed runs in
+  last 3 days` — **the backup lane was green twice daily throughout**; the gate
+  counted `done.` lines out of **journald**, and journald on BOS-HQ retains
+  under three days, so the oldest completion had rotated out before the gate
+  read it. It now counts the lane's own output: `restic snapshots --tag db
+  --json` filtered to the last 72 h, where `forget --keep-daily` makes **≥3
+  snapshots in 72 h** exactly "three consecutive green days". The journald
+  figure is still printed as context but can no longer abort a run, and the
+  same `snapshots` call now serves the later gate too (one restic call instead
+  of two). Recorded as ADR-0041 **Amendment 2**.
+  *Rule it generalises to: a gate asserting "N events in the last T" must read
+  a store whose retention exceeds T.*
+- **Compose `APP_VERSION` defaults 2.67.3 → 2.92.0** — five locations
+  (`docker-compose.yml` ×4, `docker-compose.demo.yml` ×1). Not the app's
+  reported version, but what tags the **Sentry/GlitchTip release** on both
+  halves and what the Login/Setup footers render; they had been stale for ~25
+  minor versions because nothing checks them. **The host `.env` on BOS-HQ
+  overrides the default and is itself stale (`APP_VERSION=2.67.4`), so this
+  does not by itself fix production** — both halves are ROADMAP `H-1`.
+
+### Docs
+
+- **Phase 7 (ADR-0045) reconciled as merged + deployed** — `d30eb5b` 13:53 PDT,
+  v2.91.0 live 13:58 PDT. `P7-6` (post-deploy client-IP check) stays open: the
+  public URL sits behind Cloudflare Access, so only Bill's own browser session
+  produces a log line with a real external IP.
+- **Maps (ADR-0046) reconciled as deployed** — v2.92.0 live 14:52 PDT, probe
+  `ok: true / layers_ok: 5`, probe ntfy off by design until MP-2.
+- **ADR-0041 §5.7 cutover recorded as EXECUTED** (~14:55 PDT, `d153623`),
+  including that the deleted plaintext R2 prefix had **already been
+  copy-forwarded into immutable Backblaze B2** by the fleet's second-provider
+  lane (noc-master ADR-0232) — so an `s3 rm` here no longer reaches every copy.
+- **`.deployer-disabled` misconception corrected in 7 documents** (ADR-0033,
+  ADR-0034, ADR-0035, ADR-0038, two 2026-07-03 plans, the 2026-05-14 incident).
+  Dated correction notes appended; no history rewritten.
+- **ADR-0043 + the FP-1 plan** un-staled: P0/P1 are live, the §8 log-inventory
+  hunt was filled in 2026-09-04/05, and **P7 is no longer blocked on it**. Both
+  now say to re-derive log counts from the database rather than read the prose.
+- **ROADMAP** — closed items (`BK-2`, `FU-2`, `FU-7`, `FU-8`,
+  `FU-AI-RUNTIME-GATE`, `FU-AI-2`) moved verbatim under a new **Completed**
+  section so the open surface is only open work; FU-8's superseded six-item
+  list deleted in favour of its own 2026-08-03 correction; the empty "Older
+  roadmap items" placeholder removed; `FU-AI-RUNTIME-GATE` corrected from
+  "no deploy yet" to live (re-verified against the running system); new items
+  `BK-3` (Grafana rule description, now unblocked, lives in `~/noc-master`),
+  `BK-4` (n8n sqlite disposal) and `H-1` (compose-default parity).
+- **PROGRESS.md** — closed history older than 2026-08-01 moved verbatim to
+  `docs/archive/PROGRESS-2026-H1.md`; the spent FP-1 reminder-cron paragraph
+  deleted; two four-month-old "IN-FLIGHT" headings corrected against the
+  running system; the 2026-04-24 "awaiting operator action" item closed against
+  the telemetry it named (`M4TD.last_used_at` = 2026-09-21 20:03 UTC).
+- **README** — the demo's "24-hour auto-reset" replaced with the real
+  mechanism: `scripts/demo-nightly-reset.sh` from the BOS crontab at **02:23
+  PT** (`23 2 * * *`; hosts run `America/Los_Angeles` since 2026-08-25).
+- **CLAUDE.md** — version-bump list is now **6 files / 7 locations**
+  (`backend/app/version.py` added by ADR-0046), plus the compose-default rule.
+- **New:** `docs/reports/2026-09-21-open-items-inventory.md` — the authoritative
+  open-items and operator to-do list as of today.
+
 ## 2026-09-21 — Keyless basemap registry + tile-health probe — v2.92.0 (ADR-0046)
 
 **Every map's default "Dark" layer was serving a watermarked tile and had been
@@ -105,17 +183,21 @@ matches).
   client-injected leftmost hop through genuinely trusted proxies, for each
   topology. `cd backend && pytest -q` → **795 passed, 17 skipped** (was
   784 passed, 17 skipped before this correction).
-- Still shipped to worktree branch `security/phase7-customer-hardening`
-  only — **not merged, not deployed.**
+- ~~Still shipped to worktree branch `security/phase7-customer-hardening`
+  only — **not merged, not deployed.**~~ **MERGED AND DEPLOYED 2026-09-21:**
+  Bill merged the branch at `d30eb5b` (13:53 PDT) and this correction
+  (`a226c93`) landed in the same range; the fleet deployer built and recreated
+  the stack, **v2.91.0 live on BOS-HQ at 13:58 PDT**.
 
 ## 2026-09-21 — Phase 7 customer-surface hardening — v2.91.0 (ADR-0045)
 
 Fleet SSO-conversion fan-out Wave 2B (noc-master
 `docs/plans/2026-09-21-sso-fanout-dispatch.md`). Customer logins stay
 app-local permanently (ADR-0246 decision 5) — this closes four concrete
-defects underneath, not an SSO migration. **Shipped to worktree branch
+defects underneath, not an SSO migration. ~~**Shipped to worktree branch
 `security/phase7-customer-hardening`, not merged/deployed** — operator-
-gated, prepared for review.
+gated, prepared for review.~~ **MERGED `d30eb5b` 13:53 PDT and DEPLOYED —
+v2.91.0 live on BOS-HQ at 13:58 PDT, same day.**
 
 - **Root cause underneath three of the four findings:** every rate limiter
   and the login lockout keyed on `request.client.host`, which is nginx's

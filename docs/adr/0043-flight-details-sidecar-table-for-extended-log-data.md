@@ -1,6 +1,12 @@
 # ADR-0043 — Extended DJI log data lands in a `flight_details` sidecar plus a `flight_series` table, not on `flights`
 
-- **Status:** Accepted (decision recorded; implementation PLANNED, not started)
+- **Status:** Accepted — **P0 + P1 SHIPPED AND LIVE; P-EVAL closed; P2–P7 remain.**
+  (Was "implementation PLANNED, not started" — stale since 2026-09-05.) P0 schema +
+  read path shipped **v2.82.0** (`8b29ef9`); P1 Tier 0 extraction shipped **v2.83.0** +
+  parser **1.2.0** (`439b952`); alembic head `0011_battery_src_truth`. P-EVAL closed
+  2026-09-11 — no crate bump exists
+  (`docs/reports/2026-09-11-dji-log-parser-upgrade-eval.md`). Current state is tracked
+  in `ROADMAP.md` § FP-1.
 - **Date:** 2026-09-04
 - **Amended:** 2026-09-04, same day — operator decisions D1–D7 (below) arrived
   after the first acceptance. The core decision (a sidecar, not columns on
@@ -338,9 +344,23 @@ still roll it back. Structural where possible; verified where not.
 
 ## Status of implementation
 
-Nothing is built. The nine-phase build order, sizing, per-phase tests,
+> **Updated 2026-09-21.** The paragraph below said "Nothing is built" and "P7 is
+> blocked on the log-inventory hunt". Both are stale: **P0 and P1 are built and
+> live** (v2.82.0 `8b29ef9`, v2.83.0 + parser 1.2.0 `439b952`), and the plan's
+> §8 hunt was **filled in on 2026-09-04/05** — `docs/reports/2026-09-05-fp1-log-recovery-hunt.md`
+> plus the manifest `docs/plans/data/2026-09-05-missing-28-dji-originals.tsv`.
+> **P7 is therefore no longer blocked on the hunt.** What it inherits instead is
+> a settled inventory: 584 OpenDroneLog-era originals recovered to BOS-HQ
+> `~/droneops-staging/drive-logs/` and covered by restic/R2 under tag `staging`;
+> 198 real originals on the fleet; 226 `dji_txt` rows; and **28 `dji_txt`
+> originals unrecoverable from any fleet source** (HSH's backup script only ever
+> ran `pg_dump`, so those bytes were never captured). One time-critical operator
+> lead remains — the Synology Active Backup search, see the hunt report.
+
+P2–P7 are not built. The nine-phase build order, sizing, per-phase tests,
 version-bump targets, deploy notes, the D7 matching rule, nine risks and three
 remaining assumptions are in
 `docs/plans/2026-09-04-flight-details-data-ingestion.md`. ROADMAP item **FP-1**
-points at that plan. P7 is blocked on the log-inventory hunt, recorded there as a
-PENDING section for the operator to fill in.
+points at that plan and carries the live status. **Counts move** — every log
+total in this ADR and in the plan should be re-derived from the database rather
+than read off the prose (ROADMAP § FP-1 "Log inventory").
