@@ -93,7 +93,16 @@ function MissionEditLegacyRedirect() {
 }
 
 export default function App() {
-  const { isAuthenticated, needsSetup, loading, login, logout, completeSetup } = useAuth();
+  const {
+    isAuthenticated,
+    needsSetup,
+    loading,
+    ssoConfigured,
+    localLoginDisabled,
+    login,
+    logout,
+    completeSetup,
+  } = useAuth();
 
   if (loading) {
     return (
@@ -116,7 +125,9 @@ export default function App() {
         {/* All other routes require authentication */}
         <Route path="*" element={
           needsSetup ? <Setup onSetupComplete={completeSetup} /> :
-          !isAuthenticated ? <Login onLogin={login} /> : (
+          !isAuthenticated ? (
+            <Login onLogin={login} ssoConfigured={ssoConfigured} localLoginDisabled={localLoginDisabled} />
+          ) : (
             <Suspense fallback={PageFallback}>
               <Routes>
                 <Route element={<AppLayout onLogout={logout} />}>

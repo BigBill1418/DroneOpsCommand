@@ -16,7 +16,7 @@ See ADR-0046.
 
 from __future__ import annotations
 
-APP_VERSION = "2.93.0"
+APP_VERSION = "2.93.1"
 
 #: Sent on every outbound tile request (report renderer, tile-health probe).
 #: Identifies the app, the deployment and a reachable contact, per the OSMF

@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from pydantic import BaseModel
 
+from app.auth.cf_access import is_cf_access_configured
 from app.auth.jwt import (
     create_access_token,
     create_refresh_token,
@@ -105,15 +106,31 @@ class SetupRequest(BaseModel):
 
 @router.get("/setup-status")
 async def setup_status(db: AsyncSession = Depends(get_db)):
-    """Public endpoint — returns whether initial setup is needed.
+    """Public endpoint — returns whether initial setup is needed, plus the
+    two SSO flags the login screen needs BEFORE it can decide whether to
+    attempt a silent Access probe or show the password form at all
+    (ADR-0047). Both flags are safe to expose publicly: they say only
+    whether an operator has wired Cloudflare Access, never a secret.
 
     Managed instances skip the setup wizard — admin is pre-created on startup.
+    Local-login-disabled instances also skip it — there is no reason to run
+    the wizard for a local account that could never be used to log in.
     """
-    if settings.managed_instance:
-        return {"needs_setup": False}
+    sso_configured = is_cf_access_configured()
+    local_login_disabled = settings.local_login_disabled
+    if settings.managed_instance or local_login_disabled:
+        return {
+            "needs_setup": False,
+            "sso_configured": sso_configured,
+            "local_login_disabled": local_login_disabled,
+        }
     result = await db.execute(select(User))
     users = result.scalars().all()
-    return {"needs_setup": len(users) == 0}
+    return {
+        "needs_setup": len(users) == 0,
+        "sso_configured": sso_configured,
+        "local_login_disabled": local_login_disabled,
+    }
 
 
 @router.post("/setup")

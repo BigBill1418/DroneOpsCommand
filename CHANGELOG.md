@@ -4,6 +4,34 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-09-21 — v2.93.1 — Login screen modernized for SSO (ADR-0047 Part 2)
+
+**NOT DEPLOYED — `feat/operator-sso` worktree branch only.**
+
+### Changed
+
+- **Email fixed** on the login and setup screens: `me@barnardHQ.com` -> `Bill@BarnardHQ.com`
+  (exact capitalization, both the `mailto:` href and the visible text).
+- **Login footer now matches CallSignLane's pattern** — an anchor to `https://www.barnardhq.com`
+  wrapping "A software solution by:" plus the real BarnardHQ wordmark
+  (`frontend/public/barnardhq-logo.svg`, copied byte-for-byte from CallSignPublic).
+- **Silent SSO.** `useAuth` now reads `sso_configured` off `GET /api/auth/setup-status`
+  (extended to carry it, alongside `local_login_disabled`, in this commit) and, when true,
+  probes `GET /api/auth/account` with no bearer token via a bare `axios` call before ever
+  showing the password form — Cloudflare Access injects its JWT header automatically on every
+  proxied request, so a real operator browsing to `droneops.barnardhq.com` never types a
+  password. Fully inert (zero extra network round trip) when `sso_configured` is false — the
+  self-hosted/OSS and public-demo default.
+- Login screen now renders an "Access" card above the password form when SSO is configured
+  (Step A additive state) and hides the password form entirely once an operator also sets
+  `local_login_disabled` (Step B).
+
+### Verification
+
+Full frontend suite: 91 passed (14 new: `useAuth` 7, `Login` 6, `Setup` 1 — up from the 77
+baseline). `npx tsc --noEmit` clean. Backend: 898 passed, 23 skipped (`setup-status` SSO-flag
+coverage; local-login gating itself is a separate commit).
+
 ## 2026-09-21 — v2.93.0 — Operator Cloudflare Access SSO, Step A (ADR-0047)
 
 **NOT DEPLOYED — lands on `feat/operator-sso` in a dedicated worktree, per operator
