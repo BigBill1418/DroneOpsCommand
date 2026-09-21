@@ -4,14 +4,15 @@
  * No modal, no multi-step flow. Call this function → it renders → auto-downloads.
  *
  * Pipeline:
- * 1. Fetch CartoDB dark map tiles for the flight bounding box
- * 2. Composite tiles into a static map background on canvas
+ * 1. Fetch the shared Dark basemap (ADR-0046 registry) for the flight bbox
+ * 2. Composite the layer stack into a static map background on canvas
  * 3. For each frame: draw map bg + altitude-colored trail + drone marker + telemetry HUD
  * 4. Capture canvas stream with MediaRecorder → WebM
  * 5. Auto-download when complete
  */
 
 import { notifications } from '@mantine/notifications';
+import { BASEMAP_SETS, tileUrl, type TileSpec } from '../lib/basemaps';
 import { formatFlightDate } from '../lib/datetime';
 
 // ── Types ──────────────────────────────────────────────────────────
@@ -79,21 +80,66 @@ function formatDuration(secs: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
-// ── Tile cache ─────────────────────────────────────────────────────
+// ── Basemap tiles (ADR-0046) ───────────────────────────────────────
+// The video uses the same Dark set the maps use — dark canvas base plus the
+// transportation overlay — so an exported flight looks like the app.
+
+const VIDEO_BASEMAP = BASEMAP_SETS.dark;
+
+/**
+ * Upper bound on tiles fetched for ONE layer of ONE export.
+ *
+ * Drawing at z+1 quadruples the request count versus drawing at the display
+ * zoom, and a 1497x1020 viewport at z+1 is already ~100 tiles. The cap keeps a
+ * single export from turning into a burst of many hundred requests at a
+ * provider we are a keyless guest of; the zoom steps back down instead, which
+ * costs sharpness and nothing else.
+ */
+const MAX_TILES_PER_LAYER = 180;
+
+/** Inclusive tile index range covering [vpMin, vpMin + vpSize) pixels. */
+function tileRange(vpMin: number, vpSize: number, drawSize: number): [number, number] {
+  return [Math.floor(vpMin / drawSize), Math.floor((vpMin + vpSize - 1) / drawSize)];
+}
+
+/**
+ * Which zoom to REQUEST this layer at, for a map drawn at `zoom`.
+ *
+ * Esri serves no `@2x` retina variant (CARTO did — that is what this replaced),
+ * so density comes from fetching one zoom deeper and drawing each tile at half
+ * size. Clamped to the layer's real `maxNativeZoom`, because past that every
+ * provider here returns a byte-identical blank filler tile rather than a 404.
+ * A layer clamped BELOW `zoom` simply upsamples, exactly as Leaflet does in the
+ * live map.
+ */
+function pickTileZoom(
+  spec: TileSpec, zoom: number, vpLeft: number, vpTop: number, mapW: number, mapH: number,
+): number {
+  let tileZoom = Math.min(zoom + 1, spec.maxNativeZoom);
+  while (tileZoom > 1) {
+    const drawSize = 256 * Math.pow(2, zoom - tileZoom);
+    const [x0, x1] = tileRange(vpLeft, mapW, drawSize);
+    const [y0, y1] = tileRange(vpTop, mapH, drawSize);
+    if ((x1 - x0 + 1) * (y1 - y0 + 1) <= MAX_TILES_PER_LAYER) break;
+    tileZoom--;
+  }
+  return tileZoom;
+}
+
 const tileCache = new Map<string, HTMLImageElement>();
 
-async function fetchTile(x: number, y: number, z: number): Promise<HTMLImageElement> {
-  const key = `${z}/${x}/${y}`;
-  if (tileCache.has(key)) return tileCache.get(key)!;
-
-  const subdomain = ['a', 'b', 'c'][Math.abs(x + y) % 3];
-  const url = `https://${subdomain}.basemaps.cartocdn.com/dark_all/${z}/${x}/${y}@2x.png`;
+async function fetchTile(spec: TileSpec, z: number, x: number, y: number): Promise<HTMLImageElement> {
+  const url = tileUrl(spec, z, x, y);
+  const cached = tileCache.get(url);
+  if (cached) return cached;
 
   return new Promise((resolve, reject) => {
     const img = new Image();
+    // Every registry provider sends `Access-Control-Allow-Origin: *`, so the
+    // canvas stays untainted and captureStream()/toDataURL() keep working.
     img.crossOrigin = 'anonymous';
-    img.onload = () => { tileCache.set(key, img); resolve(img); };
-    img.onerror = () => reject(new Error(`Failed to fetch tile ${key}`));
+    img.onload = () => { tileCache.set(url, img); resolve(img); };
+    img.onerror = () => reject(new Error(`Failed to fetch tile ${z}/${x}/${y}`));
     img.src = url;
   });
 }
@@ -173,24 +219,7 @@ export async function renderFlightVideo(
       lat2pixel(lat, zoom) - vpTop,
     ];
 
-    // ── 2. Fetch map tiles ──
-    const tileMinX = lng2tile(minLng - lngPad, zoom);
-    const tileMaxX = lng2tile(maxLng + lngPad, zoom);
-    const tileMinY = lat2tile(maxLat + latPad, zoom);
-    const tileMaxY = lat2tile(minLat - latPad, zoom);
-
-    const tilePromises: Promise<{ img: HTMLImageElement; tx: number; ty: number } | null>[] = [];
-    for (let tx = tileMinX; tx <= tileMaxX; tx++) {
-      for (let ty = tileMinY; ty <= tileMaxY; ty++) {
-        tilePromises.push(
-          fetchTile(tx, ty, zoom).then(img => ({ img, tx, ty })).catch(() => null)
-        );
-      }
-    }
-    const tiles = (await Promise.all(tilePromises)).filter(Boolean) as { img: HTMLImageElement; tx: number; ty: number }[];
-
-    // ── 3. Render map background ──
-    notifications.update({ id: notifId, message: 'Compositing map...', loading: true });
+    // ── 2. Fetch + composite the basemap ──
     const mapBg = document.createElement('canvas');
     mapBg.width = MAP_W;
     mapBg.height = MAP_H;
@@ -198,19 +227,36 @@ export async function renderFlightVideo(
     mapCtx.fillStyle = '#050608';
     mapCtx.fillRect(0, 0, MAP_W, MAP_H);
 
-    for (const tile of tiles) {
-      const drawX = tile.tx * 256 - vpLeft;
-      const drawY = tile.ty * 256 - vpTop;
-      mapCtx.drawImage(tile.img, drawX, drawY, 256, 256);
+    // Layers are drawn bottom-to-top in registry order: dark canvas, then the
+    // transparent transportation overlay carrying roads and street names.
+    for (const spec of VIDEO_BASEMAP.layers) {
+      const tileZoom = pickTileZoom(spec, zoom, vpLeft, vpTop, MAP_W, MAP_H);
+      const drawSize = 256 * Math.pow(2, zoom - tileZoom);
+      const [minTx, maxTx] = tileRange(vpLeft, MAP_W, drawSize);
+      const [minTy, maxTy] = tileRange(vpTop, MAP_H, drawSize);
+
+      const pending: Promise<{ img: HTMLImageElement; tx: number; ty: number } | null>[] = [];
+      for (let tx = minTx; tx <= maxTx; tx++) {
+        for (let ty = minTy; ty <= maxTy; ty++) {
+          pending.push(fetchTile(spec, tileZoom, tx, ty).then((img) => ({ img, tx, ty })).catch(() => null));
+        }
+      }
+      const tiles = (await Promise.all(pending)).filter(Boolean) as { img: HTMLImageElement; tx: number; ty: number }[];
+
+      mapCtx.globalAlpha = spec.opacity ?? 1;
+      for (const tile of tiles) {
+        mapCtx.drawImage(tile.img, tile.tx * drawSize - vpLeft, tile.ty * drawSize - vpTop, drawSize, drawSize);
+      }
+      mapCtx.globalAlpha = 1;
     }
 
-    // ── 4. Determine frame count ──
+    // ── 3. Determine frame count ──
     const totalTime = timeOffsets[timeOffsets.length - 1] || track.length;
     const videoDurationSecs = Math.min(Math.max(totalTime / 10, 15), 60);
     const totalFrames = Math.ceil(videoDurationSecs * FPS);
     const pointsPerFrame = track.length / totalFrames;
 
-    // ── 5. Set up MediaRecorder ──
+    // ── 4. Set up MediaRecorder ──
     notifications.update({ id: notifId, message: 'Initializing encoder...', loading: true });
     const stream = canvas.captureStream(FPS);
     let mimeType = 'video/webm;codecs=vp9';
@@ -236,14 +282,14 @@ export async function renderFlightVideo(
 
     recorder.start();
 
-    // ── 6. Pre-compute flight stats ──
+    // ── 5. Pre-compute flight stats ──
     const maxAltFt = flight.max_altitude * 3.28084;
     const maxSpeedMph = flight.max_speed * 2.23694;
     const distanceMiles = flight.total_distance * 0.000621371;
     const flightDate = flight.start_time ? formatFlightDate(flight.start_time) : '';
     const aircraftName = flight.drone_name || flight.drone_model || 'Unknown Aircraft';
 
-    // ── 7. Render frames ──
+    // ── 6. Render frames ──
     for (let frame = 0; frame < totalFrames; frame++) {
       const pointIdx = Math.min(Math.floor(frame * pointsPerFrame), track.length - 1);
       const currentPoint = track[pointIdx];
@@ -512,7 +558,7 @@ export async function renderFlightVideo(
       await new Promise(r => setTimeout(r, 1));
     }
 
-    // ── 8. Finalize ──
+    // ── 7. Finalize ──
     notifications.update({ id: notifId, message: 'Encoding video...', loading: true });
     recorder.stop();
     const blob = await recorderDone;

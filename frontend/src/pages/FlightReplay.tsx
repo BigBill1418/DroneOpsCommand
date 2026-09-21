@@ -29,7 +29,8 @@ import {
   IconMapPin,
   IconVideo,
 } from '@tabler/icons-react';
-import { MapContainer, TileLayer, Polyline, CircleMarker, Popup, LayersControl, useMap } from 'react-leaflet';
+import { MapContainer, Polyline, CircleMarker, Popup, useMap } from 'react-leaflet';
+import { BasemapLayers } from '../lib/BasemapLayers';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import api from '../api/client';
@@ -337,27 +338,14 @@ export default function FlightReplay() {
         {/* Map */}
         <Card padding={0} radius="md" style={cardStyle}>
           <MapContainer
+            attributionControl={false}
             center={[track[0].lat, track[0].lng]}
             zoom={15}
             style={{ height: isMobile ? 'calc(100vh - 340px)' : 'calc(100vh - 280px)', minHeight: 300, borderRadius: 8 }}
             scrollWheelZoom={true}
             zoomControl={false}
           >
-            <LayersControl position="topright">
-              <LayersControl.BaseLayer checked name="Dark">
-                <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" />
-              </LayersControl.BaseLayer>
-              <LayersControl.BaseLayer name="Satellite">
-                <TileLayer
-                  url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-                  attribution="Esri"
-                  maxZoom={19}
-                />
-              </LayersControl.BaseLayer>
-              <LayersControl.BaseLayer name="Street">
-                <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution="OSM" />
-              </LayersControl.BaseLayer>
-            </LayersControl>
+            <BasemapLayers />
             <FitTrack points={track} />
             <FollowDrone lat={currentPoint.lat} lon={currentPoint.lng} follow={followDrone} />
 

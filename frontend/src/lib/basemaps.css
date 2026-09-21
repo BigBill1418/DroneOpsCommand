@@ -1,0 +1,22 @@
+/* Compact attribution control (ADR-0046).
+   Esri and the OSM Foundation both REQUIRE visible attribution, so every
+   map renders one — but the verbatim copyright strings are long and the
+   maps are small. Shrink it and let it sit quietly in the corner rather
+   than dropping it. */
+.leaflet-control-attribution {
+  background: rgba(5, 6, 8, 0.72) !important;
+  color: #5a6478 !important;
+  font-size: 9px !important;
+  line-height: 1.35 !important;
+  padding: 1px 5px !important;
+  max-width: 62vw;
+}
+
+.leaflet-control-attribution a {
+  color: #7a869c !important;
+  text-decoration: none;
+}
+
+.leaflet-control-attribution a:hover {
+  color: #00d4ff !important;
+}

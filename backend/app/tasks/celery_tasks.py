@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 from datetime import datetime, timedelta
 
@@ -81,6 +82,16 @@ celery_app.conf.beat_schedule = {
     "payment-reminders": {
         "task": "send_payment_reminders",
         "schedule": crontab(hour=16, minute=0),
+    },
+    # ADR-0046 — basemap tile-health probe. Weekly is sufficient: the CARTO
+    # watermark sat undetected for 24 days, so a 7-day worst case is a ~24x
+    # improvement. Monday 15:47 UTC is ~08:47 Pacific — inside waking hours
+    # and well clear of the ADR-0037 quiet window, so if it ever does publish
+    # the message lands somewhere useful. Minute offset from every other
+    # entry (17, */15, 0) so nothing co-fires.
+    "basemap-tile-health": {
+        "task": "probe_basemap_tiles",
+        "schedule": crontab(day_of_week=1, hour=15, minute=47),
     },
 }
 
@@ -923,3 +934,103 @@ def parse_device_flight_task(
         batch_id, filename, entry["state"], entry["imported"], entry["skipped"],
     )
     return {"batch_id": batch_id, "per_file": [entry]}
+
+
+# ── ADR-0046 — basemap tile-health probe ──────────────────────────────
+
+
+@celery_app.task(name="probe_basemap_tiles")
+def probe_basemap_tiles_task() -> dict:
+    """Fetch one fixed tile per basemap provider and compare it to baseline.
+
+    This is the control for the failure that actually happened: on ~2026-08-28
+    CARTO started serving watermarked tiles with HTTP 200, correct headers and
+    plausible byte sizes, and nothing in the stack could tell. The probe looks
+    at the pixels — see ``app.services.basemap_probe``.
+
+    Always writes the full result to ``system_settings`` so the admin endpoint
+    and Loki have it regardless of whether the alert transport is armed. The
+    ntfy publish is gated OFF by default behind ``basemap_probe_ntfy_enabled``
+    (ROADMAP MP-2) because the thresholds have not been validated against the
+    providers' own data-refresh cadence yet.
+    """
+    from sqlalchemy import create_engine, select
+    from sqlalchemy.orm import Session
+
+    from app.models.system_settings import SystemSetting
+    from app.services.basemap_probe import (
+        ALERT_CLICK_URL,
+        ALERT_DEDUP_TTL_SECONDS,
+        SETTING_LAST_RESULT,
+        SETTING_NTFY_ENABLED,
+        alert_payload,
+        ntfy_enabled,
+        run_probe,
+    )
+    from app.services.ntfy import send_alert_sync
+
+    result = run_probe()
+
+    logger.info(
+        "basemap_tile_health",
+        extra={
+            "event": "basemap_tile_health",
+            "ok": result["ok"],
+            "layers_ok": result["layers_ok"],
+            "layers_total": result["layers_total"],
+            "failing": result["failing"],
+            "probe_tile": result["probe_tile"],
+        },
+    )
+
+    armed = False
+    engine = create_engine(settings.database_url_sync, pool_pre_ping=True)
+    try:
+        with Session(engine) as db:
+            rows = {
+                row.key: row.value
+                for row in db.execute(
+                    select(SystemSetting).where(
+                        SystemSetting.key.in_([SETTING_LAST_RESULT, SETTING_NTFY_ENABLED])
+                    )
+                ).scalars().all()
+            }
+            armed = ntfy_enabled(rows.get(SETTING_NTFY_ENABLED))
+
+            payload = json.dumps(result)
+            existing = db.get(SystemSetting, SETTING_LAST_RESULT)
+            if existing is None:
+                db.add(SystemSetting(key=SETTING_LAST_RESULT, value=payload))
+            else:
+                existing.value = payload
+            db.commit()
+    except Exception as exc:  # persistence must never lose the probe result
+        logger.error("basemap_tile_health.persist_failed: %s", exc)
+    finally:
+        engine.dispose()
+
+    if result["ok"]:
+        return {"ok": True, "layers_ok": result["layers_ok"], "alerted": False}
+
+    if not armed:
+        logger.warning(
+            "basemap_tile_health.alert_suppressed",
+            extra={
+                "event": "basemap_tile_health.alert_suppressed",
+                "reason": f"{SETTING_NTFY_ENABLED} is not enabled (observe-only, ROADMAP MP-2)",
+                "failing": result["failing"],
+            },
+        )
+        return {"ok": False, "layers_ok": result["layers_ok"], "alerted": False}
+
+    title, message, dedup = alert_payload(result)
+    send_alert_sync(
+        title,
+        message,
+        dedup_key=dedup,
+        dedup_ttl_seconds=ALERT_DEDUP_TTL_SECONDS,
+        priority=0,  # ADR-0037: not customer-visible, not actionable in 5 minutes
+        click=ALERT_CLICK_URL,
+        tags=["warning", "map"],
+    )
+    return {"ok": False, "layers_ok": result["layers_ok"], "alerted": True}

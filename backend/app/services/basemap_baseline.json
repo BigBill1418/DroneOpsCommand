@@ -1,0 +1,56 @@
+{
+  "_comment": "Baseline tile fingerprints for the ADR-0046 tile-health probe. Regenerate with: python -m app.services.capture_basemap_baseline \u2014 but only after visually confirming the live tiles are clean.",
+  "captured_at": "2026-09-21T21:21:40.139758+00:00",
+  "probe_tile": {
+    "z": 10,
+    "x": 163,
+    "y": 373
+  },
+  "layers": {
+    "esri_dark_base": {
+      "url": "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/10/373/163",
+      "bytes": 4317,
+      "content_type": "image/jpeg",
+      "width": 256,
+      "height": 256,
+      "ahash": "9ffefcf9f97999fb",
+      "dhash": "8001160404048408"
+    },
+    "esri_transportation": {
+      "url": "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/10/373/163",
+      "bytes": 7889,
+      "content_type": "image/png",
+      "width": 256,
+      "height": 256,
+      "ahash": "70301e0f00000000",
+      "dhash": "32180f0000010000"
+    },
+    "esri_imagery": {
+      "url": "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/10/373/163",
+      "bytes": 13327,
+      "content_type": "image/jpeg",
+      "width": 256,
+      "height": 256,
+      "ahash": "63161ca662070007",
+      "dhash": "390b429339e18152"
+    },
+    "esri_boundaries_places": {
+      "url": "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/10/373/163",
+      "bytes": 2618,
+      "content_type": "image/png",
+      "width": 256,
+      "height": 256,
+      "ahash": "0002060000000000",
+      "dhash": "0001030000000000"
+    },
+    "osm_standard": {
+      "url": "https://tile.openstreetmap.org/10/163/373.png",
+      "bytes": 24540,
+      "content_type": "image/png",
+      "width": 256,
+      "height": 256,
+      "ahash": "0a07075001bb69b9",
+      "dhash": "4d22124c4894349c"
+    }
+  }
+}

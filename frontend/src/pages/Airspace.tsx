@@ -27,7 +27,8 @@ import {
   IconChevronUp,
   IconChevronDown,
 } from '@tabler/icons-react';
-import { MapContainer, TileLayer, CircleMarker, Circle, Marker, Popup, LayersControl, useMap } from 'react-leaflet';
+import { MapContainer, CircleMarker, Circle, Marker, Popup, useMap } from 'react-leaflet';
+import { BasemapLayers } from '../lib/BasemapLayers';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import api from '../api/client';
@@ -363,23 +364,14 @@ export default function Airspace() {
             </Center>
           ) : (
             <MapContainer
+              attributionControl={false}
               center={[activeLat!, activeLon!]}
               zoom={9}
               style={{ height: isMobile ? 'calc(100vh - 240px)' : 540, minHeight: 320, borderRadius: 8 }}
               scrollWheelZoom={true}
               zoomControl={false}
             >
-              <LayersControl position="topright">
-                <LayersControl.BaseLayer checked name="Dark">
-                  <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" />
-                </LayersControl.BaseLayer>
-                <LayersControl.BaseLayer name="Satellite">
-                  <TileLayer url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}" attribution="Esri" maxZoom={19} />
-                </LayersControl.BaseLayer>
-                <LayersControl.BaseLayer name="Street">
-                  <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution="OSM" />
-                </LayersControl.BaseLayer>
-              </LayersControl>
+              <BasemapLayers />
               <RecenterMap lat={activeLat!} lon={activeLon!} />
 
               {/* Radius circle */}

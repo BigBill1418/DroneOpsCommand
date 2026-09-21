@@ -5,6 +5,85 @@ in-flight scope is tracked in `PROGRESS.md`. This file holds only
 not-yet-started work with a clear trigger, scope, and ADR/decision
 reference where applicable.
 
+## Maps (ADR-0046, 2026-09-21)
+
+Basemaps moved off CARTO to keyless Esri + OSM at v2.92.0 after CARTO began
+serving watermarked tiles. Research:
+`docs/reports/2026-09-21-basemap-provider-eval.md`.
+
+### MP-1 — Protomaps PMTiles self-hosted on R2 — **NOT STARTED**
+
+**Trigger:** the Esri keyless endpoints change terms, start watermarking, gate
+behind a key, or the probe in MP-2 reports a provider-side change we cannot
+work around. Also worth starting unprompted if the soft dark base above z16
+becomes a real operational complaint.
+
+**Why it is the real answer.** Every option in ADR-0046 except this one leaves
+"what if the provider changes the terms" answered by someone else. A PMTiles
+archive is a single file served over HTTP Range requests — R2 supports that
+natively, no tile server, no per-tile origin cost — and the fleet already runs
+R2 under the ADR-0232 backup posture. It is structurally incapable of being
+watermarked, rate-limited or retired by a vendor, sharp at every zoom,
+retina-native by construction, and restyleable to match the app's dark theme
+exactly.
+
+**Critically, it does not force a MapLibre migration.** `protomaps-leaflet`
+renders Protomaps vector tiles to a canvas *inside* Leaflet, with a built-in
+dark theme — so the five map components, the flight tracks, the airspace
+polygons and the replay scrubber all stay as they are. Versions checked
+2026-09-21: `protomaps-leaflet@5.1.0` (BSD-3, published 2025-06-18 — stable but
+not actively moving), `pmtiles@4.5.0` (BSD-3, published 2026-08-10, active).
+Re-assess that choice against MapLibre when the item is picked up.
+
+**Scope:** ~1-2 engineer-days plus a build/refresh pipeline for the extract. A
+Pacific-Northwest or CONUS extract is manageable; planet is ~120 GB and not
+warranted. Swapping the app onto it is a one-line change in
+`frontend/src/lib/basemaps.ts` — that is the point of the registry.
+
+### MP-2 — Tune the probe, then arm ntfy — **NOT STARTED, earliest 2026-10-05**
+
+The tile-health probe ships **observe-only**: `basemap_probe_ntfy_enabled`
+defaults false, so it records and logs but never publishes. The Hamming-distance
+(8) and byte-band (+/-40%) thresholds in `app/services/basemap_probe.py` are
+starting points, **not measurements** — basemaps legitimately change when a
+provider refreshes its data, and a probe that pages falsely on the first refresh
+gets muted, which is worse than no probe.
+
+**Do:** after at least two weeks of weekly runs (first run Monday 2026-09-22,
+so earliest **2026-10-05**), read the accumulated
+`system_settings.basemap_probe_last_result` history and the
+`basemap_tile_health` log lines, look at the observed hash distances and byte
+deltas per layer, and either widen the thresholds to the observed variance plus
+headroom or confirm they hold. Then
+`PUT /api/admin/basemap/tile-health/ntfy {"enabled": true}`.
+
+**Watch for:** `esri_transportation` is the tightest margin — a synthetic
+watermark moved its aHash by only 10 against a threshold of 8, because the layer
+is sparse. Sparse overlays are the weak case for hash-based detection; the
+blank-tile check and the byte band are what carry them.
+
+**Note on the topic.** The probe publishes to the repo's existing
+`droneops-alerts` topic, not a new `droneops-basemap` one, because a new ntfy
+topic is a black hole until Bill subscribes on his phone. If a dedicated topic
+is ever wanted, minting it is the easy half — getting it subscribed is the part
+that must not be skipped.
+
+### MP-3 — Re-measure the Esri zoom ceilings if flights leave Eugene — **NOT STARTED**
+
+**Trigger:** DroneOps starts flying materially outside the Willamette Valley.
+
+Every `maxNativeZoom` in the registry was measured over Eugene, OR
+(44.0521, -123.0868) on 2026-09-21. Esri's ceilings are **location-specific**:
+`World_Imagery` reaches z19 there and z20-21 over some metros, less over rural
+areas. The service metadata advertises LOD 23 for every layer and is useless for
+planning. Past the real ceiling every service returns a byte-identical blank
+filler tile rather than a 404, so the failure is a blank map, not an error.
+
+**Do:** walk a zoom ladder over the new area (`?blankTile=false` makes Esri
+return 404 instead of filler, which makes the ladder trivial to script — do not
+put that parameter on the live layers), then either raise `maxNativeZoom` where
+there is more data or set it per-region.
+
 ## Flight-parser data expansion (research 2026-09-04)
 
 ### FP-1 — Extract the untapped DJI log data into a Flight Details view — **P0 + P1 LIVE; P-EVAL DONE (no crate bump exists); P2–P7 remain**

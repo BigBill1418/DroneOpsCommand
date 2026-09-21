@@ -4,6 +4,67 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-09-21 — Keyless basemap registry + tile-health probe — v2.92.0 (ADR-0046)
+
+**Every map's default "Dark" layer was serving a watermarked tile and had been
+since ~2026-08-28.** CARTO began stamping "API KEY REQUIRED" into its keyless
+raster basemaps. The tiles came back **HTTP 200**, `image/png`, `ACAO: *`,
+256x256, plausible byte size — every header healthy, the image degraded. No
+status check, `tileerror` handler, uptime monitor or tile cache could see it;
+a cache would have made it worse by serving the watermark for its TTL. It went
+unnoticed for 24 days. Research: `docs/reports/2026-09-21-basemap-provider-eval.md`.
+
+### Changed
+
+- **One basemap registry** — `frontend/src/lib/basemaps.ts` + `<BasemapLayers/>`.
+  All five call sites (`FlightMap`, `Telemetry`, `FlightReplay`, `Airspace`,
+  `FlightVideoExporter`) import one component; none holds a tile URL. A provider
+  swap is now a one-line edit instead of a five-file hunt.
+- **Keyless Esri ArcGIS raster + OSM.** Dark = `World_Dark_Gray_Base` +
+  `World_Transportation` overlay (the overlay carries real data to z19, so roads
+  and street names stay crisp exactly where the z16 base goes soft); Satellite =
+  `World_Imagery`; Hybrid = imagery + place names + roads; Street = OSM.
+  `maxNativeZoom` per layer is **measured**, not the LOD 23 the services
+  advertise — past their real data every one returns a blank filler tile.
+- **Attribution now renders on every map.** Four call sites passed bare
+  `"Esri"`/`"OSM"` and `FlightMap` rendered none; both providers require real
+  attribution. Strings are verbatim from each MapServer's `copyrightText`.
+- **OSM `{s}` subdomains dropped** — OSMF specifies the bare
+  `tile.openstreetmap.org` host and warns other subdomains may be withdrawn.
+- **Video exporter reworked.** CARTO served `@2x` retina tiles; Esri serves
+  none. Density now comes from fetching z+1 and drawing at half scale (clamped
+  to each layer's native ceiling, capped at 180 tiles/layer), compositing the
+  full Dark stack so exports keep the app's look.
+- **Report renderer sends an identifying User-Agent.** `staticmap` 0.5.7
+  defaults to `User-Agent: StaticMap` — a library default UA, which the OSMF
+  Tile Usage Policy names as a thing you must not do. Verified on the wire.
+
+### Added
+
+- **Tile-health probe** (`probe_basemap_tiles`, Celery beat, Mondays 15:47 UTC).
+  Fetches one fixed tile per provider, computes two 64-bit perceptual hashes
+  with Pillow (no new dependency — `imagehash` would pull numpy + scipy), and
+  compares against a checked-in baseline captured today. Validated against the
+  real defect class: a watermark stamped into each live tile moves the hashes
+  10-35 bits against a threshold of 8. Result persisted to `system_settings` and
+  emitted as a structured log line.
+- **Admin endpoints** — `GET /api/admin/basemap/tile-health`,
+  `POST .../run` (60s cooldown), `PUT .../ntfy`.
+- **ntfy publishing is wired but DEFAULT OFF** (`basemap_probe_ntfy_enabled`).
+  The thresholds are starting points, not measurements; observe-only for two
+  weeks first (ROADMAP MP-2, earliest 2026-10-05).
+- `backend/app/version.py` — `APP_VERSION` + the outbound `USER_AGENT`. A
+  **seventh version location**, guarded by `tests/test_app_version_parity.py`.
+
+### Known risk, accepted
+
+Esri's keyless `server.arcgisonline.com` endpoints are a **gray-zone
+dependency** — Esri has pushed developers toward a keyed service since 2022 and
+these endpoints are four years past their own stated migration deadline. This is
+structurally the same bet as CARTO. Taken with eyes open because swap cost is
+now one line, detection is ≤7 days, and both exits are documented: Stadia at
+$20/month, or Protomaps PMTiles self-hosted on R2 (ROADMAP MP-1).
+
 ## 2026-09-21 — Correction: Phase 7's trusted-proxy fix only trusted one hop (ADR-0045)
 
 **Same-day correction to the entry directly below.** `app/utils/client_ip.py`

@@ -249,6 +249,8 @@ def render_static_map(flights: list[dict], width: int = 800, height: int = 600) 
     """
     from staticmap import StaticMap, Line, CircleMarker
 
+    from app.version import USER_AGENT
+
     tracks = extract_gps_tracks(flights)
     if not tracks:
         logger.info("No tracks for static map, skipping render")
@@ -262,10 +264,21 @@ def render_static_map(flights: list[dict], width: int = 800, height: int = 600) 
         # report request with it — past Cloudflare's ~100s edge window → 524.
         # 10s/tile is generous for OSM; on failure the map is skipped (caught
         # below), the report still generates without it (ADR-0020).
+        #
+        # ADR-0046: the OSMF Tile Usage Policy requires server-side consumers
+        # to send "a clear, unique User-Agent string" naming the application,
+        # and names sending a library's default UA as a thing you must not do.
+        # staticmap 0.5.7 defaults to `User-Agent: StaticMap` — exactly that
+        # case — but accepts a `headers` dict, so the fix is one argument and
+        # the renderer can stay on OSM. Report maps are a handful of tiles
+        # over a bounded area at low volume, which the policy allows; the
+        # thing it forbids is pre-emptive or cached bulk fetching, and this
+        # renderer does neither.
         m = StaticMap(
             width, height,
             url_template="https://tile.openstreetmap.org/{z}/{x}/{y}.png",
             tile_request_timeout=10,
+            headers={"User-Agent": USER_AGENT},
         )
 
         for i, track in enumerate(tracks):

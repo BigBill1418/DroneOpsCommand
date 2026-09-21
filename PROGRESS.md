@@ -4,6 +4,53 @@ Maintained alongside `CHANGELOG.md` and `docs/adr/`. `CHANGELOG.md` is
 the ledger of shipped changes; this file tracks what's in-flight or
 blocked.
 
+## 2026-09-21 — Basemap migration off CARTO + tile-health probe — SHIPPED, PENDING DEPLOY
+
+**State: complete, tests green, committed to `main` locally. NOT pushed** — the
+orchestrator reviews, pushes and verifies the deploy. v2.92.0, ADR-0046.
+
+Every map's default Dark layer had been serving CARTO tiles watermarked
+"API KEY REQUIRED" since ~2026-08-28 — HTTP 200 with correct headers, so
+nothing in the stack could see it and it stood for 24 days. Replaced with
+keyless Esri + OSM behind a single registry, and added the pixel-level probe
+that is the only class of control that can catch that failure.
+
+Evidence quoted in the commit body. Verification done this session:
+
+- All five registry tile URLs fetched live: 200, correct bytes, `ACAO: *`.
+- Dark base + transportation composited at z12/z13 and inspected; the
+  `World_Dark_Gray_Reference` layer was tried as a third layer and **rejected**
+  on the evidence (its city labels are overprinted unreadable by the
+  transportation layer, and it is blank from z16).
+- Report renderer's User-Agent confirmed **on the wire** against a local HTTP
+  server — 4 tile requests, all carrying `DroneOpsCommand/2.92.0 (...)`, no
+  `StaticMap` default.
+- Probe detection validated against the real defect class, not asserted: a
+  watermark stamped into each of the five live tiles moves the hashes 10-35
+  bits against a threshold of 8; the same clean tile against its own baseline
+  reads `ok`.
+- Both frontend and backend guard tests falsified by mutation before being
+  trusted.
+
+**Open for Bill / next session:**
+
+1. **ROADMAP MP-2 — arm the probe's ntfy, earliest 2026-10-05.** It ships
+   observe-only on purpose; the thresholds are starting points, not
+   measurements. Two weeks of weekly runs first (first run Monday 2026-09-22),
+   then `PUT /api/admin/basemap/tile-health/ntfy {"enabled": true}`.
+2. **Prove the probe once after deploy:**
+   `POST /api/admin/basemap/tile-health/run` (admin-authed) should return
+   `ok: true, layers_ok: 5`. A 429 just means it ran in the last 60s.
+3. **`backend/app/version.py` is a SEVENTH version location.** CLAUDE.md's bump
+   list still says 5 files / 6 locations and was deliberately not edited by this
+   session. A missed bump there is caught by
+   `tests/test_app_version_parity.py` (red, not silent), and it only affects the
+   outbound User-Agent — but the bump list should be updated.
+4. **The Esri keyless-terms risk is accepted, not resolved** (ADR-0046
+   Consequences). If Esri gates those endpoints, the exits are Stadia at
+   $20/month or Protomaps on R2 (MP-1), and the registry makes either a
+   one-line change.
+
 ## 2026-09-21 — Phase 7 customer-surface hardening — AWAITING OPERATOR MERGE
 
 **State: code + tests complete and green, committed to worktree branch

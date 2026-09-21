@@ -2,7 +2,7 @@
 
 **Self-hosted mission management, flight log analysis, GPS flight replay with video export, AI report generation, invoicing, and real-time airspace monitoring for commercial drone operators.**
 
-**Version 2.91.0** | [Quick Start](#quick-start) | [Features](#features) | [Configuration](#configuration) | [Contributing](CONTRIBUTING.md) | [License](LICENSE)
+**Version 2.92.0** | [Quick Start](#quick-start) | [Features](#features) | [Configuration](#configuration) | [Contributing](CONTRIBUTING.md) | [License](LICENSE)
 
 **Live Demo:** [command-demo.barnardhq.com](https://command-demo.barnardhq.com) (login: `demo` / `demo123`)
 
@@ -164,7 +164,7 @@ After logging in, go to **Settings > Branding** to set your company name, taglin
 - Top flights by duration and distance
 - Searchable, sortable flight log table with unit conversions (meters to feet/miles, m/s to mph)
 - Average distance and duration per flight
-- Flight detail drawer with interactive GPS flight path map over dark CartoDB tiles
+- Flight detail drawer with interactive GPS flight path map over the shared dark basemap
 - Green takeoff marker, orange landing marker, cyan flight path trace
 - Export individual flights as GPX, KML, or CSV
 
@@ -175,7 +175,7 @@ After logging in, go to **Settings > Branding** to set your company name, taglin
 - Per-flight telemetry accessible from the flight detail view
 
 ### Multi-Flight Path Maps
-- Interactive Leaflet map with dark CartoDB basemap matching the app's dark theme
+- Interactive Leaflet map with the shared dark basemap matching the app's dark theme
 - Color-coded flight path overlays with start/end point markers
 - Convex hull polygon showing total coverage area boundary
 - Coverage area calculation in acres (with 30m buffer for camera swath simulation)
@@ -328,12 +328,12 @@ After logging in, go to **Settings > Branding** to set your company name, taglin
 - Flight stats panel with duration, distance, max altitude, max speed
 - Home point and start/end markers on map
 - Follow-drone mode auto-pans the map to track the aircraft
-- Dark CartoDB basemap matching the app's theme
+- Dark basemap matching the app's theme
 
 ### Flight Video Export
 - One-click export: click button → render → auto-download
 - Renders full flight replay as a downloadable WebM video (1920x1080, 30fps)
-- Canvas-based rendering with CartoDB dark map tiles, altitude-colored trail, drone marker
+- Canvas-based rendering with the shared dark basemap (fetched one zoom deeper and drawn at half scale for pixel density), altitude-colored trail, drone marker
 - Telemetry sidebar overlay with live altitude, speed, heading, position, elapsed time
 - Flight stats panel, altitude color legend, and progress bar in the video
 - Progress notifications during rendering with percentage updates
@@ -405,13 +405,50 @@ The primary database is configured for WAL streaming replication to a standby on
 
 The primary entrypoint script (`scripts/primary-entrypoint.sh`) configures `pg_hba.conf` for replication access and WAL sender settings. The standby configuration is in `docker-compose.standby.yml`.
 
+### Map basemap providers
+
+All map tiles come from one registry — `frontend/src/lib/basemaps.ts` — rendered
+by `<BasemapLayers/>`. No page holds a tile URL, so changing provider is a
+one-line edit. Decision and the risks accepted:
+[ADR-0046](docs/adr/0046-keyless-basemap-registry-and-tile-health-probe.md);
+provider comparison: `docs/reports/2026-09-21-basemap-provider-eval.md`.
+
+| Layer set | Provider | Notes |
+|---|---|---|
+| **Dark** (default) | Esri `Canvas/World_Dark_Gray_Base` + `Reference/World_Transportation` | Keyless. Base has real data to z16, the roads/labels overlay to z19 — which is what keeps street detail crisp at drone zoom while the backdrop upsamples. |
+| **Satellite** | Esri `World_Imagery` | Keyless, real data to z19. |
+| **Hybrid** | Imagery + `World_Boundaries_and_Places` + `World_Transportation` | Place names and roads over satellite. |
+| **Street** | OpenStreetMap standard | User-selectable only, never the default — the OSMF Tile Usage Policy allows human-driven viewing, not bulk or pre-emptive fetching. |
+
+No API key, no account, no cost. Esri serves `{z}/{y}/{x}`; OSM serves
+`{z}/{x}/{y}` — a transposed template returns a real tile of somewhere else.
+Neither provider offers an `@2x` retina variant, and `maxNativeZoom` values are
+measured rather than taken from the services' advertised LOD.
+
+Both providers require attribution, which every map renders. The backend report
+renderer (`app/services/map_renderer.py`) fetches OSM server-side and sends
+`DroneOpsCommand/<version> (+https://droneops.barnardhq.com; bill@barnardhq.com)`
+as required by the policy.
+
+**Tile-health probe.** A weekly Celery task fetches one fixed tile per provider
+and compares two perceptual hashes and the byte size against a checked-in
+baseline. This exists because the provider this replaced (CARTO) started serving
+tiles with an "API KEY REQUIRED" watermark burned into the pixels while still
+returning HTTP 200 with correct headers — a failure no status check, retry
+handler or cache can see. Inspect it at
+`GET /api/admin/basemap/tile-health`; run it on demand with
+`POST /api/admin/basemap/tile-health/run`. ntfy alerting is wired but ships
+**off** (`basemap_probe_ntfy_enabled`) until the thresholds are tuned against
+real data — ROADMAP MP-2.
+
 ### Frontend Stack
+
 - **React 18** with TypeScript
 - **Mantine UI v7** component library with dark theme
 - **Vite** build tool
 - **React Router** for SPA navigation
 - **TipTap** rich text editor
-- **Leaflet** interactive maps with dark CartoDB basemap
+- **Leaflet** interactive maps over a keyless dark basemap — see [Map basemap providers](#map-basemap-providers)
 - **Axios** HTTP client with JWT interceptors and token refresh
 - **Mantine Dates** for date inputs
 - **Tabler Icons** icon set
@@ -648,7 +685,7 @@ Dual-provider LLM client supporting Ollama and Claude API. The active provider i
 REST client that fetches flight data from a self-hosted OpenDroneLog instance. Handles multiple API endpoint patterns for version compatibility. Normalizes field names between camelCase and snake_case. Extracts GPS tracks for map rendering.
 
 ### Map Renderer
-Generates GeoJSON FeatureCollections with flight path LineStrings, start/end markers, and convex hull polygons. Calculates coverage area in acres using UTM projection and Shapely geometry with configurable buffer distance. Renders static PNG maps using OpenStreetMap tiles.
+Generates GeoJSON FeatureCollections with flight path LineStrings, start/end markers, and convex hull polygons. Calculates coverage area in acres using UTM projection and Shapely geometry with configurable buffer distance. Renders static PNG maps using OpenStreetMap tiles, sending an identifying User-Agent per the OSMF Tile Usage Policy.
 
 ### Flight Parser Service
 Standalone microservice that decrypts and parses DJI flight logs using the DJI Cloud API. Extracts GPS tracks, telemetry time-series, drone metadata, and battery information from encrypted TXT log files.
