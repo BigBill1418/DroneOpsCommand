@@ -24,9 +24,9 @@ rollback-per-step in `docs/adr/0047-operator-cloudflare-access-sso.md`.
 | RS256/JWKS Access-JWT verifier (`backend/app/auth/cf_access.py`) | Done, 33 tests |
 | `cf_access_identities` mapping table + migration `0012_cf_access_ident` | Done, 6 real-Postgres tests |
 | `get_current_user` wired additively | Done, 7 tests |
-| `LOCAL_LOGIN_DISABLED` kill switch | Done, off by default |
-| Login/Setup screen modernized for SSO + email fix + CallSignLane-style footer | Done |
-| Version bump 2.92.1 -> 2.93.0 (Step A) | Done, `test_app_version_parity` green |
+| `LOCAL_LOGIN_DISABLED` kill switch | Done, off by default, 9 tests |
+| Login/Setup screen modernized for SSO + email fix + CallSignLane-style footer | Done, 14 tests |
+| Three commits: Step A (2.93.0), frontend Part 2 (2.93.1), Step B (2.94.0) | Done, `test_app_version_parity` green at each |
 
 **Operator action required before any of this takes effect:** set
 `CF_ACCESS_TEAM_DOMAIN`/`CF_ACCESS_AUD` on BOS-HQ (Step A), soak, then set

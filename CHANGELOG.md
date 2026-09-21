@@ -4,6 +4,35 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-09-21 — v2.94.0 — Operator Cloudflare Access SSO, Step B kill switch (ADR-0047)
+
+**NOT DEPLOYED, and `LOCAL_LOGIN_DISABLED` is OFF by default everywhere — including
+`docker-compose.bos-prod.yml`, untouched by this commit.**
+
+### Added
+
+- `LOCAL_LOGIN_DISABLED=true` now actually gates `POST /api/auth/login`,
+  `POST /api/auth/setup`, `PUT /api/auth/account`, and `POST /api/auth/refresh` — all four
+  return `403` and mint no tokens. `GET /api/auth/setup-status` reports `needs_setup: false`
+  unconditionally when set (same shape as the existing `managed_instance` short-circuit).
+- **Deliberately NOT gated:** `GET /api/auth/account` (read-only identity info, and the exact
+  endpoint the frontend's silent SSO probe calls — gating it would lock an operator out even
+  while genuinely authenticated via a working Access session) and `get_current_user`'s
+  bearer-token verification logic itself (only the routes that *mint* new local credentials
+  are gated, so re-enabling local login is a single env-var flip, not a code revert).
+- Self-hosted/OSS installs and the public demo instance are unaffected: the flag defaults to
+  `false` and neither deployment topology has any reason to ever set it.
+
+### Verification
+
+Full backend suite: 907 passed, 23 skipped. 9 new tests in
+`backend/tests/test_local_login_disabled.py` cover both states: the default (false) is proven
+a byte-identical no-op for all four routes, and the gated (true) state is proven to 403 all
+four while leaving `GET /account` reachable. `test_app_version_parity.py` green at 2.94.0.
+
+Full cutover runbook (enable Step A, soak, then enable this) and per-step rollback:
+`docs/adr/0047-operator-cloudflare-access-sso.md`.
+
 ## 2026-09-21 — v2.93.1 — Login screen modernized for SSO (ADR-0047 Part 2)
 
 **NOT DEPLOYED — `feat/operator-sso` worktree branch only.**

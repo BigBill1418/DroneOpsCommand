@@ -98,6 +98,21 @@ def _clear_failures(ip: str) -> None:
     _lockouts.pop(ip, None)
 
 
+def _require_local_login_enabled() -> None:
+    """ADR-0047 Step B guard. Raises 403 when an operator has explicitly
+    retired local login (LOCAL_LOGIN_DISABLED=true) — false by default
+    everywhere, including self-hosted/OSS installs and the public demo
+    instance, so this is a no-op for them. Only the routes that MINT new
+    local credentials call this; get_current_user's bearer-token
+    VERIFICATION logic is left completely intact so this is a config
+    flip, not a code deletion — see docs/adr/0047-*.md."""
+    if settings.local_login_disabled:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Local login is disabled on this instance — sign in via SSO",
+        )
+
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 class SetupRequest(BaseModel):
     username: str
@@ -137,6 +152,7 @@ async def setup_status(db: AsyncSession = Depends(get_db)):
 @limiter.limit("5/minute")
 async def initial_setup(request: Request, body: SetupRequest, db: AsyncSession = Depends(get_db)):
     """Create the first admin user. Only works when no users exist."""
+    _require_local_login_enabled()
     client_ip = get_trusted_client_ip(request)
     result = await db.execute(select(User))
     existing = result.scalars().all()
@@ -172,6 +188,7 @@ async def initial_setup(request: Request, body: SetupRequest, db: AsyncSession =
 @router.post("/login")
 @limiter.limit("10/minute")
 async def login(request: Request, body: LoginRequest, db: AsyncSession = Depends(get_db)):
+    _require_local_login_enabled()
     client_ip = get_trusted_client_ip(request)
     logger.info("Login attempt: user='%s' ip=%s", body.username, client_ip)
 
@@ -230,6 +247,7 @@ async def update_account(
     db: AsyncSession = Depends(get_db),
 ):
     """Update username and/or password. Requires current password for verification."""
+    _require_local_login_enabled()
     if not await verify_password_async(body.current_password, user.hashed_password):
         raise HTTPException(status_code=403, detail="Current password is incorrect")
 
@@ -313,6 +331,7 @@ async def get_password_rules():
 
 @router.post("/refresh", response_model=TokenResponse)
 async def refresh(request: RefreshRequest, db: AsyncSession = Depends(get_db)):
+    _require_local_login_enabled()
     try:
         payload = jwt.decode(
             request.refresh_token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm]
