@@ -35,7 +35,7 @@ substantiated, it was dropped and that is noted in §4.
   immutable Backblaze B2** — the fleet r2-mirror lane (noc-master ADR-0232) had
   already copy-forwarded it under Object Lock compliance, 90 days, never pruned.
 - **Also (not a release):** the demo stack `~/droneops-demo` on BOS-HQ was
-  updated **by hand at 14:57 PDT, v2.80.4 → v2.92.0** (it is not
+  updated **by hand at 14:57 PDT, v2.80.4 → v2.92.0 (14:57 PDT), then → v2.92.1 (15:23 PDT)** (it is not
   deployer-managed). `cloudflared`/`db`/`redis` untouched; demo worker + beat
   remain deliberately stopped (dunning-email hazard, ADR-0042). Verified: demo
   backend reports 2.92.0, three rebuilt containers healthy, zero `cartocdn`.

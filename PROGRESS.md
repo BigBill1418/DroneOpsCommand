@@ -31,7 +31,7 @@ pushed".)
 **Demo stack updated by hand the same day (14:57 PDT).** `~/droneops-demo` on
 BOS-HQ is **not** deployer-managed (only prod is), so it was pulled
 `--ff-only` to `d153623` and rebuilt: `compose up -d --build --no-deps frontend
-backend flight-parser`. It went **v2.80.4 → v2.92.0**. `cloudflared`, `db` and
+backend flight-parser`. It went **v2.80.4 → v2.92.0 (14:57 PDT), then → v2.92.1 (15:23 PDT)**. `cloudflared`, `db` and
 `redis` were deliberately left running (4-week uptime intact); the demo
 **worker and beat stay stopped on purpose** — a running demo beat is the
 dunning-email hazard recorded in ADR-0042. Verified: demo backend reports

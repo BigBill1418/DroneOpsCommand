@@ -24,7 +24,7 @@ Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 `sentry.initialized release=droneops@2.92.1` (only when a DSN is set — prod
 runs with GlitchTip DSN; check `docker logs droneops-backend-1 | grep sentry`).
 
-## 2026-09-21 — Stale-docs sweep + demo stack to v2.92.0 + backup-cutover gate fix [skip-deploy]
+## 2026-09-21 — Stale-docs sweep + demo stack to v2.92.x + backup-cutover gate fix [skip-deploy]
 
 Documentation and ops reconciliation after three things shipped the same day.
 **No application code changed**, so no version bump: the live app stays 2.92.0
@@ -33,7 +33,7 @@ and the parser 1.2.0.
 ### Ops
 
 - **Demo stack `~/droneops-demo` on BOS-HQ updated by hand, 14:57 PDT —
-  v2.80.4 → v2.92.0.** It is **not** deployer-managed (the NOC deployer targets
+  v2.80.4 → v2.92.0 (14:57 PDT), then → v2.92.1 (15:23 PDT).** It is **not** deployer-managed (the NOC deployer targets
   prod only), so it was `git pull --ff-only` to `d153623` then
   `compose up -d --build --no-deps frontend backend flight-parser`.
   `cloudflared`, `db` and `redis` were deliberately left alone (4-week uptime
