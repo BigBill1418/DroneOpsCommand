@@ -700,7 +700,7 @@ msmtp/O365 with this summary. **Now stale** — it was written to chase the
 merge call, which has happened. It is harmless (one mail, then self-removes)
 but its text will read as though the merge is still pending.
 
-## 2026-08-17 — Encrypted R2 backup (ADR-0041) — LIVE, IN PARALLEL RUN — cutover pending
+## 2026-08-17 — Encrypted R2 backup (ADR-0041) — LIVE — cutover executed 2026-09-21
 
 **The new lane is deployed, running on a timer, and verified end-to-end**
 (V1–V12, see ADR-0041 "Implementation outcome"). **The old lane is still
@@ -1442,3 +1442,12 @@ Unset = no-op. Nothing in the app code fails if these are absent.
 - No backend changes land until those PRs merge. Current HEAD is production-stable.
 
 <!-- ADR-0121 autosync verification probe 2026-06-13 — docs-only, no code impact -->
+
+### Cutover executed 2026-09-21 (automated)
+
+All gates passed (≥3 daily db snapshots in 72h, metric fresh, Result=success, restic
+db snapshots present). Legacy cron removed (CallSign line untouched),
+plaintext `s3://obs-glitchtip-backups/droneops/` prefix deleted,
+`scripts/snapshot.sh` removed from the repo (history preserves it).
+Executed by `scripts/droneops-backup-cutover.sh` via systemd timer on
+droneops-server; this entry written by the same script.
