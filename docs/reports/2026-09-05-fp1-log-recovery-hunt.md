@@ -1,5 +1,15 @@
 # FP-1 forensic log-recovery hunt — round 2 (2026-09-05, read-only + one backup-hygiene fix)
 
+> **Status 2026-09-21: verdict unchanged, and still load-bearing.** The 28 lost
+> `dji_txt` originals remain unrecoverable from any fleet source; the two
+> time-critical operator leads this report raises — the **M4TD / M30T / Mavic 3 Pro
+> controller `FlightRecord` folders** (§1, the highest-probability surviving copy)
+> and the **Synology Active Backup search before the NEXTL3VEL PC rejoins the backup
+> task** (weak prior, but cheap and expiring) — are both **still outstanding**,
+> tracked as `O-1` and `O-2` in `docs/reports/2026-09-21-open-items-inventory.md`.
+> This report closed FP-1 plan §8, which is why ROADMAP **P7 is no longer blocked
+> on the hunt** (it now waits only on P2–P6).
+
 Follow-up to `docs/plans/2026-09-04-flight-details-data-ingestion.md` §8 / §8a.
 All times Pacific unless labelled UTC. Host clocks are `America/Los_Angeles`;
 container logs and R2/restic timestamps are UTC.
@@ -71,7 +81,16 @@ must be run against.** Two distinct prefixes are in play, so searching only
 - `FlightRecord_YYYY-MM-DD_[HH-MM-SS].txt` — 3 files (Mini 5 Pro; bracketed form)
 
 Flight dates span 2026-03-22 → 2026-04-19. Full hash + date + model + filename
-manifest: `missing_28_full.tsv` (alongside this file).
+manifest: **`docs/plans/data/2026-09-05-missing-28-dji-originals.tsv`** — 28 rows,
+no header line, tab-separated `sha256 \t created_at(date) \t model \t original_filename`.
+*(Corrected 2026-09-21: this said `missing_28_full.tsv` "alongside this file", which
+was the scratch working name and does not exist in the repo; the committed manifest
+is the path above. The same scratch names appear in §"Artifacts" below —
+`missing_28_hashes.txt`, `missing_28_filenames.txt`, `db_dji_all.tsv`,
+`drive_sha256.txt`, `bos_192_hashes.txt`, `syno_appdata_24.txt`,
+`migration_tar_24.txt` — none of those were committed; they were working files on
+BOS-HQ. The two artifacts that **were** committed are this manifest and
+`docs/plans/data/2026-09-04-drive-logs-inventory.csv`.)*
 
 ## 2. NEXTL3VEL and the Active Backup lead — what actually changed
 

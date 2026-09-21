@@ -11,6 +11,27 @@
   parallel with Stage A/B because it is backend-independent; the async client
   (Stage D) ships only after Stage A/B are live.
 
+> **Status 2026-09-21: ✅ DONE — every stage shipped.** *(This plan carried no status
+> header; it read as open.)*
+> - **Stage A/B — backend async route + status poll:** v2.71.0 (`27c82b4`, 2026-06-15).
+>   `POST /api/flight-library/device-upload/async` and `GET …/device-upload/status/{batch_id}`
+>   are both in the **live** BOS-HQ `openapi.json` today, next to the unchanged legacy
+>   route. Hardened by v2.72.1 (cross-container temp-file handoff) and v2.72.2
+>   (fail-fast shared-store post-condition) — see
+>   [ADR-0023](../adr/0023-device-upload-async-celery-decoupling.md) §6.
+> - **Stage C — the `aborted` fix (§2.5a)** and **Stage D — async client adoption:**
+>   both landed together in **DroneOpsSync v1.3.29** (`c66931a`, PR #57). The blanket
+>   `aborted` flag was replaced by a per-file `FileOutcome`, so a `SocketTimeoutException`
+>   no longer fails the rest of the batch, and `MainViewModel` branches
+>   `asyncAvailable ? uploadFileAsync : uploadFileLegacy` off the
+>   `device-health.async_upload_available` hint.
+> - **Still stale, in the other repo:** DroneOpsSync's
+>   `docs/adr/0008-device-upload-async-poll-client.md` Status still reads "Proposed —
+>   design only, no code shipped". Outside this repo's pass; flagged for the operator.
+> - Line citations in the header have drifted: `run_backup_job_task` is at
+>   `celery_tasks.py:533` (cited `:521`) and the backup job routes at `backup.py:726`
+>   and `:755` (cited `:728-800`). Cite the symbols.
+
 Reference implementation to mirror at every step: the v2.70.0 backup-job leg —
 `backend/app/tasks/backup_jobs.py`, `run_backup_job_task`
 (`celery_tasks.py:521`), the routes in `backup.py:728-800`, and the hermetic

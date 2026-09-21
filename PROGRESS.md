@@ -26,7 +26,7 @@ pushed".)
 | served leaflet chunk | contains the Esri endpoints; **zero `cartocdn`** across all 44 chunks |
 | probe run inside `droneops-worker-1` | `ok: true`, `layers_ok: 5` |
 | probe ntfy | **OFF** by design (MP-2, earliest 2026-10-05) |
-| first *scheduled* probe run | 2026-09-22 15:47 UTC |
+| first *scheduled* probe run | **Mon 2026-09-28 15:47 UTC (08:47 PDT)** — the beat entry is `day_of_week=1`, and today's 15:47 UTC slot had already passed when v2.92.0 went live at 14:52 PDT. (An earlier line here said 2026-09-22; that is a Tuesday.) |
 
 **Demo stack updated by hand the same day (14:57 PDT).** `~/droneops-demo` on
 BOS-HQ is **not** deployer-managed (only prod is), so it was pulled
@@ -34,9 +34,11 @@ BOS-HQ is **not** deployer-managed (only prod is), so it was pulled
 backend flight-parser`. It went **v2.80.4 → v2.92.0 (14:57 PDT), then → v2.92.1 (15:23 PDT)**. `cloudflared`, `db` and
 `redis` were deliberately left running (4-week uptime intact); the demo
 **worker and beat stay stopped on purpose** — a running demo beat is the
-dunning-email hazard recorded in ADR-0042. Verified: demo backend reports
-2.92.0, all three rebuilt containers healthy, served bundle carries the Esri
-endpoints and zero `cartocdn`. The **CHAD-HQ demo clone is a different clone**,
+dunning-email hazard recorded in ADR-0042. Verified: all three rebuilt
+containers healthy, served bundle carries the Esri endpoints and zero
+`cartocdn`; the demo backend reported 2.92.0 at 14:57 PDT and **2.92.1 after the
+15:23 PDT second update** (re-read off `localhost:8001/openapi.json`
+2026-09-21). The **CHAD-HQ demo clone is a different clone**,
 still on `dfad0a3`, and remains open.
 
 Every map's default Dark layer had been serving CARTO tiles watermarked
@@ -71,11 +73,11 @@ Evidence quoted in the commit body. Verification done this session:
 2. **Prove the probe once after deploy:**
    `POST /api/admin/basemap/tile-health/run` (admin-authed) should return
    `ok: true, layers_ok: 5`. A 429 just means it ran in the last 60s.
-3. **`backend/app/version.py` is a SEVENTH version location.** CLAUDE.md's bump
-   list still says 5 files / 6 locations and was deliberately not edited by this
-   session. A missed bump there is caught by
-   `tests/test_app_version_parity.py` (red, not silent), and it only affects the
-   outbound User-Agent — but the bump list should be updated.
+3. ~~**`backend/app/version.py` is a SEVENTH version location.** CLAUDE.md's bump
+   list still says 5 files / 6 locations.~~ — **DONE 2026-09-21.** CLAUDE.md now
+   reads **6 files / 7 locations** and lists `backend/app/version.py` explicitly.
+   A missed bump there is still caught by `tests/test_app_version_parity.py`
+   (red, not silent).
 4. **The Esri keyless-terms risk is accepted, not resolved** (ADR-0046
    Consequences). If Esri gates those endpoints, the exits are Stadia at
    $20/month or Protomaps on R2 (MP-1), and the registry makes either a
@@ -373,7 +375,10 @@ over the backend log since startup: **0**.
 
 **One residual to fix separately — `flight-parser` is absent from the
 deployer's `build_map`** for this repo (`noc-master/data/config.yml` maps only
-`backend`, `frontend`, `worker`). The ADR-0056 digest gate and the
+`backend`, `frontend`, `worker`). **Status 2026-09-21: CLOSED.** A
+`flight-parser` entry was added to that `build_map` on 2026-09-06 (verified in
+`noc-master/data/config.yml`); the rest of this paragraph is the record of why
+it mattered. The ADR-0056 digest gate and the
 `services_actually_rebuilt` field are both computed *over `build_map`*, so the
 parser is structurally invisible to them — which is why a deploy that
 demonstrably rebuilt and recreated the parser still reports
@@ -666,7 +671,15 @@ zero duplicate serials.
 
 ### Log inventory — corrected 2026-09-05 (recovery hunt finished)
 
-**Counts re-verified by me against the live prod DB on 2026-09-05, not taken
+> **Superseded 2026-09-11 — do not quote the numbers below as current.** They
+> were true on 2026-09-05 and moved the moment Bill uploaded again. The
+> re-derivation of 2026-09-11 (ROADMAP § FP-1, and the P-EVAL section above)
+> reads **198** real originals and **226** `dji_txt` rows. Re-derive from the
+> database, never from prose. The *conclusions* below — the 584 recovered ODL
+> originals, the closed staging-backup gap, and the 28 unrecoverable
+> `dji_txt` originals — are unchanged.
+
+**Counts re-verified against the live prod DB on 2026-09-05, not taken
 from the plan:**
 
 ```
@@ -709,12 +722,10 @@ count at run time, because it moves every time Bill uploads.
   plan's "backups began 2026-07-16" and it closes the question.
 - Their `original_filename` values are recovered and follow **three distinct
   naming patterns**, so a search for `DJIFlightRecord*` alone misses 12 of 28.
-  Manifest (`missing_28_full.tsv`) and report
-  (`FP1-log-recovery-hunt-2026-09-05.md`) are in the recovery session's
-  scratchpad — **they should be copied into `docs/plans/data/` before that
-  scratchpad is reaped.** I have not done that: they are another session's
-  files and I did not want to commit artifacts I had not produced or read in
-  full.
+  Manifest and report were in the recovery session's scratchpad at the time and
+  flagged for copying into the repo. **Status 2026-09-21: DONE** — they are
+  committed as `docs/plans/data/2026-09-05-missing-28-dji-originals.tsv` and
+  `docs/reports/2026-09-05-fp1-log-recovery-hunt.md` (both verified present).
 - **Two long-standing facts were wrong and are corrected in the plan.**
   DroneOpsSync is an **Android APK on the controller**, not a Windows companion
   — a Windows companion was formally rejected in its ADR-0007, and NEXTL3VEL

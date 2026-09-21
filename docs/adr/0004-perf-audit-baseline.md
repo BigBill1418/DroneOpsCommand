@@ -6,6 +6,14 @@
 **Related plan:** `docs/plans/2026-04-24-perf-audit.md`
 **Live host:** BOS-HQ (10.99.0.4)
 
+> **Status 2026-09-21:** **DONE.** All four fixes shipped and were verified live —
+> F-1 `8163120` (v2.63.7), F-2 `d09d9c8` (v2.63.8), F-3 `eb60229` (v2.63.9),
+> F-4 `aea428f` (v2.63.10), docs `4212ad8` (v2.63.11). AFTER measurements are in
+> [ADR-0005](0005-perf-audit-results.md). One line under "Research sources" is stale:
+> deploys are **not** "NOC autopull" — the per-repo autopull was retired in
+> [ADR-0018](0018-deploy-path-is-noc-fleet-deployer.md); the fleet deployer
+> (`swarmpilot_deployer`) deploys on push to `main`.
+
 ---
 
 ## Context
@@ -18,7 +26,7 @@ This ADR captures the BEFORE-state measurements so subsequent audits have a fixe
 
 ## Audit methodology
 
-All measurements taken from BOS-HQ via SSH + Docker exec into running containers, not synthetic load. Production observability data sourced from the existing JSON-log middleware at `backend/app/main.py:455-470`.
+All measurements taken from BOS-HQ via SSH + Docker exec into running containers, not synthetic load. Production observability data sourced from the existing JSON-log middleware — the `log_requests` HTTP middleware in `backend/app/main.py` (cited as `main.py:455-470` on 2026-04-24; it sits at **`main.py:706-716`** as of 2026-09-21 — cite the symbol, not the line).
 
 Five lines of evidence:
 1. Backend RES log timing (every endpoint logs `RES METHOD PATH STATUS X.XXs`).

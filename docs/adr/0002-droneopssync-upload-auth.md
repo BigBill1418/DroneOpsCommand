@@ -7,6 +7,24 @@
 - **Related ADRs:** `0001-observability.md` (DroneOps). Cross-repo: EyesOn `ADR-0017` / `ADR-0019` (camera-less companion UX), EyesOn `ADR-0020` (managed-tenant discovery). Memory: `feedback_dji_rc_pro_no_camera.md`, `feedback_managed_customer_seamless.md`.
 - **Related commits:** `b6d4319` (device-api-key auth + `/device-upload` endpoint, introduced), `d563ad6` (v2.36.0 Capacitor native rewrite), `1544b9e` (v2.34.0 LAN-only fix), `7bf62b7` (v2.32.1 device upload API restoration — operator-corrected from v2.30.0 removal).
 
+> **Status 2026-09-21 (three corrections; the decision itself is unchanged).**
+> 1. **Every "Pushover" reference below is superseded.** §5.2 layers 3 + 4 and §5.3's
+>    test plan describe `PUSHOVER_TOKEN` + `PUSHOVER_USER_KEY`; the transport moved to
+>    self-hosted ntfy on 2026-04-25 — see **[ADR-0006](0006-pushover-to-ntfy-migration-addendum.md)**
+>    (this repo) and **fleet ADR-0036** (noc-master). The single env var is now
+>    `NTFY_DRONEOPS_PUBLISHER_TOKEN`; `backend/app/services/pushover.py` no longer exists
+>    (`backend/app/services/ntfy.py` replaced it with an identical public API). The
+>    watchdog contract — dedup keys, TTLs, fail-open, best-effort — is preserved verbatim.
+> 2. **The `companion/` tree referenced throughout §1–§5 was deleted in `4b87e65`** (per
+>    §7). Read every `companion/src/...` path here as archaeology recoverable with
+>    `git log --all -- companion/`. Layers 3 + 4 are backend code and are still live:
+>    `check_device_silence_task` (`backend/app/tasks/celery_tasks.py`) and the first-401
+>    alert in `backend/app/auth/device.py`.
+> 3. **§6's three open questions are still open and now carry ROADMAP IDs** — fleet APK
+>    audit → `FU-1` (DE-PRIORITIZED), managed-tenant discovery → `FU-5` (NOT STARTED,
+>    gated on the first managed customer), device-key lifecycle policy → `FU-4` (NOT
+>    STARTED). Tracked in `docs/reports/2026-09-21-open-items-inventory.md` §3.
+
 ---
 
 ## 1. Context

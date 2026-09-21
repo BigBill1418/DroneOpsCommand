@@ -2,8 +2,21 @@
 
 **Date:** 2026-09-21
 **Repo:** DroneOpsCommand (`/home/bbarnard065/droneops`), main @ `d30eb5b`, app v2.91.0
+*(state at the time of the research; live is **v2.92.1** as of 2026-09-21 evening)*
 **Stack:** React + Leaflet 1.9.4 + react-leaflet 4.2.1; FastAPI backend
-**Status:** Research only. No application code changed, nothing committed.
+**Status:** **Research — ACTED ON THE SAME DAY.** *(This line read "Research only. No
+application code changed, nothing committed." — true when written, stale within hours.)*
+The §5 design was implemented as
+[ADR-0046](../adr/0046-keyless-basemap-registry-and-tile-health-probe.md) and shipped as
+**v2.92.0** (`72dd1a9`), **live on BOS-HQ at 14:52 PDT 2026-09-21** — keyless Esri + OSM
+behind one registry (`frontend/src/lib/basemaps.ts`), zero `cartocdn` across all 44
+served chunks, and the pixel-fingerprint tile-health probe on Celery beat (Mondays
+15:47 UTC; **first scheduled run Mon 2026-09-28**). This report was committed alongside
+that change and is the evidence base for it — the probe baseline in
+`backend/app/services/basemap_baseline.json` is the same fixed tile
+(z10/x163/y373) fingerprinted here. ntfy stays OFF until ROADMAP `MP-2`.
+Note the two bare `ADR-0037` references in §5 mean the **fleet** noise-reduction
+policy, not this repo's local ADR-0037 (airspace/LAANC).
 **Author:** Terry (research/architecture pass)
 
 ---

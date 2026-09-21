@@ -9,6 +9,29 @@
   (`backend/app/main.py` lifespan), shipped together because the index
   creation must live *inside* the same recovery-guarded, primary-only block.
 
+> **Status 2026-09-21: the recovery guard is intact; the Alembic "future work" this ADR
+> recorded was DONE the same day.**
+> - **"DroneOpsCommand has **no Alembic**" (§Context) and §Alternatives' "Rejected for
+>   now because the repo has no Alembic at all … **Future work**" are both closed by
+>   [ADR-0022](0022-alembic-adoption-and-health-gate-trim.md)** (2026-06-11, same day),
+>   which adopted Alembic with a brownfield stamp, and by
+>   [ADR-0036](0036-migration-single-path-hardening.md) (2026-07-03), which advisory-locked
+>   the boot path. §Consequences' closing line — "The Alembic follow-up remains the path
+>   to retire this pattern" — is therefore historical. Live head: `0011_battery_src_truth`.
+> - **The deferred P2/P3 indexes landed** as Alembic `0002_p2_p3_indexes` (ADR-0022 §5),
+>   seven of them, each justified against a real query. Production carries **16** `ix_*`
+>   indexes today.
+> - **The `pg_is_in_recovery()` guard and `_create_hot_indexes` are unchanged and still
+>   run** — `_run_startup_schema_and_seed()` now calls `run_migrations_sync` instead of
+>   the inline triple, and the four hot indexes are created by baseline migration `0001`,
+>   which imports `_create_hot_indexes` verbatim.
+> - **One line citation drifted:** the client-portal login lookup cited as
+>   `client_portal.py:159` is at **`client_portal.py:154`**
+>   (`select(Customer).where(Customer.email == data.email)`). The other four
+>   (`business_signals.py:107`, `maintenance.py:505`, `models/invoice.py:97`,
+>   `models/invoice.py:62`) were re-checked today and are **still exact**. The same stale
+>   `:159` is repeated in `_create_hot_indexes`' docstring in `backend/app/main.py`.
+
 ## Context
 
 DroneOpsCommand has **no Alembic**. The de-facto migration mechanism is an

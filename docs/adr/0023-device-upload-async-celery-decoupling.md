@@ -1,8 +1,35 @@
 # ADR-0023 — Decouple device flight-log upload from in-request parsing (Celery + status poll)
 
-- **Status:** **Proposed** — design only, no code shipped. Closes the deferred
-  full leg of audit finding **P2-2** (the last open item from the 2026-06-11
-  ground-up audit; see ROADMAP FU-8 closure note).
+- **Status:** **Accepted — SHIPPED AND LIVE, both legs.** (Was "**Proposed** — design
+  only, no code shipped"; that line was already contradicted by Amendment §6 below and
+  is corrected here on **2026-09-21**.) Closes the deferred full leg of audit finding
+  **P2-2** (the last open item from the 2026-06-11 ground-up audit; see ROADMAP FU-8
+  closure note).
+  - **Backend leg — v2.71.0 (`27c82b4`, 2026-06-15).** `POST
+    /api/flight-library/device-upload/async` and `GET
+    /api/flight-library/device-upload/status/{batch_id}` are both present in the **live**
+    BOS-HQ `openapi.json` today, alongside the unchanged legacy `POST
+    …/device-upload`. `backend/app/tasks/device_upload_jobs.py` exists; the route pair is
+    at `backend/app/routers/flight_library.py:1465` and `:1579`. Hardened by
+    **v2.72.1** and **v2.72.2** (Amendment §6).
+  - **DroneOpsSync client leg — v1.3.29 (`c66931a`, PR #57).** `AsyncUploadModels.kt`,
+    `DroneOpsSyncService.@POST("/api/flight-library/device-upload/async")`,
+    `DeviceHealthResponse.async_upload_available` and `MainViewModel.uploadFileAsync`
+    are all on `main` in `BigBill1418/DroneOpsSync`, with a graceful
+    `asyncAvailable ? async : legacy` fallback. **§2.5a shipped in the same release**:
+    the per-file `FileOutcome` model replaced the blanket `aborted` flag, so a
+    `SocketTimeoutException` no longer fails the rest of the batch (`aborted` is now set
+    only by `outcome.abortBatch`).
+  - **Therefore §5's definition of done is met.** The only stale artifact left is
+    **DroneOpsSync's own `docs/adr/0008-device-upload-async-poll-client.md`, whose Status
+    still reads "Proposed — design only, no code shipped"** — that is a different repo
+    and outside this pass's file set; flagged for the orchestrator.
+  - **Line citations in §1 have drifted** (symbols, not lines, are the durable
+    reference): `device_upload_flights` is at `flight_library.py:1364` (cited `:1000`),
+    `_spool_upload` at `:269` (cited `:243`), `_SpooledUpload.parse` at `:240` (cited
+    `:214`), `run_backup_job_task` at `celery_tasks.py:533` (cited `:521`), the backup
+    job routes at `backup.py:726` / `:755` (cited `:728-800`). Still exact:
+    `backup.py:319` (the deprecation note) and `backup.py:755` (`get_backup_job`).
 - **Date:** 2026-06-15
 - **Authors:** Terry (research/architect). Implementation handoff to aegis
   (backend leg) + fleet-mobile-engineer/aegis (DroneOpsSync client leg).

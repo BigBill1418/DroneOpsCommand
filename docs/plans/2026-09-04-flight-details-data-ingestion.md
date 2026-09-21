@@ -18,6 +18,13 @@ plan for ROADMAP **FP-1**, which carries the live status.
 > pass and the ODL re-import must all count at run time. Canonical note:
 > `ROADMAP.md` § FP-1 "Log inventory".
 >
+> **Re-derived 2026-09-21** (live primary, `droneops-standby-db`): `dji_txt` =
+> **234**, `opendronelog_import` = **584**, 818 flights total; `flight_details` =
+> **16** rows and `flight_series` = **240** rows (P1 writes details on new ingest
+> only — the backfill is P3 and unbuilt). So the "226" above is itself now
+> point-in-time, exactly as this box warns. **Re-derive at run time; do not read
+> any of these.**
+>
 > **§8's log-inventory hunt is CLOSED** (2026-09-04/05), so the PENDING table it
 > left for the operator is answered:
 > `../reports/2026-09-05-fp1-log-recovery-hunt.md` plus the manifest

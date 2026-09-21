@@ -4,6 +4,22 @@
 - Date: 2026-07-02
 - Related: ADR-0027 (choose_duration), ADR-0028 (GPS teleport gate)
 
+> **Status 2026-09-21 — the unit fixes are in force; BOTH §Consequences follow-ups are
+> still open, re-checked against `flight-parser/src/` today:**
+> - **CSV dispatch still tries Litchi first.** `flight-parser/src/main.rs:275-277` is
+>   still `match litchi::parse_litchi_csv(…) { Ok(r) => r, Err(_) => airdata::parse_airdata_csv(…) }`
+>   — no header-signature sniffing. So an Airdata-in-feet CSV routed through Litchi still
+>   under-reports altitude, exactly as this ADR predicted.
+> - **There is still no shared `units`/`columns` module.** `flight-parser/src/` holds
+>   `airdata.rs details.rs dji.rs gate.rs litchi.rs main.rs` — nothing else. The
+>   "standing risk" is unchanged, and [ADR-0043](0043-flight-details-sidecar-table-for-extended-log-data.md)
+>   cites it as the reason the telemetry downsampler was extracted rather than
+>   copy-pasted.
+> Neither has a ROADMAP ID; both are recorded in
+> `docs/reports/2026-09-21-open-items-inventory.md`. Note the operator's standing
+> position that Airdata is out of scope
+> (`docs/plans/2026-07-03-report-quality.md`), which is why neither has been prioritised.
+
 ## Context
 
 A top-down audit of the Rust `flight-parser` found three confirmed unit-conversion

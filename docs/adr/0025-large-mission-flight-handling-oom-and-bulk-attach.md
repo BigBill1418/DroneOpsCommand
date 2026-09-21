@@ -5,6 +5,16 @@
 * **Supersedes / extends:** ADR-0019 (flight-library list defers heavy JSON columns), ADR-0020 (report-geo buffer OOM). This is the third member of the same OOM family.
 * **Version:** v2.73.0
 
+> **Status 2026-09-21:** in force. **§C's flagged follow-up is still open** — the editor
+> still requests `/flight-library?limit=2000` and the backend still caps there
+> (`frontend/src/pages/MissionFlightsEdit.tsx:166`); pagination beyond 2000 was
+> "future work; flagged, not silently capped" and remains unbuilt. It is not yet
+> binding: the live library holds **818 flights** (584 `opendronelog_import` +
+> 234 `dji_txt`), so the cap has not been reached. Recorded in
+> `docs/reports/2026-09-21-open-items-inventory.md`. §A2's scalar-only cache and the
+> bulk-attach endpoint are both still in place and are the foundation ADR-0026 and
+> ADR-0038 build on.
+
 ## Context
 
 An operator built a mission ("savannah") with far more flights than any prior mission. Two symptoms appeared together:

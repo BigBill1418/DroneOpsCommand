@@ -1,8 +1,13 @@
 # Phase-5 observability: labels + json-file logging anchors.
-# HSH-HQ Alloy discovers this container by `com.barnardhq.*` and stamps
+# The Alloy agent discovers this container by `com.barnardhq.*` and stamps
 # project/service/tenant/env on every log stream. `docker-compose.demo.yml`
-# (CHAD-HQ) overrides `com.barnardhq.env` to `demo`. Do NOT change label
-# keys without updating `/opt/observability-agent/alloy/config.alloy`.
+# overrides `com.barnardhq.env` to `demo`.
+# Corrected 2026-09-21: this stack runs on **BOS-HQ**, and so does the demo
+# (`~/droneops-demo`); the Alloy that consumes these labels is the BOS-HQ one
+# at **`/opt/observability/alloy/config.alloy`** (verified — it matches
+# `com.barnardhq.{project,service,env,tenant}`). The old text named HSH-HQ and
+# `/opt/observability-agent/alloy/config.alloy`, which is a different host's
+# legacy path. Do NOT change label keys without updating that file.
 x-barnardhq-labels: &barnardhq-labels
   com.barnardhq.project: "droneops"
   com.barnardhq.env: "prod"
@@ -202,6 +207,11 @@ services:
       - OTEL_SERVICE_NAME=droneops-api
       - TENANT=${TENANT:-shared}
       - ENV=${ENV:-prod}
+      # COSMETIC since v2.92.1 — nothing reads APP_VERSION. The Sentry release
+      # tag comes from `backend/app/version.py` (covered by
+      # tests/test_app_version_parity.py). A hand-set APP_VERSION in a host
+      # .env pinned 2.67.4 through ~25 releases and mis-tagged every error
+      # group; that dependency is gone. ROADMAP H-1. Bumped for tidiness only.
       - APP_VERSION=${APP_VERSION:-2.92.1}
       # ADR-0002 §5 + ADR-0003 alerts via ntfy (ADR-0036).
       # Unset = no-op (structured JSON logs still emit).
@@ -392,6 +402,11 @@ services:
         # any `VITE_*` var that's in scope when `npm run build` runs.
         VITE_SENTRY_DSN: ${VITE_SENTRY_DSN:-}
         VITE_SENTRY_ENVIRONMENT: ${VITE_SENTRY_ENVIRONMENT:-production}
+        # COSMETIC since v2.92.1 — nothing reads VITE_APP_VERSION any more.
+        # `frontend/src/lib/sentry.ts` tags the release from the vite-defined
+        # `__APP_VERSION__` (frontend/package.json), and the Login/Setup
+        # footers always did. Kept and bumped so `docker compose config` does
+        # not display a version 25 releases stale. See ROADMAP H-1.
         VITE_APP_VERSION: "${APP_VERSION:-2.92.1}"
     restart: unless-stopped
     # BOS-HQ 2026-06-05 sweep: static nginx SPA (~8 MiB) → 256M floor.

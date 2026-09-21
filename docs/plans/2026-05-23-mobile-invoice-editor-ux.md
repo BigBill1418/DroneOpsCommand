@@ -1,7 +1,10 @@
 # Mobile UX redesign — invoice editor (MissionInvoiceEdit)
 
 **Date:** 2026-05-23
-**Status:** Implemented
+**Status:** Implemented — **still awaiting the operator's on-device sign-off as of
+2026-09-21** (see §Verification; tracked as `O-15` in
+`docs/reports/2026-09-21-open-items-inventory.md`). The code half is done and live;
+the outstanding half needs a physical phone and cannot be closed from a session.
 **Scope:** `frontend/src/pages/MissionInvoiceEdit.tsx` only (operator-confirmed
 scope — the new-mission wizard's invoice step is intentionally out of scope).
 

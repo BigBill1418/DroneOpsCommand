@@ -6,6 +6,18 @@
 **Live host:** BOS-HQ (10.99.0.4)
 **Audit scope:** READ-ONLY investigation — NO code touched. This document is the directive for the executor.
 
+> **Status 2026-09-21: ✅ DONE — all four fixes shipped, verified live, series closed.**
+> F-1 `8163120` (v2.63.7) · F-2 `d09d9c8` (v2.63.8) · F-3 `eb60229` (v2.63.9) ·
+> F-4 `aea428f` (v2.63.10) · docs close-out `4212ad8` (v2.63.11). AFTER measurements and
+> acceptance are in [ADR-0005](../adr/0005-perf-audit-results.md); all three §6
+> thresholds passed. Of the deferred items: **Settings `useApiCache` adoption shipped**
+> in v2.70.1 (`5ffcadc`); **F-7 index strategy** remains correctly deferred (live DB is
+> 124 MB, under the 500 MB trigger — though 11 reviewed indexes landed separately via
+> ADR-0021/0022); **`pg_stat_statements` is still not loaded** (`pg_extension` → `plpgsql`
+> only, still an operator decision); **F-8 Dashboard sub-component split is still open**
+> (`Dashboard.tsx` is 1,207 lines). Tracked in
+> `docs/reports/2026-09-21-open-items-inventory.md`.
+
 ---
 
 ## 1. Executive Summary

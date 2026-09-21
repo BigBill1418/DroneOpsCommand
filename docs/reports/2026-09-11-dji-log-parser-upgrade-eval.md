@@ -10,6 +10,19 @@ No database row was written, no schema changed, no container restarted, and
 `flight-parser/Cargo.toml` was **not** modified. The deliverable is evidence.
 All times Pacific unless labelled UTC.
 
+> **Re-checked 2026-09-21 (10 days on): the recommendation stands, and so does the
+> gap it names.** `flight-parser/Cargo.toml` still requests `dji-log-parser = "0.5"`
+> — **not** the exact `= "0.5.7"` pin this evaluation and ADR-0043 **D6** call for —
+> so a `cargo update` could still move the crate and bypass D6 without a decision.
+> `DJI_LOG_PARSER_VERSION` is still a hand-maintained `&str` constant
+> (`flight-parser/src/dji.rs:7`) stamped onto every `flight_details` row as the
+> provenance D6's "re-backfill below version X" query depends on, and **nothing
+> checks it against `Cargo.lock`**. Both are recorded as open in
+> `docs/reports/2026-09-21-open-items-inventory.md` § "Flight-parser data expansion".
+> Whether a `0.5.8`+ release has appeared upstream since 2026-09-11 was **not**
+> re-checked in this pass — that needs a crates.io lookup, which this docs pass did
+> not perform.
+
 ---
 
 ## 0. Recommendation — **DO NOT ADOPT. There is nothing to adopt.**

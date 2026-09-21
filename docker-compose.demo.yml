@@ -1,13 +1,24 @@
 # Docker Compose override for demo instance (command-demo.barnardhq.com)
 #
-# Usage from /opt/droneops-demo/:
-#   docker compose -p droneops-demo -f docker-compose.yml -f docker-compose.demo.yml --env-file .env.demo up -d --build
+# The live demo is the separate clone `~/droneops-demo` on **BOS-HQ**
+# (`/home/bbarnard065/droneops-demo` — corrected 2026-09-21; this header said
+# `/opt/droneops-demo`, which does not exist). It is **NOT deployer-managed**:
+# the NOC fleet deployer targets prod only, so the demo is updated by hand.
+# Prefer `./bootstrap.sh`, which validates `.env.demo` first; the raw form is:
+#   cd ~/droneops-demo && git pull --ff-only && \
+#   docker compose -p droneops-demo -f docker-compose.yml -f docker-compose.demo.yml \
+#     --env-file .env.demo up -d --build
 #
-# Phase-5 observability note: this override pins `com.barnardhq.env=demo`
-# on every label and the Alloy OTLP endpoint to CHAD-HQ's local collector
-# (10.99.0.2). Alloy on CHAD-HQ then cascades to the HSH-HQ plane over
-# WireGuard — keeps the demo host's spans/logs off the WG wire unless
-# they need to be correlated with prod.
+# The demo `worker` and `beat` are pinned to 0 replicas BELOW and must stay
+# stopped — a running demo beat sends real dunning email (ADR-0042).
+# A second, older demo clone exists on CHAD-HQ; it is a different checkout.
+#
+# Phase-5 observability note: this override pins `com.barnardhq.env=demo` on
+# every label and sends OTLP to the **central Alloy at
+# `alloy.barnardhq.com:4317` on BOS-HQ** (noc-master ADR-0050, 2026-05-09) —
+# see the `OTEL_EXPORTER_OTLP_ENDPOINT` default below, which is the authority.
+# This header previously described the retired CHAD-HQ-local-collector
+# cascade (10.99.0.2) and contradicted the service block. Corrected 2026-09-21.
 
 x-barnardhq-labels-demo: &barnardhq-labels-demo
   com.barnardhq.project: "droneops"
@@ -31,7 +42,8 @@ services:
     environment:
       # ADR-0012: required, no default. The previous literal embedded the demo
       # POSTGRES password directly in the public compose file. Provide via
-      # `DATABASE_URL` in `.env.demo` on the demo host (e.g. CHAD-HQ).
+      # `DATABASE_URL` in `.env.demo` on the demo host (BOS-HQ,
+      # ~/droneops-demo/.env.demo).
       - DATABASE_URL=${DATABASE_URL:?DATABASE_URL must be set in .env.demo (no default — see ADR-0012)}
       - DEMO_MODE=true
       - DEMO_RESET_INTERVAL_HOURS=24

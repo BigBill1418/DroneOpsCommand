@@ -18,7 +18,9 @@ Thanks for your interest in contributing! This guide covers how to get started.
 
 ```bash
 cp .env.example .env
-# Edit .env with your settings
+# Edit .env. Four values have NO default and compose refuses to start without
+# them (ADR-0012): POSTGRES_PASSWORD, DATABASE_URL, REPLICATION_PASSWORD,
+# JWT_SECRET_KEY.
 docker compose up -d
 ```
 
@@ -44,6 +46,21 @@ uvicorn app.main:app --reload
 
 Requires PostgreSQL and Redis running (easiest via `docker compose up db redis -d`).
 
+## Tests
+
+There is **no pytest job and no cargo job in CI** — `.github/workflows/` holds
+only `auto-merge-claude.yml`, `secret-scan.yml` (gitleaks) and
+`self-hosted-smoke-test.yml`. Nothing runs the suites at merge time, so run them
+yourself and quote the real output in your PR description:
+
+```bash
+cd backend && OTEL_EXPORTER_OTLP_ENDPOINT="" pytest -q   # needs the Dockerfile's native libs (pango/cairo/geos/proj) + aiosqlite
+cd flight-parser && cargo test
+```
+
+Blank `OTEL_EXPORTER_OTLP_ENDPOINT` explicitly — unset, it falls back to a real
+fleet collector and buries the pytest summary in exporter errors.
+
 ## Code Style
 
 - **Backend**: Python with type hints. FastAPI async endpoints. SQLAlchemy 2.0 async ORM.
@@ -53,8 +70,8 @@ Requires PostgreSQL and Redis running (easiest via `docker compose up db redis -
 
 ## What to Work On
 
-- Check the [Issues](../../issues) tab for open bugs and feature requests
-- Items in the **Roadmap** section of the README
+- Check the [Issues](https://github.com/BigBill1418/DroneOpsCommand/issues) tab for open bugs and feature requests
+- Items in [`ROADMAP.md`](ROADMAP.md) and the **Roadmap** section of the README
 - Bug fixes and documentation improvements are always welcome
 
 ## Pull Request Guidelines
@@ -62,7 +79,8 @@ Requires PostgreSQL and Redis running (easiest via `docker compose up db redis -
 - Keep PRs focused — one feature or fix per PR
 - Include a description of what changed and why
 - Test your changes locally before submitting
-- Update the README if your change adds new configuration or features
+- Update the README **and `.env.example`** if your change adds or removes configuration, and add a dated `CHANGELOG.md` entry
+- Bump the version — see `CLAUDE.md` for the 6-file / 7-location list
 
 ## Architecture Overview
 
@@ -71,8 +89,8 @@ Requires PostgreSQL and Redis running (easiest via `docker compose up db redis -
 | Frontend | React 18 + Vite + Mantine UI v7 | SPA web interface |
 | Backend | FastAPI + SQLAlchemy 2.0 (async) | REST API |
 | Database | PostgreSQL 16 | Persistent storage |
-| Flight Parser | Python microservice | DJI flight log decryption |
-| LLM | Ollama (Qwen 2.5 3B) or Claude API | AI report generation |
+| Flight Parser | Rust (axum) microservice, port 8100 | DJI / Litchi / Airdata flight log decryption |
+| LLM | Ollama (Llama 3.1 8B Instruct `q4_K_M`) or Claude API | AI report generation |
 | Queue | Redis 7 + Celery | Async task processing |
 
 ## Reporting Bugs

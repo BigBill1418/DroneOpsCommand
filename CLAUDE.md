@@ -44,18 +44,18 @@ The compose `${APP_VERSION:-X.Y.Z}` defaults (`docker-compose.yml` ×4,
 halves comes from the bumped source files above — so a stale compose default or
 host `.env` value cannot mis-tag anything (ROADMAP H-1, 2026-09-21).
 
-**Also refresh the compose `APP_VERSION` defaults at each bump** — five
+**Refresh the compose `APP_VERSION` defaults at each bump anyway** — five
 locations, `docker-compose.yml` ×4 (backend, worker, flight-parser, frontend
-build-arg) and `docker-compose.demo.yml` ×1. They are *not* the app's reported
-version (`main.py`'s literal is), but `APP_VERSION` / `VITE_APP_VERSION` is what
-tags the **Sentry/GlitchTip release** on both halves
-(`backend/app/observability/sentry.py:110`, `frontend/src/lib/sentry.ts:33`) and
-what the Login/Setup page footers render. They sat at `2.67.3` from ~v2.67 until
-2026-09-21 — 25 minor versions of mis-tagged error releases — because nothing
-checks them. **Nothing checks them yet:** ROADMAP `H-1` is the parity test that
-would. The host `.env` on BOS-HQ overrides the default and is *also* hand-set
-(`APP_VERSION=2.67.4` as of 2026-09-21), so the default alone does not fix
-production.
+build-arg) and `docker-compose.demo.yml` ×1 — but only for tidiness. They are
+*not* the app's reported version (`main.py`'s literal is) and, since v2.92.1,
+they are not the Sentry release tag either: `backend/app/observability/sentry.py`
+reads `app.version.APP_VERSION` and `frontend/src/lib/sentry.ts` reads the
+vite-defined `__APP_VERSION__` (from `package.json`). The Login/Setup footers
+always rendered `__APP_VERSION__`. **Historical note:** the defaults sat at
+`2.67.3` and the BOS-HQ host `.env` at `2.67.4` for ~25 minor versions, which
+mis-tagged every error release; that stale host line was removed 2026-09-21 and
+ROADMAP `H-1` is CLOSED. Nothing checks the compose defaults, and nothing needs
+to.
 
 Include the version tag in the commit message (e.g. `— v1.7.8`).
 
@@ -84,9 +84,17 @@ polls `origin/main`, rebuilds the changed services on BOS-HQ and recreates them.
 
 - **Treat any push to `main` as a production deploy.** Branch and let the
   operator merge unless told otherwise.
-- **Verify a deploy by what is running, never by the deployer's success line:**
-  `curl -s https://droneops.barnardhq.com/openapi.json | jq -r .info.version`
-  for the app, and the parser's `GET /health` → `version` for the Rust service.
+- **Verify a deploy by what is running, never by the deployer's success line.**
+  `https://droneops.barnardhq.com` sits behind **Cloudflare Access**, so any
+  agent-side request gets a 302 to the Access login page and never reaches the
+  app — and `curl -fsS` without `-L` scores that 302 as success. Read it from
+  BOS-HQ instead:
+  ```bash
+  ssh 10.99.0.4 'curl -s localhost:8000/openapi.json | jq -r .info.version'   # app
+  ssh 10.99.0.4 'docker exec droneops-backend-1 python -c "import urllib.request;print(urllib.request.urlopen(\"http://flight-parser:8100/health\").read().decode())"'
+  ```
+  The parser's `GET /health` → `version` is the only reliable confirmation that a
+  Rust-service deploy landed. Demo is `localhost:8001` / `:3081` on the same host.
 - A commit whose subject carries `[skip-deploy]` is pull-only. The gate is
   **all** commits in the pushed range, so a docs commit on top of code commits
   does *not* suppress the deploy.
@@ -207,14 +215,20 @@ autopull*, which no longer exists. This repo **is** continuously deployed on pus
 to `main`. The real way to pause deploys is
 `noc-master/data/soak-pause/<repo>.pause`.
 
-**Public hostnames:** prod is **`https://droneops.barnardhq.com`**. Despite
-older docs, `command.barnardhq.com` has **no DNS record** — it resolves only
-via the zone wildcard and returns CF 530 (ADR-0010 documents the correction).
-Demo is `https://command-demo.barnardhq.com`.
+**Public hostnames:** prod is **`https://droneops.barnardhq.com`** — and it is
+behind **Cloudflare Access**, so a non-browser request gets a 302, not the app.
+Despite older docs, `command.barnardhq.com` has **no DNS record at all**
+(re-checked 2026-09-21: NXDOMAIN, no zone wildcard either, `curl` → 000;
+ADR-0010 documents the correction). Demo is
+**`https://command-demo.barnardhq.com`** (resolves, HTTP 200, not
+Access-gated).
 
 **Demo stack (updated 2026-06-11):** separate clone `~/droneops-demo` on
-BOS-HQ, **NOT deployer-managed** — the NOC deployer only targets prod, so the
-demo must be updated manually:
+BOS-HQ (`/home/bbarnard065/droneops-demo` — *not* `/opt/`), **NOT
+deployer-managed** — the NOC deployer only targets prod, so the demo must be
+updated manually. Its `worker` and `beat` are deliberately kept **stopped**
+(dunning-email hazard, ADR-0042). A second, older demo clone exists on CHAD-HQ
+and is a different checkout.
 `cd ~/droneops-demo && git pull --ff-only && docker compose -p droneops-demo
 -f docker-compose.yml -f docker-compose.demo.yml --env-file .env.demo up -d --build`.
 Known recreate gotchas (all hit on the 2026-06-11 v2.70.1 update — see
@@ -233,8 +247,9 @@ Migrated from Pushover. Same dedup + Redis suppression + `send_alert` /
 changed. See `docs/adr/0006-pushover-to-ntfy-migration-addendum.md`.
 
 **Module:** `backend/app/services/ntfy.py` (replaces `pushover.py`).
-Same public API consumed by `backend/app/auth/device.py:26` and
-`backend/app/routers/admin_device_rotation.py:35,175,177`.
+Same public API consumed by `backend/app/auth/device.py:26` (import) and
+`backend/app/routers/admin_device_rotation.py:35` (import) / `:163` (the one
+`send_alert` call). Line numbers drift — re-grep before citing.
 
 **Env var:** `NTFY_DRONEOPS_PUBLISHER_TOKEN` (replaces `PUSHOVER_TOKEN` +
 `PUSHOVER_USER_KEY`). Single token. Set in BOS-HQ `~/droneops/.env`.

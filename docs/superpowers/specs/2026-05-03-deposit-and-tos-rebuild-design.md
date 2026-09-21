@@ -1,7 +1,7 @@
 # Deposit Feature + TOS-Acceptance Rebuild + Themed Customer Portal — Design
 
 **Date:** 2026-05-03
-**Status:** Approved (Bill, 2026-05-03)
+**Status:** Approved (Bill, 2026-05-03) — **IMPLEMENTED; shipped as v2.65.0 on 2026-05-03** (added 2026-09-21). Decision records: [ADR-0009](../../adr/0009-deposit-feature.md) (two-phase billing), [ADR-0010](../../adr/0010-tos-acceptance-acroform.md) (AcroForm TOS). Both are live. Retained as the design of record; §Per-repo deltas in ADR-0010 lists where this spec and the repo diverged.
 **Related:** `docs/TOS-Rebuild.md` (full TOS-acceptance subsystem spec), `docs/adr/0008-customer-payment-gated-on-mission-completion.md` (extended by §3 of this design), CHANGELOG entry for v2.64.0 Stripe activation (2026-05-02).
 
 ---

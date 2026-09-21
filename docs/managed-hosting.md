@@ -2,6 +2,14 @@
 
 DroneOps Command Hosted is a fully managed instance operated by BarnardHQ.
 
+> **Operator note (2026-09-21).** The pricing and inclusions below are the
+> commercial offer and are not verifiable from this repo — confirm against the
+> current published offer before quoting them. Everything from
+> **Environment Variables** down *is* verifiable and was re-checked against the
+> running estate on 2026-09-21 (BOS-HQ `droneops-managed-gateway`,
+> `docker network inspect droneops-managed` → `172.29.0.0/16`,
+> `backend/app/config.py`).
+
 ## What's Included
 
 - All features: missions, AI reports (Claude-powered), Client Portal, pilot management, fleet tracking, flight logs, financial engine

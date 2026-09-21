@@ -1,8 +1,32 @@
-> **Maintained automatically by NOC doc-autogen.** This file is refreshed twice daily (04:00 + 16:00 UTC) by `~/noc-master/scripts/doc-autogen.py`, which summarizes recent commits via Claude Haiku 4.5 and commits with a `[skip-deploy]` trailer so no container rebuilds are triggered. See [NOC-Master ADR-0013](https://github.com/BigBill1418/NOC-Master-Control-SWARM/blob/main/docs/decisions/ADR-0013-docs-only-deploy-skip.md). Manual edits are preserved — the generator diffs against existing content before writing.
+> **Maintained automatically by NOC doc-autogen.** This file is refreshed twice daily by `~/noc-master/scripts/doc-autogen.py` (HSH-HQ user timer `doc-autogen.timer`, `OnCalendar` 04:00 + 16:00 — **local time, i.e. America/Los_Angeles, since the 2026-08-25 fleet timezone change**; the unit's own comment still says UTC and is stale). It summarizes recent commits via Claude Haiku 4.5 and commits with a `[skip-deploy]` trailer so no container rebuilds are triggered. See [NOC-Master DEC-0013](https://github.com/BigBill1418/NOC-Master-Control-SWARM/blob/main/docs/decisions/DEC-0013-docs-only-deploy-skip.md). Manual edits are preserved — the generator diffs against existing content before writing.
 
 # Changelog
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
+
+## 2026-09-21 — Repo-wide documentation freshness pass [skip-deploy]
+
+Every tracked Markdown file (90), plus `.env.example`, compose comments and
+script headers, read in full and verified against git history and the running
+BOS-HQ stack. Two ledgers record one row per file with the evidence used:
+`docs/reports/2026-09-21-docs-freshness-ledger-A.md` (core docs, ops files)
+and `…-ledger-B.md` (ADRs, plans, reports, incidents). New: `docs/adr/README.md`
+(index of ADR-0001…0046 with current status, contiguous, no gaps) and
+`docs/plans/data/README.md`. Material corrections include: `.env.example`
+named an Ollama model nothing pulls and was missing 13 env vars the code reads
+(now programmatically symmetric with the code); the Cloudflare tunnel guide
+pointed at `frontend:80` (nginx listens on 8080); README still described
+Watchtower (removed 2026-06-05), a Python flight-parser (it is Rust), the
+`/missions/new` wizard (a redirect since v2.67.0) and ~30 missing API routes;
+ADR-0023 read "Proposed — no code shipped" three months after both legs went
+live; ADR-0028 §H1 had no pointer to its supersession by ADR-0029; the basemap
+probe's first scheduled run is **Mon 2026-09-28 15:47 UTC**, not 09-22 (a
+Tuesday). ADR-0013's 4xx-burst customer-endpoint alert is recorded as **never
+built** (genuine gap, now in the open-items inventory §3.7). Deliberately left:
+three code comments with drifted line-number cites (`backend/app/main.py`
+`_create_hot_indexes` docstring, `backend/tests/test_db_migrations.py`
+"ADR-0035" → 0036) — comment-only edits would trigger a production rebuild;
+fold them into the next code change.
 
 ## 2026-09-21 — v2.92.1 — Sentry release tags read the source-of-truth version
 
@@ -27,8 +51,10 @@ runs with GlitchTip DSN; check `docker logs droneops-backend-1 | grep sentry`).
 ## 2026-09-21 — Stale-docs sweep + demo stack to v2.92.x + backup-cutover gate fix [skip-deploy]
 
 Documentation and ops reconciliation after three things shipped the same day.
-**No application code changed**, so no version bump: the live app stays 2.92.0
-and the parser 1.2.0.
+**No application code changed in this commit**, so it carried no version bump:
+the app was 2.92.0 and the parser 1.2.0 at the time.
+*(Status 2026-09-21: v2.92.1 shipped later the same day — see the entry above.
+Live is **2.92.1**; the parser is unchanged at **1.2.0**.)*
 
 ### Ops
 
@@ -38,9 +64,10 @@ and the parser 1.2.0.
   `compose up -d --build --no-deps frontend backend flight-parser`.
   `cloudflared`, `db` and `redis` were deliberately left alone (4-week uptime
   intact) and the demo **worker + beat stay stopped on purpose** — a running
-  demo beat is the dunning-email hazard recorded in ADR-0042. Verified: demo
-  backend reports 2.92.0, all three rebuilt containers healthy, served bundle
-  carries the Esri endpoints and **zero `cartocdn`**. The CHAD-HQ demo is a
+  demo beat is the dunning-email hazard recorded in ADR-0042. Verified: all
+  three rebuilt containers healthy, served bundle carries the Esri endpoints
+  and **zero `cartocdn`**; the demo backend read 2.92.0 at 14:57 PDT and
+  **2.92.1** after the 15:23 PDT second update. The CHAD-HQ demo is a
   different clone, still on `dfad0a3`, and remains open.
 - **Backup-cutover gate rewritten** in `scripts/droneops-backup-cutover.sh`.
   The 2026-08-28 automatic attempt aborted with `only 5/6 completed runs in
@@ -57,11 +84,17 @@ and the parser 1.2.0.
   a store whose retention exceeds T.*
 - **Compose `APP_VERSION` defaults 2.67.3 → 2.92.0** — five locations
   (`docker-compose.yml` ×4, `docker-compose.demo.yml` ×1). Not the app's
-  reported version, but what tags the **Sentry/GlitchTip release** on both
-  halves and what the Login/Setup footers render; they had been stale for ~25
-  minor versions because nothing checks them. **The host `.env` on BOS-HQ
-  overrides the default and is itself stale (`APP_VERSION=2.67.4`), so this
-  does not by itself fix production** — both halves are ROADMAP `H-1`.
+  reported version, but at the time what tagged the **Sentry/GlitchTip
+  release** on both halves; they had been stale for ~25 minor versions because
+  nothing checks them. **The host `.env` on BOS-HQ overrode the default and was
+  itself stale (`APP_VERSION=2.67.4`), so this did not by itself fix
+  production** — both halves were ROADMAP `H-1`.
+  *(Status 2026-09-21: `H-1` is **CLOSED**. v2.92.1 removed the dependency
+  entirely — releases now come from `backend/app/version.py` and
+  `__APP_VERSION__`. The stale `APP_VERSION=2.67.4` line was removed from the
+  BOS-HQ `.env`; the host now reports `APP_VERSION=2.92.1` and nothing reads
+  it. Compose defaults are 2.92.1 and cosmetic. The Login/Setup footers were
+  never affected — they always rendered `__APP_VERSION__`.)*
 
 ### Docs
 
@@ -227,7 +260,11 @@ v2.91.0 live on BOS-HQ at 13:58 PDT, same day.**
   `app/utils/client_ip.get_trusted_client_ip` trusts `X-Forwarded-For`
   only from a verified proxy (dynamic DNS resolution of `frontend`, no
   compose changes needed, + optional static `FORWARDED_ALLOW_IPS`) and
-  takes the rightmost non-client-controlled hop. Wired into `main.py`,
+  takes the rightmost non-client-controlled hop.
+  *(Status 2026-09-21: superseded hours later by `a226c93` — a single
+  hostname reproduced the bug against the real two-hop chain.
+  `TRUSTED_PROXY_HOSTNAME` is now a comma-separated list defaulting to
+  `frontend,cloudflared`. See the correction entry above.)* Wired into `main.py`,
   `auth.py`, `tos.py`, `client_portal.py`, `intake.py`.
 - **`POST /api/tos/accept` unauthenticated write closed.** `customer_id` is
   now resolved FROM a validated, unexpired `intake_token` (mirrors
@@ -391,6 +428,8 @@ Claude Code session loads first:
   sidebar and mobile drawer — and the mobile one was repeatedly missed.
   `flight-parser/Cargo.toml` was absent entirely despite being the only thing
   that makes a parser deploy verifiable. Now 5 files, 6 locations.
+  *(Status 2026-09-21: **6 files / 7 locations** — ADR-0046 added
+  `backend/app/version.py`.)*
 - **`.deployer-disabled` was described in a way that reads as "auto-deploy is
   off."** Nothing in the fleet deployer reads that marker; this repo **is**
   continuously deployed on push to `main`. The real pause is

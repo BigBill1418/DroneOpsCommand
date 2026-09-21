@@ -5,6 +5,16 @@
 - **Version:** 2.66.0
 - **Related:** ADR-0009 (deposit-feature), ADR-0010 (TOS AcroForm), ADR-0036 (ntfy notifications)
 
+> **Cross-reference disambiguation, 2026-09-21.** Every bare `ADR-0036` / `ADR-0037` in
+> this document means the **fleet** (noc-master) ADRs — *ntfy transport* and
+> *notification-noise policy*. It does **not** mean this repo's local
+> [ADR-0036](0036-migration-single-path-hardening.md) (migration single-path hardening)
+> or [ADR-0037](0037-airspace-laanc-awareness-at-mission-creation.md) (airspace/LAANC),
+> which were numbered later, on 2026-07-03. Implementation re-verified today:
+> `_reuse_existing_checkout_session` (`client_portal.py:527`), `_next_invoice_number`
+> (`invoices.py:42`) and the urgent signature-failure alert on topic
+> `droneops-deposits` are all present.
+
 ## Context
 
 The v2.65.x payment surface (deposit + balance + customer portal Pay

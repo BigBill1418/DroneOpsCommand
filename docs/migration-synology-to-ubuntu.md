@@ -1,5 +1,25 @@
 # Migration Guide: Synology Container Manager → Ubuntu Server VM
 
+> **HISTORICAL — this is a one-time migration runbook, executed long ago; noted
+> 2026-09-21.** It is kept because the verification-gate pattern is reusable, but
+> it describes the *original* Synology → Ubuntu move, not the current estate
+> (BarnardHQ's production has since moved again, HSH-HQ → BOS-HQ, 2026-04-20).
+> Two specifics must not be copied into new work:
+>
+> - **The autopull units it installs and checks do not exist.**
+>   `droneops-autopull.service` / `.timer`, `autopull.sh` and `update.sh` were
+>   all removed with ADR-0018. `setup-server.sh` installs exactly **one** unit,
+>   `droneops.service`, and `--uninstall` cleans up any stray autopull units.
+>   Deploys are the NOC fleet deployer on push to `main`.
+> - **The `db` service and the `doc`/`doc` role+database** are the stock defaults.
+>   On BOS-HQ the base `db` service is neutralized and the real primary is the
+>   container `droneops-standby-db` with role+db `droneops` — see
+>   `docker-compose.bos-prod.yml` and CLAUDE.md "Deployment topology".
+>
+> For a *current* from-nothing rebuild, use
+> [`docs/runbooks/droneops-backup-restore.md`](runbooks/droneops-backup-restore.md)
+> § Procedure A, not this file.
+
 **Zero data loss. Every step has a verification gate — do not proceed until the current step passes.**
 
 ---
@@ -151,7 +171,7 @@ cd /opt/droneops
 
 # Checkout the branch your Synology was running
 # (check your Synology: git branch --show-current)
-git checkout main   # or claude/dev — match what was deployed
+git checkout main   # main is the only branch — `claude/dev` was retired
 ```
 
 ### Step 2.3 — Configure environment
@@ -364,19 +384,25 @@ sudo ufw status
 
 ## ONGOING MANAGEMENT
 
+> **Corrected 2026-09-21.** This block used to advertise an in-repo auto-deploy
+> poller with a `--branch` flag defaulting to `claude/dev`. None of that exists:
+> `setup-server.sh` takes only `--uninstall`, there is no `claude/dev` branch,
+> and the `droneops-autopull` units were removed with ADR-0018.
+
 ```bash
 cd /opt/droneops
 
-# Manual update
-git pull && docker compose up -d --build
+# Update
+git pull --ff-only && docker compose up -d --build
+docker compose ps                     # confirm healthy
 
-# Or install auto-deploy (recommended)
-sudo ./setup-server.sh              # tracks claude/dev by default
-sudo ./setup-server.sh --branch main  # track main instead
+# Install the boot-start unit (this is ALL setup-server.sh does)
+sudo ./setup-server.sh                # installs droneops.service
+sudo ./setup-server.sh --uninstall    # removes it (+ cleans stray autopull units)
 
-# Check auto-deploy status
+# Check it
 systemctl status droneops
-systemctl list-timers droneops-autopull*
+journalctl -u droneops -f
 ```
 
 ---

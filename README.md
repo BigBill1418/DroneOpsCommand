@@ -15,7 +15,7 @@ Designed for FAA Part 107 certified operators running missions such as search & 
 ### Why DroneOpsCommand?
 
 - **100% self-hosted** — runs on your own hardware via Docker Compose. No cloud dependencies, no per-seat licensing, no subscription fees.
-- **AI report generation** — local via Ollama (Qwen 2.5 3B default) or cloud via Claude API. Your data stays on your hardware with Ollama; Claude API available for faster, higher-quality output.
+- **AI report generation** — local via Ollama (Llama 3.1 8B Instruct `q4_K_M` default) or cloud via Claude API. Your data stays on your hardware with Ollama; Claude API available for faster, higher-quality output.
 - **White-label ready** — company name, tagline, and branding are fully configurable from the Settings UI. No code changes needed to make it yours.
 - **Full lifecycle** — flight log upload, GPS path visualization, animated flight replay with video export, telemetry analysis, mission management, AI reports, PDF export, invoicing, and email delivery in one platform.
 - **Real-time airspace** — live aircraft tracking via OpenSky Network with anonymous or authenticated access.
@@ -51,9 +51,9 @@ Designed for FAA Part 107 certified operators running missions such as search & 
 
 | Resource | Minimum | Recommended | Notes |
 |----------|---------|-------------|-------|
-| RAM      | 8 GB    | 16 GB       | Ollama alone reserves ~4 GB for the quantized model; backend + Postgres + flight-parser + Redis under load push past 8 GB total. |
+| RAM      | 12 GB   | 16 GB       | `docker-compose.yml` gives Ollama `mem_reservation: 8g` / `mem_limit: 10g`; the default Llama 3.1 8B `q4_K_M` model is ~6 GB resident with its KV cache. Backend + Postgres + flight-parser + Redis push the total past 8 GB, so 8 GB of host RAM is not enough unless you run `LLM_PROVIDER=claude` and drop the `ollama` service. |
 | CPU      | 4 cores | 6–8 cores   | `docker-compose.yml` pins Ollama to 6 cores. Fewer cores means slow AI report generation. |
-| Disk     | 30 GB   | 100 GB+     | Flight logs, Postgres, Ollama model, video exports. Grows with usage. |
+| Disk     | 30 GB   | 100 GB+     | Flight logs, Postgres, the ~4.9 GB Ollama model, video exports. Grows with usage. |
 
 > **Docker Desktop users (Windows/Mac) — READ THIS.** Docker Desktop runs containers inside a Linux VM with its own RAM/CPU limits. The defaults are usually **too low** for DroneOpsCommand. Open **Docker Desktop → Settings → Resources** and raise **Memory to at least 8 GB** (16 GB recommended) and **CPUs to at least 4** before `docker compose up`. If the VM runs out of memory the stack will crash at startup or under load with no clear error. `setup-server.sh` does not run on Windows/Mac, so you won't see a preflight warning — allocate the VM resources manually.
 
@@ -67,15 +67,17 @@ git clone https://github.com/BigBill1418/DroneOpsCommand.git
 cd DroneOpsCommand
 cp .env.example .env
 
-# 2. Set your secrets (IMPORTANT: change these before first run)
-#    Edit .env and update at minimum:
-#    - POSTGRES_PASSWORD
-#    - JWT_SECRET_KEY
+# 2. Set your secrets. These four have NO default (ADR-0012) — compose
+#    interpolates them with `:?` and REFUSES TO START if any is empty:
+#    - POSTGRES_PASSWORD       openssl rand -base64 32
+#    - DATABASE_URL            postgresql+asyncpg://doc:<that password>@db:5432/doc
+#    - REPLICATION_PASSWORD    openssl rand -base64 32  (any value on a standalone install)
+#    - JWT_SECRET_KEY          openssl rand -hex 32
 
 # 3. Launch
 docker compose up -d
 
-# 4. Wait for the AI model to download (first run only, ~1.5GB)
+# 4. Wait for the AI model to download (first run only, ~4.9 GB)
 docker compose logs -f ollama-setup
 
 # 5. Open the app
@@ -88,8 +90,8 @@ docker compose logs -f ollama-setup
 
 1. PostgreSQL schema is created automatically
 2. Setup wizard prompts you to create the admin account (no env vars needed)
-3. Aircraft fleet (6 DJI models) and rate templates (8 billing presets) are pre-loaded
-4. Ollama downloads the Qwen 2.5 3B model (~1.5GB)
+3. Aircraft fleet (7 DJI models) and rate templates (14 billing presets) are pre-loaded
+4. Ollama downloads the Llama 3.1 8B Instruct `q4_K_M` model (~4.9 GB)
 5. All storage directories are created
 
 ### Auto-start on boot
@@ -113,24 +115,16 @@ docker compose logs -f backend     # application logs
 
 ### Updating
 
-There is **no in-repo deploy script** — `update.sh` and the per-repo
-`autopull` poller were both removed (see
-[ADR-0018](docs/adr/0018-deploy-path-is-noc-fleet-deployer.md)); having two
-deploy paths where one was broken actively misled operators. To update a
-self-hosted install:
-
 ```bash
 git pull --ff-only
 docker compose up -d --build       # rebuild only what changed
 docker compose ps                  # confirm everything is healthy
 ```
 
-Database migrations run automatically on backend startup, so no separate
-migrate step is needed.
-
-> On BarnardHQ's own production host, deploys are handled by an external
-> fleet deployer that polls `origin/main` — not by anything in this repo.
-> Self-hosters use the two commands above.
+Database migrations run automatically on backend startup. There is deliberately
+**no in-repo deploy script or auto-update poller** — see
+[Updating](#updating) below for the full rationale
+([ADR-0018](docs/adr/0018-deploy-path-is-noc-fleet-deployer.md)).
 
 All containers have healthchecks and `restart: unless-stopped`, so individual services auto-recover from crashes. The backend retries DB and Redis connections on startup to handle restart race conditions.
 
@@ -198,7 +192,7 @@ After logging in, go to **Settings > Branding** to set your company name, taglin
 
 ### AI Report Generation
 - Dual LLM provider support: local via Ollama or cloud via Claude API (Anthropic)
-- Ollama default model: Qwen 2.5 3B — runs on your hardware, data stays local
+- Ollama default model: Llama 3.1 8B Instruct `q4_K_M` — runs on your hardware, data stays local
 - Claude API option: Claude Sonnet for faster, higher-quality reports (requires API key)
 - Switchable from Settings page — choose provider per deployment
 - Operator enters field notes/narrative, LLM generates professional after-action report
@@ -214,7 +208,7 @@ After logging in, go to **Settings > Branding** to set your company name, taglin
 - Edit both operator narrative and final report content
 
 ### Aircraft Fleet Management
-- Pre-seeded DJI aircraft profiles: Matrice 30T, Matrice 4TD, Mavic 3 Pro, Avata 2, FPV, Mini 5 Pro
+- Pre-seeded DJI aircraft profiles (7): Matrice 30T, Matrice 4TD, Mavic 4 Pro, Mavic 3 Pro, Avata 2, FPV, Mini 5 Pro
 - Detailed specifications per aircraft: flight time, max speed, camera, thermal imaging, sensors, weight, transmission range
 - Add/edit/delete aircraft with custom specs (stored as JSON)
 - Assign aircraft to individual flights within a mission
@@ -239,7 +233,11 @@ After logging in, go to **Settings > Branding** to set your company name, taglin
 - Sort ordering for line item display
 
 ### Rate Templates
-- Reusable billing templates: Standard Hourly Rate, Mileage, Flat Rate Travel, Rapid Deployment, Night Operations Surcharge, Thermal Imaging, Video Editing, Report Preparation
+- 14 reusable billing templates seeded on first boot: Standard Hourly Rate, Travel - Mileage,
+  Travel - Flat Rate, Rapid Deployment, Night Operations Surcharge, Thermal Imaging,
+  Video Editing, Report Preparation, PV Thermal Inspection — Field Day,
+  Mobilization — Regional Overnight, Lodging + Per Diem, Weather Standby,
+  Data Processing & QA, Third-Party Analytics (pass-through)
 - Configurable default quantity, unit (hours, miles, flat, each), and rate
 - Active/inactive toggle
 - Add/edit/delete from Settings page
@@ -386,24 +384,33 @@ After logging in, go to **Settings > Branding** to set your company name, taglin
 |---------|-----------|------|---------|
 | Frontend | React 18 + Vite + Mantine UI | 3080 (nginx) | SPA web interface |
 | Backend | Python 3.12, FastAPI, SQLAlchemy 2.0 | 8000 | REST API |
-| Database | PostgreSQL 16 Alpine | 5434:5432 | Persistent storage with replication support |
-| Flight Parser | Python microservice | 8100 | DJI flight log decryption and parsing |
-| LLM | Ollama (Qwen 2.5 3B default) or Claude API | 11434 | AI report generation |
+| Database | PostgreSQL 16 Alpine | 5434:5432 (bound to `127.0.0.1` + `10.99.0.1`, never `0.0.0.0`) | Persistent storage with replication support |
+| Flight Parser | Rust (axum) microservice | 8100 | DJI/Litchi/Airdata flight log decryption and parsing |
+| LLM | Ollama (Llama 3.1 8B Instruct `q4_K_M` default) or Claude API | 11434 | AI report generation |
 | Queue | Redis 7 Alpine | 6379 | Celery task broker |
 | Worker | Celery (same backend image) | — | Async report generation |
-| Watchtower | containrrr/watchtower | — | Base image auto-update |
 | Cloudflared | cloudflare/cloudflared | — | Secure tunnel (optional) |
 
 ### PostgreSQL Streaming Replication
 
-The primary database is configured for WAL streaming replication to a standby on CHAD-HQ (10.99.0.2). This provides:
+On BarnardHQ's own deployment the primary runs on **BOS-HQ (10.99.0.4)** as the
+container `droneops-standby-db` (a promoted former standby — the name is
+historical), and it streams WAL to a standby on **CHAD-HQ (10.99.0.2)**,
+`application_name=chad_hq_standby`. Verified live 2026-09-21. This provides:
 
 - **Hot standby** — read-only replica available for failover
 - **Continuous WAL shipping** — changes stream in real-time to the standby
 - **Replication user** — dedicated `replicator` role with `REPLICATION` privileges
 - **Managed by NOC** — replication health monitored by NOC Master's continuous replication monitor (30s checks, auto-recovery)
 
-The primary entrypoint script (`scripts/primary-entrypoint.sh`) configures `pg_hba.conf` for replication access and WAL sender settings. The standby configuration is in `docker-compose.standby.yml`.
+The primary entrypoint script (`scripts/primary-entrypoint.sh`) configures `pg_hba.conf` for replication access and WAL sender settings.
+
+> **Note on `docker-compose.standby.yml` / `scripts/init-standby.sh`:** both still
+> describe the **pre-2026-04-20 topology** (primary on CHAD-HQ, standby on HSH-HQ)
+> and their `10.99.0.2` primary address is the old one. The direction inverted
+> during the HSH→BOS migration. Set the primary host to the real primary before
+> using either on a fresh standby; the files carry the same warning in their
+> headers.
 
 ### Map basemap providers
 
@@ -485,14 +492,14 @@ All settings are configured via environment variables in the `.env` file.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `POSTGRES_USER` | `doc` | PostgreSQL username |
-| `POSTGRES_PASSWORD` | `changeme_in_production` | PostgreSQL password |
+| `POSTGRES_PASSWORD` | *(no default — required)* | PostgreSQL password. Per ADR-0012 compose interpolates this with `:?`, so the containers refuse to start if it is unset. |
 | `POSTGRES_DB` | `doc` | Database name |
-| `DATABASE_URL` | `postgresql+asyncpg://...` | Full async connection string |
+| `DATABASE_URL` | *(no default — required)* | Full async connection string, e.g. `postgresql+asyncpg://doc:<pw>@db:5432/doc`. Also `:?`-guarded in compose. |
 
 ### Authentication
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `JWT_SECRET_KEY` | `changeme_generate_a_random_secret` | **Change this** — used to sign tokens |
+| `JWT_SECRET_KEY` | *(no default — required)* | Signs every access/refresh token. `:?`-guarded in compose per ADR-0012 — the stack will not start without it. Generate with `openssl rand -hex 32`. |
 | `JWT_ALGORITHM` | `HS256` | Token signing algorithm |
 | `JWT_ACCESS_TOKEN_EXPIRE_MINUTES` | `30` | Access token lifetime |
 | `JWT_REFRESH_TOKEN_EXPIRE_DAYS` | `30` | Refresh token lifetime |
@@ -505,9 +512,10 @@ All settings are configured via environment variables in the `.env` file.
 | `OPENDRONELOG_URL` | *(empty)* | Your OpenDroneLog server URL (e.g., `http://192.168.1.50:8080`) |
 | `DJI_API_KEY` | *(empty)* | DJI Cloud API key for encrypted flight log parsing ([register here](https://developer.dji.com)) |
 | `OLLAMA_BASE_URL` | `http://ollama:11434` | Ollama API endpoint |
-| `OLLAMA_MODEL` | `qwen2.5:3b` | Ollama model for report generation |
+| `OLLAMA_MODEL` | `llama3.1:8b-instruct-q4_K_M` | Ollama model for report generation. **Must match what `ollama-setup` pulls** (same value in `docker-compose.yml`) — point it at a model that was never pulled and report generation fails with a model-not-found error. |
 | `LLM_PROVIDER` | `ollama` | Active LLM provider: `ollama` or `claude` |
 | `ANTHROPIC_API_KEY` | *(empty)* | Anthropic API key (required when `LLM_PROVIDER=claude`) |
+| `CLAUDE_MODEL` | `claude-sonnet-4-6` | Anthropic model id used when `LLM_PROVIDER=claude`. Override to pin or bump; do not hardcode model ids in service modules. |
 
 ### Email (SMTP)
 | Variable | Default | Description |
@@ -536,11 +544,68 @@ SMTP settings can also be configured from the Settings page in the web UI (store
 | `FRONTEND_PORT` | `3080` | Host port for the frontend. Use `127.0.0.1:3080` to restrict to localhost when behind a tunnel |
 | `CLOUDFLARE_TUNNEL_TOKEN` | *(empty)* | Cloudflare Tunnel token for secure remote access without opening ports |
 
-### Watchtower (Auto-Update)
+### Trusted-proxy IP resolution (ADR-0045)
+Every rate limiter and the login lockout resolve the real caller through
+`backend/app/utils/client_ip.py`. `X-Forwarded-For` is honoured **only** when the
+direct peer is a trusted proxy — never blindly.
+
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `WATCHTOWER_MONITOR_ONLY` | `false` | Set to `true` to get notifications only (no auto-update) |
-| `WATCHTOWER_NOTIFICATION_URL` | *(empty)* | Shoutrrr notification URL (Slack, Discord, email, etc.) |
+| `TRUSTED_PROXY_HOSTNAME` | `frontend,cloudflared` | Comma-separated Docker Compose service names, each resolved via Docker's embedded DNS on every check. The default matches this compose file's real two-hop chain (cloudflared → nginx → uvicorn) and needs no operator action. Managed tenants must set `caddy` instead — see [docs/managed-hosting.md](docs/managed-hosting.md). |
+| `FORWARDED_ALLOW_IPS` | *(empty)* | Optional additional comma-separated IPs/CIDRs to trust, for a proxy hop that cannot be resolved by hostname from this container's network. |
+
+### Customer-facing links
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `TOS_SIGNED_DOWNLOAD_EXPIRE_DAYS` | `730` | How long a customer's signed-TOS download link stays valid after acceptance. Bounded but durable — it used to be unbounded. |
+| `INTAKE_TOKEN_EXPIRE_DAYS` | `7` | Lifetime of a customer intake link. |
+| `CLIENT_TOKEN_EXPIRE_DAYS` | `30` | Lifetime of a client-portal access link. |
+| `GOOGLE_REVIEW_URL` | BarnardHQ's `g.page` link | Review CTA on the final-invoice PDF, report-delivery email, post-payment portal state and payment-received email. Unset = the CTAs hide themselves. Change this for your own deployment. |
+
+### Operator locale
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OPERATOR_TIMEZONE` | `America/Los_Angeles` | Defines the *calendar date* of a flight (ADR-0017). A flight's instant is stored in UTC; its date is the date in this zone. Evening Pacific flights otherwise roll to the next UTC day. |
+
+### Managed instance (BarnardHQ-hosted tier only)
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MANAGED_INSTANCE` | `false` | `true` enables the managed gates (setup wizard skipped, LLM locked to Claude). |
+| `CLIENT_ID` | *(empty)* | Tenant identifier surfaced on the health endpoint. |
+| `ADMIN_USERNAME` / `ADMIN_PASSWORD` | *(empty)* | Auto-provisioned admin for managed instances **only**. A self-hosted install creates its admin through the first-run setup wizard and ignores these. |
+
+### Demo mode (`docker-compose.demo.yml` only)
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DEMO_MODE` | `false` | Enables the demo guard middleware and the demo banner. |
+| `DEMO_ADMIN_USERNAME` / `DEMO_ADMIN_PASSWORD` | *(empty)* | Demo admin seeded on boot. |
+| `DEMO_RESET_INTERVAL_HOURS` | `24` | **Read but unimplemented** — nothing in the app acts on it. `scripts/demo-nightly-reset.sh` on a crontab is the real reset. |
+
+### Alerting and watchdogs (optional)
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `NTFY_DRONEOPS_PUBLISHER_TOKEN` | *(empty)* | Publisher token for self-hosted ntfy (fleet ADR-0036). Unset = watchdogs still log, alerts just do not go out. |
+| `DEVICE_SILENCE_HOURS` | `48` | A device key active recently but silent this long raises an alert. |
+| `DEVICE_SILENCE_ACTIVITY_WINDOW_DAYS` | `7` | How recently a key must have been used to be considered active. |
+| `DEVICE_SILENCE_DEDUP_HOURS` | `12` | Per-key alert cooldown so a long outage does not spam. |
+
+### Observability (optional)
+All DSN/endpoint-gated — unset means no-op. A single-tenant self-hosted install can ignore this block.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SENTRY_DSN` | *(empty)* | Sentry/GlitchTip DSN for the backend + Celery worker. |
+| `SENTRY_ENVIRONMENT` | `production` | Environment tag. |
+| `SENTRY_TRACES_SAMPLE_RATE` | `0.05` | Trace sampling. |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | *(empty)* | OTLP/gRPC collector endpoint. |
+| `OTEL_SERVICE_NAME` | `droneops-api` | Service name on emitted spans. |
+| `ENV` / `TENANT` | `prod` / `shared` | Stamped on logs, traces and the Sentry environment. |
+| `VITE_SENTRY_DSN` / `VITE_SENTRY_ENVIRONMENT` | *(empty)* / `production` | Frontend Sentry — **build-time only**, read by Vite at `npm run build`. |
+
+> Since v2.92.1 the **Sentry release tag** on both halves comes from the bumped
+> source files (`backend/app/version.py` and `frontend/package.json`), not from
+> the `APP_VERSION` env var. The `APP_VERSION` / `VITE_APP_VERSION` compose
+> defaults are cosmetic.
 
 ### Replication
 | Variable | Default | Description |
@@ -558,13 +623,13 @@ Two LLM providers are supported, configurable from the Settings page or via envi
 
 | Provider | Model | Where it runs | When to use |
 |----------|-------|---------------|-------------|
-| **Ollama** (default) | Qwen 2.5 3B | Local, on your hardware | Data stays on-premises, no API costs |
+| **Ollama** (default) | Llama 3.1 8B Instruct `q4_K_M` | Local, on your hardware | Data stays on-premises, no API costs |
 | **Claude API** | Claude Sonnet | Anthropic cloud | Faster, higher-quality reports, requires API key |
 
 Set `LLM_PROVIDER=claude` and `ANTHROPIC_API_KEY` in `.env` to use Claude, or switch providers in Settings at runtime.
 
 ### Ollama Performance Tuning
-The `docker-compose.yml` pins Ollama to 6 CPU cores (leaving 2 for the OS and database), sets 8GB RAM reservation, enables flash attention, and keeps the model loaded permanently (`OLLAMA_KEEP_ALIVE=-1`).
+The `docker-compose.yml` pins Ollama to 6 CPU cores (`cpuset: "0-5"`, leaving 2 for the OS and database), sets an 8 GB RAM reservation with a 10 GB hard cap, enables flash attention, serves one request at a time (`OLLAMA_NUM_PARALLEL=1`, `OLLAMA_MAX_LOADED_MODELS=1`) and keeps the model loaded permanently (`OLLAMA_KEEP_ALIVE=-1`). The image is pinned to `ollama/ollama:0.23.2` — not `:latest` — so a patch is an explicit edit.
 
 ---
 
@@ -591,9 +656,14 @@ polling-based CD on a self-hosted install, drive it from outside the repo (a
 systemd timer of your own, a CI runner, or a webhook) rather than reintroducing
 a second in-repo path.
 
-### Watchtower (base image updates)
+### Base image updates
 
-Watchtower runs as a sidecar service checking for updated base images (PostgreSQL, Redis, Ollama) daily. By default it auto-updates; set `WATCHTOWER_MONITOR_ONLY=true` to get notifications without auto-updating. Configure `WATCHTOWER_NOTIFICATION_URL` in `.env` for alerts (supports Slack, Discord, email, etc. via [Shoutrrr](https://containrrr.dev/shoutrrr/)).
+There is **no Watchtower sidecar.** It was removed on 2026-06-05 (fleet ADR-0088):
+an auto-updater on a deployer-managed host is a second, uncoordinated deploy
+path. Base images (`postgres:16-alpine`, `redis:7-alpine`, `ollama/ollama:0.23.2`,
+`cloudflare/cloudflared`) are **pinned in `docker-compose.yml` on purpose** —
+bump the tag in the file, then `docker compose up -d --build`. Self-hosters who
+want automatic base-image updates should run that tooling outside this repo.
 
 ---
 
@@ -605,14 +675,24 @@ Landing page with mission stats, recent missions table, real-time weather condit
 ### Missions (`/missions`)
 List all missions with status badges (Draft/Completed/Sent), billable indicators, search, and quick actions (edit, delete). Click a row to view mission details.
 
-### New Mission (`/missions/new`)
-Multi-step wizard with 5 stages:
+### Creating and editing a mission
 
-1. **Details** — Customer, title, type, date, location, description, billable toggle, UNAS folder path, download link URL with expiration
-2. **Flights** — Browse OpenDroneLog flights, select flights for the mission, assign aircraft to each flight, view flight map and coverage area
-3. **Images** — Upload mission photos (drag-and-drop or file picker), auto-resized and EXIF-corrected
-4. **Report** — Enter operator narrative, generate LLM report, edit in rich text editor, generate PDF, email to customer
-5. **Invoice** — Add line items from rate templates or manually, set quantities and rates, configure tax, mark paid/unpaid
+A mission is **created from the inline modal behind the "New Mission" button on
+`/missions`** — there is no standalone create page. Editing is per-section from
+the mission hub at `/missions/:id`, not a linear wizard:
+
+| Route | Step |
+|---|---|
+| `/missions/:id/details/edit` | Customer, title, type, date, location, description, billable toggle, lead source, UNAS folder path, download link URL with expiration |
+| `/missions/:id/flights/edit` | Browse/attach flights, assign aircraft per flight, view flight map and coverage area |
+| `/missions/:id/images/edit` | Upload mission photos (drag-and-drop or file picker), auto-resized and EXIF-corrected |
+| `/missions/:id/report/edit` | Operator narrative, LLM report generation, rich-text editing, PDF, email to customer |
+| `/missions/:id/invoice/edit` | Line items from rate templates or manually, quantities, rates, tax, paid/unpaid |
+| `/missions/:id/edit-legacy` | The old 5-stage wizard, kept reachable |
+
+`/missions/new` and `/missions/:id/edit` are **soft redirects** since v2.67.0 —
+they show a toast and bounce to `/missions` and `/missions/:id` respectively, so
+old operator bookmarks still land somewhere sensible.
 
 ### Mission Detail (`/missions/:id`)
 Full mission view with metadata, assigned aircraft cards, interactive flight map, coverage stats, download link status, report content, and action buttons (edit, delete, generate PDF, email report).
@@ -644,11 +724,26 @@ Customer CRM with add/edit/delete, address auto-complete via OpenStreetMap geoco
 ### Financials (`/financials`)
 Revenue dashboard with total/average/outstanding metrics, breakdowns by drone, category, mission type, month, and customer. Full invoice table with search.
 
-### Setup (`/setup`)
-First-run wizard shown when no users exist. Creates the initial admin account. To reset: `docker compose exec backend python reset_to_setup.py`.
+### TOS Acceptances (`/tos-acceptances`)
+Admin view of every captured Terms-of-Service acceptance: who signed, when, and
+a link to the stored signed PDF with its SHA-256 anchor.
 
-### Client Portal (`/client`)
-Client-facing mission dashboard and invoice payment. Clients access via signed JWT links sent from the operator. Separate authentication scope from the operator UI.
+### First-run setup
+Not a route — the app renders the setup wizard in place of every authenticated
+page while no users exist, then the login screen. It creates the initial admin
+account. To reset: `docker compose exec backend python reset_to_setup.py`.
+
+### Public routes (no operator login)
+
+| Route | Purpose |
+|---|---|
+| `/intake/:token` | Tokenized customer intake form |
+| `/tos/accept` | Terms-of-Service acceptance (typed name + checkbox → AcroForm-filled PDF) |
+| `/client/:token` | Client portal — mission list + invoices, opened from a signed link |
+| `/client/login` | Optional password login for repeat clients |
+| `/client/mission/:missionId` | Client-facing mission detail |
+
+Client portal authentication is a separate scope from the operator UI.
 
 ### Settings (`/settings`)
 System configuration across multiple tabs:
@@ -679,7 +774,7 @@ Async SMTP client that sends HTML emails with the PDF report attached. Loads con
 Dual-provider LLM client supporting Ollama and Claude API. The active provider is selectable from Settings or via `LLM_PROVIDER` env var.
 
 - **Ollama** — HTTP client to the `/api/generate` endpoint. Sends a structured prompt with mission data, flight telemetry, and operator notes. Temperature 0.3 for consistency, 300s timeout, 6 CPU threads.
-- **Claude API** — Anthropic SDK client using Claude Sonnet. Same structured prompt, cloud-processed. Requires `ANTHROPIC_API_KEY`.
+- **Claude API** — Anthropic SDK client, model from `CLAUDE_MODEL` (default `claude-sonnet-4-6`). Same structured prompt, cloud-processed. Requires `ANTHROPIC_API_KEY`.
 
 ### OpenDroneLog Client
 REST client that fetches flight data from a self-hosted OpenDroneLog instance. Handles multiple API endpoint patterns for version compatibility. Normalizes field names between camelCase and snake_case. Extracts GPS tracks for map rendering.
@@ -688,7 +783,7 @@ REST client that fetches flight data from a self-hosted OpenDroneLog instance. H
 Generates GeoJSON FeatureCollections with flight path LineStrings, start/end markers, and convex hull polygons. Calculates coverage area in acres using UTM projection and Shapely geometry with configurable buffer distance. Renders static PNG maps using OpenStreetMap tiles, sending an identifying User-Agent per the OSMF Tile Usage Policy.
 
 ### Flight Parser Service
-Standalone microservice that decrypts and parses DJI flight logs using the DJI Cloud API. Extracts GPS tracks, telemetry time-series, drone metadata, and battery information from encrypted TXT log files.
+Standalone **Rust** (axum) microservice on port 8100 that decrypts and parses DJI flight logs using the DJI Cloud API, plus Litchi and Airdata CSV exports. `GET /health` reports its own crate version — the only reliable confirmation that a parser deploy landed. Extracts GPS tracks, telemetry time-series, drone metadata, and battery information from encrypted TXT log files.
 
 ### Airspace Service
 Proxies requests to the OpenSky Network API for real-time aircraft position data. Supports anonymous and OAuth2-authenticated modes. Converts search radius to bounding box coordinates and normalizes the response into a clean aircraft list.
@@ -700,7 +795,7 @@ Aggregates data from 4 external APIs: Open-Meteo (current conditions), AviationW
 
 ## API Reference
 
-Full interactive API documentation is available at `http://localhost:3080/docs` (Swagger UI) when the app is running.
+Full interactive API documentation is available at `http://localhost:3080/docs` (Swagger UI) when the app is running — nginx proxies `/docs`, `/redoc` and `/openapi.json` straight to the backend. The table below is a curated subset; `/openapi.json` is the complete, authoritative list.
 
 ### Core Endpoints
 
@@ -712,9 +807,9 @@ Full interactive API documentation is available at `http://localhost:3080/docs` 
 | GET/PUT/DELETE | `/api/missions/{id}` | Read, update, or delete a mission |
 | POST | `/api/missions/{id}/flights` | Attach a flight to a mission |
 | POST | `/api/missions/{id}/images` | Upload a mission image |
-| GET/POST | `/api/missions/{id}/report/generate` | Generate LLM report (async) |
+| POST | `/api/missions/{id}/report/generate` | Generate LLM report (async) |
 | GET | `/api/missions/{id}/report/status/{task_id}` | Poll report generation status |
-| PUT | `/api/missions/{id}/report` | Save/update report content |
+| GET/PUT | `/api/missions/{id}/report` | Read or save report content |
 | POST | `/api/missions/{id}/report/pdf` | Generate and download PDF |
 | POST | `/api/missions/{id}/report/send` | Email PDF report to customer |
 | GET/POST | `/api/missions/{id}/invoice` | Get or create invoice |
@@ -728,7 +823,14 @@ Full interactive API documentation is available at `http://localhost:3080/docs` 
 | GET | `/api/flight-library/{id}` | Flight detail with GPS track and telemetry |
 | GET | `/api/flight-library/{id}/track` | Raw GPS track points |
 | GET | `/api/flight-library/{id}/telemetry` | Downsampled telemetry time-series |
-| GET | `/api/flight-library/{id}/export/{format}` | Export flight as GPX, KML, or CSV |
+| GET | `/api/flight-library/{id}/export/{fmt}` | Export flight as GPX, KML, or CSV |
+| GET | `/api/flight-library/{id}/details` | Extended DJI log detail (ADR-0043 sidecar) |
+| GET | `/api/flight-library/{id}/details/series` | Full-resolution frame series |
+| GET | `/api/flight-library/details/status` | Extended-detail coverage summary |
+| GET | `/api/flight-library/device-health` | Device-key preflight check (companion app) |
+| POST | `/api/flight-library/device-upload/async` | Async device upload → `{batch_id}` |
+| GET | `/api/flight-library/device-upload/status/{batch_id}` | Poll an async device upload |
+| POST | `/api/flight-library/import/opendronelog` | Import from OpenDroneLog |
 | POST | `/api/flight-library/upload` | Upload flight log files (batched) |
 | POST | `/api/flight-library/device-upload` | Device-authenticated log upload |
 | POST | `/api/flight-library/manual` | Create a manual flight entry |
@@ -736,9 +838,14 @@ Full interactive API documentation is available at `http://localhost:3080/docs` 
 | GET | `/api/flight-library/airspace/aircraft` | Live aircraft positions (OpenSky proxy) |
 | GET/POST/PUT/DELETE | `/api/batteries` | Battery CRUD |
 | GET/POST/PUT/DELETE | `/api/maintenance` | Maintenance record CRUD |
-| GET/POST | `/api/device-keys` | Device API key management |
+| GET/POST/DELETE | `/api/settings/device-keys` | Device API key management |
+| POST | `/api/admin/devices/{id}/rotate-key` | Zero-touch device key rotation (ADR-0003) |
 | POST | `/api/backup/validate-upload` | Validate a backup file |
 | POST | `/api/backup/restore-from-upload` | Restore database from backup |
+| POST | `/api/backup/create-and-download` | Export a database backup |
+| GET/PUT | `/api/backup/schedule` | In-app backup schedule |
+| POST/GET | `/api/backup/jobs`, `/api/backup/jobs/{id}` | Async backup job + progress poll |
+| GET/DELETE | `/api/backup/history`, `/api/backup/history/{filename}` | Backup history |
 | GET | `/api/flights` | List flights from OpenDroneLog |
 | GET | `/api/financials/summary` | Financial dashboard data |
 | GET | `/api/weather/current` | Weather, METAR, TFRs, NOTAMs, NWS alerts |
@@ -747,7 +854,10 @@ Full interactive API documentation is available at `http://localhost:3080/docs` 
 | GET/PUT | `/api/settings/opendronelog` | OpenDroneLog URL |
 | GET/PUT | `/api/settings/payment` | PayPal/Venmo payment links |
 | GET/POST/PUT/DELETE | `/api/rate-templates` | Rate template CRUD |
+| GET/PUT | `/api/settings/llm` | LLM provider selection and API key |
+| GET/PUT | `/api/settings/dji`, `/api/settings/opensky`, `/api/settings/weather`, `/api/settings/branding` | Per-area settings (each with a `POST .../test` or `/lookup` where applicable) |
 | GET | `/api/llm/status` | Ollama/LLM connection status |
+| GET | `/api/branding` | Public branding payload (login + customer-facing pages) |
 | GET/POST | `/api/pilots` | Pilot CRUD |
 | GET | `/api/pilots/{id}/hours-summary` | Pilot flight hour breakdown |
 | POST | `/api/client/auth/validate` | Validate client portal token |
@@ -759,9 +869,25 @@ Full interactive API documentation is available at `http://localhost:3080/docs` 
 | POST | `/api/missions/{id}/client-link` | Generate client access link |
 | POST | `/api/missions/{id}/client-link/send` | Email client access link |
 | POST | `/api/webhooks/stripe` | Stripe payment webhook |
+| POST | `/api/intake/initiate` | Start a customer intake, emails a tokenized link |
+| GET/POST | `/api/intake/form/{token}` | Public intake form read/submit |
+| GET | `/api/intake/tos-pdf/{token}` | Serve the TOS template to the intake form |
+| POST | `/api/tos/accept` | Record a TOS acceptance, produce the signed PDF |
+| GET | `/api/tos/acceptances` | Admin list of acceptances |
+| GET | `/api/tos/signed/{audit_id}` | Operator download of a signed TOS |
+| GET | `/api/tos/signed/by-token/{intake_token}` | Customer download of their own signed copy (bounded by `TOS_SIGNED_DOWNLOAD_EXPIRE_DAYS`) |
+| GET | `/api/admin/basemap/tile-health` | Latest basemap tile-health probe result (ADR-0046) |
+| POST | `/api/admin/basemap/tile-health/run` | Run the probe on demand (60 s cooldown) |
+| PUT | `/api/admin/basemap/tile-health/ntfy` | Arm/disarm probe alerting |
+| GET | `/api/missions/{id}/preflight`, `/api/missions/airspace-preflight` | Pre-flight weather + airspace assessment |
+| GET | `/api/maintenance/status`, `/api/maintenance/due`, `/api/maintenance/next-due` | Maintenance alert sources |
+| GET/POST | `/api/maintenance/schedules` | Recurring maintenance schedules |
+| GET | `/api/v1/business-signals` | Business-signal rollup |
+| GET | `/api/demo/status` | Demo-mode banner payload |
 | GET | `/api/auth/setup-status` | Check if initial setup is needed |
 | POST | `/api/auth/setup` | Create initial admin account |
 | GET | `/api/health` | Health check |
+| GET | `/health` | Unauthenticated alias for old companion clients (FU-2) |
 
 ---
 

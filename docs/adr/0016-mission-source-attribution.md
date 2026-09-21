@@ -4,6 +4,18 @@
 **Related ADRs:** 0014 (Mission Hub redesign — Hub + Facet edit pattern, the surface that gains the new field), 0009 (deposit feature — established the additive-nullable-ALTER + failover-safe migration pattern this ADR reuses), 0012 (secret hygiene — no tokens in code/commits).
 **Author:** Aegis (feature lane), at operator request.
 
+> **Status 2026-09-21:** live and unchanged in behaviour. **Decision §3 is now
+> historical**: it argued against Alembic because "this repo has **no `alembic.ini`, no
+> `env.py`, no `versions/` tree**". All three exist since 2026-06-11
+> ([ADR-0022](0022-alembic-adoption-and-health-gate-trim.md)); the boot path is
+> advisory-locked ([ADR-0036](0036-migration-single-path-hardening.md)) and the live head
+> is `0011_battery_src_truth`. The two `missions` ALTERs this ADR added are captured in
+> baseline `0001_baseline_schema`. **New schema changes go in a new Alembic revision, not
+> in `_add_missing_columns`** — that is now the standing rule
+> ([ADR-0042](0042-fresh-install-integrity-and-demo-hygiene.md) decision 1 adds the
+> idempotency obligation). The rest of the ADR — VARCHAR over PG enum, Pydantic-layer
+> validation, `revenue_by_source` — stands as written.
+
 ---
 
 ## Context

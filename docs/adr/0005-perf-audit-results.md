@@ -4,6 +4,12 @@
 **Date:** 2026-04-24
 **Companion:** ADR-0004 (BEFORE state) and `docs/plans/2026-04-24-perf-audit.md`
 
+> **Status 2026-09-21: series COMPLETE.** Every "filled in by aegis once pushed"
+> placeholder below is resolved — **FIX-3 = `eb60229` (v2.63.9)**, **FIX-4 = `aea428f`
+> (v2.63.10)**, docs close-out **`4212ad8` (v2.63.11)**. The duplicated
+> "## FIX-3 … _pending_" stub further down was an editing artifact and is marked as
+> such in place. Follow-up status re-verified today, see "Followups" at the foot.
+
 ---
 
 ## Context
@@ -113,7 +119,7 @@ without queueing.
 
 ## FIX-3 — Frontend code-split 17 main pages + Vite `manualChunks`
 
-**Commit:** _filled in by aegis once pushed_
+**Commit:** `eb60229` (auto-merged into `main`) — _resolved 2026-09-21; the placeholder read "filled in by aegis once pushed"_
 **Version:** v2.63.9
 **Files changed:** `frontend/src/App.tsx`, `frontend/vite.config.ts`.
 
@@ -179,15 +185,18 @@ $ sudo docker exec droneops-frontend-1 ls -lh /usr/share/nginx/html/assets/
 
 ---
 
-## FIX-3 — Frontend code-split 17 main pages + Vite `manualChunks`
+## FIX-3 (duplicate heading — editing artifact)
 
-_pending — populated when v2.63.9 deploys._
+> **Resolved 2026-09-21.** This stub was a second, empty copy of the FIX-3 section
+> and read "_pending — populated when v2.63.9 deploys._". FIX-3 shipped as
+> `eb60229` (v2.63.9) and is fully recorded in the FIX-3 section above. Kept as a
+> marker rather than deleted so the section numbering in this dated record is stable.
 
 ---
 
 ## FIX-4 — Client-side `useApiCache` hook + apply to Dashboard/Flights
 
-**Commit:** _filled in by aegis once pushed_
+**Commit:** `aea428f` (auto-merged into `main`) — _resolved 2026-09-21; the placeholder read "filled in by aegis once pushed"_
 **Version:** v2.63.10
 **Files changed:** `frontend/src/hooks/useApiCache.ts` (new),
 `frontend/src/pages/Dashboard.tsx`, `frontend/src/pages/Flights.tsx`.
@@ -230,6 +239,12 @@ revisit-within-TTL. Flights aircraft fetch is cached.
 
 **FIX-4 ACCEPTED (build-time + structural acceptance — UI smoke is
 operator follow-up).**
+
+> **Status 2026-09-21:** the outstanding UI smoke is moot — `useApiCache` has since
+> been rolled out well past Dashboard/Flights (`/customers`, `/aircraft`,
+> `/rate-templates`, `/settings/weather` shared and deduped across 7 pages) in
+> **v2.70.1 (`5ffcadc`, 2026-06-11)** with invalidations audited, and has been live in
+> production continuously since. No open item.
 
 ---
 
@@ -282,3 +297,20 @@ parallelized weather). Repeat-visit Dashboard within 30 s drops to
 - Index strategy when DB > 500 MB (F-7 in plan, deferred — not a today problem).
 - `pg_stat_statements` empirical query observability — operator decision, requires postmaster restart.
 - Dashboard sub-component split (F-8, deferred — gain too small to ship in this audit).
+
+> **Status 2026-09-21 (each re-checked against the running system, not recalled):**
+> - **Settings `useApiCache` — DONE.** v2.70.1 (`5ffcadc`, 2026-06-11) split
+>   `Settings.tsx` from 2,715 lines into a 134-line shell + 11 lazy per-tab subtrees
+>   (mount burst ~19 GETs → 1) and rolled the cache out across 7 pages.
+>   `frontend/src/pages/Settings.tsx` is 134 lines today.
+> - **Index strategy — still deferred, trigger not met.** Live DB is **124 MB**
+>   (`pg_database_size('droneops')` on `droneops-standby-db`), under the 500 MB
+>   threshold. Separately, 11 reviewed indexes did land via Alembic
+>   ([ADR-0021](0021-startup-recovery-guard-and-hot-indexes.md) ×4 +
+>   [ADR-0022](0022-alembic-adoption-and-health-gate-trim.md) `0002_p2_p3_indexes` ×7);
+>   prod carries **16** `ix_*` indexes.
+> - **`pg_stat_statements` — still OPEN.** `SELECT extname FROM pg_extension` on the
+>   live primary returns `plpgsql` only. Still an operator decision (needs a
+>   postmaster restart).
+> - **Dashboard sub-component split — still OPEN.** `frontend/src/pages/Dashboard.tsx`
+>   is **1,207 lines**, one component. Not on ROADMAP under an ID.

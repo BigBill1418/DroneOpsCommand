@@ -1,5 +1,23 @@
 # CS-Public patch hand-off — Wave 2B item 5
 
+> **Status 2026-09-21 (re-verified today, read-only): STILL UNAPPLIED, and still
+> applies cleanly.** `~/repos/CallSignPublic` has moved on from the `6c22708` recorded
+> below to **`0570fdd`** ("Merge pull request #127 … build 11 lane N"), but
+> `git apply --check docs/patches/0075-cspublic-search-origin-auth.patch` against that
+> HEAD still succeeds, and neither `ORIGIN_SEARCH_SECRET`, `_require_worker_bearer` nor
+> `search.worker_origin_token` appears anywhere in `worker/api/src/index.ts` or
+> `backend/app/api/archive.py` — so **the defect this patch closes is still live**:
+> `cs-api.barnardhq.com/api/archive/search` still answers unauthenticated, bypassing
+> Turnstile and the per-IP rate limiter.
+>
+> Nothing below has changed and the **MUST READ** fail-closed ordering still governs
+> the rollout: provision `search.worker_origin_token` on the origin first, then
+> `wrangler secret put ORIGIN_SEARCH_SECRET` with the **same** value. Tracked as
+> `O-12` in
+> `../reports/2026-09-21-open-items-inventory.md`. Note the third artifact
+> (`0075-cspublic-test_archive_search_origin_auth.py`) is still **UNVERIFIED** — it has
+> never been run, for the same reason as at hand-off.
+
 **Target repo:** `~/repos/CallSignPublic` (confirmed via `git remote -v`:
 `https://github.com/BigBill1418/CallSignPublic.git`, reachable, tree clean at
 hand-off — commit `6c22708`). **Not** `~/callsign` (that's the private

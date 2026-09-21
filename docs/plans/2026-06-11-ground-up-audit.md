@@ -1,6 +1,22 @@
 # DroneOpsCommand — Ground-Up Technical Audit (2026-06-11)
 
 **Status:** Analysis complete — findings report. No code modified.
+
+> **Disposition as of 2026-09-21 (this is a findings document, not a plan; the
+> findings were executed elsewhere).** **P1-1** (startup DDL on every boot /
+> crash-loop-on-standby) → [ADR-0021](../adr/0021-startup-recovery-guard-and-hot-indexes.md)
+> `pg_is_in_recovery()` guard, then the structural follow-up
+> [ADR-0022](../adr/0022-alembic-adoption-and-health-gate-trim.md) (Alembic) and
+> [ADR-0036](../adr/0036-migration-single-path-hardening.md) (advisory lock).
+> **P1-5 / P2-P3 indexes** → ADR-0021 (4) + ADR-0022 `0002_p2_p3_indexes` (7); prod
+> carries 16 `ix_*`. **P3-1** (Stripe coupled to the liveness 503) → ADR-0022 §6.
+> **P2-2** (device-upload latency coupling) → [ADR-0023](../adr/0023-device-upload-async-celery-decoupling.md),
+> **shipped both legs** (backend v2.71.0 `27c82b4`; DroneOpsSync v1.3.29 `c66931a`).
+> **P2-4 / P2-5 / P3-4** → v2.70.1 (`5ffcadc`). ROADMAP's FU-8 was closed on that
+> commit. The one header fact that drifted: **`backend/app/main.py:414` is no longer
+> where the version lives** — since v2.92.0 the source of truth is
+> `backend/app/version.py::APP_VERSION` (currently `2.92.1`), mirrored into
+> `app/main.py`'s `version=` literal and guarded by `tests/test_app_version_parity.py`.
 **Auditor:** Terry (research/architect). Deep-dives by 3 parallel sub-agents (backend perf/mem, frontend perf, reliability/compose) + direct integration & code-quality review.
 **Scope:** `/home/bbarnard065/droneops` (DroneOpsCommand) + `/home/bbarnard065/DroneOpsSync` + the integration between them.
 **Live host:** BOS-HQ (10.99.0.4), blue-green standby topology, PostgreSQL streaming replication.

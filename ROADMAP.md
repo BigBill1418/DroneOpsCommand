@@ -42,6 +42,14 @@ warranted. Swapping the app onto it is a one-line change in
 
 ### MP-2 — Tune the probe, then arm ntfy — **NOT STARTED, earliest 2026-10-05**
 
+> **Schedule corrected 2026-09-21.** The beat entry is
+> `crontab(day_of_week=1, hour=15, minute=47)` — **Mondays 15:47 UTC = 08:47
+> PDT**. v2.92.0 went live at 14:52 PDT on Monday 2026-09-21, *after* that day's
+> slot, so the **first scheduled run is Monday 2026-09-28** and the second is
+> 2026-10-05, which is where the "earliest 2026-10-05" above comes from. Two
+> *full* weeks of history is 2026-10-12. An earlier draft said "first run Monday
+> 2026-09-22"; 2026-09-22 is a Tuesday and no run happens then.
+
 The tile-health probe ships **observe-only**: `basemap_probe_ntfy_enabled`
 defaults false, so it records and logs but never publishes. The Hamming-distance
 (8) and byte-band (+/-40%) thresholds in `app/services/basemap_probe.py` are
@@ -49,8 +57,7 @@ starting points, **not measurements** — basemaps legitimately change when a
 provider refreshes its data, and a probe that pages falsely on the first refresh
 gets muted, which is worse than no probe.
 
-**Do:** after at least two weeks of weekly runs (first run Monday 2026-09-22,
-so earliest **2026-10-05**), read the accumulated
+**Do:** after at least two weekly runs, read the accumulated
 `system_settings.basemap_probe_last_result` history and the
 `basemap_tile_health` log lines, look at the observed hash distances and byte
 deltas per layer, and either widen the thresholds to the observed variance plus
@@ -546,7 +553,8 @@ it lived in `PROGRESS.md` and was **executed 2026-09-21**.
   every LLM generation and persists findings into two new `Report`
   columns (`has_audience_leak BOOL`, `audience_leak_details JSONB`)
   added via the idempotent `_add_missing_columns` migration path in
-  `backend/app/main.py:114-122`. Helper never raises (detector failure
+  `backend/app/main.py` (`def _add_missing_columns` is at `:67` as of
+  2026-09-21 — the original `:114-122` citation has drifted). Helper never raises (detector failure
   logs and leaves defaults so generation never 500s). No regen loop
   per operator directive — detection + surfacing only, with a
   doc-string-lock test preventing drift toward retry-clean. Yellow
@@ -625,8 +633,11 @@ it lived in `PROGRESS.md` and was **executed 2026-09-21**.
   >   heavy `flight_data_cache` keys (`_strip_cache_heavy_keys`,
   >   `_scalar_cache_from_flight`).
   > - **#2 Alembic** — shipped (ADR-0022, v2.70.0). `backend/alembic/versions/`
-  >   holds `0001_baseline_schema` … `0009_mission_dl_email_sent_at`, all nine
-  >   present inside the running `droneops-backend-1` container on BOS-HQ, and
+  >   held `0001_baseline_schema` … `0009_mission_dl_email_sent_at` when this
+  >   correction was written; as of 2026-09-21 it holds **eleven** revisions
+  >   (`0010_flight_details` and `0011_battery_source_of_truth`, added by
+  >   ADR-0043), all present inside the running `droneops-backend-1` container
+  >   on BOS-HQ, and
   >   ADR-0036 made the advisory-locked Alembic boot the single schema path.
   >   **Anything that still says "DroneOpsCommand has no Alembic; add columns to
   >   `_add_missing_columns()` in `main.py`" is describing the pre-v2.70.0 repo

@@ -1,7 +1,20 @@
 # DJI flight-log untapped-data census (2026-09-04)
 
-**Status:** research record, nothing built. Bill asked "what ELSE is in those log
-files that we can also extract and utilize?" This is the primary-source answer.
+**Status:** research record. Bill asked "what ELSE is in those log files that we can
+also extract and utilize?" This is the primary-source answer.
+
+> **Status 2026-09-21:** the "nothing built" half of this line is **out of date** — it
+> was written 2026-09-04 and this census is the research input that
+> [ADR-0043](../adr/0043-flight-details-sidecar-table-for-extended-log-data.md) was
+> built on. **FP-1 P0 and P1 are shipped and live**: the `flight_details` /
+> `flight_series` sidecar schema + read path in **v2.82.0** (`8b29ef9`) and Tier 0
+> extended-log extraction in **v2.83.0** + flight-parser **1.2.0** (`439b952`); live
+> alembic head is `0011_battery_src_truth`, and the live DB holds 16 `flight_details`
+> rows and 240 `flight_series` rows (details are written on new ingest only — the
+> backfill is P3 and unbuilt). **P2–P7 are not built.** The census itself is unchanged
+> and still accurate as a record of what the decoder can hand us; the one hard gate on
+> P2 is peak RSS against the parser's 256 MB `mem_limit`, still unmeasured (ROADMAP
+> `FP-1`).
 
 ## Method
 

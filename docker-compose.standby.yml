@@ -1,6 +1,18 @@
 # docker-compose.standby.yml — PostgreSQL streaming replication standby
-# Runs on HSH-HQ (10.99.0.1) to maintain a hot standby of the DroneOps
-# primary database running on CHAD-HQ (10.99.0.2:5434).
+# Originally: runs on HSH-HQ (10.99.0.1) to maintain a hot standby of the
+# DroneOps primary database running on CHAD-HQ (10.99.0.2:5434).
+#
+# ⚠ STATUS 2026-09-21 — THIS FILE DESCRIBES THE PRE-2026-04-20 TOPOLOGY.
+# The direction inverted during the HSH-HQ → BOS-HQ migration. Live today
+# (verified 2026-09-21 via `pg_stat_replication` on the primary):
+#     PRIMARY  = BOS-HQ 10.99.0.4, container `droneops-standby-db`
+#                (a promoted former standby; the name is historical)
+#     STANDBY  = 10.99.0.2 (CHAD-HQ), application_name `chad_hq_standby`
+# So the `host=10.99.0.2` in `primary_conninfo` below points at the STANDBY,
+# not the primary, and `application_name=hsh_hq_standby` is not the name the
+# live standby registers under. Do NOT bring this file up as-is: set the
+# primary host to the real primary first. Kept because it is the reviewed,
+# secret-free shape of a standby for this stack (ADR-0012 guards intact).
 #
 # Usage:
 #   docker compose -f docker-compose.standby.yml up -d

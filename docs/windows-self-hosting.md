@@ -9,12 +9,12 @@ Complete guide for running DroneOpsCommand on a Windows 10/11 machine using Dock
 | Requirement | Minimum | Recommended |
 |---|---|---|
 | OS | Windows 10 (version 2004+) or Windows 11 | Windows 11 |
-| RAM | 8 GB | 16 GB |
-| Disk | 25 GB free | 50 GB free |
+| RAM | 12 GB | 16 GB |
+| Disk | 35 GB free | 50 GB free |
 | CPU | 4 cores | 8 cores |
 | Virtualization | Enabled in BIOS | — |
 
-> The AI report engine (Ollama/Qwen 2.5 3B) reserves ~8 GB of RAM. With 8 GB total you will be tight — 16 GB is strongly recommended. Alternatively, use `LLM_PROVIDER=claude` with an Anthropic API key to skip the local model entirely.
+> The AI report engine (Ollama, default model **Llama 3.1 8B Instruct `q4_K_M`**) is given an 8 GB reservation and a 10 GB cap in `docker-compose.yml`, and the model is ~6 GB resident with its KV cache. **8 GB of host RAM is not enough** with Ollama running — 16 GB is strongly recommended. Alternatively, use `LLM_PROVIDER=claude` with an Anthropic API key and set the `ollama` service to zero replicas, which drops the requirement back to ~6 GB.
 
 ---
 
@@ -141,7 +141,7 @@ docker compose up -d
 The first run will:
 1. **Build** the backend, frontend, and flight-parser images (5-10 minutes)
 2. **Download** PostgreSQL, Redis, and Ollama base images (~2 GB)
-3. **Pull the AI model** — Qwen 2.5 3B is ~1.5 GB
+3. **Pull the AI model** — Llama 3.1 8B Instruct `q4_K_M` is ~4.9 GB
 
 Watch the model download progress:
 

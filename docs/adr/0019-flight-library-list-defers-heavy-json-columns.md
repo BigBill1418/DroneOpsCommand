@@ -7,6 +7,21 @@
   `/api/flight-library` list endpoint, and the mission-picker flight loader
   (`frontend/src/pages/MissionFlightsEdit.tsx`).
 
+> **Status 2026-09-21 — the two §Follow-ups re-checked against the code and the running
+> system:**
+> - **"Frontend fail-soft is too quiet" — STILL OPEN.** `MissionFlightsEdit.loadFlights`
+>   still wraps the `/flight-library` call in a bare `catch { … }` that falls through to
+>   `GET /flights` (the ODL proxy) on *any* error, exactly as described
+>   (`frontend/src/pages/MissionFlightsEdit.tsx:166-176`). No ROADMAP ID; recorded in
+>   `docs/reports/2026-09-21-open-items-inventory.md`.
+> - **"Boot-time backfill log spam" — NOT PRESENT TODAY, code unchanged.** The
+>   per-flight `fleet-match …` INFO lines are still emitted by `_match_fleet_aircraft`,
+>   but the loop they run in is empty: the live backend logs
+>   `STARTUP: Aircraft backfill — 0/0 unlinked matched` and `docker logs
+>   droneops-backend-1 | grep -c fleet-match` returns **0**, because
+>   [ADR-0044](0044-serial-prefix-matcher-odl-canonical-serials.md) drove unattributed
+>   flights to zero. Re-opens if unlinked rows ever accumulate again.
+
 ## Context — production incident (2026-06-10 ~11:25 PM PT)
 
 Operator reported two symptoms:

@@ -44,9 +44,22 @@ per-point timestamps, RC link quality, distance-from-home, the flight-mode/RTH
 timeline, photo/video events, gimbal pointing, MSL altitude, battery
 current/mAh/cell balance, the human-readable warning stream, and — one call
 deeper into the raw record stream — pilot GPS, pack cycle count, component
-firmware, and failsafe configuration. All 210 production `dji_txt` flights are decoded, but only 182 have a retained original file (plan §8; 28 were lost in the 2026-04-20 HSH→BOS migration). All 210 production `dji_txt` flights are
-v14 logs with `frames_decoded=true` and their originals are retained at
-`/data/uploads/flight_logs/<sha256>.txt`, so every item is backfillable.
+firmware, and failsafe configuration. All 210 production `dji_txt` flights (the
+count on 2026-09-04) are v14 logs with `frames_decoded=true`; **182 of them have
+a retained original** at `/data/uploads/flight_logs/<sha256>.txt` (plan §8 — 28
+were lost in the 2026-04-20 HSH→BOS migration), so every item is backfillable for
+those.
+
+> **Editing-artifact fix + re-derived counts, 2026-09-21.** The paragraph above
+> previously ran two half-sentences together ("All 210 … are decoded, but only 182
+> have a retained original file … All 210 … are v14 logs"), which read as a
+> contradiction. Repaired without changing either fact. **Today's counts, queried
+> from the live primary rather than read off this prose:** `dji_txt` = **234**,
+> `opendronelog_import` = **584** (818 flights total); `flight_details` = **16**
+> rows, `flight_series` = **240** rows — consistent with P1 writing details only on
+> new ingest, since the backfill is P3 and unbuilt. The 226 figure in the "Status of
+> implementation" note below was itself point-in-time. §"Status of implementation"
+> already warns that counts move; this is the re-derivation.
 
 The operator asked for it to be captured into the database and made reachable
 from the Flights menu, with utilisation ("reports, battery, maintenance")
@@ -329,8 +342,10 @@ still roll it back. Structural where possible; verified where not.
   report in `docs/reports/`, its own ADR, and a `force=true` re-backfill on
   adoption.
 - The inline `downsample` helper in `get_telemetry`
-  (`flight_library.py:1999-2003`) is extracted to a shared service used by both
-  read paths. This is ADR-0032's standing finding applied prophylactically — that
+  (cited as `flight_library.py:1999-2003` on 2026-09-04) is extracted to a shared
+  service used by both read paths. **Done in P0/P1:** it now lives in
+  `backend/app/services/telemetry_downsample.py` (`downsample`, `select_indices`),
+  imported at `flight_library.py:51` and used by `get_telemetry` at `:2220`. This is ADR-0032's standing finding applied prophylactically — that
   ADR concludes the absence of a shared layer is what lets a defect class recur,
   and a second copy-pasted downsampler would be the same mistake.
 - **Failover & Resilience Guard:** two additive tables and three additive

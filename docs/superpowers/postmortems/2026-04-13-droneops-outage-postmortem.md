@@ -4,6 +4,32 @@
 **Status:** Blameless process post-mortem. Service restoration handled separately by Aegis.
 **Scope:** Process failures, not the technical fix.
 
+> **Status 2026-09-21 — the analysis stands; its two action sections were never
+> executed, and that is stated here rather than left to look done.**
+> - **§5 "Proposed `CLAUDE.md` additions" — NOT ADDED.** `CLAUDE.md` contains no
+>   "Deploy Discipline" section and none of the five rules (rollback-first,
+>   conflict-flag ban, real-verification, drift threshold, bind-mount integrity check).
+>   `docs/superpowers/deploy-logs/` — the directory rule 1 tells the operator to write
+>   pre-deploy state into — does not exist.
+> - **§6 "Memory records to update" — NOT CREATED** under this agent's memory store
+>   (`feedback_deploy_rollback_first.md`, `feedback_no_theirs_ours_on_deploy.md`,
+>   `feedback_deploy_verification_real.md`, `feedback_drifted_clone_refusal.md`,
+>   `project_incident_20260413_droneops.md` are all absent). Note the path §6 gives
+>   (`~/.claude/projects/-home-bbarnard065/memory/`) is not the current memory location
+>   either.
+> - **What *did* change, independently, covers part of the same ground:** the deploy
+>   path itself was consolidated onto the fleet deployer with the per-repo poller
+>   deleted ([ADR-0018](../../adr/0018-deploy-path-is-noc-fleet-deployer.md), which
+>   removes the "drifted clone you deploy by hand" shape for **production**), and the
+>   repo-wide rule that deploy verification must read the **running** version rather
+>   than `deployer-state.json` is now recorded in `CLAUDE.md` § Deployment topology and
+>   repeated in ADR-0033/0034/0035/0038.
+> - **The demo stack this incident was about is still hand-updated**, not
+>   deployer-managed (`~/droneops-demo` on BOS-HQ) — it was hand-updated twice on
+>   2026-09-21 (→ v2.92.0, then → v2.92.1). So the §4 lessons remain live guidance for
+>   that one surface.
+> Recorded as open in `docs/reports/2026-09-21-open-items-inventory.md`.
+
 ## 1. Timeline
 
 All times UTC, reconstructed from `git log` and container uptime on CHAD-HQ.

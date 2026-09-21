@@ -4,6 +4,14 @@
 - **Date:** 2026-09-05
 - **Amends:** [ADR-0007](0007-strict-fleet-attribution-matcher.md) (strict fleet-attribution matcher). ADR-0007 remains in force; this ADR adds one narrowly-scoped rule inside its serial branch and changes nothing about its model branch.
 
+> **Re-verified 2026-09-21** by re-running this ADR's own §Verification queries against
+> the authoritative primary: unattributed serial-bearing flights = **0** (expected 0);
+> `DJI Matrice 4TD` = **50** and `DJI Matrice 4T` = **39** on the two 20-char ODL serials
+> (the ADR expected 49/39 — the M4TD row has grown by one flight since 2026-09-05, which
+> is the rule continuing to work, not drift). `backend/tests/test_flight_attribution.py`
+> → **22 passed**, matching §References. The live backend logs
+> `STARTUP: Aircraft backfill — 0/0 unlinked matched`.
+
 ## Context
 
 ### Two serial forms for the same airframe

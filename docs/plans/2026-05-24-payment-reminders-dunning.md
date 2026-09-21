@@ -1,6 +1,12 @@
 # 2026-05-24 — Automated payment reminders (dunning) — design spec
 
-- **Status:** Approved (design); ready for implementation plan
+- **Status:** **✅ IMPLEMENTED — Phase 1 (email) SHIPPED 2026-05-24 as v2.67.7** and
+  runtime-verified (Banks invoice `BARNARDHQ-2026-0002` enrolled; the 48 h stage fired
+  2026-05-26 16:35 UTC). *(This line read "Approved (design); ready for implementation
+  plan" until 2026-09-21 — stale by ~4 months.)* The implementation record is
+  [`2026-05-24-payment-reminders-dunning-plan.md`](2026-05-24-payment-reminders-dunning-plan.md),
+  which carries the ship evidence and has no open tasks. **Phase 2 (SMS) remains
+  deferred and unbuilt** — it is the only part of this spec that is still a design.
 - **Owner:** Bill / Claude
 - **Scope:** DroneOpsCommand backend. Phase 1 = email. Phase 2 (later) = SMS.
 

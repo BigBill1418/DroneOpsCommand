@@ -1,8 +1,24 @@
 # Incident: Mission-report audience leak — 2026-05-14
 
 **Author:** Terry (research / documentation lane; aegis owns the code-level RCA + fix)
-**Status:** Closed (RCA + prompt fix) / In-progress (runtime soft-block gate). Quality defect, not an outage. No customer impact (operator caught the defect on his own personal instance before the report shipped). "Close-out thoroughness" workflow per operator preference, not active-incident hotfix. See §10 for the post-RCA decisions.
+**Status:** **CLOSED in full.** *(Updated 2026-09-21 — this read "Closed (RCA + prompt fix) / In-progress (runtime soft-block gate)"; the gate half has been shipped and deployed since 2026-05-14.)* Quality defect, not an outage. No customer impact (operator caught the defect on his own personal instance before the report shipped). "Close-out thoroughness" workflow per operator preference, not active-incident hotfix. See §10 for the post-RCA decisions.
 **Severity:** Class-Q (quality defect in a generated, client-facing artifact). Below ntfy alerting threshold under ADR-0037. No publish.
+
+> **Status 2026-09-21 (verified against the running system, not recalled).** The
+> runtime soft-block gate that §10 Decision B left "in-progress / deploy gated on the
+> 24 h soak" is **live in production**: `_apply_audience_findings` is defined at
+> `backend/app/tasks/celery_tasks.py:166` and wired at `:307`, and both
+> `reports.has_audience_leak` and `reports.audience_leak_details` are present in the
+> production database. The guard suite has since grown from 17 to **36** tests
+> (`backend/tests/services/test_report_audience_guard.py`, re-run today: 36 passed)
+> because ADR-0029's altitude rules and ADR-0035's `TestNarrativeQualityLevers` were
+> added to it; `test_audience_leak_persistence.py` is 10 passed, as recorded.
+> Two notes on references in this document:
+> - **"ADR-0037" here means the *fleet* (noc-master) notification-noise policy**, not
+>   this repo's local ADR-0037 (airspace/LAANC), which was numbered later on 2026-07-03.
+> - The §"Related improvement" citation `MissionReportEdit.tsx:262-272` has drifted —
+>   the clear-on-Generate block (`setReportContent('')`, `setHasAudienceLeak(false)`,
+>   `setAudienceLeakDetails([])`) is at **`:285-287`** today.
 
 ## 1. Symptom
 

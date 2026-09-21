@@ -233,6 +233,13 @@ DroneOpsCommand (items 1–4): standard `git push` → NOC fleet-deployer path
 post-deploy: `curl -s https://droneops.barnardhq.com/openapi.json | jq -r
 .info.version` reads `2.91.0`.
 
+> **Status 2026-09-21:** that verification **passed at ship time** — v2.91.0 was live
+> on BOS-HQ at 13:58 PDT. The repo has since moved on: live is **v2.92.1** (v2.92.0
+> = ADR-0046 basemaps, v2.92.1 = the Sentry-release fix). So re-running the command
+> above today correctly returns `2.92.1`, not `2.91.0`; the Phase 7 code is in every
+> build after `d30eb5b`. Full backend suite re-run today: **855 passed, 17 skipped**
+> (this ADR's correction section records 795/17 at the time of the fix).
+
 CS-Public (item 5): **do not merge/deploy until both secrets are set** —
 see the patch hand-off note and `docs/patches/0075-cspublic-search-origin-auth.patch`.
 
@@ -284,7 +291,9 @@ constant container IP, just relocated from `frontend`'s address to
 verification method — confirming the new `backend.environment` block
 *renders* correctly. It does not, and cannot, confirm the *live network
 path* matches the code's trust assumption. This is the same class of gap
-`docs/adr/0247-....md` Amendments 1–4 (noc-master) document repeatedly: a
+`noc-master/docs/adr/0247-noc-control-plane-phase-1-containment.md` Amendments 1–4
+document repeatedly *(filename resolved 2026-09-21 — this cited the placeholder
+`docs/adr/0247-....md`, which resolves to nothing)*: a
 fix can verify correct under one method (syntax/render) and be wrong under
 the one that actually matters (the live system). No live container, no
 live log, and no `docker network inspect` was run against the actual
@@ -342,8 +351,10 @@ current container IP is — it is not guaranteed stable across a recreate).
 > `ssh 10.99.0.4 'docker logs --tail 50 droneops-frontend-1'` and confirm the
 > resolved-client field shows his own public IP, not `172.19.0.11`.
 
-**Not fixed by this correction, by decision:** the managed-tenant topology
-requires an operator action (`docker-compose.managed.yml` on BOS-HQ, a
+**Not fixed by this correction, by decision — and still outstanding as of
+2026-09-21 (no managed tenant is provisioned, so nothing is currently
+mis-bucketed; it becomes load-bearing the moment one is):** the managed-tenant
+topology requires an operator action (`docker-compose.managed.yml` on BOS-HQ, a
 file outside this repo) that this branch cannot make — `docs/managed-
 hosting.md` documents the exact required values
 (`TRUSTED_PROXY_HOSTNAME=caddy` + `FORWARDED_ALLOW_IPS=<shared-gateway

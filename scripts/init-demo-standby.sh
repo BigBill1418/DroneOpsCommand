@@ -1,10 +1,16 @@
 #!/bin/bash
-# init-demo-standby.sh — Initializes the DroneOps Demo PostgreSQL standby on HSH-HQ.
-# Performs pg_basebackup from the CHAD-HQ primary and creates the
-# standby.signal file required for streaming replication.
+# init-demo-standby.sh — Initializes a DroneOps Demo PostgreSQL standby.
+# Performs pg_basebackup from the demo primary and creates the standby.signal
+# file required for streaming replication.
 #
 # Run this ONCE before starting the standby container.
 # After this, docker-compose.demo-standby.yml handles ongoing replication.
+#
+# ⚠ STATUS 2026-09-21 — STALE PRIMARY ADDRESS, AND NOTHING USES THIS TODAY.
+# The demo stack runs on BOS-HQ (10.99.0.4) at ~/droneops-demo; its `db`
+# service publishes host port 5435 there. `PRIMARY_HOST="10.99.0.2"` below is
+# the pre-2026-04-20 CHAD-HQ address. No demo standby container is running
+# anywhere on the mesh. Set PRIMARY_HOST to the real demo primary before use.
 #
 # Usage: ./scripts/init-demo-standby.sh
 

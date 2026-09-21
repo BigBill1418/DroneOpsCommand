@@ -1,8 +1,37 @@
 # ADR-0028 — Flight-data integrity: GPS outlier gate, batch-import transaction safety, race-safe dedup, live-scalar reporting, and Part-107 altitude truthfulness
 
-- Status: Accepted
+- Status: **Accepted, EXCEPT §H1 which is SUPERSEDED** — see the dated note below.
 - Date: 2026-06-29
 - Supersedes/relates: ADR-0019/0020/0025 (mission OOM), ADR-0026 (report metric accuracy + ghost flights), ADR-0027 (DJI duration + auto names)
+- **Superseded in part by:** [ADR-0029](0029-mission-reports-are-client-deliverables-not-compliance-audits.md)
+  (§H1) and [ADR-0031](0031-odl-max-altitude-is-verified-remove-unverified-peak-caveat.md)
+  (the residue §H1 left behind)
+
+> **Status 2026-09-21 — two corrections, both of them reversals of this ADR's own text.**
+>
+> 1. **§H1 ("Part-107 altitude truthfulness") is SUPERSEDED and its behaviour has been
+>    REMOVED from the code.** [ADR-0029](0029-mission-reports-are-client-deliverables-not-compliance-audits.md)
+>    (2026-06-29, v2.76.1) deleted `PART_107_CEILING_M`, the `over_400ft` per-flight flag
+>    and summary field, the `over_400ft_count` tally and the "exceeds the 400 ft AGL
+>    Part 107 limit" annotation, and inverted the prompt clause: the model must **never**
+>    mention, compare against or flag an altitude limit in a client deliverable. The
+>    reason is in that ADR: the report engine cannot know the ground reference, a
+>    LAANC/waiver authorization, or §107.51(b) structure proximity, so an "exceeded"
+>    claim is an unfounded admission against the operator. **§Consequences' line
+>    "Altitude is reported truthfully against the 400 ft AGL limit" no longer describes
+>    this system.** The *data* half of H1 — accurate values with correct units — is
+>    retained. H1's "ceiling-limited (peak unverified)" ODL flag was then removed by
+>    [ADR-0031](0031-odl-max-altitude-is-verified-remove-unverified-peak-caveat.md).
+>    **Everything else in this ADR is untouched and still in force**: C1, C2, H2, H3/H4/M3,
+>    H5, M1–M9, L2/L4/L5/L6.
+>
+> 2. **§"Out-of-repo open item" is CLOSED.** The question — "is ~500 m the configured
+>    ceiling or an achieved peak?" — was answered against per-point telemetry on
+>    2026-06-30 by [ADR-0031](0031-odl-max-altitude-is-verified-remove-unverified-peak-caveat.md):
+>    for all **570** ODL flights carrying a `gps_track`, stored `max_altitude` matched the
+>    track peak within 1 m (max delta 0.4 m, zero rows where stored exceeded the track),
+>    and the 13 device-max flights each carry hundreds of genuine points at 499–500 m.
+>    It is an achieved peak. No ODL API credentials were needed after all.
 
 ## Context
 

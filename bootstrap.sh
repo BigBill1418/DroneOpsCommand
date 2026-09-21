@@ -8,7 +8,8 @@
 # 6h 26m before anyone noticed.
 #
 # This script fails loud instead of failing silent. Run it in place of a
-# bare `docker compose up -d` on the demo host:
+# bare `docker compose up -d` on the demo host (BOS-HQ, ~/droneops-demo —
+# host corrected 2026-09-21; the error text below said CHAD-HQ):
 #
 #   ./bootstrap.sh
 #   ./bootstrap.sh --clean   # rebuild without docker cache
@@ -21,7 +22,7 @@ cd "$(dirname "$0")"
 if [[ ! -f .env.demo ]]; then
   echo "ERROR: .env.demo not found in $(pwd)" >&2
   echo "This file is required for demo deployment." >&2
-  echo "It should be present on the demo host (CHAD-HQ:~/droneops-demo/.env.demo)." >&2
+  echo "It should be present on the demo host (BOS-HQ 10.99.0.4: ~/droneops-demo/.env.demo)." >&2
   exit 1
 fi
 

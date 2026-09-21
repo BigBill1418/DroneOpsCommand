@@ -7,11 +7,18 @@
 > `0030-report-output-token-caps-full-after-action-reports.md`). Two other
 > details below are also out of date and must not be copied into new work:
 > the migration is numbered on this repo's linear Alembic tree
-> (`backend/alembic/versions/`, currently 0001…0009 — there is no `0030_*`),
-> and the API container's compose service is `backend`, not `api`, so the
-> `docker compose run --rm api alembic …` lines in §"Deploy" are wrong —
+> (`backend/alembic/versions/`, **0001…0011 as of 2026-09-21** — there is no
+> `0030_*`), and the API container's compose service is `backend`, not `api`, so
+> the `docker compose run --rm api alembic …` lines in §"Deploy" are wrong —
 > migrations run automatically in the API entrypoint on the advisory-locked
 > boot path (ADR-0022 + ADR-0036).
+>
+> **Third stale detail, added 2026-09-21:** every `https://command.barnardhq.com/…`
+> URL below is dead. That hostname has **no DNS record at all** (re-checked
+> 2026-09-21: NXDOMAIN, no zone wildcard, `curl` → 000). Prod is
+> `https://droneops.barnardhq.com` — and it is behind Cloudflare Access, so the
+> `curl -sS -I` smoke checks in §"Deploy" would get a 302 to the Access login
+> page rather than the app. Verify from BOS-HQ on `localhost:8000` instead.
 
 **Repo:** `BigBill1418/DroneOpsCommand`
 **Target version:** v2.63.x → v2.64.0

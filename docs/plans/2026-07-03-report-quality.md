@@ -1,8 +1,21 @@
 # Plan: Client-Report Narrative Quality Pass (FU-AI-QUALITY-PASS)
 
 - **Date:** 2026-07-03
-- **Status:** Proposed (concrete options for the parked "it's ok for now"
-  watching brief)
+- **Status:** **§3.1–3.3 SHIPPED; §3.4–3.6 awaiting the operator's reaction — the §7
+  decision is the one thing gating the rest.** *(Updated 2026-09-21 — the header read a
+  flat "Proposed", which is no longer true of the first three levers.)* The single
+  low-risk prompt pass §7 asks Bill to approve **was approved and shipped** as
+  [ADR-0035](../adr/0035-report-narrative-quality-levers.md), **v2.77.0, 2026-07-03**:
+  §3.1 kill-hedging, §3.2 anti-bloat / signal-density budget, §3.3 number-grounding
+  (with an explicit altitude carve-out so ADR-0029 is reinforced, not weakened), locked
+  by `TestNarrativeQualityLevers` in
+  `backend/tests/services/test_report_audience_guard.py`. **§3.4 (routine-flight
+  variant), §3.5 (Section-5 framing) and §3.6 (real-estate register) remain unbuilt**
+  and are deliberately gated on Bill reacting to the shipped pass — ROADMAP
+  `FU-AI-QUALITY-PASS` is explicit that no session should pick a direction unasked.
+  Tracked as `O-3` in `docs/reports/2026-09-21-open-items-inventory.md`. Line citation
+  drift: `SYSTEM_PROMPT_TEMPLATE` still starts at `backend/app/services/ollama.py:9` but
+  is far longer than the cited `:9-67` — cite the symbol.
 - **Owner:** engineering (DroneOpsCommand)
 - **Related:** ROADMAP `FU-AI-QUALITY-PASS`; ADR-0015 (single client-facing
   audience contract); **ADR-0029 (altitude / Part-107 guard — MUST NOT be

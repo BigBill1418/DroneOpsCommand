@@ -1,7 +1,7 @@
 # Mission Hub Redesign — Design Spec
 
 **Date:** 2026-05-03
-**Status:** Approved by operator (Bill, 2026-05-03)
+**Status:** Approved by operator (Bill, 2026-05-03) — **IMPLEMENTED; shipped as v2.67.0 on 2026-05-03** (added 2026-09-21). Decision record: [ADR-0014](../../adr/0014-mission-hub-redesign.md). The Hub + Facet pattern is live; the legacy wizard is still preserved at `/missions/:id/edit-legacy` because ADR-0014's deletion criteria were never evaluated. Note §"Integration matrix" references `scripts/snapshot.sh` as the nightly backup — that lane was retired on 2026-09-21 ([ADR-0041](../../adr/0041-comprehensive-encrypted-backup-to-r2.md) §5.7 cutover); backups are now `droneops-backup.timer` → encrypted restic → R2, mirrored to Backblaze B2.
 **Triggered by:** duplicate-mission bug (operator opened existing mission for edit, clicked Save on Details step, system created a NEW mission instead of updating). Two duplicates created at 18:46:54 + 18:49:28 UTC; both since deleted by operator.
 **Related:** ADR-0009 (deposit feature), ADR-0010 (TOS rebuild), ADR-0011 (payment idempotency), ADR-0013 (contract tests + 4xx alerting).
 

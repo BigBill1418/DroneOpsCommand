@@ -7,6 +7,17 @@
 - **Related:** ADR-0036 (notifications), `.github/workflows/secret-scan.yml`,
   `.pre-commit-config.yaml`, `.gitleaks.toml`
 
+> **Cross-reference disambiguation + follow-up status, 2026-09-21.** The bare `ADR-0036`
+> above is the **fleet** (noc-master) ntfy ADR, not this repo's local
+> [ADR-0036](0036-migration-single-path-hardening.md) (migration single-path hardening),
+> which was numbered later. On §"Operator follow-ups": the history rewrite was **not**
+> commissioned (the leaked values remain rotated-and-inert, which is the accepted
+> posture recorded in §Trade-offs); `.github/workflows/secret-scan.yml` is still present
+> and is one of only three workflows in the repo; and the `:?required` pattern still
+> holds — the 2026-08-17 cold DR rehearsal proved it non-vacuously by showing a compose
+> render **refused** with `.env` removed ([ADR-0041](0041-comprehensive-encrypted-backup-to-r2.md)
+> §As-built addendum).
+
 ## Context
 
 GitGuardian flagged commit `5ec9392` (pushed 2026-05-03 07:39:27 UTC) as

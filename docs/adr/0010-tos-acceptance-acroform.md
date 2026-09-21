@@ -13,6 +13,28 @@ place; see Consequences below.
 - `docs/adr/0008-customer-payment-gated-on-mission-completion.md`
   (extended by the parallel deposit feature, ADR-0009)
 
+> **Status 2026-09-21 (live; three of the four deferred items are closed).**
+> - **"This repo does not use Alembic" (§Per-repo deltas, and the `0030_tos_acceptances.py`
+>   row) is no longer true.** Alembic landed 2026-06-11
+>   ([ADR-0022](0022-alembic-adoption-and-health-gate-trim.md)); the `tos_acceptances`
+>   table is captured in baseline `0001_baseline_schema`. New schema changes go in a new
+>   revision.
+> - **CF Access bypass for `/tos/*` + `/api/tos/*` — DONE.** A real paying customer drove
+>   the public flow end to end on 2026-05-03 (see
+>   [ADR-0013](0013-customer-flow-contract-tests-4xx-burst-alerting.md), which opens by
+>   describing that customer's session). The §Verification line "Live verification
+>   deferred to operator post-merge once the orchestrator extends Cloudflare Access" is
+>   therefore satisfied.
+> - **Operator-side TOS-acceptance review UI — DONE, not "psql or the download
+>   endpoint".** `frontend/src/pages/TosAcceptancesAdmin.tsx` shipped 2026-05-03
+>   (`725f5b9`) at route `/tos-acceptances`, is in the AppShell nav as "TOS Audit", and
+>   is deep-linked from Customers and MissionDetail.
+> - **Deprecating the `CustomerIntake.tsx` canvas widget — still OPEN.** The file is
+>   still on disk and still backs `/intake/{token}`. No ROADMAP ID; recorded in
+>   `docs/reports/2026-09-21-open-items-inventory.md`.
+> - `backend/tests/services/test_tos_acceptance.py` re-ran today: **12 passed**, matching
+>   §Verification.
+
 ## Context
 
 Until today, the customer's acceptance of the BarnardHQ Terms of

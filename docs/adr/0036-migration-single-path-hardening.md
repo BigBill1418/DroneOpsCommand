@@ -10,6 +10,32 @@
   **v2.75.1** hotfix (revision-id length crash-loop). Executes **Phase 1** of
   `docs/plans/2026-07-03-migration-consolidation.md`.
 
+> **Status 2026-09-21 (Phase 1 in force; Phase 2 partial, Phase 3 not started).**
+> - **The advisory lock is live.** `_MIGRATION_LOCK_ID = 8675310` and the
+>   lock/unlock envelope are in `backend/app/db_migrations.py`, and the hermetic
+>   envelope tests are in `backend/tests/test_db_migrations.py` (re-run today:
+>   **17 passed, 2 skipped** — the two skips are the opt-in real-Postgres tier gated on
+>   `DOC_TEST_PG_URL`; this ADR recorded 25/2 on 2026-07-03).
+> - **The ≤32-char revision fence exists** (`test_db_migrations.py:288`), hermetic.
+> - **Phase 2's "model-vs-head autogenerate CI gate" exists as a test but NOT as a
+>   gate.** `_autogenerate_diffs` / `compare_metadata` is in the **opt-in real-Postgres
+>   tier** and is skipped by default, and this repo has **no pytest job in CI at all** —
+>   `.github/workflows/` holds only `auto-merge-claude.yml`, `secret-scan.yml`,
+>   `self-hosted-smoke-test.yml`. So nothing enforces either fence at merge time.
+> - **Phase 3 is not started**, as §"Scope boundary (deferred)" anticipated:
+>   `_add_missing_columns` / `_create_hot_indexes` are still defined in
+>   `backend/app/main.py` (lines 67 and 256) and are still imported by
+>   `alembic/versions/0001_baseline_schema.py`. That is by design — the baseline
+>   reproduces the live schema by construction — and is cosmetic debt, not risk.
+> - **One line citation drifted:** the boot-path call cited as `main.py:387` is now the
+>   import at **`main.py:389`** and the call at **`:391`**, inside
+>   `_run_startup_schema_and_seed()`.
+> - Note this ADR is referenced as "ADR-0035" in `test_db_migrations.py`'s comments and
+>   in [ADR-0042](0042-fresh-install-integrity-and-demo-hygiene.md)'s Related list — an
+>   artifact of the number reshuffle recorded in
+>   [ADR-0038](0038-flight-attach-unification-phase1-live-aircraft.md). The advisory lock
+>   is **ADR-0036**; ADR-0035 is report-narrative quality.
+
 ## Context
 
 The migration-consolidation investigation (see the plan doc) established that the

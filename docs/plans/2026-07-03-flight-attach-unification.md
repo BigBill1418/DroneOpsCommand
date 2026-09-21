@@ -1,7 +1,18 @@
 # Plan: MissionFlight Flight-Attach Unification (retire the triple-path junction)
 
 - **Date:** 2026-07-03
-- **Status:** Proposed (phased; each phase independently shippable + reversible)
+- **Status:** **Phase 1 SHIPPED AND LIVE; Phases 2–4 remain Proposed** (phased; each
+  phase independently shippable + reversible). *(Updated 2026-09-21 — the header read a
+  flat "Proposed", which understated it.)* **Phase 1** landed as
+  [ADR-0038](../adr/0038-flight-attach-unification-phase1-live-aircraft.md) on
+  2026-07-03 (v2.76.4): the report aircraft is resolved from the live `Flight` for
+  native rows and the attach path stopped copying `Flight.aircraft_id` onto the
+  junction. **Phase 2** (materialize legacy-ODL rows into real `Flight` rows),
+  **Phase 3** (flip metrics/track reads to live-only) and **Phase 4** (drop
+  `opendronelog_flight_id` / junction `aircraft_id` / `flight_data_cache`, make
+  `flight_id` NOT NULL) are **not started** — the 584 `opendronelog_import` rows are
+  still the class that keeps the junction/cache fallback alive. Nothing is blocking:
+  the staleness defect Phase 1 targeted is closed at the root for native flights.
 - **Owner:** engineering (DroneOpsCommand)
 - **Related:** ADR-0007 (serial-first fleet match), ADR-0025 (heavy-column
   defer / OOM family), ADR-0026 (duplicate-attach dedup), ADR-0028 (live-scalar

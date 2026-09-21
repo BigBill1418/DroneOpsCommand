@@ -3,6 +3,21 @@
 - **Status:** Accepted
 - **Date:** 2026-05-01
 - **Supersedes:** the fuzzy three-pass matcher introduced in v2.49.0 (commit `852f701`, 2026-03-26)
+- **Amended by:** [ADR-0044](0044-serial-prefix-matcher-odl-canonical-serials.md) (2026-09-05,
+  v2.90.0) — adds one narrowly-scoped rule *inside* the serial branch: the 16-char DJI
+  header serial and the 20-char OpenDroneLog form of the same airframe are reduced to a
+  canonical form and compared for **full equality** (never a prefix test — the thing this
+  ADR banned). Everything else here, including the model branch and the
+  `aircraft_id IS NULL` scoping, is unchanged and still in force.
+
+> **Status 2026-09-21:** in force and measurably working. Live check on the authoritative
+> primary: `SELECT count(*) FROM flights WHERE aircraft_id IS NULL AND drone_serial IS NOT
+> NULL AND drone_serial <> ''` → **0**, and the startup backfill logs
+> `STARTUP: Aircraft backfill — 0/0 unlinked matched`. Two line citations below have
+> drifted and are corrected here rather than in place: the startup backfill cited as
+> `main.py:308-346` now lives inside **`_run_startup_schema_and_seed()`
+> (`backend/app/main.py:~430-459`)**, and `_match_fleet_aircraft` is at
+> `backend/app/routers/flight_library.py:659`. Cite the symbols.
 
 ## Context
 

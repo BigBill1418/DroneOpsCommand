@@ -8,6 +8,25 @@
   ADR-0039/0040 (the migrations that exposed the defect), fleet ADR-0036/0037
   (ntfy transport + noise policy).
 
+> **Status 2026-09-21 (all three decisions in force; two corrections).**
+> - **The "ADR-0035 (migration advisory lock)" reference above is wrong.** The advisory
+>   lock is **[ADR-0036](0036-migration-single-path-hardening.md)**; local ADR-0035 is
+>   report-narrative quality. (Residue of the number reshuffle recorded in
+>   [ADR-0038](0038-flight-attach-unification-phase1-live-aircraft.md).)
+> - **Decision 3's crontab expression has changed — the wall-clock time has not.** The
+>   ADR records `23 9 * * *` UTC = 02:23 Pacific. Since **2026-08-25** every fleet host's
+>   system clock runs `America/Los_Angeles` (noc-master ADR-0218), so the live BOS-HQ
+>   operator crontab reads **`23 2 * * *`** — still **02:23 PT**, now expressed in local
+>   time. Verified today: `crontab -l` holds exactly two lines, CallSign's
+>   `30 3 * * *` snapshot and `23 2 * * * …/scripts/demo-nightly-reset.sh`.
+> - **The preferred long-term shape is still unbuilt.** `DEMO_RESET_INTERVAL_HOURS=24`
+>   is still set in `docker-compose.demo.yml:37` and still nothing in the app implements
+>   it; `scripts/demo-nightly-reset.sh` remains the reset. Its own header says so.
+>   Recorded in `docs/reports/2026-09-21-open-items-inventory.md`.
+> - Decisions 1 (post-baseline migrations must be idempotent) and 2 (loud startup
+>   failures) are unchanged and load-bearing; migrations `0010`/`0011` follow the
+>   existence-guard pattern.
+
 ---
 
 ## Context — the incident

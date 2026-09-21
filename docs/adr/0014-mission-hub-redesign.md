@@ -6,6 +6,20 @@
 **Plan:** `docs/superpowers/plans/2026-05-03-v2.67.0-mission-hub-orchestration-plan.md`
 **Author:** v2.67.0 4-agent parallel ship (A: Hub + create + status; B: Details/Flights/Images facets; C: Report facet; D: routing + tests + this ADR)
 
+> **Status 2026-09-21:** shipped and in force. One thing this ADR scheduled has **not**
+> happened: **`MissionWizardLegacy.tsx` is still on disk** (`frontend/src/pages/`), still
+> lazy-mounted at `/missions/:id/edit-legacy` (`frontend/src/App.tsx:133`), 4½ months into
+> a soak window whose §"Deletion criteria" are three conditions plus an explicit operator
+> OK. The criteria were never formally evaluated and there is no follow-up ADR closing the
+> migration (this ADR predicted "likely ADR-0015 or higher"; ADR-0015 went to a different
+> subject). Recorded as open in `docs/reports/2026-09-21-open-items-inventory.md` — the
+> cost is only dead lazy-loaded code, so this is hygiene, not risk.
+>
+> §Consequences also promises the ADR-0013 4xx-burst alert "queued for v2.66.x" would
+> catch a Hub endpoint going 422 on real payloads. **That alert was never built** — see
+> the dated status note at the top of
+> [ADR-0013](0013-customer-flow-contract-tests-4xx-burst-alerting.md).
+
 ---
 
 ## Context

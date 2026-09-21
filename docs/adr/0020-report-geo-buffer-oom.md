@@ -6,6 +6,19 @@
   columns) — same failure class (heavy GPS data + 1 GiB worker cgroup), different
   code path.
 
+> **Status 2026-09-21 — §Follow-up hardening re-checked:**
+> - **"Move the geo pipeline fully into the Celery worker" — still NOT done** (and still
+>   not required): the endpoint still computes bounded geometry in-request. What *did*
+>   land since is [ADR-0025](0025-large-mission-flight-handling-oom-and-bulk-attach.md)
+>   A3 (`mission_tracks.load_bounded_flight_tracks`, one raw track at a time) and
+>   [ADR-0026](0026-duplicate-flight-attachment-and-report-metric-accuracy.md) §5
+>   (`calculate_mission_area_acres`, full-resolution measurement inside the same bound),
+>   which is why the in-request path is still acceptable.
+> - **The InfraWatch `droneops-backend-mem` rule is live** — `obs-rule-droneops-backend-mem-high`
+>   and `obs-rule-droneops-backend-crashloop` are both present and unpaused in
+>   `/opt/infrawatch/grafana/provisioning/alerting/observability-alerts.yml`, on topic
+>   `droneops-backend-mem`.
+
 ## Context
 
 Clicking **"Generate Report"** in DroneOpsCommand returned a Cloudflare **520**

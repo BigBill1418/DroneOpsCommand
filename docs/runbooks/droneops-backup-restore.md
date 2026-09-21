@@ -2,7 +2,8 @@
 
 **Decision record:** [ADR-0041](../adr/0041-comprehensive-encrypted-backup-to-r2.md)
 **Applies to:** BOS-HQ `10.99.0.4` (`BarnardHQ-BOS`), compose project `droneops`
-**Last verified end-to-end:** 2026-08-17
+**Last verified end-to-end:** 2026-08-17 (cold DR rehearsal, §11)
+**Legacy lane:** RETIRED 2026-09-21 — the ADR-0041 §5.7 cutover executed at ~14:55 PDT. `scripts/snapshot.sh`, its crontab line and the plaintext `s3://obs-glitchtip-backups/droneops/` prefix are all gone. **This restic lane is now the only backup lane.**
 
 ---
 
@@ -24,6 +25,9 @@ R2 bucket. Four lanes, distinguished by restic **tag**:
 Repository:  s3:https://<R2_ACCOUNT_ID>.r2.cloudflarestorage.com/droneops-backups/restic
 Runner:      restic/restic:0.17.3   (pinned; do NOT use the host's 0.16.4)
 Schedule:    droneops-backup.timer — 03:23 + 15:23 UTC (12 h RPO)
+             = 20:23 PDT (previous evening) + 08:23 PDT. The unit is anchored
+             in UTC ON PURPOSE so a DST shift cannot collide it with a sibling
+             job in the BOS-HQ nightly window; see the unit's own comment.
 Credentials: BOS-HQ ~/.droneops-secrets/restic-droneops.env  (mode 600, dir 700)
 ```
 
@@ -159,7 +163,12 @@ docker run --rm -v droneops_app_data:/d -v /restore/files/data:/src:ro alpine:3 
 ```bash
 cd ~/droneops && docker compose up -d
 docker exec droneops-standby-db psql -U droneops -d droneops -tAc 'SELECT count(*) FROM flights'
-curl -sf https://droneops.barnardhq.com/health
+
+# Verify ON THE HOST. The public hostname is behind Cloudflare Access, so an
+# agent-side request gets a 302 to the Access login page — and `curl -sf`
+# WITHOUT -L scores that 302 as success. Never verify a restore through it.
+curl -sf localhost:8000/api/health
+curl -s  localhost:8000/openapi.json | jq -r .info.version
 ```
 
 Sanity floor: `flights` should be within one backup cycle of the last known
@@ -269,7 +278,7 @@ gunzip -c ~/droneops/backups/droneops-20260817-064121.sql.gz \
 ## 6. Procedure E — Run the drill by hand
 
 The drill is what converts "a backup exists" into "a backup restores". It runs
-quarterly (16th of Jan/Apr/Jul/Oct, 16:23 UTC) and is safe to run any time — it
+quarterly (16th of Jan/Apr/Jul/Oct, 16:23 UTC = 09:23 PDT / 08:23 PST; next 2026-10-16) and is safe to run any time — it
 restores into a throwaway DB and drops it via a `trap`, even on failure.
 
 ```bash
@@ -322,8 +331,11 @@ integrity check have all succeeded. A partial run does not advance it.
 
 Work down this list; each step is cheap.
 
-1. **Read the actual error.** `journalctl -u droneops-backup.service -n 80`
-   (or `tail ~/droneops/backups/snapshot.log` for the legacy lane).
+1. **Read the actual error.** `journalctl -u droneops-backup.service -n 80`.
+   There is no longer a legacy lane to check — `snapshot.sh` and
+   `~/droneops/backups/snapshot.log` were retired at the 2026-09-21 cutover.
+   (`~/droneops/backups/*.sql.gz` still exists; that is the §5 break-glass
+   lane, which is *kept*, and it has no log of its own.)
 2. **Is the DB container up?** `docker ps | grep droneops-standby-db`. The
    script refuses to run without it.
 3. **Credentials.** A `SignatureDoesNotMatch` / `BucketExists` failure means
@@ -358,8 +370,11 @@ together and prunes `config`/`legacy` wrongly.
 > silently become a **no-op** — leaving retention unenforced while looking
 > perfectly configured.
 
-24-month / 7-year retention is driven by content, not convention: this
-repository holds executed TOS documents and invoice records.
+Retention is driven by content, not convention: this repository holds executed
+TOS documents and invoice records. Daily/weekly/monthly are 14/8/24; **yearly is
+`unlimited` — yearly snapshots are never pruned** (operator decision 2026-08-18,
+ADR-0041 D4 amended; it was 7 before). Any "7-year retention" phrasing left in
+older sections of ADR-0041 is historical.
 
 **Deliberately excluded** (recorded so nobody re-litigates them — ADR-0041 D3):
 `droneops_ollama_data` (4.6 GB of re-pullable model weights),
@@ -370,8 +385,10 @@ and `droneops_standby_pgdata` **as a filesystem** — a physical copy of a runni
 cluster is not a valid backup; the logical dump is the correct artifact.
 
 Cost is roughly **$0.03–0.10/month**. Storage is not a design constraint here,
-which is why 7-year retention is the affordable choice rather than an
-extravagant one.
+which is why never-pruned yearly retention is the affordable choice rather than
+an extravagant one. Note the ADR-0232 consequence recorded in §13: the B2 copy
+is never pruned at all, so this policy no longer bounds how long the bytes exist
+*anywhere*.
 
 ---
 

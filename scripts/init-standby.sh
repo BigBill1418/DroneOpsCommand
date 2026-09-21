@@ -1,10 +1,21 @@
 #!/bin/bash
-# init-standby.sh — Initializes the PostgreSQL standby on HSH-HQ.
-# Performs pg_basebackup from the CHAD-HQ primary and creates the
-# standby.signal file required for streaming replication.
+# init-standby.sh — Initializes a PostgreSQL streaming-replication standby.
+# Performs pg_basebackup from the primary and creates the standby.signal file
+# required for streaming replication.
 #
 # Run this ONCE before starting the standby container.
 # After this, docker-compose.standby.yml handles ongoing replication.
+#
+# ⚠ STATUS 2026-09-21 — PRIMARY_HOST BELOW IS THE PRE-2026-04-20 ADDRESS.
+# This script was written when the primary was on CHAD-HQ (10.99.0.2) and the
+# standby on HSH-HQ. The direction inverted at the HSH-HQ → BOS-HQ migration.
+# Live today (verified via pg_stat_replication on the primary):
+#     PRIMARY = BOS-HQ 10.99.0.4, container `droneops-standby-db`, host port 5434
+#     STANDBY = 10.99.0.2 (CHAD-HQ), application_name `chad_hq_standby`
+# `PRIMARY_HOST="10.99.0.2"` therefore points at the STANDBY. Set it to the
+# real primary (and check PRIMARY_PORT) before running this on a fresh standby,
+# or pg_basebackup will clone the replica instead of the source of truth.
+# Same caveat applies to docker-compose.standby.yml's primary_conninfo.
 #
 # Usage: ./scripts/init-standby.sh
 

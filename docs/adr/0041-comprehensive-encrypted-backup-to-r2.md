@@ -571,8 +571,17 @@ commands and criteria are in `PROGRESS.md`.
 1. **Cutover after three green days** — ~~see `PROGRESS.md`~~ **DONE 2026-09-21.**
 2. **Grafana rule descriptions** for `obs-rule-droneops-backup-stale` still
    tell the operator to run `snapshot.sh` and read `backups/snapshot.log`.
-   Correct today; update to `droneops-backup.service` / `journalctl` at
-   cutover. Metric names and expressions are unaffected.
+   ~~Correct today;~~ **wrong as of 2026-09-21** — both were deleted at the
+   cutover (Amendment 2). Re-verified today in
+   `/opt/infrawatch/grafana/provisioning/alerting/observability-alerts.yml`:
+   the `description` still reads
+   `ssh bos-hq 'tail -50 ~/droneops/backups/snapshot.log'` and
+   `re-run with '~/droneops/scripts/snapshot.sh'`, pointing the operator at two
+   paths that no longer exist. Replace with
+   `journalctl -u droneops-backup.service -n 50` +
+   `sudo systemctl start droneops-backup.service`. **Change the `description`
+   only** — metric names and expressions are a hard contract. The file lives in
+   `~/noc-master`, which is why the cutover script could not do it. ROADMAP `BK-3`.
 3. **The standby on `10.99.0.2` still carries inherited `archive_mode='on'` +
    the same `archive_command` in its `postgresql.auto.conf`.** Inert while it
    is a standby (`on` does not archive during recovery; only `always` does),
@@ -791,3 +800,15 @@ The spent one-shot timer `droneops-backup-cutover.timer` (**user** scope on
 HSH-HQ / droneops-server, not system scope) was disabled. It is a one-shot that
 had already fired; leaving it enabled serves nothing and invites a second
 execution against a repo that no longer has anything to cut over.
+
+> **Re-check 2026-09-21 (docs pass).** The unit files are still on disk at
+> `~/.config/systemd/user/droneops-backup-cutover.{service,timer}` on
+> droneops-server — disabled, not removed, which matches the sentence above.
+> `systemctl --user is-enabled` could **not** be run from this session (no user
+> D-Bus in the agent's environment: `Failed to connect to bus: No medium found`),
+> so the disabled state is carried from the cutover run's own verification rather
+> than re-proven here. The *live* backup lane was re-proven: `droneops-backup.timer`
+> and `droneops-restore-drill.timer` are **system**-scope, both `enabled`, next runs
+> 2026-09-21 20:27 PDT and 2026-10-16 09:23 PDT respectively; `scripts/snapshot.sh`
+> is gone from the tree; BOS-HQ's crontab holds only CallSign's snapshot line and the
+> demo-reset line.

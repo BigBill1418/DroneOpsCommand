@@ -9,6 +9,20 @@
   - DroneOpsSync `docs/adr/0002-zero-touch-device-key-rotation-client.md`
   - Memory: `feedback_dji_rc_pro_no_camera.md`, `project_droneopssync_upload_fix_20260424.md`
 
+> **Status 2026-09-21: ✅ DONE — shipped 2026-04-24 as backend v2.63.6 + DroneOpsSync
+> v1.3.25**, formalized as [ADR-0003](../adr/0003-zero-touch-device-key-rotation.md).
+> Every file in that ADR's implementation map exists and
+> `backend/tests/test_device_key_rotation.py` re-ran clean today (**15 passed**).
+> Two lines in §7's operator checklist are stale and are corrected here rather than
+> re-ticked, because the checklist is a dated record:
+> - **"deploy via `update.sh` on BOS-HQ"** — `update.sh` was deleted in `e4610b5`
+>   (2026-04-01) and the per-repo deploy path was retired in
+>   [ADR-0018](../adr/0018-deploy-path-is-noc-fleet-deployer.md). Merging to `main` is
+>   the deploy; the fleet deployer (`swarmpilot_deployer`) builds and recreates.
+> - **"Pushover flow tested or mocked"** — the transport moved to self-hosted ntfy the
+>   next day ([ADR-0006](../adr/0006-pushover-to-ntfy-migration-addendum.md) / fleet
+>   ADR-0036); the rotation FYI publishes through `backend/app/services/ntfy.py`.
+
 ---
 
 ## 1. Problem

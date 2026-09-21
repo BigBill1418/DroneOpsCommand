@@ -17,6 +17,24 @@
   set 2026-04-25 with `until=2026-05-03T00:18:53Z`. NOC deployer pulls
   this branch but will not redeploy until cleared.
 
+> **Status 2026-09-21 (three point-in-time lines corrected; the decision stands).**
+> 1. **The soak-pause is long gone.** It expired 2026-05-03 and
+>    `~/noc-master/data/soak-pause/` holds only `.gitkeep` today — nothing pauses this
+>    repo. The §"Non-goals" line "Soak-pause holds the running container at v2.63.11"
+>    is therefore historical; live is **v2.92.1**.
+> 2. **The NOC `/status/<svc>` route is live.** §"Non-goals" said "Until that route is
+>    live, the default click URL still resolves (NOC root)". `noc-master` serves
+>    `GET /api/status/:code` (`api/routes/status.js`) and the SPA route `/status/:code`
+>    (`frontend/src/App.jsx`); the tier-3 click target
+>    `https://noc-mastercontrol.barnardhq.com/status/droneops` resolves.
+> 3. **The implementation-map test count is wrong.** The last row says
+>    `test_device_key_rotation.py` is "still 11 tests"; it was **15** when
+>    [ADR-0003](0003-zero-touch-device-key-rotation.md) §4 recorded it and it is **15**
+>    today (re-run 2026-09-21: `15 passed`). `backend/tests/test_ntfy.py` does carry
+>    **13** tests as stated. Every other row in that map was re-checked and is exact,
+>    including the two line citations (`auth/device.py:26`,
+>    `admin_device_rotation.py:35`) and the three compose blocks.
+
 ---
 
 ## Context

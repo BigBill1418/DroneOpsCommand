@@ -1,8 +1,24 @@
 # ADR-0046: Keyless basemap registry + tile-health probe
 
 **Date:** 2026-09-21
-**Status:** Accepted — code, tests and docs shipped in one commit against `main`
-at v2.92.0; deploy is the operator's push (ADR-0018).
+**Status:** Accepted — **SHIPPED AND DEPLOYED.** Code, tests and docs landed in one
+commit against `main` at v2.92.0 (`72dd1a9`), and the fleet deployer built and
+recreated the stack: **v2.92.0 was live on BOS-HQ at 14:52 PDT on 2026-09-21**
+(updated the same day — this line previously read "deploy is the operator's push
+(ADR-0018)"). Verified live: backend `openapi.json` reported `2.92.0`, the served
+leaflet chunk carried the Esri endpoints with **zero `cartocdn` across all 44
+chunks**, and a probe run inside `droneops-worker-1` returned `ok: true,
+layers_ok: 5`. Live is **v2.92.1** now (v2.92.1 = the unrelated Sentry-release fix,
+`c70ccc8`). The demo stack was hand-updated to match (14:57 PDT, then 15:23 PDT).
+**First *scheduled* probe run is Mon 2026-09-28 15:47 UTC (08:47 PDT)** — today's
+Monday slot passed at 08:47 PDT, six hours before the deploy. ntfy stays OFF until
+ROADMAP `MP-2` (earliest 2026-10-05) **and** operator confirmation that
+`droneops-alerts` is subscribed (`MP-2`/`O-9`).
+
+> **Cross-reference note, 2026-09-21:** the two bare `ADR-0037` references below
+> (§7, "clear of the ADR-0037 quiet window" and "ADR-0037: not customer-visible")
+> mean the **fleet** (noc-master) notification-noise policy, not this repo's local
+> [ADR-0037](0037-airspace-laanc-awareness-at-mission-creation.md) (airspace/LAANC).
 **Supersedes in practice:** the five hard-coded CARTO/Esri/OSM tile URLs that
 existed in `frontend/` before this change.
 **Research this is built on:** `docs/reports/2026-09-21-basemap-provider-eval.md`

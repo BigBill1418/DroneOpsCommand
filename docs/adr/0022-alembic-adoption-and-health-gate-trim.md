@@ -11,6 +11,30 @@
   startup recovery guard + the four hot-path indexes), which remains the
   prior art and whose semantics this ADR preserves intact.
 
+> **Status 2026-09-21: adopted, in production, and the §"Operator manual-verification
+> plan" is satisfied.** Verified against the live system rather than recalled —
+> `docker exec droneops-backend-1 alembic current` → **`0011_battery_src_truth (head)`**,
+> `SELECT version_num FROM alembic_version` agrees, `\di ix_*` counts **16** (the ADR's
+> step 3 said 11, before revisions 0003–0011 added more), the health endpoint answers
+> `200` with `"stripe":"unconfigured"` (step 5's shape), and
+> `tests/test_health_check.py::test_health_stays_healthy_when_stripe_fails` is present.
+> The brownfield stamp ran once as designed; every boot since is `noop`/`upgraded`.
+>
+> **§5's line citations have partly drifted** — corrected here, not in place, because the
+> *query patterns* are the evidence and they are unchanged:
+> `flights.start_time` default sort is now `flight_library.py:907`
+> (`sort_col_map.get(sort_by, Flight.start_time)`) with the date-range filters at `:939`
+> / `:948`; `flights.created_at` is the universal tiebreaker at `:922`
+> (`.order_by(order, desc(Flight.created_at))`) and the recent-activity feed at `:1011`;
+> `missions.customer_id` dup-detect is `missions.py:316`; `mission_images.mission_id`
+> scalar count is `missions.py:1178`; the rejected `missions.mission_date` ORDER BY is
+> `client_portal.py:246`. **Still exact today:** `pilots.py:168`,
+> `business_signals.py:96,103,134,137`, `maintenance.py:74,285,317,434`.
+>
+> Also note `tests/test_db_migrations.py` now collects **17 passed, 2 skipped** (the ADR
+> and ADR-0036 record 25/2 at their respective dates); the advisory-lock envelope tests
+> and the ≤32-char revision fence are all still present.
+
 ## Context
 
 DroneOpsCommand had **no Alembic in use**. The de-facto schema-migration

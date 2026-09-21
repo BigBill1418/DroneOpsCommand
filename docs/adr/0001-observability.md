@@ -5,6 +5,17 @@
 - **Phase:** 5 (DroneOps) of the BarnardHQ observability rollout
 - **Related commits:** `6b7e626` (JSON logging), `d4df8e7` (SDKs + compose labels)
 
+> **Status 2026-09-21 (topology + release tag re-verified).** The decision stands and
+> every module it names still exists (`backend/app/observability/{sentry,otel,pii}.py`,
+> `frontend/src/lib/sentry.ts`). Two facts in the body are point-in-time and have moved:
+> (1) **Both topologies are on BOS-HQ (10.99.0.4) now** — production is `~/droneops`
+> there (ADR-0018) and the public demo is `~/droneops-demo` on the *same* host, not
+> CHAD-HQ; the "Endpoint routing" table's HSH-HQ/CHAD-HQ split is historical. (2) Since
+> **v2.92.1 (`c70ccc8`, 2026-09-21)** the Sentry/GlitchTip **release tag no longer comes
+> from the `APP_VERSION` env var** — the backend reads `app.version.APP_VERSION` and the
+> frontend the vite-defined `__APP_VERSION__` (ROADMAP H-1). Nothing else in this ADR
+> changed.
+
 ## Context
 
 DroneOpsCommand runs in two topologies inside the BarnardHQ mesh:

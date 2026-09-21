@@ -1,6 +1,13 @@
 # docker-compose.demo-standby.yml — PostgreSQL streaming replication standby
-# Runs on HSH-HQ (10.99.0.1) to maintain a hot standby of the DroneOps Demo
-# primary database running on CHAD-HQ (10.99.0.2:5435).
+# Originally: runs on HSH-HQ (10.99.0.1) to maintain a hot standby of the
+# DroneOps Demo primary database running on CHAD-HQ (10.99.0.2:5435).
+#
+# ⚠ STATUS 2026-09-21 — STALE TOPOLOGY, and there is no live demo standby.
+# The demo stack runs on BOS-HQ at `~/droneops-demo` (containers
+# `droneops-demo-*`; its `db` publishes host port 5435 there), so the
+# `host=10.99.0.2 port=5435` in `primary_conninfo` below is the old address.
+# No `droneops-db-demo-standby-1` is running anywhere on the mesh. Set the
+# primary host correctly before bringing this up.
 #
 # Usage:
 #   docker compose -f docker-compose.demo-standby.yml up -d

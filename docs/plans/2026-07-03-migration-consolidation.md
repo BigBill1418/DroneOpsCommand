@@ -1,7 +1,23 @@
 # Plan: DB-Migration Consolidation — retire the legacy schema helpers, harden the boot path
 
 - **Date:** 2026-07-03
-- **Status:** Proposed (phased; low-risk, live-DB-safe)
+- **Status:** **Phase 1 SHIPPED AND LIVE; Phase 2 partial; Phase 3 not started**
+  (phased; low-risk, live-DB-safe). *(Updated 2026-09-21 — the header read a flat
+  "Proposed".)* **Phase 1** landed as
+  [ADR-0036](../adr/0036-migration-single-path-hardening.md) (2026-07-03): the
+  migration run is advisory-locked on `_MIGRATION_LOCK_ID = 8675310`, distinct from
+  seed's `8675309`, with a blocking acquire and a `finally` release. **Phase 2** exists
+  only as tests, not as a gate — the ≤32-char revision fence is hermetic
+  (`backend/tests/test_db_migrations.py:288`) but the model-vs-head
+  `compare_metadata` check sits in the **opt-in** real-Postgres tier (skipped unless
+  `DOC_TEST_PG_URL` is set), and **this repo has no pytest job in CI at all**
+  (`.github/workflows/` = `auto-merge-claude.yml`, `secret-scan.yml`,
+  `self-hosted-smoke-test.yml`), so nothing enforces either at merge time. **Phase 3**
+  (freeze the legacy helpers into baseline `0001` and sever them from the runtime
+  import graph) is **not started**: `_add_missing_columns` and `_create_hot_indexes`
+  are still defined in `backend/app/main.py` (lines 67 and 256) and still imported by
+  `alembic/versions/0001_baseline_schema.py` — by design, since the baseline reproduces
+  the live schema by construction. Live head: `0011_battery_src_truth`.
 - **Owner:** engineering (DroneOpsCommand)
 - **Related:** ADR-0016 (mission source attribution — used the legacy
   `_add_missing_columns` mechanism), ADR-0021 (standby-safe startup / recovery

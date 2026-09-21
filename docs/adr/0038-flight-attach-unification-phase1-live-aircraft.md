@@ -13,6 +13,16 @@
   landing code now, so it takes **0035**; the migration-consolidation ADR should
   take the next free number (**0036**).
 
+> **Correction 2026-09-21 — the ADR-number coordination note above did not hold.**
+> This ADR is **0038**, not 0035. The numbers as they actually landed on 2026-07-03:
+> **0035** = report-narrative quality levers, **0036** = migration single-path hardening
+> (the advisory lock — that half of the note *was* honoured), **0037** = airspace/LAANC,
+> **0038** = this document. Anything elsewhere in the repo that calls the advisory lock
+> "ADR-0035" (`backend/tests/test_db_migrations.py` comments, ADR-0042's Related list)
+> is a residue of this reshuffle. Phase 1 is shipped and live; **Phases 2–4 remain
+> proposed** — see `docs/plans/2026-07-03-flight-attach-unification.md`, whose status
+> header now records this.
+
 ## Context
 
 The `MissionFlight` junction (`backend/app/models/mission.py`) carries three

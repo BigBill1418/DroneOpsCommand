@@ -5,6 +5,21 @@
 * **Extends / corrects:** ADR-0025 (large-mission flight handling + bulk attach). ADR-0025 added an *idempotent bulk* attach path but left the *single* attach path (`add_flight`) with zero dedup and added no DB-level guard — this ADR closes that gap and corrects the report metrics it feeds.
 * **Version:** v2.74.0
 
+> **Status 2026-09-21 (guards in force; one citation corrected and one conclusion
+> superseded).**
+> - **The parser citation `flight-parser/src/dji.rs:50` for "meters AGL" is stale** —
+>   `let header_max_height = details.max_height as f64;   // meters AGL` is at
+>   **`dji.rs:75`** today. The unit fact is unchanged.
+> - **The §Consequences "honesty flag" about 190.8 m AGL (626 ft) exceeding the Part-107
+>   400 ft ceiling is superseded as *report* behaviour** by
+>   [ADR-0029](0029-mission-reports-are-client-deliverables-not-compliance-audits.md)
+>   (2026-06-29): the report engine must **never** announce, flag, list, compute or
+>   comment on an altitude limit in a client deliverable. The *data* correction here —
+>   altitude formatted as `"<m> m AGL (<ft> ft)"`, source unit primary — is retained.
+>   Any compliance determination is the certificated PIC's, out of band.
+> - The three structural guards are live: partial UNIQUE indexes from migration `0003`,
+>   idempotent `add_flight`, and defensive dedup in the report aggregates.
+
 ## Context
 
 The AI mission report for **"Savannah Bananas Games"** (a live-broadcast stadium production, mission `e5f3aedf-c3a2-46d2-9438-33a3cb8f3f8f`) showed badly inflated numbers. Verified against the authoritative DB (`droneops-standby-db` on BOS-HQ — the real primary; `droneops-db-1` is a neutralized `alpine:3` stub):

@@ -5,6 +5,26 @@
 **Related incident:** `docs/incidents/2026-05-14-mission-report-audience-leak.md`.
 **Author:** Terry (research + docs lane).
 
+> **Status 2026-09-21 (load-bearing and live; three citation corrections).**
+> - **"ADR-0037" in §Related and §Consequences means the *fleet* (noc-master)
+>   notification-noise policy**, not this repo's local
+>   [ADR-0037](0037-airspace-laanc-awareness-at-mission-creation.md) (airspace/LAANC),
+>   which was numbered later on 2026-07-03.
+> - **The prompt citation `backend/app/services/ollama.py:9-21` is stale by size, not by
+>   location.** `SYSTEM_PROMPT_TEMPLATE` still begins at line 9 of that module and
+>   `claude_llm.py` still imports it at line 6, but the fix (and ADR-0029/0031/0035) grew
+>   the template far past line 21 — cite the symbol `SYSTEM_PROMPT_TEMPLATE`.
+> - **Decision #5's wire-in is live in production.** `_apply_audience_findings` is
+>   defined at `backend/app/tasks/celery_tasks.py:166` and called at `:307` (the ADR
+>   cites the enclosing range `:150-189`, which still brackets the definition), and both
+>   `reports.has_audience_leak` and `reports.audience_leak_details` exist in the
+>   production database.
+> - **The regression fixture has grown.** §Verification and §Consequences say "17-test"
+>   and "the unchanged 17-test `test_report_audience_guard.py` suite"; today it is
+>   **36 tests** (ADR-0029 altitude rules and ADR-0035's `TestNarrativeQualityLevers`
+>   were added to it). Re-run today: 36 passed, and
+>   `test_audience_leak_persistence.py` 10 passed as stated.
+
 ---
 
 ## Context

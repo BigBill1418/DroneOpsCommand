@@ -1,7 +1,13 @@
 # Plan: DJI Firmware-Cliff & Fleet-Longevity Posture (2026 → 2029)
 
 - **Date:** 2026-07-03
-- **Status:** Proposed (operator decision required)
+- **Status:** **Proposed — STILL OPEN, operator decision required (re-checked
+  2026-09-21).** No purchasing or posture decision has been recorded since 2026-07-03,
+  and the three questions in §"Open questions" — spares budget and count per model,
+  whether a public-safety/DFR deal is real near-term pipeline or aspirational, and risk
+  appetite on flying security-frozen airframes past 2029 if the waiver lapses — are
+  unanswered. Tracked as `O-7` in `docs/reports/2026-09-21-open-items-inventory.md`.
+  This document contains **no code changes** and nothing here is blocking.
 - **Owner:** Bill Barnard / BarnardHQ
 - **Scope:** Fleet hardware posture (Avata 2, Mini 5 Pro, Mavic-class DJI),
   purchasing timeline, and the design implications for DroneOpsSync /

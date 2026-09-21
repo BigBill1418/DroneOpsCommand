@@ -8,6 +8,22 @@
 - **Plan:** [`docs/plans/2026-04-24-zero-touch-key-rotation.md`](../plans/2026-04-24-zero-touch-key-rotation.md)
 - **Memory:** `feedback_dji_rc_pro_no_camera.md`, `project_droneopssync_upload_fix_20260424.md`
 
+> **Status 2026-09-21 (shipped and live; two point-in-time corrections).** The mechanism
+> is intact — every file in §4's implementation map exists and
+> `backend/tests/test_device_key_rotation.py` re-ran clean today: **15 passed**, matching
+> §4's claim. Corrections:
+> - **§2.3 and §2.6 say "Pushover".** The transport moved to ntfy on 2026-04-25
+>   ([ADR-0006](0006-pushover-to-ntfy-migration-addendum.md) / fleet ADR-0036); the
+>   rotation FYI now publishes through `backend/app/services/ntfy.py` and is gated on
+>   `NTFY_DRONEOPS_PUBLISHER_TOKEN`, not `PUSHOVER_TOKEN` + `PUSHOVER_USER_KEY`.
+> - **§4 lists the migration as `backend/app/main.py::_add_missing_columns`.** That is no
+>   longer the runtime schema path: since [ADR-0022](0022-alembic-adoption-and-health-gate-trim.md)
+>   (2026-06-11) startup runs Alembic (`run_migrations_sync`, advisory-locked per
+>   [ADR-0036](0036-migration-single-path-hardening.md)), and `_add_missing_columns`
+>   survives only because baseline migration `0001_baseline_schema` imports it. These
+>   columns are captured in that baseline. **New schema changes go in a new Alembic
+>   revision, never in `_add_missing_columns`.**
+
 ---
 
 ## 1. Context

@@ -33,9 +33,16 @@ When adding a route you'll see two options — **Public Hostname** and **Private
    - **Subdomain**: `doc`
    - **Domain**: `example.com`
    - **Service type**: `HTTP`
-   - **URL**: `frontend:80`
+   - **URL**: `frontend:8080`
 
    > This tells Cloudflare to route `https://droneops.example.com` → your frontend nginx container, which already proxies `/api/*` to the backend. Cloudflare automatically creates the DNS CNAME record if it manages your domain's nameservers.
+   >
+   > **Port 8080, not 80.** The frontend image runs nginx as a non-root user, so
+   > `frontend/nginx.conf` has `listen 8080` and the Dockerfile `EXPOSE 8080`.
+   > `docker ps` still shows `80/tcp` because the upstream `nginx:alpine` base
+   > image declares it, but nothing listens there — pointing the tunnel at
+   > `frontend:80` yields a connection-refused 502. (Corrected 2026-09-21; this
+   > file said `frontend:80` before.)
 
 3. Click **Save**
 
@@ -172,7 +179,7 @@ Customer's Browser
    cloudflared container
         │
         ▼
-   frontend (nginx:80)
+   frontend (nginx:8080)
      ├── /intake/*         → React SPA
      ├── /api/intake/*     → proxy to backend:8000
      └── /api/*            → proxy to backend:8000
@@ -194,8 +201,9 @@ Customer's Browser
 | Symptom | Fix |
 |---------|-----|
 | `cloudflared` exits immediately | Check `CLOUDFLARE_TUNNEL_TOKEN` is set in `.env` |
+| Tunnel is Healthy but every request 502s | The public-hostname **URL** is almost certainly `frontend:80`. nginx listens on **8080** in this image (it runs as non-root). Change it to `frontend:8080`. |
 | Tunnel shows "Inactive" in dashboard | Run `docker compose logs cloudflared` to check errors |
-| Intake form loads but API calls fail | Make sure the tunnel hostname points to `frontend:80`, not `backend:8000` |
+| Intake form loads but API calls fail | Make sure the tunnel hostname points to `frontend:8080`, not `backend:8000` |
 | "Access Denied" on intake form | Check your Cloudflare Access bypass policies include `/intake/*` and `/api/intake/*` |
 | TOS PDF won't load | Add bypass for `/api/intake/*` in Access policies |
 | DroneOpsSync companion app won't connect via cloud | Add bypass for `/api/flight-library/device-*` in Access policies |

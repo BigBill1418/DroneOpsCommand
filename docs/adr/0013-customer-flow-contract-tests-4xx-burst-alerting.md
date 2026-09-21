@@ -4,6 +4,43 @@
 **Date:** 2026-05-03
 **Triggered by:** TOS-accept 422 incident (v2.66.0/0.1 → hotfix v2.66.2)
 
+> **Status 2026-09-21 — THE "Implementation status" SECTION AT THE FOOT IS STALE.**
+> Re-checked against the running system and the tree, not recalled:
+> - **v2.66.2 (shipped) — DONE.** `backend/tests/test_tos_accept_route_body.py` exists
+>   and the regression is pinned.
+> - **v2.66.3 "port the contract-test pattern to the other 4 customer-facing endpoints"
+>   — NOT DONE.** `backend/tests/contract/` does not exist. (Some of those endpoints do
+>   have route-level tests — `test_client_portal_pay.py`, `test_stripe_webhook_*.py` —
+>   but not the dedicated contract tier this ADR specifies.)
+> - **v2.66.3 "add the 4xx-burst alert rule" — NOT DONE, 4½ months on.** There is no
+>   `droneops` 4xx rule in InfraWatch's
+>   `/opt/infrawatch/grafana/provisioning/alerting/observability-alerts.yml` (the only
+>   `droneops` groups there are `droneops-backup`, `droneops-backend-mem` and the
+>   log/silence rules), and the topic `droneops-customer-flow-alerts` appears nowhere in
+>   `noc-master/data/service-registry.json` or `ntfy-fallback-topics.yml`. The Sentry
+>   `failed_request_status_codes` forwarding in the same decision is also absent
+>   (`grep -r failed_request_status_codes backend/` → no hits).
+> - **v2.66.4 `docs/runbooks/2026-05-03-customer-flow-smoke.md` — NOT WRITTEN.**
+>   `docs/runbooks/` contains only `droneops-backup-restore.md`, and `CLAUDE.md` has no
+>   release-checklist reference to it.
+>
+> - **Decision §3's PEP-563 router ban has drifted — three routers violate it today**,
+>   and the claim "Other routers don't currently use it; an audit confirmed" is no
+>   longer true: `backend/app/routers/basemap_health.py:15`,
+>   `business_signals.py:16`, `admin_device_rotation.py:18`. **It is not currently
+>   reproducing the defect**, and that was tested rather than assumed: the one route
+>   among them that takes a Pydantic body — `PUT /api/admin/basemap/tile-health/ntfy`
+>   (`NtfyToggle`), the route ROADMAP `MP-2` will call — is bound as a **`requestBody`**
+>   in the *live* production `openapi.json`, not as a query parameter. So under the
+>   FastAPI/Pydantic version now running, PEP 563 no longer defeats body-vs-query
+>   inference. `tos.py` still carries the inline NOTE and still does **not** import it.
+>   Treat the ban as an un-enforced convention, not a live guarantee — nothing in CI
+>   checks it.
+>
+> Net: decision §1 is partially delivered, decision §2 was never built, decision §3 is
+> partly unenforced. The **decisions still stand** — they are recorded as open in
+> `docs/reports/2026-09-21-open-items-inventory.md` so they stop reading as shipped.
+
 ## Context — the incident this is responding to
 
 Five hours after shipping v2.66.0 + v2.66.1 (and roughly 24 hours after the deposit + AcroForm-TOS subsystems went live in v2.65.0), the **first real paying customer** opened an intake link, filled out the TOS form, and clicked Accept & Sign. They saw a generic "acceptance failed" toast. They retried six times in five minutes. Operator (Bill) heard about it from the customer.

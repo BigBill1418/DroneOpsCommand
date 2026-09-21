@@ -5,6 +5,23 @@
 **Extends:** [ADR-0008 — Customer payment gated on mission completion](0008-customer-payment-gated-on-mission-completion.md)
 **Sibling:** [ADR-0010 — TOS-acceptance AcroForm](0010-tos-acceptance-acroform.md) (co-shipped)
 
+> **Status 2026-09-21 (two corrections; the billing model is unchanged and live).**
+> - **"this repo has no Alembic" (Decision §1) is no longer true.** Alembic was adopted
+>   on 2026-06-11 ([ADR-0022](0022-alembic-adoption-and-health-gate-trim.md)) and the
+>   boot path was advisory-locked on 2026-07-03
+>   ([ADR-0036](0036-migration-single-path-hardening.md)). Live head is
+>   `0011_battery_src_truth`. These seven columns + three CHECK constraints are captured
+>   in baseline `0001_baseline_schema`. **New schema changes go in a new Alembic
+>   revision, never in `_add_missing_columns`.**
+> - **The ntfy topic registration named as "orchestrator follow-up" in §5 is done.**
+>   `droneops-deposits` is in `noc-master/data/ntfy-fallback-topics.yml` (renamed to the
+>   ≤64-char form `bhq-fb-droneops-deposits-…` by noc-master ADR-0194 §3i on 2026-08-09,
+>   because the original name was over ntfy's limit and had therefore never been
+>   reachable). The publisher is `backend/app/routers/stripe_webhook.py`
+>   (`_NTFY_TOPIC_DEPOSITS`).
+> - Test counts in §Tests are as-shipped 2026-05-03; today the four files collect
+>   **61** tests (18 / 25 / 11 / 7) and all pass.
+
 ## Context
 
 The DroneOps Command instance went live with Stripe in v2.64.0 and is
