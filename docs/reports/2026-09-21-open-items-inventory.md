@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-21 (times Pacific — BOS-HQ and the other fleet hosts have run
 `America/Los_Angeles` since 2026-08-25)
-**Live:** app **2.92.0**, flight-parser **1.2.0**, alembic head
+**Live:** app **2.92.1** (2.92.0 + the H-1 Sentry-release fix), flight-parser **1.2.0**, alembic head
 `0011_battery_src_truth`
 **Supersedes:** every earlier "what's open" list in this repo. `ROADMAP.md`
 remains the durable record per item; this is the snapshot with today's closures
@@ -141,7 +141,7 @@ Every ID below exists in `ROADMAP.md`. Status is as of 2026-09-21.
 | ID | Title | Status | What unblocks it | Source |
 |---|---|---|---|---|
 | `BL-1` | Formula/markup support for pass-through rate templates | NOT STARTED | Operator asks for computed markups, or a second formula-shaped rate appears. One at-cost template does not justify the schema + UI work. | `ROADMAP.md:191` |
-| `H-1` | Parity test for the compose `APP_VERSION` defaults | NOT STARTED (**new, this pass**) | Nothing. The five compose defaults sat at `2.67.3` for ~25 minor versions with nothing checking them; they tag the **Sentry/GlitchTip release** on both halves and drive the Login/Setup footers. Defaults fixed to 2.92.0 today, **but the host `.env` on BOS-HQ overrides them and is itself stale (`APP_VERSION=2.67.4`)** — so production is still mis-tagged until that is fixed too. ~1 hour. | `ROADMAP.md:452` |
+| `H-1` | Compose `APP_VERSION` defaults / Sentry release drift | **✅ DONE 2026-09-21 (v2.92.1)** | Dependency removed rather than guarded: Sentry release tags now come from `app.version.APP_VERSION` / vite-defined `__APP_VERSION__`; the stale `APP_VERSION=2.67.4` line was removed from BOS-HQ `.env`. (Correction: the Login/Setup footers were never affected — they already rendered `__APP_VERSION__`.) | `ROADMAP.md` § H-1 |
 | — | Device-upload Celery decoupling (audit P2-2, full leg) | DESIGNED, not started | A DroneOpsSync client release. **Recommended fast-follow:** ship the DroneOpsSync socket-timeout-is-per-file fix standalone (one line, backend-independent) ahead of the full async route. | `ROADMAP.md` § FU-8; `docs/plans/2026-06-15-device-upload-async-decoupling.md` |
 | — | Trigram (`pg_trgm`) indexes for leading-wildcard ILIKE search | Rejected, revisit-if | Flight search slows at scale. B-tree cannot serve leading wildcards, which is why it was rejected from migration `0002`. | `ROADMAP.md` § FU-8 |
 | — | Companion APK instrumentation (`SentryAndroid.init`) | OPEN | **Note the original path is dead** — `companion/` was deleted from this repo in `4b87e65`; the real companion is `BigBill1418/DroneOpsSync` (native Kotlin). Work happens there, not here. | `PROGRESS.md` § Follow-ups |

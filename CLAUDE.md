@@ -38,6 +38,12 @@ Update the version in ALL of these — **6 files, 7 locations**:
 
 Verify each line number against the current file before editing; they drift.
 
+The compose `${APP_VERSION:-X.Y.Z}` defaults (`docker-compose.yml` ×4,
+`docker-compose.demo.yml` ×1) are bumped for tidiness only. Since v2.92.1
+**nothing reads the `APP_VERSION` env var** — the Sentry release tag on both
+halves comes from the bumped source files above — so a stale compose default or
+host `.env` value cannot mis-tag anything (ROADMAP H-1, 2026-09-21).
+
 **Also refresh the compose `APP_VERSION` defaults at each bump** — five
 locations, `docker-compose.yml` ×4 (backend, worker, flight-parser, frontend
 build-arg) and `docker-compose.demo.yml` ×1. They are *not* the app's reported

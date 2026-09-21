@@ -4,6 +4,26 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-09-21 — v2.92.1 — Sentry release tags read the source-of-truth version
+
+### Fixed
+
+- **Sentry/GlitchTip release drift (ROADMAP H-1).** Both halves tagged errors
+  with the `APP_VERSION` env var: the compose defaults sat at `2.67.3` and the
+  BOS-HQ host `.env` pinned `2.67.4`, so production errors have been grouped
+  under a ~25-minor-versions-stale release since ~v2.67. `backend/app/
+  observability/sentry.py` now uses `app.version.APP_VERSION`;
+  `frontend/src/lib/sentry.ts` now uses the vite-defined `__APP_VERSION__`
+  (from `package.json`). Both are covered by `test_app_version_parity.py`, so
+  the tag can no longer lag a bump. `VITE_APP_VERSION` is no longer read.
+- The stale `APP_VERSION=2.67.4` line was removed from BOS-HQ `~/droneops/.env`
+  (a backup copy was left beside it). Compose defaults bumped to 2.92.1 for
+  tidiness; CLAUDE.md now says they are not load-bearing.
+
+**Verification:** `GET /openapi.json` → 2.92.1 after deploy; backend log line
+`sentry.initialized release=droneops@2.92.1` (only when a DSN is set — prod
+runs with GlitchTip DSN; check `docker logs droneops-backend-1 | grep sentry`).
+
 ## 2026-09-21 — Stale-docs sweep + demo stack to v2.92.0 + backup-cutover gate fix [skip-deploy]
 
 Documentation and ops reconciliation after three things shipped the same day.

@@ -449,30 +449,25 @@ rationale.
 
 ## Repo hygiene
 
-### H-1 — Parity test for the compose `APP_VERSION` defaults — **NOT STARTED**
+### H-1 — Compose `APP_VERSION` defaults / Sentry release drift — **✅ DONE 2026-09-21 (v2.92.1)**
 
-- **Why this exists.** `backend/app/version.py` is guarded by
-  `tests/test_app_version_parity.py`, so a missed bump there is red. **The five
-  compose `APP_VERSION` defaults are guarded by nothing**, and they sat at
-  `2.67.3` from ~v2.67 until 2026-09-21 — **25 minor versions**. They are not
-  the app's reported version, but they *are* what tags the **Sentry/GlitchTip
-  release** on both halves (`backend/app/observability/sentry.py:110`,
-  `frontend/src/lib/sentry.ts:33`) and what the Login/Setup page footers render.
-  So every error grouped by release since ~v2.67 has been mis-tagged, silently.
-- **Scope.** A test that parses `docker-compose.yml` (×4: backend, worker,
-  flight-parser, frontend build-arg) and `docker-compose.demo.yml` (×1) and
-  asserts each `${APP_VERSION:-X.Y.Z}` default equals `app.version.APP_VERSION`.
-  Same shape as the existing parity test, which is the proof the shape works.
-- **Also needs an operator/deploy action, and the test cannot cover it.** The
-  host `.env` on BOS-HQ **overrides** the default and is itself hand-set:
-  `APP_VERSION=2.67.4` as of 2026-09-21, confirmed inside the running
-  `droneops-backend-1`. **Fixing the default does not fix production.** Either
-  set it to the live version at each bump, or delete the line so the compose
-  default wins — the second is the one that stops drifting. Note the frontend
-  half is a **build ARG** (`VITE_APP_VERSION`), so it only changes on a rebuild.
-- **Deliverable.** `backend/tests/test_compose_version_parity.py`, a CLAUDE.md
-  line (added 2026-09-21), and the host `.env` decision.
-- **Owner.** TBD. ~1 hour.
+- **What was wrong.** The five compose `${APP_VERSION:-…}` defaults sat at
+  `2.67.3` for ~25 minor versions, and BOS-HQ's hand-set `.env` pinned
+  `APP_VERSION=2.67.4`. That env var was the **Sentry/GlitchTip release tag**
+  on both halves, so every error since ~v2.67 was grouped under a stale
+  release. (Correction to the earlier draft of this item: the Login/Setup
+  footers were **not** affected — they render `__APP_VERSION__`, vite-defined
+  from `package.json`, and showed 2.92.0 correctly.)
+- **Fix shipped (v2.92.1).** The dependency was removed instead of guarded:
+  `backend/app/observability/sentry.py` now tags releases from
+  `app.version.APP_VERSION` and `frontend/src/lib/sentry.ts` from
+  `__APP_VERSION__` — both are bumped source files already covered by
+  `tests/test_app_version_parity.py`. The `APP_VERSION` env var and the
+  compose defaults are no longer load-bearing anywhere (they still get bumped
+  for tidiness). The stale `APP_VERSION=2.67.4` line was removed from BOS-HQ
+  `~/droneops/.env` the same day.
+- **Not built, by decision.** A compose-default parity test — nothing reads
+  those defaults any more, so a test would guard a cosmetic value.
 
 ---
 

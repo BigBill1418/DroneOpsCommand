@@ -107,7 +107,11 @@ def init_sentry(service: str) -> bool:
     except ValueError:
         rate = _DEFAULT_TRACES_SAMPLE_RATE
 
-    release = os.environ.get("APP_VERSION") or os.environ.get("DRONEOPS_VERSION") or "dev"
+    # v2.92.1: the release tag comes from the source-of-truth version, never from
+    # the APP_VERSION env var — BOS-HQ .env pinned 2.67.4 for ~25 minor releases
+    # and every error was grouped under a stale release (ROADMAP H-1).
+    from app.version import APP_VERSION
+    release = APP_VERSION
     env_tag = os.environ.get("ENV", "production")
 
     try:

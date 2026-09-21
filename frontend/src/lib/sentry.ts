@@ -21,7 +21,6 @@ import * as Sentry from "@sentry/react";
 declare global {
   interface ImportMetaEnv {
     readonly VITE_SENTRY_DSN?: string;
-    readonly VITE_APP_VERSION?: string;
     readonly VITE_SENTRY_ENVIRONMENT?: string;
   }
 }
@@ -30,7 +29,10 @@ export function initFrontendSentry(): boolean {
   const dsn = import.meta.env?.VITE_SENTRY_DSN;
   if (!dsn) return false;
 
-  const release = import.meta.env?.VITE_APP_VERSION ?? "dev";
+  // v2.92.1: __APP_VERSION__ is vite-defined from package.json (the bumped
+  // source of truth); VITE_APP_VERSION was a build-arg fed from a hand-set
+  // host .env and lagged production by 25 minor releases (ROADMAP H-1).
+  const release = typeof __APP_VERSION__ !== "undefined" ? __APP_VERSION__ : "dev";
   const environment = import.meta.env?.VITE_SENTRY_ENVIRONMENT ?? "production";
 
   try {
