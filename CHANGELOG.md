@@ -4,6 +4,46 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-09-22 — Operator Cloudflare Access SSO (ADR-0047 Step A) ROLLED BACK — onboarding outage
+
+### Fixed
+
+- **`POST /api/intake/initiate` returned `401` for the operator for ~9.5 h**
+  (2026-09-21 ~16:57 PDT → 2026-09-22 02:31 PDT), blocking the "Initiate Services" /
+  "GENERATE INTAKE LINK" flow that starts every customer onboarding. Each failed click also
+  bounced the browser to `/login`, which is why the password field reappeared — one defect,
+  two symptoms. Resolved by blanking `CF_ACCESS_TEAM_DOMAIN` and `CF_ACCESS_AUD` in
+  `/home/bbarnard065/droneops/.env` on BOS-HQ and recreating `droneops-backend-1`
+  (`.env.bak-adr0047-rollback-20260922-*` holds the pre-rollback file). No code change, no
+  data loss, no customer-facing impact.
+
+### Changed
+
+- ADR-0047 Step A (Cloudflare Access JWT verification) is **dark again**.
+  `GET /api/auth/setup-status` reports `sso_configured:false`; the app is back to
+  bcrypt password + HS256 bearer as the only operator credential. The v2.94.0 code remains
+  merged on `main` and is inert while both env vars are empty. Step B
+  (`LOCAL_LOGIN_DISABLED`) read `false` throughout and never took effect.
+
+### Root cause
+
+Two defects that only bite together: (1) `frontend/src/hooks/useAuth.ts` short-circuits
+`tryLocalToken()` when its SSO probe succeeds, so with Access armed the SPA never obtains a
+bearer token and holds exactly one credential — the `Cf-Access-Jwt-Assertion` header
+Cloudflare injects; (2) `/api/intake/*` is a deliberately customer-reachable prefix, so that
+header is absent there while present on `/api/customers`, `/api/missions` and
+`/api/auth/account`. Dashboard GETs therefore returned `200` and looked healthy while the one
+operator POST under that prefix carried no credential at all. Full timeline, the evidence for
+each claim, the hypotheses excluded, and the four preconditions for re-enabling are in
+`docs/adr/0047-operator-cloudflare-access-sso.md` §"2026-09-22 incident".
+
+### Documentation
+
+- `CHANGELOG.md`, `PROGRESS.md` and ADR-0047 all described this work as "NOT DEPLOYED" while
+  it was live in production from 2026-09-21 16:40 PDT. All three are corrected here. The
+  deploy was authorized by the operator; the **soak** the ADR required and the **doc update**
+  were what got skipped.
+
 ## 2026-09-21 — Repo-wide documentation freshness pass [skip-deploy]
 
 Every tracked Markdown file (90), plus `.env.example`, compose comments and
@@ -30,8 +70,11 @@ fold them into the next code change.
 
 ## 2026-09-21 — v2.94.0 — Operator Cloudflare Access SSO, Step B kill switch (ADR-0047)
 
-**NOT DEPLOYED, and `LOCAL_LOGIN_DISABLED` is OFF by default everywhere — including
-`docker-compose.bos-prod.yml`, untouched by this commit.**
+**CORRECTION (2026-09-22): this entry originally read "NOT DEPLOYED". It was wrong.**
+v2.94.0 was deployed to BOS-HQ on 2026-09-21 at 16:40 PDT and Cloudflare Access verification
+was activated at 16:55 PDT. It broke customer onboarding and was rolled back on 2026-09-22 —
+see the 2026-09-22 entry below. `LOCAL_LOGIN_DISABLED` is accurate as written: OFF by default
+everywhere, including `docker-compose.bos-prod.yml`, and it never took effect.
 
 ### Added
 

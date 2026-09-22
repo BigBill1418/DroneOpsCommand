@@ -1,8 +1,11 @@
 # ADR-0047: Operator Cloudflare Access SSO — verify the JWT, then retire the password
 
-- **Status:** Accepted — Step A (verification) and Step B (local-login kill switch) both
-  implemented on `feat/operator-sso`; **neither deployed**. Step B is off by default
-  everywhere and requires a separate operator action to enable.
+- **Status:** **ROLLED BACK 2026-09-22.** Step A was merged to `main` (v2.94.0), deployed
+  to BOS-HQ 2026-09-21 16:40 PDT and *activated* 16:55 PDT. It broke the operator
+  customer-onboarding surface for ~9.5 h and was re-darkened 2026-09-22 02:31 PDT. The code
+  stays merged and is inert while `CF_ACCESS_TEAM_DOMAIN`/`CF_ACCESS_AUD` are empty.
+  **Do not re-enable until the four preconditions in the incident section below are met.**
+  Step B (`LOCAL_LOGIN_DISABLED`) has read `false` throughout and never took effect.
 - **Date:** 2026-09-21
 - **Under:** noc-master `docs/adr/0246-fleet-auth-posture-standard-and-the-ip-bypass-decision.md`
   decisions 1, 2, and 5. Implements `docs/plans/2026-09-18-fleet-sso-conversion-roadmap.md`
@@ -18,6 +21,97 @@
   fix *verified against the wrong vantage*, is not the same as a fix verified against the
   live system — carried into both the JWKS fail-closed contract and this ADR's insistence
   on a two-step, independently-verifiable cutover).
+
+## 2026-09-22 incident — Step A was activated, onboarding broke, rolled back
+
+**Impact.** `POST /api/intake/initiate` — the "Initiate Services" / "GENERATE INTAKE LINK"
+button that begins *every* customer onboarding — returned
+`401 {"detail":"Not authenticated"}` for the operator from **2026-09-21 ~16:57 PDT to
+2026-09-22 02:31 PDT (~9.5 h)**. Each attempt also bounced the browser to `/login`, which is
+why the password field "came back" — one defect, two symptoms. No data was lost or
+corrupted, and no customer-facing surface was affected.
+
+**Timeline** (Pacific; container logs are UTC, +7h):
+
+| Time (PDT) | Event |
+|---|---|
+| 09-21 16:39:01 | `5bcd78c` merged to `main` — three ADR-0047 commits, v2.94.0 |
+| 09-21 16:39:44 | backend image built |
+| 09-21 16:40:37 | stack recreated — v2.94.0 live, Access still **dark** (`.env` had no CF vars yet) |
+| 09-21 16:54 | operator: *"finish sso that was your instruction"* |
+| 09-21 16:55:35 | `.env` on BOS-HQ gains `CF_ACCESS_TEAM_DOMAIN`, `CF_ACCESS_AUD`, `CF_ACCESS_ALLOWED_EMAILS` |
+| 09-21 ~16:57 | backend recreated — **Step A armed**; onboarding is broken from here |
+| 09-22 02:16 | operator reports DroneOpsMap cannot read the DroneOpsCommand customer list |
+| 09-22 02:17:20 | `.env` gains a `LOCAL_LOGIN_DISABLED=false` block; backend recreated. **No behavioural change** — compose already defaulted it to `false` |
+| 09-22 02:19–02:25 | operator retries; five `401`s on `POST /api/intake/initiate` recorded at the nginx layer |
+| 09-22 02:31:52 | **rolled back** — CF vars blanked, backend recreated, `sso_configured:false` |
+
+### Root cause — two defects that only bite together
+
+**1. `useAuth` stops acquiring a local credential once SSO is configured.**
+`frontend/src/hooks/useAuth.ts` `init()` runs `if (sso && (await trySso())) { return; }`
+*before* `tryLocalToken()`. `trySso()` succeeds because Cloudflare injects
+`Cf-Access-Jwt-Assertion` on the requests it proxies, so the operator is marked
+authenticated while `localStorage.access_token` is **never obtained or refreshed**. From
+that moment the SPA holds exactly one credential — the header Cloudflare adds — with no
+fallback, and nothing in the UI reveals the bearer token is missing.
+
+**2. An operator-only endpoint lives under the public customer prefix.**
+`/api/intake/*` is deliberately customer-reachable (`GET /api/intake/form/{token}`, TOS
+acceptance); `backend/app/auth/cf_access.py`'s own docstring says intake "stay[s] app-local
+permanently". The Access assertion is therefore **absent on `/api/intake/*`** while it *is*
+present on `/api/customers`, `/api/missions`, `/api/auth/account`. Those GETs returned `200`
+and the dashboard looked perfectly healthy, while the one POST that matters carried
+*neither* credential and fell to `get_current_user`'s `credentials is None` branch.
+
+> **Confidence.** Defect 1 is read directly from the code. The *consequence* — that Bill's
+> session had no bearer token and his GETs were Access-authenticated — is measured: after
+> the 401 cleared `localStorage`, protected GETs still returned `200`, and those same routes
+> return `401` with no credential at all. The *reason* the assertion is absent specifically
+> on `/api/intake/*` is a strong inference from the documented public-intake requirement; it
+> was **not** confirmed against the Cloudflare account (no API token was available in this
+> session). Confirming it is precondition 2 below.
+
+### Measured, not inferred
+
+- With a valid bearer token, `POST /api/intake/initiate` returns `200` — the backend and the
+  endpoint were never broken.
+- With no credential, every protected route returns `401 {"detail":"Not authenticated"}` —
+  a 30-byte body, exactly the byte count nginx logged for all five failed attempts.
+
+### Excluded by evidence
+
+Stale/expired session token (GETs from the same tab succeeded one second *after* the 401);
+`LOCAL_LOGIN_DISABLED` (read `false` throughout); the JWKS / AUD / clock-skew paths in
+`verify_cf_access_assertion()` (it never raises and always falls through to the bearer path);
+route shadowing; nginx header stripping (`location /api/` forwards headers untouched); the
+service worker (bypasses non-GET and `/api/`); `DemoGuardMiddleware` (inactive, and returns
+`403`, not `401`).
+
+### Preconditions before Step A is re-enabled
+
+1. `useAuth` must acquire a local bearer token **in addition to** the SSO probe, not instead
+   of it — or a missing assertion must be a recoverable condition rather than a silent dead
+   end.
+2. The Access application's **path coverage** for `droneops.barnardhq.com` must be read from
+   the Cloudflare account, written into this ADR, and re-checked at cutover. This ADR shipped
+   an app-level verifier wholly dependent on the edge injecting a header without ever
+   recording which paths the edge actually covers — that omission is what made the failure
+   invisible to review.
+3. Operator-only endpoints must not sit under the public `/api/intake/` prefix, or the
+   verifier must not be their only credential.
+4. The soak must exercise a real `POST /api/intake/initiate`, not only dashboard GETs. A
+   green dashboard did not mean a working app.
+
+### Process finding
+
+The deploy itself was **authorized** — the operator said *"get rid of that awful auth — send
+in SSO"* (15:28), *"merge"* (16:34) and *"finish sso that was your instruction"* (16:54), and
+`.env` was edited 90 s after that last message. What was skipped was the **soak** this ADR
+already required, and the **documentation update**: the commit messages, `CHANGELOG.md`,
+`PROGRESS.md` and this ADR all still read "NOT DEPLOYED" while the code was live in
+production. The cutover runbook below is not optional, and "deployed" is a state that must be
+written down in the same change that causes it.
 
 ## Context
 

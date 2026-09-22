@@ -10,12 +10,35 @@ blocked.
 > the archive is the record. The authoritative open-items + operator to-do list
 > as of today is `docs/reports/2026-09-21-open-items-inventory.md`.
 
-## 2026-09-21 — Operator Cloudflare Access SSO — **BUILT, NOT DEPLOYED (worktree `~/wt-droneops-sso`, branch `feat/operator-sso`)**
+## 2026-09-21/22 — Operator Cloudflare Access SSO — **DEPLOYED, BROKE ONBOARDING, ROLLED BACK**
 
-**State: code + tests complete for Step A (verification, additive) and Step B (local-login
-kill switch, off by default). No push, no merge, no deploy, no Cloudflare API calls per the
-operator's explicit constraint for this task.** ADR-0047. Full detail, cutover runbook, and
-rollback-per-step in `docs/adr/0047-operator-cloudflare-access-sso.md`.
+**State: merged to `main` as v2.94.0 (`5bcd78c`), deployed to BOS-HQ 2026-09-21 16:40 PDT and
+activated 16:55 PDT. It broke `POST /api/intake/initiate` — the "Initiate Services" button
+that starts every customer onboarding — for ~9.5 h. Rolled back 2026-09-22 02:31 PDT by
+blanking `CF_ACCESS_TEAM_DOMAIN`/`CF_ACCESS_AUD` on BOS-HQ and recreating the backend.**
+
+The code stays merged and is **inert** while those two vars are empty
+(`GET /api/auth/setup-status` now reports `sso_configured:false`). Step B
+(`LOCAL_LOGIN_DISABLED`) read `false` throughout and never took effect.
+
+**This section previously read "BUILT, NOT DEPLOYED … No push, no merge, no deploy". That was
+wrong from 2026-09-21 16:40 PDT onward** — the merge, the deploy and the activation all
+happened that afternoon on the operator's explicit instruction ("merge" 16:34, "finish sso
+that was your instruction" 16:54) and none of the docs were updated to say so. The drift
+between this file and production is itself part of the incident.
+
+**Root cause, verification, excluded hypotheses and the four preconditions for re-enabling
+are recorded in `docs/adr/0047-operator-cloudflare-access-sso.md` §"2026-09-22 incident".**
+In one line: with Access armed, `useAuth` stops acquiring a bearer token because its SSO
+probe short-circuits `tryLocalToken()`, and the Access assertion is not present on the
+public-prefixed `/api/intake/*` path — so that one POST had no credential at all while every
+dashboard GET looked healthy.
+
+**Current live state (verified on BOS-HQ 2026-09-22 02:32–02:34 PDT):** `CF_ACCESS_TEAM_DOMAIN`
+and `CF_ACCESS_AUD` empty; `LOCAL_LOGIN_DISABLED=false`; backend healthy;
+`POST /api/intake/initiate` returns `200` with a valid bearer token; password login is the
+operator path and the login screen showing a password field is **correct** in this state.
+The operator must log in once after the rollback — the browser holds no bearer token.
 
 **What's done:**
 
@@ -28,12 +51,15 @@ rollback-per-step in `docs/adr/0047-operator-cloudflare-access-sso.md`.
 | Login/Setup screen modernized for SSO + email fix + CallSignLane-style footer | Done, 14 tests |
 | Three commits: Step A (2.93.0), frontend Part 2 (2.93.1), Step B (2.94.0) | Done, `test_app_version_parity` green at each |
 
-**Operator action required before any of this takes effect:** set
-`CF_ACCESS_TEAM_DOMAIN`/`CF_ACCESS_AUD` on BOS-HQ (Step A), soak, then set
-`LOCAL_LOGIN_DISABLED=true` (Step B) — see the ADR's cutover runbook. Until then this is a
-complete no-op for the live app, and a complete no-op forever for self-hosted/OSS installs
-and the public demo instance (neither has Cloudflare Access; both env vars stay unset by
-design).
+**Next action is a FIX, not a cutover.** Do not set `CF_ACCESS_TEAM_DOMAIN`/`CF_ACCESS_AUD`
+again until all four preconditions in ADR-0047 §"2026-09-22 incident" are met — chiefly:
+`useAuth` must keep a local bearer token alongside the SSO probe, the Access application's
+path coverage must be read from the Cloudflare account and written down, and the soak must
+exercise a real `POST /api/intake/initiate` rather than dashboard GETs. Step B
+(`LOCAL_LOGIN_DISABLED=true`) stays out of scope until Step A is proven.
+
+This remains a complete no-op forever for self-hosted/OSS installs and the public demo
+instance (neither has Cloudflare Access; both env vars stay unset by design).
 
 ## 2026-09-21 — Basemap migration off CARTO + tile-health probe — **LIVE IN PRODUCTION**
 
