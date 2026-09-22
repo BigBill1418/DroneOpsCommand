@@ -213,6 +213,54 @@ only in `barnardhq-api` container logs, which is why it ran six hours unnoticed.
 password-authenticating machine caller is exempted by an allowlist, and each one has been
 verified working with the flag on.
 
+### Amendment 3 (2026-09-22) — Step A re-enabled, and a `kid` gap to fix in daylight
+
+**Step A is live again as of 2026-09-22 03:48 PDT**, this time with all five preconditions met.
+`CF_ACCESS_TEAM_DOMAIN=barnardhq.cloudflareaccess.com` and the `DroneOps Admin` AUD are set on
+BOS-HQ; `sso_configured` reads `true`. `LOCAL_LOGIN_DISABLED` remains **`false`** — the password
+is intentionally still available until the operator confirms SSO signs him in from his own
+browser. Removing the fallback before the primary is proven is how an operator gets locked out
+of his own system.
+
+What made this attempt different from 2026-09-21:
+
+- **Precondition 1** — `useAuth` no longer short-circuits (merged), *and* the SPA now calls the
+  ADR-0048 mint. Note the trap this nearly repeated: ADR-0048 shipped
+  `POST /api/auth/sso-exchange` with 19 passing tests and **no caller**, because the backend and
+  frontend halves were built by separate agents in separate worktrees. Both suites were green on
+  either side of the gap between them. A verified endpoint nothing calls is indistinguishable in
+  production from one never written.
+- **Precondition 2** — closed in Amendment 1, re-read from the account at cutover.
+- **Precondition 3** — satisfied by its second clause; 8 endpoints across 2 public prefixes.
+- **Precondition 4** — all 8 soaked, not one: each returns non-401 with a bearer and 401
+  without. First soak attempt POSTed `{}` to `/api/intake/initiate`, which takes the no-email
+  path and **created a real customer stub** (9→10). Removed, count verified back to 9. The soak
+  now sends a body that fails validation, so it exercises auth without side effects. *An
+  endpoint that accepts `data: dict` has no invalid body — pick the malformed shape deliberately.*
+- **Precondition 5** (Amendment 2) — both machine callers verified **with Access armed**:
+  `droneopsmap-bridge` 200/9 customers, `marketing-bridge` 200. This also narrows Amendment 2:
+  arming Access alone does **not** reproduce those 403s, which is further evidence the flag was
+  genuinely `true` rather than Access being the cause.
+
+The mint was probed live: absent, garbage, and `alg:none` assertions all return 401.
+
+#### Open finding — `python-jose` ignores `kid` (fleet-wide, not urgent)
+
+`_decode()` passes the whole JWKS as `{"keys": keys}`. `python-jose` does not select by `kid`; it
+tries the keys, so a token with an unknown `kid` still verifies if any key in the set matches.
+Found by the DroneOpsMap agent, whose `test_unknown_kid_denies` failed on first run.
+**`~/marketing/api/cf-access.js` and DroneOpsMap's port share the same shape.**
+
+**This is not an authentication bypass, and is not a reason to re-darken Step A.** The key set is
+this team's own Cloudflare keys; `aud` is pinned to the `DroneOps Admin` app, `iss` to the team
+domain, and `CF_ACCESS_ALLOWED_EMAILS` still applies. Forging requires a JWT Cloudflare signed
+for this team, with this app's audience and an allow-listed email — i.e. having already
+authenticated through Access. The `kid` check is defence-in-depth against key confusion.
+
+Deliberately **not** patched at 03:48 PDT mid-cutover: the verifier is the only thing between
+Access and the API right now, and an untested change to it is riskier than the gap. Fix with a
+`kid`-selection step plus a regression test, in one sweep across all three implementations.
+
 ### Process finding
 
 The deploy itself was **authorized** — the operator said *"get rid of that awful auth — send
