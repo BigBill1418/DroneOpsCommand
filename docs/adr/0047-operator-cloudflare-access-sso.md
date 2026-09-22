@@ -103,6 +103,64 @@ service worker (bypasses non-GET and `/api/`); `DemoGuardMiddleware` (inactive, 
 4. The soak must exercise a real `POST /api/intake/initiate`, not only dashboard GETs. A
    green dashboard did not mean a working app.
 
+### Amendment 1 (2026-09-22) — precondition 2 closed, and the blast radius was 8 endpoints, not 1
+
+**Precondition 2 is now met.** The Access path coverage for `droneops.barnardhq.com` was read
+from the Cloudflare account (account `151fd15b…`, `GET /accounts/{id}/access/apps` plus
+`/policies` per app) rather than inferred. Recorded here so cutover can re-check it:
+
+| Access application | Decision | Paths (`self_hosted_domains` == `destinations`) |
+|---|---|---|
+| `DroneOps Admin` | **allow** | `droneops.barnardhq.com` (catch-all) |
+| `DroneOps Public (Intake + Customer Portal + Stripe)` | **bypass** | `/intake/*`, `/assets/*`, `/api/intake/*`, `/api/flight-library/device-*`, `/api/health` |
+| `DroneOps Public (Customer Portal + Stripe Webhook)` | **bypass** | `/api/webhooks/stripe`, `/api/client/*`, `/client/*`, `/tos/*`, `/api/tos/*` |
+
+Team domain: `barnardhq.cloudflareaccess.com`. `DroneOps Admin` AUD:
+`c33f32a6b0e2fad259c94504f251259a7655c2cfbfa150a4374a304fc78f88ce`.
+
+The inference in the incident write-up was **correct**: a `bypass` policy means the edge does
+not authenticate and therefore does not inject `Cf-Access-Jwt-Assertion`. `/api/intake/*` is
+covered by a bypass app, so the assertion is genuinely absent there. This is now evidence,
+not reasoning.
+
+**The blast radius was larger than the incident recorded.** The write-up named one endpoint
+(`POST /api/intake/initiate`) and one prefix (`/api/intake/*`). Enumerating every route that
+depends on `get_current_user` and resolves under a bypassed path gives **8 operator-only
+endpoints across 2 prefixes** — `/api/tos/*` is bypassed too and was never mentioned:
+
+| Endpoint | Verb | Bypass pattern |
+|---|---|---|
+| `/api/intake/initiate` | POST | `/api/intake/*` |
+| `/api/intake/default-tos-status` | GET | `/api/intake/*` |
+| `/api/intake/upload-default-tos` | POST | `/api/intake/*` |
+| `/api/intake/{customer_id}/send-email` | POST | `/api/intake/*` |
+| `/api/intake/{customer_id}/signed-tos` | GET | `/api/intake/*` |
+| `/api/intake/{customer_id}/upload-tos` | POST | `/api/intake/*` |
+| `/api/tos/acceptances` | GET | `/api/tos/*` |
+| `/api/tos/signed/{audit_id}` | GET | `/api/tos/*` |
+
+All eight fail identically and silently once Step A is armed and the SPA holds only the
+Access assertion: the whole intake-and-TOS onboarding workflow, not a single button. The
+operator saw `initiate` first because it is the entry point; the rest were equally broken and
+simply had not been reached yet.
+
+**Consequences for the remaining preconditions.**
+
+- Precondition 3 is satisfied *only* by its second clause — "the verifier must not be their
+  only credential" — since 8 endpoints across 2 deliberately-public prefixes cannot all be
+  relocated. That makes precondition 1 (`useAuth` must hold a local bearer **in addition to**
+  the SSO probe) load-bearing for correctness, not a nicety.
+- Precondition 4's soak must exercise **all eight** rows above, not only
+  `POST /api/intake/initiate`. A green dashboard did not mean a working app; neither does one
+  green button.
+- Re-check this table at cutover. It is a live read of Cloudflare state, and a new bypass app
+  or a widened path pattern silently extends this list.
+
+**Method note.** The enumeration parses `@router.<verb>` decorators with balanced-paren
+matching. A naive `([^)]*)` capture of the handler signature truncates at the first `)` inside
+`Depends(get_current_user)` and reports 1 protected endpoint instead of 8 — worth stating
+because the under-count is silent and looks like good news.
+
 ### Process finding
 
 The deploy itself was **authorized** — the operator said *"get rid of that awful auth — send
