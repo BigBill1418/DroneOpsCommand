@@ -372,6 +372,55 @@ this change. Note `restart` does **not** re-read the environment — it must be 
 **Carried forward:** the `kid` finding in Amendment 3 remains open and is being fixed across all
 three implementations. It is not a bypass and was correctly not patched mid-cutover.
 
+### Amendment 5 (2026-09-22 09:51 PDT) — `kid` pinning deployed and proven against live Cloudflare
+
+Merged and deployed (`6357004`). Backend suite **959 passed / 23 skipped** against a 952/23
+baseline; 5 of the 7 new tests were confirmed to FAIL against pre-fix code, returning
+`CfAccessResult(ok=True, email='bill@barnardhq.com')` — the defect demonstrated in the harness
+rather than asserted.
+
+**How the deploy was verified without a browser.** The Access 302 redirect carries a `meta` JWT
+that Cloudflare *really signs* with a team key, but which is not an Access assertion — it has no
+`iss`. Feeding it to the live `/api/auth/sso-exchange` therefore distinguishes the two failure
+modes precisely:
+
+```
+reason=verification_failed: missing required key "iss" among claims
+```
+
+It reached **claims** validation, which means the `kid` was matched in the JWKS and the RS256
+signature verified against that single selected key. A broken key selection would have denied
+earlier with a `kid`-shaped reason. Header confirmed as
+`kid: 5fcf5fba…, alg: RS256`, one of the 2 keys published at the team certs endpoint.
+**When a real credential is hard to obtain, a real token of the wrong purpose still exercises
+the mechanism** — it fails at a *later* stage, and which stage it fails at is the measurement.
+
+#### Correction — marketing was never affected
+
+Amendment 3 stated that `~/marketing/api/cf-access.js` "shares this gap". **That was wrong.**
+Node's `jose` selects by `kid` inside `createRemoteJWKSet`; verified against the real module,
+including the discriminating case (header claims key A, signature from published key B →
+`signature verification failed`, where a try-every-key verifier would have accepted it). No
+change was made to marketing. The error came from assuming a *port* inherits the original's
+defect, when the guarantee was a property of the **library**, not of the module.
+
+#### Operational consequence of retiring the password — worth an alert
+
+`JWKS_TTL_SECONDS = 3600`, `JWKS_COOLDOWN_SECONDS = 30`. The cache is fail-closed with no
+stale-if-error path, so a failed fetch denies **every** verification for up to 30s. That was
+observed during this deploy: the first probe after the container restart returned
+`jwks fetch cooldown active … no fresh keys available`, and the same probe succeeded 49s later.
+The container's own egress to the certs endpoint was confirmed healthy (HTTP 200, 2 keys), so
+this is the cooldown working as designed, not a fault.
+
+**But the blast radius changed when the password was retired.** Before Step B, a JWKS outage
+degraded SSO and the operator fell back to a password. Now it is the only credential path, so a
+sustained Cloudflare certs outage locks the operator out entirely until
+`LOCAL_LOGIN_DISABLED=false` is set by hand on the host. That is acceptable — the break-glass is
+~30 seconds — but it should be **monitored rather than discovered**. There is currently no alert
+on JWKS fetch failure. Recommend one, alongside the machine-caller monitor that the six silent
+breakages in this programme argue for.
+
 ### Process finding
 
 The deploy itself was **authorized** — the operator said *"get rid of that awful auth — send
