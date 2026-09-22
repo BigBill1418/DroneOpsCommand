@@ -358,6 +358,31 @@ After logging in, go to **Settings > Branding** to set your company name, taglin
 - Single-worker uvicorn for consistent async behavior
 - Explicit commit + read-back verification on password changes
 
+**Optional: Cloudflare Access SSO for the operator login (off by default).** If you put the
+operator surface behind Cloudflare Access, the app can verify the `Cf-Access-Jwt-Assertion`
+itself rather than trusting the perimeter — RS256 against your team's JWKS, with `iss`, `aud`,
+`exp` (30 s skew), key selection bound to the token's `kid`, and an e-mail allow-list. It is
+**inert unless you set both `CF_ACCESS_TEAM_DOMAIN` and `CF_ACCESS_AUD`**; until you do, the
+verifier never runs, no network call is made, and `POST /api/auth/sso-exchange` answers `404`.
+
+- `POST /api/auth/sso-exchange` trades a verified assertion for the same token pair
+  `/api/auth/login` returns, so an SSO-only operator can still obtain a bearer for any route
+  your Access policy *bypasses*.
+- `LOCAL_LOGIN_DISABLED=true` (default `false`) retires the password entirely: `login`,
+  `setup`, `account` and `refresh` return `403`. Nothing is deleted — set it back to `false`
+  and redeploy to restore password login. **`docker compose restart` does not re-read the
+  environment; use `up -d`.**
+- `SERVICE_ACCOUNT_USERNAMES` is a comma-separated exemption from that `403` for non-interactive
+  machine accounts, which cannot hold an Access cookie. The exemption is from the `403` and
+  **nothing else** — the password, the lockout and the `is_active` check all still run.
+- **Self-hosted, OSS and demo installs are unaffected by all of the above by construction**:
+  both Access variables are empty and `LOCAL_LOGIN_DISABLED` is `false` in the shipped
+  `docker-compose.yml` and `.env.example`.
+
+Design notes and the two production outages that shaped it:
+`docs/adr/0047-operator-cloudflare-access-sso.md` (five amendments) and
+`docs/adr/0048-service-account-allowlist-and-sso-bearer-exchange.md`.
+
 ### Dashboard
 - At-a-glance stats: total flight hours, total flights, total missions, drafts, customers
 - Recent missions table with status badges and quick actions

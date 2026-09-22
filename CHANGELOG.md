@@ -4,6 +4,60 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-09-22 — The operator password is retired. Cloudflare Access is the only human login. (ADR-0047 Am. 4 + 5)
+
+`LOCAL_LOGIN_DISABLED=true` on BOS-HQ since **2026-09-22 09:21:38 PDT**; the `kid`-pinning
+deploy that followed recreated the backend at **09:51:43 PDT**. `POST /api/auth/login` for the
+operator account returns **403**. `GET /api/auth/setup-status` reads
+`sso_configured: true, local_login_disabled: true`. Live version **2.95.0**.
+
+Recorded here because it was not: the merge, the deploy and the activation of Step A all
+happened on 2026-09-21 afternoon while the commit messages, this file, `PROGRESS.md` and
+ADR-0047 itself still said "NOT DEPLOYED". **"Deployed" is a state that must be written down in
+the same change that causes it** — that drift is part of the incident, not commentary on it.
+
+### Post-cutover verification, with the flag on
+
+| Check | Result |
+|---|---|
+| `POST /api/auth/login` (`bbarnard065`) | **403** — retired |
+| `setup-status` | `sso_configured: true`, `local_login_disabled: true` |
+| `marketing-bridge` login | **200** — the allow-list works |
+| `droneopsmap-bridge` live chain | **200**, 9 customers |
+| The 8 Access-bypassed operator endpoints | **8/8** accept a bearer, 401 without |
+| `POST /api/auth/sso-exchange`, no assertion | **401** — active, fails closed |
+
+Both machine callers survive only because `SERVICE_ACCOUNT_USERNAMES` exempts them. Without
+ADR-0048 this flip would have reproduced the silent 6-hour bridge outage of ADR-0047
+Amendment 2.
+
+**The confirmation that unblocked the cutover was in the logs, not in a question.** Step A had
+been armed since 03:48 PDT and the flip was held for five and a half hours waiting for the
+operator to confirm SSO signed him in. The backend had already recorded the answer at
+16:19:03 UTC — `[CF-ACCESS] sso-exchange minted a bearer pair`, `RES POST /api/auth/sso-exchange
+200` — an hour before anyone asked. When a system records whether it works, read the record.
+
+### Break-glass
+
+`LOCAL_LOGIN_DISABLED=false` on the BOS-HQ `.env` plus `docker compose up -d backend`, ~30 s.
+**`restart` does not re-read the environment.** Prior states are kept as `.env.bak-*`, including
+`.env.bak-pre-killpw-20260922-092138`.
+
+### Correction — marketing was never affected by the `kid` defect
+
+An earlier entry in this programme claimed `~/marketing/api/cf-access.js` shared the gap. It did
+not: Node's `jose` selects by `kid` inside `createRemoteJWKSet`, verified against the real module
+including the case a try-every-key verifier would have accepted (header claims key A, signature
+from published key B → `signature verification failed`). No marketing production code was
+changed. The error came from assuming a **port** inherits the original's defect when the
+guarantee was a property of the **library**.
+
+### Known gap, not fixed here
+
+There is **no alert on JWKS fetch failure**, and none on a broken machine caller. With the
+password retired the first is now the operator's only credential path, and the second ran 6 h
+dark on the marketing bridge during this programme. ROADMAP **FU-9** and **FU-10**.
+
 ## 2026-09-22 — The Access verifier now selects its signing key by `kid` (ADR-0047 Am. 3, CLOSED)
 
 The open finding recorded in ADR-0047 Amendment 3 is closed. `app/auth/cf_access.py` passed the
@@ -51,7 +105,8 @@ already authenticated through Access. The `kid` check is defence in depth agains
 
 Suite: 959 passed, 23 skipped (baseline before this change: 952 passed, 23 skipped) on the dev
 host; 47 passed, 6 skipped for the Access-verifier files under a clean venv holding the pinned
-`python-jose==3.4.0`. **Not deployed — the operator deploys this one.**
+`python-jose==3.4.0`. **Deployed 2026-09-22 09:51 PDT** (`6357004`) and proven against
+live Cloudflare — see the entry above.
 
 ## 2026-09-22 — The SPA actually calls the mint (ADR-0048, frontend half)
 

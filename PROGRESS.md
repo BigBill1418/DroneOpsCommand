@@ -10,72 +10,94 @@ blocked.
 > the archive is the record. The authoritative open-items + operator to-do list
 > as of today is `docs/reports/2026-09-21-open-items-inventory.md`.
 
-## 2026-09-21/22 — Operator Cloudflare Access SSO — **DEPLOYED, BROKE ONBOARDING, ROLLED BACK**
+## 2026-09-22 — Operator Cloudflare Access SSO — **COMPLETE. The operator password is retired.**
 
-**State: merged to `main` as v2.94.0 (`5bcd78c`), deployed to BOS-HQ 2026-09-21 16:40 PDT and
-activated 16:55 PDT. It broke `POST /api/intake/initiate` — the "Initiate Services" button
-that starts every customer onboarding — for ~9.5 h. Rolled back 2026-09-22 02:31 PDT by
-blanking `CF_ACCESS_TEAM_DOMAIN`/`CF_ACCESS_AUD` on BOS-HQ and recreating the backend.**
+**State, read off the running system 2026-09-22 (PDT):**
 
-The code stays merged and is **inert** while those two vars are empty
-(`GET /api/auth/setup-status` now reports `sso_configured:false`). Step B
-(`LOCAL_LOGIN_DISABLED`) read `false` throughout and never took effect.
-
-**This section previously read "BUILT, NOT DEPLOYED … No push, no merge, no deploy". That was
-wrong from 2026-09-21 16:40 PDT onward** — the merge, the deploy and the activation all
-happened that afternoon on the operator's explicit instruction ("merge" 16:34, "finish sso
-that was your instruction" 16:54) and none of the docs were updated to say so. The drift
-between this file and production is itself part of the incident.
-
-**Root cause, verification, excluded hypotheses and the four preconditions for re-enabling
-are recorded in `docs/adr/0047-operator-cloudflare-access-sso.md` §"2026-09-22 incident".**
-In one line: with Access armed, `useAuth` stops acquiring a bearer token because its SSO
-probe short-circuits `tryLocalToken()`, and the Access assertion is not present on the
-public-prefixed `/api/intake/*` path — so that one POST had no credential at all while every
-dashboard GET looked healthy.
-
-**Current live state (verified on BOS-HQ 2026-09-22 02:32–02:34 PDT):** `CF_ACCESS_TEAM_DOMAIN`
-and `CF_ACCESS_AUD` empty; `LOCAL_LOGIN_DISABLED=false`; backend healthy;
-`POST /api/intake/initiate` returns `200` with a valid bearer token; password login is the
-operator path and the login screen showing a password field is **correct** in this state.
-The operator must log in once after the rollback — the browser holds no bearer token.
-
-**What's done:**
-
-| Piece | State |
+| Check | Observed |
 |---|---|
-| RS256/JWKS Access-JWT verifier (`backend/app/auth/cf_access.py`) | Done, 33 tests |
-| `cf_access_identities` mapping table + migration `0012_cf_access_ident` | Done, 6 real-Postgres tests |
-| `get_current_user` wired additively | Done, 7 tests |
-| `LOCAL_LOGIN_DISABLED` kill switch | Done, off by default, 9 tests |
-| Login/Setup screen modernized for SSO + email fix + CallSignLane-style footer | Done, 14 tests |
-| Three commits: Step A (2.93.0), frontend Part 2 (2.93.1), Step B (2.94.0) | Done, `test_app_version_parity` green at each |
-| `SERVICE_ACCOUNT_USERNAMES` allow-list (ADR-0048, v2.95.0) | Done, empty by default, 26 tests — closes ADR-0047 **precondition 5** |
-| `POST /api/auth/sso-exchange` (ADR-0048, v2.95.0) | Done, `404` until Access is configured, 19 tests — supplies the bearer **mint** precondition 1 needs |
+| `POST /api/auth/login` (`bbarnard065`) | **403** — retired |
+| `GET /api/auth/setup-status` | `sso_configured: true`, `local_login_disabled: true`, `needs_setup: false` |
+| `SERVICE_ACCOUNT_USERNAMES` on `droneops-backend-1` | `marketing-bridge,droneopsmap-bridge` |
+| `LOCAL_LOGIN_DISABLED` on `droneops-backend-1` | `true` |
+| Live version | **2.95.0** |
+| Backend container recreated | 2026-09-22 **09:51:43 PDT** (16:51:43 UTC) — the `kid`-pinning deploy |
 
-**Next action is a FIX, not a cutover.** Do not set `CF_ACCESS_TEAM_DOMAIN`/`CF_ACCESS_AUD`
-again until all four preconditions in ADR-0047 §"2026-09-22 incident" are met — chiefly:
-`useAuth` must keep a local bearer token alongside the SSO probe, the Access application's
-path coverage must be read from the Cloudflare account and written down, and the soak must
-exercise a real `POST /api/intake/initiate` rather than dashboard GETs — all **8** of them,
-per Amendment 1. Step B (`LOCAL_LOGIN_DISABLED=true`) stays out of scope until Step A is
-proven.
+Cloudflare Access is now the **only** way a human authenticates to DroneOpsCommand.
+Timeline of the flags on the BOS-HQ `.env` (from the preserved backups, which are taken
+with `cp -p` so each backup's mtime is the *previous* `.env` mtime):
+Step A armed 2026-09-22 **03:47:56 PDT**; Step B (`LOCAL_LOGIN_DISABLED=true`) set
+2026-09-22 **09:21:38 PDT**; `kid` pinning deployed **09:51 PDT**.
 
-**ADR-0048 (v2.95.0) closed Step B's two known breakages in code, but enabled nothing.**
-Amendment 2 established that the flag was in fact true in production for ~6 h on 2026-09-21
-and silently killed the `marketing-bridge` financials poller, so "Step B never took effect"
-is no longer accurate anywhere. The allow-list (precondition 5) and the SSO→bearer exchange
-now exist; both ship inert and need an operator to set `SERVICE_ACCOUNT_USERNAMES` on the
-BOS-HQ `.env` before either does anything. See ADR-0048 §"To enable".
+**This section previously described the rolled-back state as current** ("`CF_ACCESS_TEAM_DOMAIN`
+and `CF_ACCESS_AUD` empty; `LOCAL_LOGIN_DISABLED=false`; … the login screen showing a password
+field is **correct** in this state"). That was true only between 02:31 and 03:47 PDT on
+2026-09-22. It is kept out of this file rather than restated, because the full incident history —
+both outages, the preconditions, and what closed each one — is the standing record in
+`docs/adr/0047-operator-cloudflare-access-sso.md`, which carries **five amendments**.
+
+**What shipped, and where the reasoning lives:**
+
+| Piece | State | Record |
+|---|---|---|
+| RS256/JWKS Access-JWT verifier (`backend/app/auth/cf_access.py`) | **LIVE** | ADR-0047 Decision, Step A |
+| `cf_access_identities` mapping table + migration `0012_cf_access_ident` | **LIVE** | ADR-0047 Decision §2 |
+| `get_current_user` accepts the assertion as an *additional* credential | **LIVE** | ADR-0047 Decision §3 |
+| `useAuth` acquires a local bearer **alongside** the SSO probe | **LIVE** | ADR-0047 precondition 1 |
+| `SERVICE_ACCOUNT_USERNAMES` allow-list | **LIVE**, 2 entries | ADR-0048 Decision §1 |
+| `POST /api/auth/sso-exchange` **and its caller** | **LIVE** | ADR-0048 Decision §2 + Amendment 1 |
+| `LOCAL_LOGIN_DISABLED` kill switch | **ON** | ADR-0047 Step B / Amendment 4 |
+| Access signing key selected by `kid` | **LIVE**, proven against live Cloudflare | ADR-0047 Amendment 5 |
+
+**Two outages and one near-miss are the reason this took two days**, all recorded in ADR-0047:
+the ~9.5 h onboarding outage (Amendment 1 — the blast radius was **8** operator endpoints across
+2 Access-bypassed prefixes, not the 1 the incident first named); a **second, concurrent ~6 h
+outage** that nobody recorded at the time, in which `LOCAL_LOGIN_DISABLED` was genuinely `true`
+and silently killed the `marketing-bridge` financials poller (Amendment 2 — and the mechanism by
+which the flag became true was never established); and `POST /api/auth/sso-exchange` shipping
+with 19 green tests and **no caller** (ADR-0048 Amendment 1).
+
+**Correction carried from ADR-0047 Amendment 5:** an earlier entry claimed
+`~/marketing/api/cf-access.js` shared the `kid` defect. **It did not.** Node's `jose` selects by
+`kid` inside `createRemoteJWKSet`, verified against the real module including the discriminating
+case (header claims key A, signature from published key B → refused). No marketing production
+code was changed. The defect was a property of `python-jose`, not of the module that was ported.
+
+### Break-glass — read this before touching anything auth-shaped
+
+Re-enabling local login is **one line** on the BOS-HQ `.env` (`LOCAL_LOGIN_DISABLED=false`) plus
+`docker compose up -d backend`, about 30 seconds. **`restart` does not re-read the environment —
+it must be `up -d`.** Backups of every prior state are on the host as `.env.bak-*`, including
+`.env.bak-pre-killpw-20260922-092138` taken immediately before the cutover.
+
+### Open, not built — both are monitoring gaps this programme created or exposed
+
+1. **No alert on JWKS fetch failure.** `JWKS_TTL_SECONDS = 3600`, `JWKS_COOLDOWN_SECONDS = 30`,
+   fail-closed with no stale-if-error path. Before Step B a JWKS outage merely degraded SSO and
+   the operator fell back to a password; now it is the only credential path, so a sustained
+   Cloudflare certs outage locks the operator out until the break-glass above is applied by hand.
+   That is an acceptable trade — it should be **monitored rather than discovered**. Tracked as
+   ROADMAP **FU-9**. Detail: ADR-0047 Amendment 5, "Operational consequence".
+2. **No alert on a broken machine caller.** Six broke across this programme, three of them
+   silently — the marketing bridge ran 6 h dark and the DroneOpsMap GPU render node ran **3 days**
+   dark. Neither had a monitor. Tracked as ROADMAP **FU-10**; the fleet-level write-up is
+   `noc-master/docs/audits/2026-09-18-barnardhq-auth-posture-audit.md` § 2026-09-22.
+
+Both allow-listed accounts (`marketing-bridge`, `droneopsmap-bridge`) now hold **live password
+credentials while every human credential is retired**. Rotating them stays an ordinary
+operational task, and under the fleet B2 retention policy a leaked value is handled by rotating
+**and** treating the old one as compromised — never by trying to delete the backup.
+
+**Unchanged for everyone who is not BarnardHQ.** Self-hosted/OSS installs and the public demo
+instance (`command-demo.barnardhq.com`) see byte-identical behaviour: `CF_ACCESS_TEAM_DOMAIN` /
+`CF_ACCESS_AUD` are empty and `LOCAL_LOGIN_DISABLED` is `false` by default, so the verifier never
+runs, `sso-exchange` answers `404`, and the password form is the login screen. That is by
+construction, not by a flag that could be flipped by accident.
+
 **Closed at merge:** the frontend half of the v2.95.0 version bump (`frontend/package.json`,
 `frontend/package-lock.json`, `AppShell.tsx` ×2) was left at 2.94.0 because a separate agent
 owned `frontend/` during that change. Bumped in the merge commit; every shipping version
-marker now reads 2.95.0 (backend `version.py`/`main.py`, both compose files, README, the two
-`AppShell.tsx` display strings, and the frontend package manifests).
-
-This remains a complete no-op forever for self-hosted/OSS installs and the public demo
-instance (neither has Cloudflare Access; both env vars stay unset by design).
-
+marker now reads 2.95.0.
 ## 2026-09-21 — Basemap migration off CARTO + tile-health probe — **LIVE IN PRODUCTION**
 
 **State: MERGED, PUSHED AND DEPLOYED.** `72dd1a9` went to `main`; the fleet

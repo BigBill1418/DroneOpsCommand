@@ -350,6 +350,49 @@ a different controller.
   fixture log file in `backend/tests/fixtures/flight-records/`.
 - **Owner.** TBD. ~0.5 eng day.
 
+### FU-9 — Alert on JWKS fetch failure — **OPEN, raised 2026-09-22 (ADR-0047 Amendment 5)**
+
+- **Why it exists now.** `LOCAL_LOGIN_DISABLED=true` since 2026-09-22 09:21 PDT, so a verified
+  Cloudflare Access assertion is the **only** human credential this app accepts. The verifier's
+  JWKS cache is `JWKS_TTL_SECONDS = 3600` / `JWKS_COOLDOWN_SECONDS = 30` and is **fail-closed
+  with no stale-if-error path**: past its TTL, a failed fetch denies every verification.
+- **Blast radius changed at the cutover, the code did not.** Before Step B a JWKS outage
+  degraded SSO and the operator fell back to a password. Now a sustained Cloudflare certs
+  outage locks the operator out of his own system until `LOCAL_LOGIN_DISABLED=false` is set by
+  hand on the BOS-HQ `.env` (`docker compose up -d backend` — **`restart` does not re-read the
+  environment**). ~30 s of break-glass, which is why this is a **monitoring** item and not a
+  code change.
+- **Observed, not hypothesised.** During the 2026-09-22 09:51 PDT deploy the first probe after
+  the container restart returned `jwks fetch cooldown active … no fresh keys available`, and
+  the same probe succeeded 49 s later. The container's egress to the certs endpoint was
+  healthy (200, 2 keys) throughout — that is the cooldown working as designed. The point is
+  that nothing would have told anyone if it had *not* recovered.
+- **Deliverable.** A counter or log-derived signal on the verifier's fetch-failure path, an
+  InfraWatch rule, and an ntfy route graded against ADR-0037. Grade it **high**, not `urgent`:
+  the break-glass is 30 seconds and the operator is the only affected party.
+- **Cross-reference.** InfraWatch `ROADMAP.md` item 23. **Owner.** TBD. ~0.5 eng day.
+
+### FU-10 — Alert on a broken machine caller — **OPEN, raised 2026-09-22**
+
+- **Why.** Six machine callers broke across the 2026-09-18→22 fleet SSO programme and **three
+  broke silently** — no alert, no dashboard, no error the operator would see. The
+  `marketing-bridge` financials poller ran **6 h** dark (ADR-0047 Amendment 2, found only in
+  `barnardhq-api` container logs); DroneOpsMap's GPU render node ran **3 days** dark. Every one
+  was the same shape: a non-browser client that cannot present an Access cookie, discovered
+  only after it broke.
+- **Scope here.** The two accounts in `SERVICE_ACCOUNT_USERNAMES` (`marketing-bridge`,
+  `droneopsmap-bridge`) are now the only password credentials this API accepts. A signal that
+  distinguishes *"this caller has not authenticated successfully in N minutes"* from *"this
+  caller is idle"* is the whole difference between a 6-hour outage and a 6-minute one.
+- **Not just this repo.** The general form belongs to the fleet; recorded fleet-side in
+  `noc-master/docs/audits/2026-09-18-barnardhq-auth-posture-audit.md` § 2026-09-22 ("the real
+  lesson") and InfraWatch `ROADMAP.md` item 22. **This is the highest-value unbuilt item the
+  programme surfaced** — worth more than the remaining SSO conversions.
+- **Deliverable.** Per-caller last-successful-auth metric + a staleness rule. Mind the
+  cadence trap: DroneOpsMap's `GET /api/health` drives roughly **two credentialed logins per
+  minute** into this API (~11.5 k/week), so a threshold calibrated on that caller says nothing
+  about a caller that polls hourly. **Owner.** TBD. ~1 eng day.
+
 ---
 
 ## LLM-assisted report surface (follow-ups from ADR-0015, 2026-05-14)
