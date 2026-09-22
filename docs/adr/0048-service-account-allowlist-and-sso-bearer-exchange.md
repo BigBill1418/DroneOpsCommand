@@ -208,3 +208,26 @@ Two traps worth recording, both hit during this change:
 2. **Two layers answer `429` on `/api/auth/login`** — the per-IP lockout and the slowapi limiter.
    A test asserting only the status code passes whether or not the layer it names ever ran. The
    lockout test therefore also asserts on the body (`detail` vs slowapi's `error`).
+
+## Amendment 1 (2026-09-22) — the endpoint needed a caller
+
+This ADR shipped `POST /api/auth/sso-exchange` with full test coverage, and **no caller.** The
+backend and frontend halves were built concurrently in separate worktrees; the frontend agent
+finished first, correctly refused to invent a backend affordance, and left a comment saying the
+exchange endpoint "does not exist today". Both statements were true when written and both were
+false once this ADR merged.
+
+Arming Access at that point would have reproduced the 2026-09-21 outage in full: the mint
+existed but nothing invoked it, so an SSO-only operator still held no bearer and the 8
+endpoints under the bypassed `/api/intake/*` and `/api/tos/*` prefixes still 401'd. **A
+verified, well-tested endpoint that nothing calls is indistinguishable in production from an
+endpoint that was never written** — the tests were green on both sides of a gap that ran
+between them.
+
+`useAuth.ts` now calls it on a verified Access session. Writing the regression test also caught
+a real defect in the first wiring: running `tryLocalToken()` after a successful exchange sends
+the newly minted token through a validation whose failure branch deletes it. `init()` now takes
+exactly one path to a bearer.
+
+**Carry forward:** when work is split across agents or repos, the integration point between
+them is the thing no one's test suite covers. Check the caller exists, not just the callee.

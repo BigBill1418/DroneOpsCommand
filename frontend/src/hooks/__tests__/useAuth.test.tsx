@@ -219,4 +219,59 @@ describe('useAuth', () => {
 
     expect(capturedAuthHeader).toBe('Bearer LOCAL_TOKEN');
   });
+
+
+  // ── ADR-0048 — SSO-to-bearer exchange ────────────────────────────────
+  // Without these, arming Cloudflare Access leaves an SSO-only operator
+  // holding no local bearer, and every endpoint under an Access-BYPASSED
+  // prefix (/api/intake/*, /api/tos/* — 8 operator routes per ADR-0047
+  // Amendment 1) 401s. That is the 2026-09-21 outage verbatim.
+
+  it('exchanges a verified Access session for a local bearer and stores both tokens', async () => {
+    mockApiAdapter({
+      '/auth/setup-status': () => ({ status: 200, data: { needs_setup: false, sso_configured: true, local_login_disabled: true } }),
+    });
+    vi.spyOn(axios, 'get').mockResolvedValue({ data: { ok: true } } as never);
+    const postSpy = vi.spyOn(axios, 'post').mockResolvedValue({
+      data: { access_token: 'minted-access', refresh_token: 'minted-refresh', token_type: 'bearer' },
+    } as never);
+
+    const { result } = renderHook(() => useAuth());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(postSpy).toHaveBeenCalledWith('/api/auth/sso-exchange');
+    expect(localStorage.getItem('access_token')).toBe('minted-access');
+    expect(localStorage.getItem('refresh_token')).toBe('minted-refresh');
+    expect(result.current.isAuthenticated).toBe(true);
+  });
+
+  it('does not attempt the exchange when SSO is not configured', async () => {
+    mockApiAdapter({
+      '/auth/setup-status': () => ({ status: 200, data: { needs_setup: false, sso_configured: false, local_login_disabled: false } }),
+    });
+    const postSpy = vi.spyOn(axios, 'post');
+
+    const { result } = renderHook(() => useAuth());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(postSpy).not.toHaveBeenCalled();
+    expect(localStorage.getItem('access_token')).toBeNull();
+  });
+
+  it('a failed exchange (404 on an install without Access) falls through, it does not strand the operator', async () => {
+    mockApiAdapter({
+      '/auth/setup-status': () => ({ status: 200, data: { needs_setup: false, sso_configured: true, local_login_disabled: false } }),
+      '/auth/account': () => ({ status: 200, data: { ok: true } }),
+    });
+    localStorage.setItem('access_token', 'pre-existing');
+    vi.spyOn(axios, 'get').mockResolvedValue({ data: { ok: true } } as never);
+    vi.spyOn(axios, 'post').mockRejectedValue({ response: { status: 404 } });
+
+    const { result } = renderHook(() => useAuth());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    // the pre-existing local bearer survives and still authenticates
+    expect(localStorage.getItem('access_token')).toBe('pre-existing');
+    expect(result.current.isAuthenticated).toBe(true);
+  });
 });

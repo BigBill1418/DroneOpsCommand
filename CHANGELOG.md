@@ -4,6 +4,42 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-09-22 — The SPA actually calls the mint (ADR-0048, frontend half)
+
+ADR-0048 added `POST /api/auth/sso-exchange`, but **nothing called it.** The backend and
+frontend halves were built by separate agents in separate worktrees, and the frontend one
+finished before the endpoint existed — its own code comment still read "an endpoint that does
+not exist today". Arming Cloudflare Access in that state would have reproduced the 2026-09-21
+outage exactly: an Access-authenticated browser reaches the app without ever seeing the login
+screen, so it holds no local bearer, and all 8 operator-only endpoints under the
+Access-**bypassed** `/api/intake/*` and `/api/tos/*` prefixes 401.
+
+### Added
+
+- `trySsoExchange()` in `frontend/src/hooks/useAuth.ts` — on a verified Access session, trades
+  the assertion for a real bearer via `POST /api/auth/sso-exchange` and stores both tokens.
+  Bare `axios` (like `trySso()`), so a failure is an ordinary "no Access session" outcome that
+  falls through instead of tripping the shared client's redirect-on-401. Returns `404` until
+  `CF_ACCESS_TEAM_DOMAIN`/`CF_ACCESS_AUD` are set, so this stays inert for self-hosted/OSS
+  installs and the public demo instance.
+- 3 regression tests: the exchange stores both tokens and authenticates; no exchange is
+  attempted when SSO is unconfigured; a `404` exchange falls through without stranding an
+  operator who already holds a local bearer.
+
+### Fixed
+
+- **A token-wipe defect caught by the new tests, not by review.** The first wiring ran
+  `tryLocalToken()` unconditionally after the exchange. That sends the freshly minted token
+  through a validation whose failure branch *deletes both tokens* — discarding the credential
+  just acquired. `init()` now seeks a bearer by exactly one route: the mint when Access has
+  verified the browser, otherwise the stored-token path. ADR-0047 precondition 1 is still
+  satisfied — a bearer is always sought — and the agent's own precondition-1 regression test
+  still passes unchanged.
+
+### Verified
+
+- `npx tsc --noEmit` clean; `npx vitest run` — **15 files, 96 passed** (93 + 3 new).
+
 ## 2026-09-22 — The two things that must exist before the password can be retired (ADR-0048) — v2.95.0
 
 Both mechanisms ship **inert**. Nothing changes for a self-hosted/OSS install, for the public
