@@ -67,9 +67,11 @@ and silently killed the `marketing-bridge` financials poller, so "Step B never t
 is no longer accurate anywhere. The allow-list (precondition 5) and the SSO→bearer exchange
 now exist; both ship inert and need an operator to set `SERVICE_ACCOUNT_USERNAMES` on the
 BOS-HQ `.env` before either does anything. See ADR-0048 §"To enable".
-**Outstanding:** the frontend half of the v2.95.0 version bump (`frontend/package.json`,
-`frontend/package-lock.json`, `AppShell.tsx` ×2) was left at 2.94.0 — a separate agent owned
-`frontend/` during that change. Bump before merge.
+**Closed at merge:** the frontend half of the v2.95.0 version bump (`frontend/package.json`,
+`frontend/package-lock.json`, `AppShell.tsx` ×2) was left at 2.94.0 because a separate agent
+owned `frontend/` during that change. Bumped in the merge commit; every shipping version
+marker now reads 2.95.0 (backend `version.py`/`main.py`, both compose files, README, the two
+`AppShell.tsx` display strings, and the frontend package manifests).
 
 This remains a complete no-op forever for self-hosted/OSS installs and the public demo
 instance (neither has Cloudflare Access; both env vars stay unset by design).
