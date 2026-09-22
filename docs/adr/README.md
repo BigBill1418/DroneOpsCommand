@@ -4,8 +4,9 @@
 exhaustive docs-freshness pass. Every row's status was read from the ADR's own
 `Status:` line after that pass reconciled it against the running system.
 
-- **Numbering:** `0001`–`0046`, **contiguous, no gaps, no duplicates** (verified
-  `2026-09-21`). The next ADR is **`0047`**.
+- **Numbering:** `0001`–`0048`, **contiguous, no gaps, no duplicates** (verified
+  `2026-09-22` against every local and remote branch, not just `main`). The next
+  ADR is **`0049`**.
 - **Repo state when this index was generated:** live app **v2.92.1**,
   flight-parser **1.2.0**, alembic head **`0011_battery_src_truth`**, `main` at
   `28b9c98`.
@@ -86,6 +87,8 @@ narrative quality.**
 | [0044](0044-serial-prefix-matcher-odl-canonical-serials.md) | Canonical DJI serials in the fleet-attribution matcher | Accepted — v2.90.0 | 2026-09-05 | **Amends [0007](0007-strict-fleet-attribution-matcher.md)** |
 | [0045](0045-phase7-customer-surface-hardening.md) | Phase 7 customer-surface hardening | Accepted — **merged and deployed v2.91.0, 2026-09-21** | 2026-09-21 | Self-corrected same day (`client_ip.py` two-hop chain) |
 | [0046](0046-keyless-basemap-registry-and-tile-health-probe.md) | Keyless basemap registry + tile-health probe | Accepted — **shipped and deployed v2.92.0, 2026-09-21** | 2026-09-21 | Supersedes in practice the five hard-coded CARTO/Esri/OSM tile URLs |
+| [0047](0047-operator-cloudflare-access-sso.md) | Operator Cloudflare Access SSO | **ROLLED BACK 2026-09-22** — code merged v2.94.0, inert while the CF vars are empty | 2026-09-21 | Amendment 1 (blast radius = 8 endpoints) + Amendment 2 (Step B *did* take effect; precondition 5) |
+| [0048](0048-service-account-allowlist-and-sso-bearer-exchange.md) | Service-account allow-list + SSO→bearer exchange | Accepted — merged v2.95.0, **ships inert** (empty allow-list, `404` until Access is configured) | 2026-09-22 | Closes [0047](0047-operator-cloudflare-access-sso.md) precondition 5 and supplies the mint precondition 1 needs |
 
 ---
 

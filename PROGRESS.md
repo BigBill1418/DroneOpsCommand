@@ -50,13 +50,26 @@ The operator must log in once after the rollback — the browser holds no bearer
 | `LOCAL_LOGIN_DISABLED` kill switch | Done, off by default, 9 tests |
 | Login/Setup screen modernized for SSO + email fix + CallSignLane-style footer | Done, 14 tests |
 | Three commits: Step A (2.93.0), frontend Part 2 (2.93.1), Step B (2.94.0) | Done, `test_app_version_parity` green at each |
+| `SERVICE_ACCOUNT_USERNAMES` allow-list (ADR-0048, v2.95.0) | Done, empty by default, 26 tests — closes ADR-0047 **precondition 5** |
+| `POST /api/auth/sso-exchange` (ADR-0048, v2.95.0) | Done, `404` until Access is configured, 19 tests — supplies the bearer **mint** precondition 1 needs |
 
 **Next action is a FIX, not a cutover.** Do not set `CF_ACCESS_TEAM_DOMAIN`/`CF_ACCESS_AUD`
 again until all four preconditions in ADR-0047 §"2026-09-22 incident" are met — chiefly:
 `useAuth` must keep a local bearer token alongside the SSO probe, the Access application's
 path coverage must be read from the Cloudflare account and written down, and the soak must
-exercise a real `POST /api/intake/initiate` rather than dashboard GETs. Step B
-(`LOCAL_LOGIN_DISABLED=true`) stays out of scope until Step A is proven.
+exercise a real `POST /api/intake/initiate` rather than dashboard GETs — all **8** of them,
+per Amendment 1. Step B (`LOCAL_LOGIN_DISABLED=true`) stays out of scope until Step A is
+proven.
+
+**ADR-0048 (v2.95.0) closed Step B's two known breakages in code, but enabled nothing.**
+Amendment 2 established that the flag was in fact true in production for ~6 h on 2026-09-21
+and silently killed the `marketing-bridge` financials poller, so "Step B never took effect"
+is no longer accurate anywhere. The allow-list (precondition 5) and the SSO→bearer exchange
+now exist; both ship inert and need an operator to set `SERVICE_ACCOUNT_USERNAMES` on the
+BOS-HQ `.env` before either does anything. See ADR-0048 §"To enable".
+**Outstanding:** the frontend half of the v2.95.0 version bump (`frontend/package.json`,
+`frontend/package-lock.json`, `AppShell.tsx` ×2) was left at 2.94.0 — a separate agent owned
+`frontend/` during that change. Bump before merge.
 
 This remains a complete no-op forever for self-hosted/OSS installs and the public demo
 instance (neither has Cloudflare Access; both env vars stay unset by design).
