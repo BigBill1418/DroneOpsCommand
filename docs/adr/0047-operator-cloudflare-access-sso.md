@@ -161,6 +161,58 @@ matching. A naive `([^)]*)` capture of the handler signature truncates at the fi
 `Depends(get_current_user)` and reports 1 protected endpoint instead of 8 — worth stating
 because the under-count is silent and looks like good news.
 
+### Amendment 2 (2026-09-22) — a second, unrecorded outage: Step B *did* take effect
+
+The incident write-up states that `LOCAL_LOGIN_DISABLED` "has read `false` throughout and
+never took effect", and describes the 2026-09-22 02:17:20 PDT `.env` edit as "**No
+behavioural change** — compose already defaulted it to `false`". **The evidence contradicts
+both claims.** A second production outage ran concurrently with the intake one and was not
+recorded.
+
+**Observed.** `barnardhq-api` on BOS-HQ logged 14 occurrences of
+`[DRONEOPS-FIN] login failed: HTTP 403`, hourly from **02:22:41 UTC to 08:22:41 UTC**
+(19:22 PDT 09-21 → 01:22 PDT 09-22). The next poll, **09:22:42 UTC**, logged
+`poll ok (snapshot #2992)` — the first cycle after the 09:17 UTC (02:17 PDT) backend
+recreate. So the marketing → DroneOpsCommand financials bridge was down for ~6 h and
+recovered at exactly the edit the ADR called a no-op.
+
+**Attribution.** The failing call is `POST ${apiUrl}/api/auth/login` in
+`~/marketing/api/droneops-financials.js` (`_login`, which throws
+`login failed: HTTP ${res.status}` on any non-OK). `DRONEOPS_API_URL` is
+`http://10.99.0.4:8000` — the mesh address, so Cloudflare Access is **not** in this path and
+cannot be the source. On that route, `403` has exactly one source in the codebase:
+`_require_local_login_enabled()` in `backend/app/routers/auth.py`. Excluded by reading the
+code: the IP lockout (`_check_lockout`) raises **429**, the slowapi limiter raises **429**,
+and `DemoGuardMiddleware` is registered only `if settings.demo_mode` — `DEMO_MODE` is not set
+on `droneops-backend-1`, so the middleware is not in the stack at all, and it never matches
+`/api/auth/login` regardless.
+
+**Therefore `settings.local_login_disabled` was `True` on the production backend for those
+~6 hours.** Step B was live and did precisely what it is built to do: refuse a password
+login. The machine caller has no other credential, so it simply stopped.
+
+**Calibration — what is *not* established.** Container A was recreated twice before this was
+investigated, so its environment could not be read directly and **the mechanism by which the
+value became true is unknown.** `docker-compose.yml` defaults it to `${LOCAL_LOGIN_DISABLED:-false}`,
+the BOS-HQ `docker-compose.override.yml` (untracked, gitignored) does not mention it, and the
+stack resolves `"false"` today. What is established is the *state*, from the 403 and its
+single possible source — not how it was reached. Anyone re-enabling Step B should read the
+live `.env` and `docker compose config` **before** and **after**, and keep the output.
+
+**Why this matters more than the outage it caused.** It is direct production evidence for the
+precondition this ADR had not yet identified: **`LOCAL_LOGIN_DISABLED=true` breaks every
+machine caller that authenticates with username+password**, silently, because such callers
+cannot present an Access cookie. Two exist today — `marketing-bridge`
+(`~/marketing/api/droneops-financials.js`) and `droneopsmap-bridge`
+(`~/DroneOpsMap/backend/app/services/doc_client.py`, which also calls `POST /api/auth/refresh`).
+Both must be exempted before the flag is ever set true again; that is tracked as the
+service-account allowlist work. Neither surfaces an alert — the marketing failure was visible
+only in `barnardhq-api` container logs, which is why it ran six hours unnoticed.
+
+**Precondition 5, added:** `LOCAL_LOGIN_DISABLED` must not be set `true` until every
+password-authenticating machine caller is exempted by an allowlist, and each one has been
+verified working with the flag on.
+
 ### Process finding
 
 The deploy itself was **authorized** — the operator said *"get rid of that awful auth — send
