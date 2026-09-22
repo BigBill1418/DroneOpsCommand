@@ -17,7 +17,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from pydantic import BaseModel
 
-from app.auth.cf_access import is_cf_access_configured
+from app.auth.cf_access import (
+    extract_cf_access_token,
+    is_cf_access_configured,
+    verify_cf_access_assertion,
+)
 from app.auth.jwt import (
     create_access_token,
     create_refresh_token,
@@ -25,6 +29,7 @@ from app.auth.jwt import (
     hash_password,
     hash_password_async,
     invalidate_user_cache,
+    resolve_cf_access_user,
     verify_password,
     verify_password_async,
     check_password_complexity,
@@ -98,19 +103,43 @@ def _clear_failures(ip: str) -> None:
     _lockouts.pop(ip, None)
 
 
-def _require_local_login_enabled() -> None:
+def _require_local_login_enabled(exempt_username: str | None = None) -> None:
     """ADR-0047 Step B guard. Raises 403 when an operator has explicitly
     retired local login (LOCAL_LOGIN_DISABLED=true) — false by default
     everywhere, including self-hosted/OSS installs and the public demo
     instance, so this is a no-op for them. Only the routes that MINT new
     local credentials call this; get_current_user's bearer-token
     VERIFICATION logic is left completely intact so this is a config
-    flip, not a code deletion — see docs/adr/0047-*.md."""
-    if settings.local_login_disabled:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Local login is disabled on this instance — sign in via SSO",
+    flip, not a code deletion — see docs/adr/0047-*.md.
+
+    ``exempt_username`` (ADR-0048) is the username this request has ALREADY
+    established: the login body's username, or the ``sub`` claim of a
+    refresh token whose signature has already been verified. Never a
+    free-form client field. When it appears in SERVICE_ACCOUNT_USERNAMES the
+    caller is let past THIS 403 and nothing else — the password check, the
+    per-IP lockout, and the ``is_active`` check all still run, in the same
+    order, on the same code path. There is no role or admin column on
+    ``User`` (see app/models/user.py) for an allowlist entry to escalate.
+
+    Omitting the argument is how a route says "no exemption exists here",
+    and is the fail-closed default: ``setup`` and ``update_account`` CREATE
+    and MUTATE credentials, so they stay hard-blocked even for an
+    allowlisted name holding a valid token."""
+    if not settings.local_login_disabled:
+        return
+
+    if exempt_username and exempt_username in settings.service_account_allowlist:
+        logger.info(
+            "ADR-0048: local-login gate bypassed for allowlisted service account '%s' "
+            "— password, lockout and is_active checks still apply",
+            exempt_username,
         )
+        return
+
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Local login is disabled on this instance — sign in via SSO",
+    )
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -152,6 +181,9 @@ async def setup_status(db: AsyncSession = Depends(get_db)):
 @limiter.limit("5/minute")
 async def initial_setup(request: Request, body: SetupRequest, db: AsyncSession = Depends(get_db)):
     """Create the first admin user. Only works when no users exist."""
+    # No exemption argument, by design (ADR-0048) — this route CREATES a
+    # local credential. The allowlist buys a machine caller a login, never
+    # a way to mint one.
     _require_local_login_enabled()
     client_ip = get_trusted_client_ip(request)
     result = await db.execute(select(User))
@@ -188,7 +220,12 @@ async def initial_setup(request: Request, body: SetupRequest, db: AsyncSession =
 @router.post("/login")
 @limiter.limit("10/minute")
 async def login(request: Request, body: LoginRequest, db: AsyncSession = Depends(get_db)):
-    _require_local_login_enabled()
+    # ADR-0048: the attempted username verbatim. `User.username == body.username`
+    # below is a byte-exact varchar comparison, so stripping or case-folding
+    # here would admit strings that lookup could never match. A name that is
+    # not on the allowlist raises 403 right here, before the row is read, so
+    # the response is identical whether or not that account exists.
+    _require_local_login_enabled(body.username)
     client_ip = get_trusted_client_ip(request)
     logger.info("Login attempt: user='%s' ip=%s", body.username, client_ip)
 
@@ -230,6 +267,79 @@ async def login(request: Request, body: LoginRequest, db: AsyncSession = Depends
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# SSO -> bearer exchange (ADR-0048)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+@router.post("/sso-exchange", response_model=TokenResponse)
+@limiter.limit("10/minute")
+async def sso_exchange(request: Request, db: AsyncSession = Depends(get_db)):
+    """Trade a verified Cloudflare Access assertion for a normal local bearer
+    pair — the missing half of ADR-0047, added by ADR-0048.
+
+    WHY THIS EXISTS. Access is an *edge* control, and ADR-0047 Amendment 1
+    established that three Access apps cover `droneops.barnardhq.com`, two of
+    them with **bypass** policies over `/api/intake/*` and `/api/tos/*`. On a
+    bypassed path the edge does not authenticate, so it injects no
+    `Cf-Access-Jwt-Assertion` — and the 8 operator-only endpoints living
+    under those prefixes therefore see no Access credential at all. An
+    operator who authenticated purely through Access holds nothing those
+    endpoints accept. Reordering the SPA's `useAuth.init()` can only preserve
+    a local bearer that already exists; nothing could MINT one, because
+    `POST /login` answers 403 once Step B is on. This route is that mint, and
+    it is the reason Step B can be turned on without repeating the
+    2026-09-21 onboarding outage.
+
+    DELIBERATELY NOT BEHIND ``_require_local_login_enabled()``. This is not a
+    local login — no password is presented, accepted, or created. It must
+    work *precisely* when local login is disabled; gating it would reproduce
+    the exact lockout ADR-0047 §Consequences warns about.
+
+    TRUST BOUNDARY. The header's presence proves nothing: this origin is
+    reachable from the WireGuard mesh (`10.99.0.4:8000`), where any container
+    can set any header it likes. Only ``verify_cf_access_assertion`` makes it
+    trustworthy — RS256 signature checked against Cloudflare's JWKS for this
+    team domain, with an explicit algorithm allow-list (so `alg:none` and the
+    HS256 confusion downgrade are refused before a key is tried), plus
+    required `aud`, `iss` and `exp`, then the `CF_ACCESS_ALLOWED_EMAILS`
+    allow-list. Every failure mode denies; none of them mints anything.
+
+    STRUCTURALLY DARK WHEN UNCONFIGURED. With `CF_ACCESS_TEAM_DOMAIN` or
+    `CF_ACCESS_AUD` empty — every self-hosted/OSS install and the public demo
+    instance — this answers 404 before it so much as reads the header. It can
+    never be a second way in for a deployment that has no Access in front
+    of it.
+
+    GRANTS NOTHING EXTRA. The identity comes from ``resolve_cf_access_user``,
+    the same mapping-table resolver ``get_current_user`` already uses, so an
+    exchange reaches exactly the shadow user an Access-authenticated request
+    would have reached — no second identity mechanism, and no privilege to
+    escalate (``users`` has no role column; see app/models/user.py). The
+    response is byte-compatible with ``POST /login``: same claims, same
+    helpers, same expiry, so nothing downstream in the SPA changes.
+    """
+    if not is_cf_access_configured():
+        # 404, not 403: on an install with no Access the route should look
+        # like it does not exist rather than advertise a door.
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    result = await verify_cf_access_assertion(extract_cf_access_token(request))
+    if not result.ok:
+        # `result.reason` distinguishes `email_not_allowed` from
+        # `token_expired`; that belongs in the log, never in the response.
+        logger.warning("[CF-ACCESS] sso-exchange DENIED (reason=%s)", result.reason)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Cloudflare Access assertion not valid for this instance",
+        )
+
+    user = await resolve_cf_access_user(db, result.email)
+    logger.info("[CF-ACCESS] sso-exchange minted a bearer pair for email=%s", result.email)
+    return TokenResponse(
+        access_token=create_access_token({"sub": user.username}),
+        refresh_token=create_refresh_token({"sub": user.username}),
+    )
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Account management
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 @router.get("/account")
@@ -247,6 +357,9 @@ async def update_account(
     db: AsyncSession = Depends(get_db),
 ):
     """Update username and/or password. Requires current password for verification."""
+    # No exemption argument, by design (ADR-0048) — this route MUTATES a
+    # credential. An allowlisted service account holding a valid bearer
+    # token still gets 403 here.
     _require_local_login_enabled()
     if not await verify_password_async(body.current_password, user.hashed_password):
         raise HTTPException(status_code=403, detail="Current password is incorrect")
@@ -331,7 +444,6 @@ async def get_password_rules():
 
 @router.post("/refresh", response_model=TokenResponse)
 async def refresh(request: RefreshRequest, db: AsyncSession = Depends(get_db)):
-    _require_local_login_enabled()
     try:
         payload = jwt.decode(
             request.refresh_token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm]
@@ -342,6 +454,21 @@ async def refresh(request: RefreshRequest, db: AsyncSession = Depends(get_db)):
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
     except JWTError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
+
+    # ADR-0048: gated on the SIGNED `sub` claim decoded above — never on a
+    # client-supplied field — and placed before the user lookup so a
+    # non-allowlisted subject gets the same 403 whether or not the row
+    # exists. This guard ran as the handler's first statement under
+    # ADR-0047; it cannot any more, because it now needs a subject that
+    # only the decode can establish. The one deliberate consequence: with
+    # local login disabled, an UNDECODABLE refresh token now answers 401
+    # instead of 403. That reveals nothing about any user (the token failed
+    # signature verification) and `GET /api/auth/setup-status` already
+    # publishes the flag itself. Note this is NOT "the flag has never been
+    # on": ADR-0047 Amendment 2 shows it was true in production for ~6 h on
+    # 2026-09-21. What is unchanged is every path that carries a decodable
+    # token, which is every path a real caller takes.
+    _require_local_login_enabled(username)
 
     result = await db.execute(select(User).where(User.username == username))
     user = result.scalar_one_or_none()

@@ -163,6 +163,31 @@ class Settings(BaseSettings):
     # app/routers/auth.py.
     local_login_disabled: bool = False
 
+    # ADR-0048 — comma-separated usernames that may keep using
+    # username+password login while `local_login_disabled` is true. Empty by
+    # default, so this is a no-op for self-hosted/OSS installs and the public
+    # demo instance, and an empty/blank value leaves the Step B guard blocking
+    # every local login exactly as it did before this setting existed.
+    # Parsed by `service_account_allowlist` below — read that, not this.
+    service_account_usernames: str = ""
+
+    @property
+    def service_account_allowlist(self) -> frozenset[str]:
+        """ADR-0048 — the usernames exempt from the `LOCAL_LOGIN_DISABLED` 403.
+
+        Whitespace-stripped around each entry, blanks dropped, and
+        deliberately **case-SENSITIVE**: `app/routers/auth.py` looks users up
+        with `User.username == <attempted>` against a Postgres `varchar`, which
+        is byte-exact. Lower-casing here (as `cf_access.py` correctly does for
+        e-mail addresses, which are case-insensitive by RFC) would admit a name
+        past the gate that the very next query could never find.
+
+        Fails closed: unset, blank, or nothing but separators all yield an
+        empty set, and an empty set exempts nobody.
+        """
+        raw = self.service_account_usernames or ""
+        return frozenset(part.strip() for part in raw.split(",") if part.strip())
+
     @property
     def database_url_sync(self) -> str:
         """Synchronous database URL for Celery tasks."""

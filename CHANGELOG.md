@@ -4,6 +4,75 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-09-22 — The two things that must exist before the password can be retired (ADR-0048) — v2.95.0
+
+Both mechanisms ship **inert**. Nothing changes for a self-hosted/OSS install, for the public
+demo instance, or for BarnardHQ production as currently configured. `LOCAL_LOGIN_DISABLED` is
+untouched and remains an operator flip on the host.
+
+### Added
+
+- **`SERVICE_ACCOUNT_USERNAMES`** (`backend/app/config.py`, wired through `docker-compose.yml`,
+  documented in `.env.example`) — a comma-separated, **empty-by-default** allow-list of
+  usernames permitted to keep using `POST /api/auth/login` and `POST /api/auth/refresh` while
+  `LOCAL_LOGIN_DISABLED=true`. It exists because two repos authenticate to this API over the
+  WireGuard mesh with a username and password and cannot hold a Cloudflare Access cookie:
+  `droneopsmap-bridge` (`~/DroneOpsMap/.../doc_client.py`) and `marketing-bridge`
+  (`~/marketing/api/droneops-financials.js`). ADR-0047 Amendment 2 showed the flag was true in
+  production for ~6 h on 2026-09-21 and silently killed the second one; this closes that
+  ADR's **precondition 5**.
+  The exemption is from the "local login is retired" 403 and **nothing else** — wrong password
+  is still 401, the per-IP lockout still fires, `is_active` is still enforced, and
+  `POST /api/auth/setup` + `PUT /api/auth/account` stay hard-blocked for every name on the list.
+  Blank or malformed values parse to an empty set, which exempts nobody.
+- **`POST /api/auth/sso-exchange`** — trades a cryptographically verified
+  `Cf-Access-Jwt-Assertion` for the same `{access_token, refresh_token, token_type}` pair
+  `/api/auth/login` returns. ADR-0047 Amendment 1 established that `/api/intake/*` and
+  `/api/tos/*` sit behind Access apps with **bypass** policies, so the edge injects no assertion
+  and the 8 operator-only endpoints there accept only a local bearer — which, once Step B is on,
+  nothing could mint. This is that mint, and it is deliberately **not** gated by the Step B
+  switch. It verifies the RS256 signature against Cloudflare's JWKS with an explicit algorithm
+  allow-list and required `aud`/`iss`/`exp`, honours `CF_ACCESS_ALLOWED_EMAILS`, and resolves
+  identity through the existing `resolve_cf_access_user()` mapping table — no second identity
+  mechanism, no privilege grant (`users` has no role column). It answers **404** when
+  `CF_ACCESS_TEAM_DOMAIN`/`CF_ACCESS_AUD` are empty, so it is invisible on any install without
+  Cloudflare Access.
+
+### Changed
+
+- `_require_local_login_enabled()` takes an optional `exempt_username`. Omitting it is the
+  fail-closed default and is what `setup` and `update_account` deliberately do.
+- **One behavioural change, on a path no real caller takes:** the Step B guard moved below the
+  token decode in `POST /api/auth/refresh`, because it now needs a subject only the decode can
+  establish (taken from the signed `sub`, never a client field). So with Step B on, an
+  *undecodable* refresh token answers **401** instead of 403. The token failed signature
+  verification, so nothing about any user is revealed. Pinned by a test.
+
+### Tests
+
+- **952 passed, 23 skipped** (`cd backend && pytest -q`), against a **907 passed, 23 skipped**
+  baseline measured on the same checkout before the change. 45 new tests:
+  `backend/tests/test_local_login_disabled.py` (+26) and `backend/tests/test_sso_exchange.py`
+  (19, new). Every security claim was falsified by mutating the implementation and confirming
+  the specific test goes red — including making `sso-exchange` trust the header unverified,
+  which turns 9 tests red. The Access tests do not mock the verifier: a real RSA keypair signs
+  every assertion and only the JWKS transport is stubbed.
+
+### Documentation
+
+- `docs/adr/0048-service-account-allowlist-and-sso-bearer-exchange.md` — full rationale, the
+  mutation-testing table, the operator enable procedure, and the two method traps found on the
+  way (the `@limiter.limit` decorator binds the module-level `Limiter` at import time, so
+  per-app limiters do not isolate the budget; and two layers answer 429 on `/api/auth/login`).
+- `docs/adr/README.md` — index reconciled: it still claimed `0001`–`0046` with `0047` next, and
+  had no row for ADR-0047. Now `0001`–`0048`, next `0049`, both rows present.
+
+### Operator action required before this does anything
+
+`SERVICE_ACCOUNT_USERNAMES=marketing-bridge,droneopsmap-bridge` on the BOS-HQ `.env`, then
+recreate the backend and verify **with Step B still off** that both bridges keep working. See
+ADR-0048 §"To enable".
+
 ## 2026-09-22 — Operator Cloudflare Access SSO (ADR-0047 Step A) ROLLED BACK — onboarding outage
 
 ### Fixed
