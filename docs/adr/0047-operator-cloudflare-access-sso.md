@@ -213,7 +213,7 @@ only in `barnardhq-api` container logs, which is why it ran six hours unnoticed.
 password-authenticating machine caller is exempted by an allowlist, and each one has been
 verified working with the flag on.
 
-### Amendment 3 (2026-09-22) — Step A re-enabled, and a `kid` gap to fix in daylight
+### Amendment 3 (2026-09-22) — Step A re-enabled; the `kid` gap found here is now CLOSED
 
 **Step A is live again as of 2026-09-22 03:48 PDT**, this time with all five preconditions met.
 `CF_ACCESS_TEAM_DOMAIN=barnardhq.cloudflareaccess.com` and the `DroneOps Admin` AUD are set on
@@ -244,22 +244,91 @@ What made this attempt different from 2026-09-21:
 
 The mint was probed live: absent, garbage, and `alg:none` assertions all return 401.
 
-#### Open finding — `python-jose` ignores `kid` (fleet-wide, not urgent)
+#### CLOSED (2026-09-22) — `python-jose` ignores `kid`
 
-`_decode()` passes the whole JWKS as `{"keys": keys}`. `python-jose` does not select by `kid`; it
-tries the keys, so a token with an unknown `kid` still verifies if any key in the set matches.
-Found by the DroneOpsMap agent, whose `test_unknown_kid_denies` failed on first run.
-**`~/marketing/api/cf-access.js` and DroneOpsMap's port share the same shape.**
+**Status: fixed in `app/auth/cf_access.py`, branch `security/cf-access-kid-pinning`. Not yet
+deployed — the operator deploys this one.**
 
-**This is not an authentication bypass, and is not a reason to re-darken Step A.** The key set is
-this team's own Cloudflare keys; `aud` is pinned to the `DroneOps Admin` app, `iss` to the team
-domain, and `CF_ACCESS_ALLOWED_EMAILS` still applies. Forging requires a JWT Cloudflare signed
-for this team, with this app's audience and an allow-listed email — i.e. having already
-authenticated through Access. The `kid` check is defence-in-depth against key confusion.
+The finding was real and is now confirmed at the library level, not merely inferred. `kid` appears
+nowhere in `python-jose`'s verification path: `jose/jws.py` has exactly one occurrence, in an
+unrelated comment, and `jose/jwt.py` has none. Passing a JWK Set routes into
+`jose.jws._sig_matches_keys`, which is literally:
 
-Deliberately **not** patched at 03:48 PDT mid-cutover: the verifier is the only thing between
-Access and the API right now, and an untested change to it is riskier than the gap. Fix with a
-`kid`-selection step plus a regression test, in one sweep across all three implementations.
+```python
+for key in keys:
+    if key.verify(signing_input, signature):
+        return True
+```
+
+So the set was searched for *any* key that matched the signature, and whatever `kid` the token
+claimed was never consulted. Reproduced end to end on **both** the pinned `python-jose==3.4.0`
+that production builds and the 3.5.0 present on the dev host: a token signed by a published key
+but carrying `kid: ATTACKER-INVENTED-KID` verified and returned `bill@barnardhq.com`.
+
+**Severity is unchanged from the original entry — this was never an authentication bypass** and
+was correctly not treated as one. `aud` is pinned to the `DroneOps Admin` app, `iss` to the team
+domain, and `CF_ACCESS_ALLOWED_EMAILS` applies. Forging still required a JWT Cloudflare signed for
+this team with this app's audience and an allow-listed email — i.e. having already authenticated
+through Access. This was defence in depth against key confusion, and the decision to leave it
+unpatched mid-cutover rather than make an untested change to the only control between Access and
+the API was the right call.
+
+**The fix.** `_select_key()` reads the token's `kid` and returns the single matching JWKS entry;
+`_decode()` verifies against that one key instead of the whole set. Every existing check is
+untouched — the `algorithms=["RS256"]` allow-list (still evaluated before any key is tried), `aud`,
+`iss`, `exp` with the 30 s skew, the 1 h JWKS TTL, the 30 s fetch cooldown, and fail-closed on an
+unavailable JWKS.
+
+Two distinct denial paths, because they differ operationally:
+
+- **Unknown `kid`** raises `UnknownKid(JWTError)`, which lands in the *existing*
+  refetch-once-and-retry path. This is deliberate: a Cloudflare key rotation arrives bearing a
+  `kid` we have never seen, so an unknown `kid` and a rotation are the same event observed from
+  different angles. Rotation recovery is preserved exactly.
+- **Absent `kid`** raises `MissingKid(JWTError)` and denies immediately. No refetch can make an
+  absent `kid` match, so spending a forced fetch attempt — and the 30 s cooldown that follows one —
+  on a request that cannot succeed would hand an unauthenticated caller a lever on the cooldown.
+  This is **strictly narrower** than the pre-fix behaviour, where such a token failed the signature
+  check and *did* force a refetch.
+
+Denying a `kid`-less token is the only part of this change that could, if the premise were wrong,
+lock the operator out — and with the password retired (Amendment 4) there is no fallback. The
+premise was checked against live fleet evidence rather than assumed: **TitanForge**
+(`backend/src/titanforge/services/auth.py:207-209`, the control plane these sessions run on) and
+**CallSignPublic** (`backend/app/core/access.py`, via PyJWT's `PyJWKClient`) both hard-require a
+`kid` and both authenticate against real Cloudflare Access in production today. A real Access
+assertion carries a `kid`.
+
+**The cooldown window was not widened**, which was an explicit requirement. An unknown-`kid` token
+and a bad-signature token now trigger an identical number of JWKS fetch attempts, pinned by a
+test that asserts the two counts are equal in both the cold- and warm-cache states. Note the
+measured behaviour on a cold cache: the forced refetch is itself throttled by the cooldown the
+initial fill just started, so such a request denies with the cooldown reason rather than
+`unknown_kid`. It still fails closed, which is the property that matters.
+
+Seven regression tests were added to `tests/test_cf_access.py`. Five of them were confirmed to
+**fail against the pre-fix implementation**, returning `CfAccessResult(ok=True,
+email='bill@barnardhq.com')` for the forged token — the defect demonstrated in the harness rather
+than asserted. The other two (a matching `kid` in a multi-key set still verifies; a rotation to a
+new `kid` still recovers via the refetch) pass on both versions by design: they are the
+don't-break-live-auth guards.
+
+#### Correction — marketing does **not** share this shape
+
+The original entry stated that `~/marketing/api/cf-access.js` and DroneOpsMap's port "share the
+same shape". For marketing that is **wrong**, and the error is worth recording because it is the
+kind of claim that propagates. Node's `jose` selects by `kid` inside `createRemoteJWKSet`, so
+`marketing/api/cf-access.js` was never vulnerable. Verified against the real module, not assumed:
+a token with an unknown `kid` is refused with `no applicable key found in the JSON Web Key Set`,
+and — the discriminating case — a token whose header claims `cf-key-A` but is signed by the
+published `cf-key-B` is refused with `signature verification failed`. A verifier that tried every
+key would have accepted that second token.
+
+The root cause of the DroneOps gap was therefore the **port itself**. The property was real in the
+original but was a property of the *library*, never of the module, so nothing in marketing's test
+suite guarded it and nothing failed when the port to `python-jose` dropped it. Three
+characterization tests have been added to `marketing/api/cf-access.test.js` to make the property
+explicit and load-bearing there; no marketing production code was changed.
 
 ### Amendment 4 (2026-09-22 09:21 PDT) — Step B is live; the password is retired
 

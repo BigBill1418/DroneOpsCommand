@@ -4,6 +4,55 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-09-22 — The Access verifier now selects its signing key by `kid` (ADR-0047 Am. 3, CLOSED)
+
+The open finding recorded in ADR-0047 Amendment 3 is closed. `app/auth/cf_access.py` passed the
+whole JWKS to `jwt.decode()` as `{"keys": keys}`, and `python-jose` **never reads the `kid`
+header** — the string appears nowhere in its verification path. A JWK Set routes into
+`jose.jws._sig_matches_keys`, a bare `for key in keys: if key.verify(...): return True` loop, so a
+token claiming an unknown `kid` verified anyway as long as some key in the set matched its
+signature. Reproduced on both the pinned `python-jose==3.4.0` that production builds and the
+3.5.0 on the dev host.
+
+**This was not an authentication bypass.** `aud` is pinned to the `DroneOps Admin` application,
+`iss` to the team domain, and `CF_ACCESS_ALLOWED_EMAILS` applies, so forging still required a JWT
+Cloudflare signed for this team with this app's audience and an allow-listed email — having
+already authenticated through Access. The `kid` check is defence in depth against key confusion.
+
+### Fixed
+
+- `_select_key()` picks the one JWKS entry whose `kid` matches the token header; `_decode()`
+  verifies against that single key instead of the whole set. Every existing control is unchanged:
+  the `algorithms=["RS256"]` allow-list (still evaluated before any key is tried), `aud`, `iss`,
+  `exp` with the 30 s skew, the 1 h JWKS TTL, the 30 s fetch cooldown, and fail-closed on an
+  unavailable JWKS.
+- An **unknown** `kid` raises `UnknownKid(JWTError)` and takes the existing
+  refetch-once-and-retry path, because a Cloudflare key rotation arrives bearing a `kid` we have
+  never seen — rotation recovery is preserved exactly.
+- An **absent** `kid` raises `MissingKid(JWTError)` and denies immediately without forcing a
+  refetch, since no refetch can make an absent `kid` match. This is strictly narrower than the
+  previous behaviour, where such a token failed the signature check and did force one, and it
+  denies an unauthenticated caller a lever on the 30 s fetch cooldown.
+- Removed a dead `import jwt as pyjwt` from `test_alg_none_downgrade_denied`. It was unused —
+  the test builds its `alg:none` token by hand, exactly as its own comment says — but PyJWT is
+  declared in neither requirements file, so that security test errored out in any environment
+  without an ambient PyJWT. It only passed because the dev host happens to have one installed.
+
+### Added
+
+- 7 regression tests in `tests/test_cf_access.py`. Five were confirmed to **fail against the
+  pre-fix implementation**, returning `CfAccessResult(ok=True, email='bill@barnardhq.com')` for
+  the forged token. The remaining two pass on both versions by design — they are the
+  don't-break-live-auth guards (a matching `kid` in a multi-key set still verifies; a rotation to
+  a new `kid` still recovers via the refetch).
+- A test pinning that the fetch **cooldown was not widened**: an unknown-`kid` token and a
+  bad-signature token trigger an identical number of JWKS fetch attempts, asserted in both the
+  cold- and warm-cache states.
+
+Suite: 959 passed, 23 skipped (baseline before this change: 952 passed, 23 skipped) on the dev
+host; 47 passed, 6 skipped for the Access-verifier files under a clean venv holding the pinned
+`python-jose==3.4.0`. **Not deployed — the operator deploys this one.**
+
 ## 2026-09-22 — The SPA actually calls the mint (ADR-0048, frontend half)
 
 ADR-0048 added `POST /api/auth/sso-exchange`, but **nothing called it.** The backend and
