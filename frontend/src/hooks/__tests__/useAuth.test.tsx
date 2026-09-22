@@ -142,4 +142,81 @@ describe('useAuth', () => {
 
     expect(result.current.localLoginDisabled).toBe(true);
   });
+
+  // ── ADR-0047 precondition 1 regression coverage (2026-09-22 incident) ──
+  // `POST /api/intake/initiate` sits under a public Access-bypassed prefix
+  // (customers reach it with no Access session — see ADR-0047 "Scope,
+  // precisely"), so it never carries Cloudflare's Cf-Access-Jwt-Assertion.
+  // The old `init()` returned immediately on a successful SSO probe and
+  // never ran `tryLocalToken()`, so an operator's local bearer was never
+  // validated/kept as a second credential once Access was armed. These two
+  // tests pin the fix: `tryLocalToken()` must still run after a successful
+  // SSO probe, and its result (an attached local bearer) must actually
+  // reach a request outside Access's coverage.
+
+  it('a successful SSO probe does NOT skip tryLocalToken() when a local token exists', async () => {
+    localStorage.setItem('access_token', 'LOCAL_TOKEN');
+    localStorage.setItem('refresh_token', 'LOCAL_REFRESH');
+    let accountCalls = 0;
+    mockApiAdapter({
+      '/auth/setup-status': () => ({ status: 200, data: { needs_setup: false, sso_configured: true, local_login_disabled: false } }),
+      '/auth/account': () => {
+        accountCalls += 1;
+        return { status: 200, data: { ok: true, user: { username: 'bill@barnardhq.com' } } };
+      },
+    });
+    // Bare axios (the SSO probe) SUCCEEDS this time — this is the exact
+    // shape that regressed: SSO working must not stop the local-token check.
+    vi.spyOn(axios, 'get').mockImplementation(async (url: string) => {
+      if (url === '/api/auth/account') {
+        return { data: { ok: true, user: { username: 'bill@barnardhq.com' } } } as never;
+      }
+      throw new Error(`unexpected bare axios GET ${url}`);
+    });
+
+    const { result } = renderHook(() => useAuth());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(result.current.isAuthenticated).toBe(true);
+    // The shared `api` client's GET /auth/account (tryLocalToken's check)
+    // must have run — proof init() did not `return` early after trySso().
+    expect(accountCalls).toBe(1);
+    // The local bearer survives — it's still there for the next request.
+    expect(localStorage.getItem('access_token')).toBe('LOCAL_TOKEN');
+  });
+
+  it('the surviving local bearer actually reaches a request outside Access coverage (e.g. /intake/initiate)', async () => {
+    localStorage.setItem('access_token', 'LOCAL_TOKEN');
+    localStorage.setItem('refresh_token', 'LOCAL_REFRESH');
+    mockApiAdapter({
+      '/auth/setup-status': () => ({ status: 200, data: { needs_setup: false, sso_configured: true, local_login_disabled: false } }),
+      '/auth/account': () => ({ status: 200, data: { ok: true, user: { username: 'bill@barnardhq.com' } } }),
+    });
+    vi.spyOn(axios, 'get').mockImplementation(async (url: string) => {
+      if (url === '/api/auth/account') {
+        return { data: { ok: true, user: { username: 'bill@barnardhq.com' } } } as never;
+      }
+      throw new Error(`unexpected bare axios GET ${url}`);
+    });
+
+    const { result } = renderHook(() => useAuth());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.isAuthenticated).toBe(true);
+
+    // Simulate a request to a route Cloudflare Access does NOT front (the
+    // public /api/intake/* prefix — ADR-0047's root-cause defect #2). The
+    // shared `api` client attaches whatever bearer localStorage holds,
+    // independent of Access. Before the fix, a fresh browser that only ever
+    // authenticated via SSO would have NO token here at all; this test
+    // proves that when one *is* obtainable (an existing local token), the
+    // fix keeps it available for exactly this request.
+    let capturedAuthHeader: unknown;
+    api.defaults.adapter = async (config) => {
+      capturedAuthHeader = config.headers?.Authorization;
+      return { data: { ok: true }, status: 200, statusText: 'OK', headers: {}, config } as never;
+    };
+    await api.post('/intake/initiate', {});
+
+    expect(capturedAuthHeader).toBe('Bearer LOCAL_TOKEN');
+  });
 });

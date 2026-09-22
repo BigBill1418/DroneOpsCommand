@@ -73,6 +73,45 @@ untouched and remains an operator flip on the host.
 recreate the backend and verify **with Step B still off** that both bridges keep working. See
 ADR-0048 §"To enable".
 
+## 2026-09-22 — `useAuth` acquires a local bearer alongside SSO (ADR-0047 precondition 1)
+
+Merged alongside ADR-0048 below, which supplies the backend affordance this entry
+originally lacked.
+
+### Fixed
+
+- `frontend/src/hooks/useAuth.ts`: `init()` no longer returns immediately on a successful
+  SSO probe. Previously `if (sso && (await trySso())) { return; }` skipped
+  `tryLocalToken()` entirely once Cloudflare Access verified the operator, so the SPA held
+  exactly one credential — the `Cf-Access-Jwt-Assertion` header Cloudflare injects — with no
+  local bearer as a fallback. `tryLocalToken()` now always runs afterward, so any local token
+  this browser already holds stays validated and available as a second, independent
+  credential. This is the direct fix for **ADR-0047 precondition 1**
+  (`docs/adr/0047-operator-cloudflare-access-sso.md`), which Amendment 1 marks load-bearing
+  for correctness (not a nicety) now that 8 operator-only endpoints across 2 Access-bypassed
+  prefixes (`/api/intake/*`, `/api/tos/*`) are known to carry no assertion at all.
+- 2 new regression tests in `frontend/src/hooks/__tests__/useAuth.test.tsx`: one asserts
+  `tryLocalToken()`'s `GET /auth/account` check still fires after a successful SSO probe, the
+  other proves a surviving local bearer actually reaches a request to a route outside Access
+  coverage (`POST /intake/initiate`) via the shared `api` client's Authorization header.
+
+### The gap this left, and how it was closed
+
+This is a frontend-only reorder: it keeps an **already-existing** local token validated and
+available. It does **not** mint a brand-new local bearer for an operator whose browser has
+never done a username/password login and has only ever authenticated via SSO — `useAuth`
+cannot forge a credential it was never issued. Minting one from a verified Access session
+requires a backend SSO-to-bearer exchange endpoint. That endpoint did not exist when this
+fix was written; `POST /api/auth/sso-exchange` (ADR-0048, merged in the same change) is it. Likewise, when
+`local_login_disabled=true`, password login is actively blocked (`403`), so there is no
+local-token path at all in that state. Both gaps were backend/routing decisions — see ADR-0047 preconditions 1 and 3 — deliberately
+not invented on the frontend, and closed by ADR-0048 instead.
+
+### Verified
+
+- `npx tsc --noEmit` — clean.
+- `npx vitest run` — **15 test files, 93 tests passed** (91 pre-existing + 2 new).
+
 ## 2026-09-22 — Operator Cloudflare Access SSO (ADR-0047 Step A) ROLLED BACK — onboarding outage
 
 ### Fixed

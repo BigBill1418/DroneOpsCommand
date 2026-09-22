@@ -59,11 +59,36 @@ export function useAuth() {
           return;
         }
 
-        if (sso && (await trySso())) {
-          setLoading(false);
-          return;
+        if (sso) {
+          await trySso();
         }
 
+        // ADR-0047 precondition 1 (2026-09-22 incident) — a successful SSO
+        // probe must NEVER short-circuit local-token acquisition. The old
+        // code `return`ed here on a successful trySso(), so `tryLocalToken`
+        // never ran once Access was armed. That's fatal because Cloudflare
+        // only injects the Cf-Access-Jwt-Assertion header on paths ITS
+        // Access application actually covers — a deliberately public prefix
+        // (e.g. /api/intake/*, reachable by customers with no Access
+        // session at all, per ADR-0047's "Scope, precisely" section) sees no
+        // assertion, ever. Every dashboard GET still returned 200 (Access-
+        // authenticated), so the app looked healthy while the one POST that
+        // mattered (`/api/intake/initiate`) carried no credential at all and
+        // 401'd for ~9.5h. Always attempting tryLocalToken() here means any
+        // local bearer this browser already holds stays a second,
+        // independent credential — available to exactly those bypassed
+        // routes — instead of being abandoned the moment SSO succeeds.
+        //
+        // What this does NOT fix: an operator who has SSO but has never
+        // once logged in with username/password has no local token to
+        // validate here, and this hook cannot mint one from a verified
+        // Access session — that requires a backend SSO-to-bearer exchange
+        // endpoint that does not exist today (Step A only added Access
+        // verification to `get_current_user`; it added no token-minting
+        // route). That gap, and the `local_login_disabled=true` case (where
+        // password login is actively blocked, so there is no local-token
+        // path at all), are backend/routing decisions — see ADR-0047
+        // preconditions 1 and 3 — and are intentionally NOT invented here.
         await tryLocalToken();
       } catch {
         // setup-status itself failed (e.g. DB unreachable) — fall back to
