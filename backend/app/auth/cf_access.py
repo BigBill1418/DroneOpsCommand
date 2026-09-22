@@ -26,6 +26,18 @@ asserting ``alg: none`` or ``alg: HS256`` (the classic algorithm-confusion
 downgrade) is rejected before any key is ever tried
 (``jose.jws._verify_signature`` checks ``alg in algorithms`` first).
 
+KEY SELECTION IS OURS TO DO (ADR-0047 Amendment 3): unlike Node's ``jose``,
+``python-jose`` never reads the ``kid`` header — the string does not appear
+anywhere in its verify path. Handing it a whole JWK Set routes into
+``jose.jws._sig_matches_keys``, a bare ``for key in keys: if key.verify(...)``
+loop, so a token carrying an UNKNOWN ``kid`` still verifies as long as some
+key in the set matches its signature. ``_select_key`` below therefore picks
+the single key by ``kid`` before verifying and denies when no entry matches.
+This is defence in depth, not an authentication boundary: ``aud`` is already
+pinned to this Access application, ``iss`` to the team domain, and an email
+allow-list applies, so forging still requires a token Cloudflare signed for
+this team with the right audience and an allow-listed email.
+
 FAIL-CLOSED CONTRACT (explicit requirement, same as the marketing pilot):
 every error path denies. Unlike TitanForge's stale-if-error JWKS cache
 (which serves a stale-but-once-valid keyset on a refresh failure to avoid
@@ -152,6 +164,19 @@ class JwksUnavailable(Exception):
     """Raised when a JWKS fetch is required and fails. Always denies."""
 
 
+class MissingKid(JWTError):
+    """Token header carries no ``kid``. A refetch can never make an absent
+    ``kid`` match, so this denies immediately without spending a JWKS fetch
+    attempt (and the cooldown that follows one)."""
+
+
+class UnknownKid(JWTError):
+    """Token's ``kid`` is absent from the JWKS we currently hold. This MAY
+    be a Cloudflare key rotation we are lagging behind, so it is retryable:
+    a plain ``JWTError`` subclass, it lands in the same
+    refetch-once-and-retry path a signature failure already takes."""
+
+
 def _get_lock(team_domain: str) -> asyncio.Lock:
     lock = _fetch_locks.get(team_domain)
     if lock is None:
@@ -228,11 +253,35 @@ def _reset_cf_access_cache_for_test() -> None:
     _fetch_locks.clear()
 
 
+def _select_key(token: str, keys: list[dict]) -> dict:
+    """Return the ONE JWKS entry whose ``kid`` matches the token header.
+
+    RFC 7515 s4.1.4: ``kid`` is a hint for *which* key to try, never a
+    credential in itself — the RS256 signature check in ``_decode`` below is
+    still what actually proves the token. Selecting on it is defence in
+    depth against key confusion. Without it, handing ``python-jose`` a whole
+    JWK Set (``{"keys": [...]}``) routes into ``jose.jws._sig_matches_keys``,
+    which loops ``for key in keys: if key.verify(...): return True`` and so
+    accepts a signature from ANY key in the set no matter which ``kid`` the
+    token claims — ``kid`` appears nowhere in that library's verify path.
+
+    The token's ``kid`` is attacker-controlled input, so it is used only as
+    a dict lookup and never interpolated into a log line or a denial reason.
+    """
+    kid = jwt.get_unverified_header(token).get("kid")
+    if not kid:
+        raise MissingKid("token header carries no kid")
+    for key in keys:
+        if key.get("kid") == kid:
+            return key
+    raise UnknownKid("token kid is not present in the current JWKS")
+
+
 def _decode(token: str, keys: list[dict], cfg: CfAccessConfig) -> dict:
     """Raises jose.exceptions.JWTError (or a subclass) on any failure."""
     return jwt.decode(
         token,
-        {"keys": keys},
+        _select_key(token, keys),
         algorithms=["RS256"],
         audience=cfg.aud,
         issuer=f"https://{cfg.team_domain}",
@@ -279,9 +328,18 @@ async def verify_cf_access_assertion(
         return CfAccessResult(ok=False, reason="token_expired")
     except JWTClaimsError as exc:
         return CfAccessResult(ok=False, reason=f"invalid_claims: {exc}")
+    except MissingKid:
+        # No `kid` at all. Cloudflare always sets one, and no refetch can
+        # make an absent kid match — deny now rather than burn a forced
+        # fetch attempt (and its 30s cooldown) on a request that cannot
+        # succeed. Strictly NARROWER than the pre-fix behaviour, where such
+        # a token failed the signature check and did force a refetch.
+        return CfAccessResult(ok=False, reason="unknown_kid")
     except JWTError:
-        # Could be a genuinely bad signature, OR Cloudflare rotated its
-        # signing key since our cache was populated. One throttled forced
+        # A genuinely bad signature, OR an unknown `kid`, OR Cloudflare
+        # rotated its signing key since our cache was populated — the last
+        # two are the SAME event seen from different angles, since a rotated
+        # key arrives bearing a kid we have never seen. One throttled forced
         # refetch-and-retry (mirrors `jose`'s refetch-on-unknown-kid) —
         # if the refetch itself is unavailable or the retry still fails,
         # deny. Never falls back to treating this as a pass.
@@ -295,6 +353,10 @@ async def verify_cf_access_assertion(
             return CfAccessResult(ok=False, reason="token_expired")
         except JWTClaimsError as exc:
             return CfAccessResult(ok=False, reason=f"invalid_claims: {exc}")
+        except (UnknownKid, MissingKid):
+            # Refetched, and the kid is STILL absent from the live JWKS.
+            # This is not a rotation we were lagging behind. Deny.
+            return CfAccessResult(ok=False, reason="unknown_kid")
         except JWTError as exc:
             return CfAccessResult(ok=False, reason=f"verification_failed: {exc}")
     except Exception as exc:  # defensive — never let this raise into a 500

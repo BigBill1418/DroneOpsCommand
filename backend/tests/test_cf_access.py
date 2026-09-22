@@ -349,8 +349,7 @@ async def test_email_outside_allow_list_denied(rsa_keypair):
 async def test_alg_none_downgrade_denied(rsa_keypair):
     """A token asserting alg=none (or any non-RS256 alg) must never verify,
     even if it happens to carry a valid-looking payload."""
-    import jwt as pyjwt  # PyJWT is NOT a dependency here, so build the
-    # none-alg token by hand instead.
+    # PyJWT is NOT a dependency here, so build the none-alg token by hand.
     import base64
     import json
 
@@ -518,6 +517,229 @@ async def test_stale_cache_past_ttl_is_never_served(rsa_keypair, monkeypatch):
     result2 = await cfa.verify_cf_access_assertion(token, config=_config(), http_client=failing_client)
     assert result2.ok is False
     assert "jwks_unavailable" in result2.reason
+
+
+# ── kid selection (ADR-0047 Amendment 3) ─────────────────────────────────
+#
+# python-jose never reads `kid`: handing it a whole JWK Set routes into
+# `jose.jws._sig_matches_keys`, a bare `for key in keys: if key.verify(...)`
+# loop. So before the fix, a token whose header claimed an UNKNOWN kid still
+# verified as long as ANY key in the set matched its signature. These tests
+# pin the selection, and pin that it did not widen the fetch-cooldown window.
+
+
+async def test_unknown_kid_denies_even_when_a_set_key_matches_the_signature(
+    rsa_keypair, rsa_keypair_2
+):
+    """THE REGRESSION. A two-key JWKS (what Cloudflare serves mid-rotation).
+    The token is signed by a key that IS in the set, so the signature check
+    itself passes — but its header claims a kid in NEITHER entry. Must be
+    refused on the kid, not waved through on the signature.
+
+    Runs in the steady state production actually sits in: JWKS cached from
+    an earlier request, well outside the 30s fetch cooldown. The unknown kid
+    therefore gets its forced refetch, the refetch returns the same keys,
+    and the retry denies on the kid itself."""
+    priv, pub = rsa_keypair
+    _, pub2 = rsa_keypair_2
+
+    jwks = [_jwk(pub, "kid-1"), _jwk(pub2, "kid-2")]
+    client = _FakeHttpClient({_jwks_url(): jwks})
+
+    # Warm the cache the way a previous good request would have.
+    assert (
+        await cfa.verify_cf_access_assertion(
+            _sign(priv, "kid-1"), config=_config(), http_client=client
+        )
+    ).ok is True
+    cfa._last_fetch_attempt[TEAM_DOMAIN] -= cfa.JWKS_COOLDOWN_SECONDS + 1
+
+    result = await cfa.verify_cf_access_assertion(
+        _sign(priv, "kid-the-token-invented"), config=_config(), http_client=client
+    )
+    assert result.ok is False
+    assert result.reason == "unknown_kid"
+    # And the attacker-controlled kid is never echoed into the denial reason
+    # (routers/auth.py logs that reason verbatim on the sso-exchange path).
+    assert "kid-the-token-invented" not in result.reason
+
+
+async def test_unknown_kid_on_a_cold_cache_still_denies(rsa_keypair, rsa_keypair_2):
+    """Same forgery against a COLD cache. The forced refetch is itself
+    throttled by the 30s cooldown the initial fill just started, so the
+    denial surfaces with the cooldown reason rather than `unknown_kid`.
+    Either way it fails closed — which is the property that matters."""
+    priv, pub = rsa_keypair
+    _, pub2 = rsa_keypair_2
+
+    client = _FakeHttpClient(
+        {_jwks_url(): [_jwk(pub, "kid-1"), _jwk(pub2, "kid-2")]}
+    )
+    result = await cfa.verify_cf_access_assertion(
+        _sign(priv, "kid-the-token-invented"), config=_config(), http_client=client
+    )
+    assert result.ok is False
+    assert "kid-the-token-invented" not in result.reason
+
+
+async def test_matching_kid_in_a_multi_key_jwks_still_verifies(
+    rsa_keypair, rsa_keypair_2
+):
+    """The other half of the acceptance bar: selection must pick the RIGHT
+    key out of a multi-key set, not merely reject. Signed by key 2, which
+    sits second in the published set."""
+    _, pub = rsa_keypair
+    priv2, pub2 = rsa_keypair_2
+
+    token = _sign(priv2, "kid-2")
+    client = _FakeHttpClient(
+        {_jwks_url(): [_jwk(pub, "kid-1"), _jwk(pub2, "kid-2")]}
+    )
+
+    result = await cfa.verify_cf_access_assertion(
+        token, config=_config(), http_client=client
+    )
+    assert result.ok is True
+    assert result.email == EMAIL
+
+
+async def test_token_with_no_kid_header_denies_without_spending_a_fetch(
+    rsa_keypair,
+):
+    """A kid-less token can never be fixed by a refetch, so it must NOT
+    force one — that would hand an unauthenticated caller a lever on the
+    30s fetch cooldown. Exactly one fetch (the initial cache fill), never a
+    second forced one."""
+    priv, pub = rsa_keypair
+    from jose import jwt as josejwt
+
+    claims = {
+        "email": EMAIL,
+        "iss": f"https://{TEAM_DOMAIN}",
+        "aud": AUD,
+        "exp": int(time.time()) + 3600,
+    }
+    token = josejwt.encode(claims, priv, algorithm="RS256")  # no `kid` header
+    assert "kid" not in josejwt.get_unverified_header(token)
+
+    calls: list[str] = []
+    client = _FakeHttpClient({_jwks_url(): [_jwk(pub, "kid-1")]}, calls=calls)
+
+    result = await cfa.verify_cf_access_assertion(
+        token, config=_config(), http_client=client
+    )
+    assert result.ok is False
+    assert result.reason == "unknown_kid"
+    assert len(calls) == 1  # no forced refetch was spent on it
+
+
+async def test_unknown_kid_costs_no_more_fetches_than_a_bad_signature_did(
+    rsa_keypair, rsa_keypair_2
+):
+    """The cooldown must not have been widened. An unknown-kid token and a
+    bad-signature token must trigger the SAME number of fetch attempts —
+    one initial + one forced refetch — so the fix cannot make the
+    `jwks fetch cooldown active` window any easier to hold open than the
+    pre-fix code already allowed."""
+    priv, pub = rsa_keypair
+    attacker_priv, _ = rsa_keypair_2
+
+    # Bad signature, correct kid: the pre-existing refetch trigger.
+    bad_sig_calls: list[str] = []
+    c1 = _FakeHttpClient({_jwks_url(): [_jwk(pub, "kid-1")]}, calls=bad_sig_calls)
+    r1 = await cfa.verify_cf_access_assertion(
+        _sign(attacker_priv, "kid-1"), config=_config(), http_client=c1
+    )
+    assert r1.ok is False
+
+    cfa._reset_cf_access_cache_for_test()
+
+    # Unknown kid, valid signature: the newly-introduced refetch trigger.
+    unknown_kid_calls: list[str] = []
+    c2 = _FakeHttpClient({_jwks_url(): [_jwk(pub, "kid-1")]}, calls=unknown_kid_calls)
+    r2 = await cfa.verify_cf_access_assertion(
+        _sign(priv, "kid-nope"), config=_config(), http_client=c2
+    )
+    assert r2.ok is False
+
+    # One fetch each: the forced refetch is itself throttled by the cooldown
+    # the initial fill started. The unknown-kid path is not cheaper OR more
+    # expensive than the bad-signature path that already existed.
+    assert len(unknown_kid_calls) == len(bad_sig_calls) == 1
+
+    # Same comparison again in the warm-cache state, where the forced
+    # refetch does run: still one apiece, still identical.
+    for calls_out, token_factory in (
+        ([], lambda: _sign(attacker_priv, "kid-1")),
+        ([], lambda: _sign(priv, "kid-nope")),
+    ):
+        cfa._reset_cf_access_cache_for_test()
+        c = _FakeHttpClient({_jwks_url(): [_jwk(pub, "kid-1")]}, calls=calls_out)
+        assert (
+            await cfa.verify_cf_access_assertion(
+                _sign(priv, "kid-1"), config=_config(), http_client=c
+            )
+        ).ok is True
+        cfa._last_fetch_attempt[TEAM_DOMAIN] -= cfa.JWKS_COOLDOWN_SECONDS + 1
+        r = await cfa.verify_cf_access_assertion(
+            token_factory(), config=_config(), http_client=c
+        )
+        assert r.ok is False
+        assert len(calls_out) == 2  # initial fill + exactly one forced refetch
+
+
+async def test_rotation_to_a_new_kid_still_recovers_via_the_refetch(
+    rsa_keypair, rsa_keypair_2
+):
+    """Rotation resilience, expressed purely in kid terms: the cache holds
+    only kid-old, Cloudflare now serves only kid-new, and the new token
+    carries kid-new. The forced refetch must still recover it — an unknown
+    kid is retryable precisely so a rotation does not cause an outage."""
+    old_priv, old_pub = rsa_keypair
+    new_priv, new_pub = rsa_keypair_2
+
+    calls: list[str] = []
+    jwks_state = {_jwks_url(): [_jwk(old_pub, "kid-old")]}
+    client = _FakeHttpClient(jwks_state, calls=calls)
+
+    assert (
+        await cfa.verify_cf_access_assertion(
+            _sign(old_priv, "kid-old"), config=_config(), http_client=client
+        )
+    ).ok is True
+
+    cfa._last_fetch_attempt[TEAM_DOMAIN] -= cfa.JWKS_COOLDOWN_SECONDS + 1
+    jwks_state[_jwks_url()] = [_jwk(new_pub, "kid-new")]
+
+    result = await cfa.verify_cf_access_assertion(
+        _sign(new_priv, "kid-new"), config=_config(), http_client=client
+    )
+    assert result.ok is True
+    assert len(calls) == 2  # exactly one forced refetch
+
+
+async def test_unknown_kid_inside_the_cooldown_window_still_fails_closed(
+    rsa_keypair, rsa_keypair_2
+):
+    """An unknown kid discovered while the fetch cooldown is active denies
+    rather than serving the cached set — the fail-closed contract holds on
+    the new path exactly as it does on the signature path."""
+    priv, pub = rsa_keypair
+    _, pub2 = rsa_keypair_2
+
+    client = _FakeHttpClient({_jwks_url(): [_jwk(pub, "kid-1")]})
+    assert (
+        await cfa.verify_cf_access_assertion(
+            _sign(priv, "kid-1"), config=_config(), http_client=client
+        )
+    ).ok is True
+
+    # Still inside the cooldown from that first fetch.
+    result = await cfa.verify_cf_access_assertion(
+        _sign(priv, "kid-2"), config=_config(), http_client=client
+    )
+    assert result.ok is False
+    assert "jwks fetch cooldown active" in result.reason
 
 
 # ── Startup logging never raises / never leaks secrets ───────────────────
