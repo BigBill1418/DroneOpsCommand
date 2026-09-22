@@ -4,6 +4,44 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-09-22 — `useAuth` acquires a local bearer alongside SSO (ADR-0047 precondition 1)
+
+**Not deployed — `feat/sso-login-screen` worktree branch only.**
+
+### Fixed
+
+- `frontend/src/hooks/useAuth.ts`: `init()` no longer returns immediately on a successful
+  SSO probe. Previously `if (sso && (await trySso())) { return; }` skipped
+  `tryLocalToken()` entirely once Cloudflare Access verified the operator, so the SPA held
+  exactly one credential — the `Cf-Access-Jwt-Assertion` header Cloudflare injects — with no
+  local bearer as a fallback. `tryLocalToken()` now always runs afterward, so any local token
+  this browser already holds stays validated and available as a second, independent
+  credential. This is the direct fix for **ADR-0047 precondition 1**
+  (`docs/adr/0047-operator-cloudflare-access-sso.md`), which Amendment 1 marks load-bearing
+  for correctness (not a nicety) now that 8 operator-only endpoints across 2 Access-bypassed
+  prefixes (`/api/intake/*`, `/api/tos/*`) are known to carry no assertion at all.
+- 2 new regression tests in `frontend/src/hooks/__tests__/useAuth.test.tsx`: one asserts
+  `tryLocalToken()`'s `GET /auth/account` check still fires after a successful SSO probe, the
+  other proves a surviving local bearer actually reaches a request to a route outside Access
+  coverage (`POST /intake/initiate`) via the shared `api` client's Authorization header.
+
+### Known gap — not fixed here, needs a backend affordance
+
+This is a frontend-only reorder: it keeps an **already-existing** local token validated and
+available. It does **not** mint a brand-new local bearer for an operator whose browser has
+never done a username/password login and has only ever authenticated via SSO — `useAuth`
+cannot forge a credential it was never issued. Minting one from a verified Access session
+requires a backend SSO-to-bearer exchange endpoint that does not exist today (Step A only
+added Access verification to `get_current_user`, no token-minting route). Likewise, when
+`local_login_disabled=true`, password login is actively blocked (`403`), so there is no
+local-token path at all in that state. Both gaps are backend/routing decisions — see ADR-0047
+preconditions 1 and 3 — and are intentionally not invented here.
+
+### Verified
+
+- `npx tsc --noEmit` — clean.
+- `npx vitest run` — **15 test files, 93 tests passed** (91 pre-existing + 2 new).
+
 ## 2026-09-22 — Operator Cloudflare Access SSO (ADR-0047 Step A) ROLLED BACK — onboarding outage
 
 ### Fixed
