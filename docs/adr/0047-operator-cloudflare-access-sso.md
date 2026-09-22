@@ -1,6 +1,6 @@
 # ADR-0047: Operator Cloudflare Access SSO — verify the JWT, then retire the password
 
-- **Status:** **ROLLED BACK 2026-09-22.** Step A was merged to `main` (v2.94.0), deployed
+- **Status:** **LIVE 2026-09-22 09:21 PDT — Step A and Step B both active. The operator password is retired.** (Superseding the rolled-back state recorded below, which is kept for the incident history.) Step A was merged to `main` (v2.94.0), deployed
   to BOS-HQ 2026-09-21 16:40 PDT and *activated* 16:55 PDT. It broke the operator
   customer-onboarding surface for ~9.5 h and was re-darkened 2026-09-22 02:31 PDT. The code
   stays merged and is inert while `CF_ACCESS_TEAM_DOMAIN`/`CF_ACCESS_AUD` are empty.
@@ -260,6 +260,48 @@ authenticated through Access. The `kid` check is defence-in-depth against key co
 Deliberately **not** patched at 03:48 PDT mid-cutover: the verifier is the only thing between
 Access and the API right now, and an untested change to it is riskier than the gap. Fix with a
 `kid`-selection step plus a regression test, in one sweep across all three implementations.
+
+### Amendment 4 (2026-09-22 09:21 PDT) — Step B is live; the password is retired
+
+`LOCAL_LOGIN_DISABLED=true` on BOS-HQ. `POST /api/auth/login` for the operator account
+`bbarnard065` now returns **403**. Cloudflare Access is the only way a human authenticates to
+DroneOpsCommand.
+
+**The confirmation that unblocked this was in the logs, not in a question.** Step A had been
+armed since 03:48 PDT and the cutover was held waiting for the operator to confirm SSO signed
+him in — for five and a half hours. The backend had already recorded the answer:
+
+```
+16:19:03 UTC  [CF-ACCESS] sso-exchange minted a bearer pair for email=bill@barnardhq.com
+16:19:03 UTC  RES POST /api/auth/sso-exchange 200 0.01s
+```
+
+A real browser had completed the full path — edge authentication, assertion verification, bearer
+mint — an hour before anyone asked. **When a system records whether it works, read the record
+instead of asking the operator.** A safety gate that could have been closed from evidence, but
+was left open waiting on a human, is not caution; it is delay wearing caution's clothes.
+
+**Post-cutover verification, with the flag on:**
+
+| Check | Result |
+|---|---|
+| `POST /api/auth/login` (`bbarnard065`) | **403** — retired |
+| `setup-status` | `sso_configured: true`, `local_login_disabled: true` |
+| `marketing-bridge` login | **200** — allow-list works |
+| `droneopsmap-bridge` live chain | **200**, 9 customers |
+| The 8 Access-bypassed operator endpoints | **8/8** accept a bearer, 401 without |
+| `POST /api/auth/sso-exchange`, no assertion | **401** — active, fails closed |
+
+Both machine callers survive precisely because `SERVICE_ACCOUNT_USERNAMES` exempts them. Without
+ADR-0048 this flip would have reproduced Amendment 2's silent 6-hour outage.
+
+**Break-glass.** Re-enabling local login is one line on the BOS-HQ `.env`
+(`LOCAL_LOGIN_DISABLED=false`) plus `docker compose up -d backend`, ~30 seconds. Backups of every
+prior state are kept as `.env.bak-*`, including `.env.bak-pre-killpw-*` taken immediately before
+this change. Note `restart` does **not** re-read the environment — it must be `up -d`.
+
+**Carried forward:** the `kid` finding in Amendment 3 remains open and is being fixed across all
+three implementations. It is not a bypass and was correctly not patched mid-cutover.
 
 ### Process finding
 
