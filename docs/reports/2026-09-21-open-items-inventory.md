@@ -21,6 +21,19 @@ substantiated, it was dropped and that is noted in §4.
 > all in the new §3.7. It also corrected the probe's first scheduled run date (§1) and
 > the demo stack's version (§1).
 
+> **Amended 2026-09-25 (fleet roadmap-staleness pass).** Four rows below were wrong or
+> have since closed, each re-verified against the live system before this edit:
+> **O-6 / `BK-4`** — done 2026-08-17, before this list was written (`CHANGELOG.md`
+> 2026-08-17; `~/backups/README.RETIRED.md`; no `n8n_*` files remain).
+> **O-12** — landed as CallSignPublic `27396d3` + `0375674` (2026-09-21); on 2026-09-25
+> the origin `cs-api.barnardhq.com/api/archive/search` answers **401 `unauthorized`**
+> (not 503 `not_configured`), so the origin token is set and enforced, and the edge
+> path serves its Turnstile challenge, not a 5xx.
+> **O-14** — not overdue. The cold rehearsal **passed 2026-08-17** (`CHANGELOG.md`);
+> ADR-0041:675 sets an **annual** cadence, so the next one is due ~2027-08-17.
+> **O-16** — watch closed clean: `droneops_backup_last_success_timestamp_seconds` last
+> advanced 2026-09-25 20:25 PDT, 11 advances in the 5 days to 2026-09-25.
+
 ---
 
 ## 1. Shipped today (2026-09-21)
@@ -80,7 +93,7 @@ line that carries the detail.
 | O-3 | **Report-quality direction.** `docs/plans/2026-07-03-report-quality.md` §7 asks one yes/no: approve a **single low-risk prompt pass** (3.1 voice authority + 3.2 anti-bloat + 3.3 number-grounding), validated by the golden-report diff + the existing audience-leak detector, then react before deciding on the routine-flight variant and real-estate register. The standing ROADMAP item is explicit that no session should pick a direction unasked. | `docs/plans/2026-07-03-report-quality.md:167-172`; `ROADMAP.md:410` (`FU-AI-QUALITY-PASS`) |
 | O-4 | **ADR-0034 is still `Status: Proposed`.** Ship Tier 0 — operator-pasted deliverable URLs on the mission, rendered in the existing client portal (one Alembic revision adding `missions.map_share_url`, a few hours, no integration)? The ADR itself recommends yes. | `docs/adr/0034-mission-map-stream-cross-system-linkage.md:3`, `:187-190` |
 | O-5 | **153 of 226 `dji_txt` rows are legacy** and carry pre-ADR-0027/0028 duration and distance. D5 freezes those fields, so they stay stale unless something reprocesses. The error is small (6 rows off by >1 s; +35.7 s total across the 125 measured) and leaving it is defensible — **but it should be a decision, not an oversight.** Reprocess or accept? | `PROGRESS.md:203` |
-| O-6 | **`~/backups/n8n_*.sqlite` on droneops-server** (~840 MB, root-owned, last written 2026-04-15) — keep or delete? The final n8n snapshot is already in the restic repo under tag `legacy-n8n`, so this copy is redundant; deleting someone's data is not an agent call. | `ROADMAP.md:245` (`BK-4`); `PROGRESS.md:895` |
+| ~~O-6~~ | **CLOSED 2026-08-17 — see the 2026-09-25 amendment.** Original: **`~/backups/n8n_*.sqlite` on droneops-server** (~840 MB, root-owned, last written 2026-04-15) — keep or delete? The final n8n snapshot is already in the restic repo under tag `legacy-n8n`, so this copy is redundant; deleting someone's data is not an agent call. | `ROADMAP.md:245` (`BK-4`); `PROGRESS.md:895` |
 | O-7 | **DJI 2027 fleet longevity — three open questions:** spares budget & count per model; whether a public-safety/DFR deal is real near-term pipeline or aspirational; risk appetite on running security-frozen airframes past 2029 if the waiver lapses. | `docs/plans/2026-07-03-dji-2027-fleet-longevity.md:196-203` |
 | O-8 | **Do we want a CAPTCHA on `/api/intake/form/{token}`?** It needs a new **Cloudflare Turnstile site key** (dashboard action). Deliberately not added in Phase 7: the 256-bit `secrets.token_urlsafe(32)` intake token already makes brute-force guessing infeasible, so this is lower-priority than the original audit line reads. Recorded, not silently dropped. | `docs/adr/0045-phase7-customer-surface-hardening.md:219-225` |
 
@@ -91,16 +104,16 @@ line that carries the detail.
 | O-9 | **Confirm `droneops-alerts` is subscribed on Bill's phone before MP-2 arms the probe's ntfy.** A topic nobody has subscribed to is a black hole — server-side subscription is impossible, it is a ~30-second phone action. The probe deliberately reuses the existing topic rather than minting `droneops-basemap` for exactly this reason. | `ROADMAP.md:66-70` |
 | O-10 | **Supply a `dji_m4t_official.png` asset** for the new Matrice 4T fleet tile. The aircraft row exists with `image_filename` NULL, so the tile renders without an image. | `PROGRESS.md:737` |
 | O-11 | **Grafana: fix the `obs-rule-droneops-backup-stale` description text.** It still tells the operator to `tail ~/droneops/backups/snapshot.log` and re-run `snapshot.sh` — **both gone as of today's cutover**. Replace with `journalctl -u droneops-backup.service -n 50` + `sudo systemctl start droneops-backup.service`. **Change the `description` only; metric names and expressions are a hard contract.** Lives in `~/noc-master` (`/opt/infrawatch/grafana/provisioning/alerting/observability-alerts.yml`), which is why the cutover script could not do it. **Now unblocked.** | `ROADMAP.md:225` (`BK-3`) |
-| O-12 | **CS-Public patch rollout — strict order, or archive search goes down.** `docs/patches/0075-cspublic-*` is a **patch, not a commit**, and needs a worktree in `~/repos/CallSignPublic`. Order: (1) set `search.worker_origin_token` on the **origin** via the Settings UI and deploy — the origin 503s **all** search briefly, expected; (2) `wrangler secret put ORIGIN_SEARCH_SECRET` with the **same** value in `worker/api/` and `wrangler deploy`; (3) verify through `cs.barnardhq.com`. Deploying without both secrets **takes down archive search entirely, including the legitimate path** — fail-closed by design. | `docs/patches/0075-cspublic-README.md:66-84` |
+| ~~O-12~~ | **CLOSED 2026-09-21 by CallSignPublic `27396d3` + `0375674` — see the 2026-09-25 amendment.** Original: **CS-Public patch rollout — strict order, or archive search goes down.** `docs/patches/0075-cspublic-*` is a **patch, not a commit**, and needs a worktree in `~/repos/CallSignPublic`. Order: (1) set `search.worker_origin_token` on the **origin** via the Settings UI and deploy — the origin 503s **all** search briefly, expected; (2) `wrangler secret put ORIGIN_SEARCH_SECRET` with the **same** value in `worker/api/` and `wrangler deploy`; (3) verify through `cs.barnardhq.com`. Deploying without both secrets **takes down archive search entirely, including the legitimate path** — fail-closed by design. | `docs/patches/0075-cspublic-README.md:66-84` |
 
 ### 2.4 Verification Bill has to perform
 
 | # | Check | Why only Bill | Source |
 |---|---|---|---|
 | O-13 | **P7-6 — post-deploy client-IP check.** Open `droneops.barnardhq.com` in a browser, then `ssh 10.99.0.4 'docker logs --tail 50 droneops-frontend-1'` and confirm the resolved-client audit field shows **his own public IP**, not the constant `172.19.0.11`. | The app sits behind **Cloudflare Access**: any agent-side request gets a 302 to the Access login page and never reaches the app, so **only an authenticated browser session produces a real external-IP log line.** Attempted and confirmed blocked today. | `docs/adr/0045-phase7-customer-surface-hardening.md:336`; `PROGRESS.md:113-121` |
-| O-14 | **Annual cold, 1Password-only DR rehearsal — overdue since ~2026-08-17.** Rebuild from the 1Password Fleet items and the R2 bucket only, reading nothing from BOS-HQ. The quarterly drill **cannot** detect a mis-filed secret, because it never reads 1Password; only this rehearsal shape can. | Requires the 1Password vault. | `docs/adr/0041-comprehensive-encrypted-backup-to-r2.md:664-667` |
+| ~~O-14~~ | **NOT OVERDUE — passed 2026-08-17; annual, next due ~2027-08-17.** Annual cold, 1Password-only DR rehearsal. Rebuild from the 1Password Fleet items and the R2 bucket only, reading nothing from BOS-HQ. The quarterly drill **cannot** detect a mis-filed secret, because it never reads 1Password; only this rehearsal shape can. | Requires the 1Password vault. | `docs/adr/0041-comprehensive-encrypted-backup-to-r2.md:664-667` |
 | O-15 | **Mobile invoice-editor — final on-device confirmation.** Playwright screenshots at 390/412/768/1280 px are clean and `tsc` is green; the operator sign-off on a real phone is the outstanding half. | Needs the physical device. | `docs/plans/2026-05-23-mobile-invoice-editor-ux.md:48-49` |
-| O-16 | **Post-cutover freshness watch closes 2026-09-24.** Confirm `droneops_backup_last_success_timestamp_seconds` keeps advancing for three days after the cutover before declaring §5.7 fully done. Passive — the deadman alert covers it. | — | `PROGRESS.md:939` |
+| ~~O-16~~ | **CLOSED 2026-09-24 — metric kept advancing (last 2026-09-25 20:25 PDT).** Post-cutover freshness watch closes 2026-09-24. Confirm `droneops_backup_last_success_timestamp_seconds` keeps advancing for three days after the cutover before declaring §5.7 fully done. Passive — the deadman alert covers it. | — | `PROGRESS.md:939` |
 
 ---
 
@@ -131,7 +144,7 @@ Every ID below exists in `ROADMAP.md`. Status is as of 2026-09-21.
 |---|---|---|---|---|
 | `BK-1` | PITR via `pg_receivewal` | DEFERRED | Write volume grows ~10× **or** the RPO requirement drops below 12 h. Neither holds: real change is ~1 MB/day. **Explicitly not the path:** re-enabling `archive_command` into pgdata. | `ROADMAP.md:208` |
 | `BK-3` | Grafana `obs-rule-droneops-backup-stale` description text | **OPEN, unblocked today** | Nothing — do it. See O-11. ~15 minutes, in `~/noc-master`. | `ROADMAP.md:225` |
-| `BK-4` | `~/backups/n8n_*.sqlite` disposal | OPEN | Bill says keep or delete. See O-6. | `ROADMAP.md:245` |
+| `BK-4` | `~/backups/n8n_*.sqlite` disposal | **DONE 2026-08-17** (corrected 2026-09-25) | Nothing. See O-6. | `ROADMAP.md:245` |
 
 ### Observability + fleet hygiene
 
@@ -262,5 +275,5 @@ outstanding in at least one document:
 | ADR-0006 soak-pause "NOC deployer … will not redeploy until cleared" | Expired 2026-05-03; `~/noc-master/data/soak-pause/` holds only `.gitkeep` | `ls -la ~/noc-master/data/soak-pause/` |
 | ADR-0006 "Until the NOC `/status/droneops` route is live…" | Live | `noc-master/api/routes/status.js` `GET /status/:code`; SPA route in `frontend/src/App.jsx` |
 | ADR-0043 "P-EVAL: recommend DO NOT ADOPT" | Still correct at 2026-09-21 — and the gap it names is still open: `Cargo.toml` requests `"0.5"`, not the exact `= "0.5.7"` pin D6 asks for, and `DJI_LOG_PARSER_VERSION` is unchecked against `Cargo.lock` | `flight-parser/Cargo.toml:12`; `flight-parser/src/dji.rs:7` |
-| `docs/patches/0075-cspublic-*` "staged for a worktree" | **Still unapplied and still applies cleanly** against CallSignPublic HEAD `0570fdd` (moved from the `6c22708` at hand-off). The defect is still live: no `ORIGIN_SEARCH_SECRET` / `_require_worker_bearer` / `search.worker_origin_token` anywhere in that checkout | `git apply --check` → clean; `grep` → no hits |
+| `docs/patches/0075-cspublic-*` "staged for a worktree" | *(Superseded later 2026-09-21: landed as CallSignPublic `27396d3` + `0375674` — see O-12.)* **Still unapplied and still applies cleanly** against CallSignPublic HEAD `0570fdd` (moved from the `6c22708` at hand-off). The defect is still live: no `ORIGIN_SEARCH_SECRET` / `_require_worker_bearer` / `search.worker_origin_token` anywhere in that checkout | `git apply --check` → clean; `grep` → no hits |
 | Two 2026-05-03 superpowers orchestration plans with **0 of 74 boxes ticked** | Both **shipped** the day they were written (v2.65.0 and v2.67.0); the boxes were simply never back-ticked. Do not re-execute — they drive production Stripe/TOS state and parallel worktrees | `docs/adr/0009`/`0010`/`0011`/`0014`; `git log` |

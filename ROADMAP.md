@@ -249,7 +249,15 @@ surviving lead is time-critical and is an operator action: see
 - **Source.** `PROGRESS.md` §"Also at cutover (do not forget)"; ADR-0041 residual 2.
 - **Owner.** TBD. ~15 minutes.
 
-### BK-4 — `~/backups/n8n_*.sqlite` on droneops-server — **OPEN, operator decision**
+### BK-4 — `~/backups/n8n_*.sqlite` on droneops-server — **DONE 2026-08-17**
+
+> **Status corrected 2026-09-25.** This row was already closed when it was written up:
+> on 2026-08-17 (operator OK given) the final dump `n8n_20260415_020001.sqlite` was
+> archived to the encrypted R2 restic repo, tag `legacy-n8n`, snapshot `1d0cfb76`,
+> restore-verified byte-identical, and every local copy deleted (~994 MB reclaimed).
+> Record: `CHANGELOG.md` 2026-08-17 "legacy n8n final state archived"; droneops-server
+> `~/backups/README.RETIRED.md`. Re-verified 2026-09-25: no `n8n_*` files remain under
+> `~/backups/`. Text below is the stale pre-correction record — do not act on it.
 
 - **Scope.** ~840 MB, root-owned, last written 2026-04-15. Untouched by every
   backup change so far and deliberately out of ADR-0041's scope. The final n8n

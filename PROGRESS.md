@@ -186,7 +186,9 @@ Remaining items for Bill:
 1. ~~**Review + merge this branch**~~ — **DONE 2026-09-21 13:53 PDT** (`d30eb5b`),
    deployed 13:58 PDT. (Suite was 784 passed / 17 skipped at branch time, 795
    passed / 17 skipped after the one-hop correction.)
-2. **CS-Public item is a PATCH, not a commit** —
+2. ~~**CS-Public item is a PATCH, not a commit**~~ — **DONE 2026-09-21** as
+   CallSignPublic `27396d3` + `0375674`; origin search returns 401 unauthenticated
+   (verified 2026-09-25). Original note, historical:
    `docs/patches/0075-cspublic-*` in this repo. Needs a worktree created in
    `~/repos/CallSignPublic` (per dispatch instruction, not created by this
    session) before it can land. **Read `0075-cspublic-README.md`'s
@@ -938,6 +940,8 @@ docker run --rm --network host \
 Then confirm the freshness metric keeps advancing for **three more days**
 before declaring done. — **this post-cutover watch is the one piece still
 running: the three-day window opened 2026-09-21 and closes 2026-09-24.**
+*Closed clean 2026-09-24 (recorded 2026-09-25): the metric kept advancing — last
+success 2026-09-25 20:25 PDT, 11 advances in 5 days.*
 
 ### 2026-08-17 later the same day — cold DR rehearsal PASSED, four defects fixed
 
@@ -991,7 +995,9 @@ cutover gate below — it remains the criterion.
   ADR-0041's older sections is historical.** Note the ADR-0232 consequence: the
   B2 copy is never pruned at all, so retention here no longer bounds how long
   the bytes exist anywhere.
-- **STILL OPEN — `~/backups/n8n_*.sqlite` on droneops-server** (~840 MB,
+- ~~**STILL OPEN**~~ **CLOSED 2026-08-17 (corrected 2026-09-25)** — archived to
+  restic tag `legacy-n8n` and deleted; see CHANGELOG 2026-08-17. Original line:
+  `~/backups/n8n_*.sqlite` on droneops-server (~840 MB,
   root-owned, stops 2026-04-15) — untouched, out of scope, needs a separate
   keep-or-delete decision from Bill.
 - ~~**Legacy volumes**~~ — **CLOSED 2026-08-18.** `droneops_postgres_data`
@@ -1035,8 +1041,8 @@ on HSH-HQ / droneops-server) was **disabled** today.
 **Committed as `d153623`** (already pushed). The gate rewrite that unblocked it
 is in this same sweep's commit.
 
-**Still to do:** the post-cutover three-day freshness watch closes 2026-09-24,
-and ROADMAP `BK-3` (the two Grafana rule descriptions in `~/noc-master`) is
+**Still to do:** ~~the post-cutover three-day freshness watch closes 2026-09-24~~
+(closed clean — see above), and ROADMAP `BK-3` (the two Grafana rule descriptions in `~/noc-master`) is
 now unblocked and open.
 
 ## 2026-06-15 — Device-upload async decoupling (audit P2-2) — DESIGNED (not started)

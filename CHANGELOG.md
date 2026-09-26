@@ -4,6 +4,16 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-09-25 — docs: four stale open-item rows corrected (O-6/BK-4, O-12, O-14, O-16) [skip-deploy]
+
+Docs-only. A fleet roadmap audit found rows describing work as open that was already done;
+each was re-verified live before editing. **BK-4 / O-6** (n8n sqlite disposal) closed
+2026-08-17 — `ROADMAP.md` still said OPEN. **O-12** (CS-Public search auth) landed as
+CallSignPublic `27396d3` + `0375674`; origin search now answers 401 unauthenticated.
+**O-14** is annual (ADR-0041:675) and passed 2026-08-17 — not overdue; next ~2027-08-17.
+**O-16** freshness watch closed clean (last backup success 2026-09-25 20:25 PDT). Edited:
+`ROADMAP.md`, `PROGRESS.md`, `docs/reports/2026-09-21-open-items-inventory.md`.
+
 ## 2026-09-22 — The operator password is retired. Cloudflare Access is the only human login. (ADR-0047 Am. 4 + 5)
 
 `LOCAL_LOGIN_DISABLED=true` on BOS-HQ since **2026-09-22 09:21:38 PDT**; the `kid`-pinning
