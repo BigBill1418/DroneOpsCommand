@@ -10,6 +10,7 @@ function, never a real HTTP call.
 
 from __future__ import annotations
 
+import asyncio
 import time
 
 import pytest
@@ -565,10 +566,10 @@ async def test_unknown_kid_denies_even_when_a_set_key_matches_the_signature(
 
 
 async def test_unknown_kid_on_a_cold_cache_still_denies(rsa_keypair, rsa_keypair_2):
-    """Same forgery against a COLD cache. The forced refetch is itself
-    throttled by the 30s cooldown the initial fill just started, so the
-    denial surfaces with the cooldown reason rather than `unknown_kid`.
-    Either way it fails closed — which is the property that matters."""
+    """Same forgery against a COLD cache. The forced refetch is satisfied by
+    the initial fill that just succeeded inside the 30s cooldown (no second
+    fetch), and the retry refuses the kid. It fails closed — which is the
+    property that matters."""
     priv, pub = rsa_keypair
     _, pub2 = rsa_keypair_2
 
@@ -721,13 +722,17 @@ async def test_rotation_to_a_new_kid_still_recovers_via_the_refetch(
 async def test_unknown_kid_inside_the_cooldown_window_still_fails_closed(
     rsa_keypair, rsa_keypair_2
 ):
-    """An unknown kid discovered while the fetch cooldown is active denies
-    rather than serving the cached set — the fail-closed contract holds on
-    the new path exactly as it does on the signature path."""
+    """An unknown kid discovered while the fetch cooldown is active denies —
+    the fail-closed contract holds on the new path exactly as it does on the
+    signature path. Since ADR-0047 Amendment 6 the forced refetch is
+    satisfied by the fetch that SUCCEEDED seconds ago (no second network
+    call), so the denial names the real cause, ``unknown_kid``, instead of
+    the misleading ``cooldown active``."""
     priv, pub = rsa_keypair
     _, pub2 = rsa_keypair_2
 
-    client = _FakeHttpClient({_jwks_url(): [_jwk(pub, "kid-1")]})
+    calls: list[str] = []
+    client = _FakeHttpClient({_jwks_url(): [_jwk(pub, "kid-1")]}, calls=calls)
     assert (
         await cfa.verify_cf_access_assertion(
             _sign(priv, "kid-1"), config=_config(), http_client=client
@@ -739,7 +744,177 @@ async def test_unknown_kid_inside_the_cooldown_window_still_fails_closed(
         _sign(priv, "kid-2"), config=_config(), http_client=client
     )
     assert result.ok is False
-    assert "jwks fetch cooldown active" in result.reason
+    assert result.reason == "unknown_kid"
+    assert len(calls) == 1  # the cooldown still bounds fetches
+
+
+# ── Concurrency: requests arriving while a refresh is in flight ─────────
+#
+# 2026-09-23..25 incident: every ~61 min, when the 1h JWKS TTL lapsed, the
+# request that started the refresh stamped `_last_fetch_attempt` and then
+# awaited Cloudflare; every request arriving during that await read the
+# stamp OUTSIDE the lock, saw "attempt < 30s ago", and was denied with
+# `jwks fetch cooldown active` — 144 false denials in 48h while the JWKS
+# endpoint returned 200 throughout. Concurrent callers must WAIT for the
+# in-flight refresh and use its result, never race it.
+
+
+class _GatedHttpClient(_FakeHttpClient):
+    """A fake whose every fetch blocks until the test opens ``gate`` — holds
+    a refresh deterministically in flight while other requests arrive."""
+
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **kw)
+        self.gate = asyncio.Event()
+        self.in_flight = asyncio.Event()
+
+    async def get(self, url: str):
+        self.in_flight.set()
+        await self.gate.wait()
+        return await super().get(url)
+
+
+def _expire_warm_cache() -> None:
+    """Put the cache in its hourly production state: populated an hour ago,
+    last attempt an hour ago, TTL just lapsed."""
+    cfa._jwks_cache[TEAM_DOMAIN].fetched_at -= cfa.JWKS_TTL_SECONDS + 1
+    cfa._last_fetch_attempt[TEAM_DOMAIN] -= cfa.JWKS_TTL_SECONDS + 1
+
+
+async def _concurrent_verify(client, tokens: list[str]) -> list[cfa.CfAccessResult]:
+    """Start one verification, wait until its JWKS fetch is actually in
+    flight, THEN start the rest, then let the fetch complete."""
+    first = asyncio.create_task(
+        cfa.verify_cf_access_assertion(tokens[0], config=_config(), http_client=client)
+    )
+    await asyncio.wait_for(client.in_flight.wait(), timeout=2)
+    rest = [
+        asyncio.create_task(
+            cfa.verify_cf_access_assertion(t, config=_config(), http_client=client)
+        )
+        for t in tokens[1:]
+    ]
+    await asyncio.sleep(0)  # let every waiter reach the JWKS lookup
+    client.gate.set()
+    return await asyncio.wait_for(asyncio.gather(first, *rest), timeout=5)
+
+
+async def test_requests_during_ttl_refresh_wait_for_it_instead_of_being_denied(rsa_keypair):
+    """THE INCIDENT. Cache expires; 8 requests arrive while the refresh is in
+    flight against a HEALTHY endpoint. All must pass, on exactly one fetch."""
+    priv, pub = rsa_keypair
+    calls: list[str] = []
+    warm = _FakeHttpClient({_jwks_url(): [_jwk(pub, "kid-1")]}, calls=calls)
+    assert (
+        await cfa.verify_cf_access_assertion(
+            _sign(priv, "kid-1"), config=_config(), http_client=warm
+        )
+    ).ok is True
+    _expire_warm_cache()
+
+    client = _GatedHttpClient({_jwks_url(): [_jwk(pub, "kid-1")]}, calls=calls)
+    results = await _concurrent_verify(client, [_sign(priv, "kid-1")] * 8)
+
+    assert [r.reason for r in results if not r.ok] == []
+    assert len(calls) == 2  # the warm fill + ONE refresh, not one per waiter
+
+
+async def test_requests_on_a_cold_cache_wait_for_the_first_fill(rsa_keypair):
+    """Same race at process start (empty cache): first burst after a deploy."""
+    priv, pub = rsa_keypair
+    calls: list[str] = []
+    client = _GatedHttpClient({_jwks_url(): [_jwk(pub, "kid-1")]}, calls=calls)
+
+    results = await _concurrent_verify(client, [_sign(priv, "kid-1")] * 8)
+
+    assert all(r.ok for r in results)
+    assert len(calls) == 1
+
+
+async def test_real_jwks_outage_during_refresh_still_denies_everyone(rsa_keypair):
+    """The fix must not mask a genuine outage: the in-flight refresh FAILS,
+    so every waiter is denied — and the waiters do not each re-hit the dead
+    endpoint (the cooldown still bounds the fetch count to one)."""
+    priv, pub = rsa_keypair
+    calls: list[str] = []
+    warm = _FakeHttpClient({_jwks_url(): [_jwk(pub, "kid-1")]}, calls=calls)
+    assert (
+        await cfa.verify_cf_access_assertion(
+            _sign(priv, "kid-1"), config=_config(), http_client=warm
+        )
+    ).ok is True
+    _expire_warm_cache()
+
+    client = _GatedHttpClient({}, calls=calls)  # endpoint now unreachable
+    results = await _concurrent_verify(client, [_sign(priv, "kid-1")] * 8)
+
+    assert not any(r.ok for r in results)
+    assert all("jwks_unavailable" in r.reason for r in results)
+    assert len(calls) == 2  # warm fill + the ONE failed refresh
+
+
+async def test_concurrent_requests_after_key_rotation_all_recover(rsa_keypair, rsa_keypair_2):
+    """Same race on the forced-refetch path: Cloudflare rotates, 8 requests
+    carrying the new kid all miss the cache at once. The first forces a
+    refetch; the rest must reuse its fresh result rather than be denied
+    with `cooldown active` — and still on exactly one forced fetch."""
+    old_priv, old_pub = rsa_keypair
+    new_priv, new_pub = rsa_keypair_2
+    calls: list[str] = []
+    warm = _FakeHttpClient({_jwks_url(): [_jwk(old_pub, "kid-old")]}, calls=calls)
+    assert (
+        await cfa.verify_cf_access_assertion(
+            _sign(old_priv, "kid-old"), config=_config(), http_client=warm
+        )
+    ).ok is True
+    cfa._last_fetch_attempt[TEAM_DOMAIN] -= cfa.JWKS_COOLDOWN_SECONDS + 1
+
+    client = _GatedHttpClient({_jwks_url(): [_jwk(new_pub, "kid-new")]}, calls=calls)
+    results = await _concurrent_verify(client, [_sign(new_priv, "kid-new")] * 8)
+
+    assert [r.reason for r in results if not r.ok] == []
+    assert len(calls) == 2  # warm fill + ONE forced refetch
+
+
+async def test_forged_kid_during_a_rotation_refetch_is_still_denied(rsa_keypair, rsa_keypair_2):
+    """Reusing a just-completed forced refetch must not become a bypass: a
+    token whose kid is absent from the FRESH set is still refused on the kid."""
+    old_priv, old_pub = rsa_keypair
+    new_priv, new_pub = rsa_keypair_2
+    warm = _FakeHttpClient({_jwks_url(): [_jwk(old_pub, "kid-old")]})
+    assert (
+        await cfa.verify_cf_access_assertion(
+            _sign(old_priv, "kid-old"), config=_config(), http_client=warm
+        )
+    ).ok is True
+    cfa._last_fetch_attempt[TEAM_DOMAIN] -= cfa.JWKS_COOLDOWN_SECONDS + 1
+
+    client = _GatedHttpClient({_jwks_url(): [_jwk(new_pub, "kid-new")]})
+    results = await _concurrent_verify(
+        client, [_sign(new_priv, "kid-new"), _sign(new_priv, "kid-forged")]
+    )
+
+    assert results[0].ok is True
+    assert results[1].ok is False
+    assert results[1].reason == "unknown_kid"
+
+
+async def test_steady_state_hot_path_never_touches_the_lock(rsa_keypair, monkeypatch):
+    """No latency regression for the 4,500/day machine callers: a fresh
+    cache is served without acquiring the refresh lock at all."""
+    priv, pub = rsa_keypair
+    client = _FakeHttpClient({_jwks_url(): [_jwk(pub, "kid-1")]})
+    token = _sign(priv, "kid-1")
+    assert (await cfa.verify_cf_access_assertion(token, config=_config(), http_client=client)).ok
+
+    def _no_lock(_team_domain):
+        raise AssertionError("fresh-cache hot path acquired the refresh lock")
+
+    monkeypatch.setattr(cfa, "_get_lock", _no_lock)
+    for _ in range(50):
+        assert (
+            await cfa.verify_cf_access_assertion(token, config=_config(), http_client=client)
+        ).ok
 
 
 # ── Startup logging never raises / never leaks secrets ───────────────────

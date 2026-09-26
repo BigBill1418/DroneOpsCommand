@@ -431,6 +431,36 @@ already required, and the **documentation update**: the commit messages, `CHANGE
 production. The cutover runbook below is not optional, and "deployed" is a state that must be
 written down in the same change that causes it.
 
+### Amendment 6 (2026-09-25) — the JWKS cooldown was denying callers queued behind a healthy refresh
+
+**Evidence.** `droneops-backend-1` on BOS-HQ logged **276**
+`JWKS unavailable — denying: jwks fetch cooldown active` lines in 72 h. They came as exactly
+**6 per burst, 46 bursts, one every ~61 min**. That is the 1 h TTL lapsing, plus the next
+request. Not one line carried `jwks_fetch_failed`; the certs endpoint was healthy throughout.
+
+**Mechanism.** `_get_jwks` checked the 30 s cooldown **before** taking the lock. The refresher
+stamps `_last_fetch_attempt` *before* awaiting Cloudflare, so every caller arriving during that
+await saw "attempt < 30 s ago". From outside the lock that reads identically to "attempt just
+failed", and the caller denied. The forced-refetch path could not tell them apart either, so a
+caller queued behind a *successful* rotation refetch was denied with fresh keys in the cache.
+
+**Decision.** The cooldown is judged under the lock, on the in-flight fetch's **outcome**. A
+success is served to every waiter. A forced refetch is satisfied by a success inside the
+cooldown, and the `kid` is still checked against those keys. A failure denies every waiter with
+no second fetch. The fail-closed contract is unchanged: no stale keyset is ever served past its
+TTL, and a real outage still denies everyone. Only the false positive is gone. Rejected
+alternative: a stale-if-error window (TitanForge's pattern). It would also have hidden the
+symptom, but it widens what a real outage can serve, and this ADR chose fail-closed on purpose.
+
+**Correction to Amendment 5.** The deploy-time probe that returned `jwks fetch cooldown active`
+and then succeeded 49 s later was recorded as "the cooldown working as designed". It is more
+likely this race: a cold cache plus a concurrent request. The endpoint was confirmed healthy at
+the time, so no real failed fetch was ever shown. It was a false denial, not a design property.
+
+**Also fixed by this.** FU-9 (alert on JWKS fetch failure) could not have been built on the
+old code. The existing log line would have paged every hour on false positives. After this
+amendment, `JWKS unavailable` means the Cloudflare endpoint really is unavailable.
+
 ## Context
 
 `droneops.barnardhq.com/` already returns a Cloudflare Access 302 — but that is edge-only.

@@ -372,9 +372,12 @@ a different controller.
   code change.
 - **Observed, not hypothesised.** During the 2026-09-22 09:51 PDT deploy the first probe after
   the container restart returned `jwks fetch cooldown active … no fresh keys available`, and
-  the same probe succeeded 49 s later. The container's egress to the certs endpoint was
-  healthy (200, 2 keys) throughout — that is the cooldown working as designed. The point is
-  that nothing would have told anyone if it had *not* recovered.
+  the same probe succeeded 49 s later. The point is that nothing would have told anyone if it
+  had *not* recovered. *(Corrected 2026-09-25, ADR-0047 Am. 6: that probe was the refresh race,
+  not the cooldown working as designed. See FU-11.)*
+- **Signal is now clean (2026-09-25).** Until ADR-0047 Am. 6 the verifier logged a false
+  `JWKS unavailable` burst every hour (276 in 72 h), so an alert on that line would have paged
+  hourly. After the fix it fires only on a real fetch failure, and FU-9 can key on it directly.
 - **Deliverable.** A counter or log-derived signal on the verifier's fetch-failure path, an
   InfraWatch rule, and an ntfy route graded against ADR-0037. Grade it **high**, not `urgent`:
   the break-glass is 30 seconds and the operator is the only affected party.
@@ -574,6 +577,16 @@ it lived in `PROGRESS.md` and was **executed 2026-09-21**.
   2.3 G → 851 M. Verified after: `pg_is_in_recovery()=t`, `archive_mode=off`,
   wal receiver `streaming`, primary slot `chad_hq_standby` active with empty
   `replay_lag`. A promotion can no longer recreate Gap 7.
+
+### FU-11 — Hourly false SSO denials from the JWKS refresh race — **CLOSED 2026-09-25** (ADR-0047 Am. 6)
+
+- **What.** `_get_jwks` judged its 30 s cooldown outside the lock, so requests queued behind a
+  healthy hourly refresh were denied (`jwks fetch cooldown active`): 276 false denials in 72 h,
+  6 per burst every ~61 min. The same flaw applied to the forced (rotation) refetch.
+- **Fix.** The cooldown is judged under the lock, on the in-flight fetch's outcome. Waiters use
+  a successful refresh and deny on a failed one. The hot path is still lock-free. Six
+  concurrency tests were added; the core one is 7/8 denied pre-fix and 8/8 pass post-fix.
+  Deploy verification is in `CHANGELOG.md` 2026-09-25.
 
 ### FU-2 — Unauthenticated `GET /health` shim — ✅ SHIPPED v2.63.4 (2026-04-24)
 

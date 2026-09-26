@@ -78,6 +78,9 @@ it must be `up -d`.** Backups of every prior state are on the host as `.env.bak-
    Cloudflare certs outage locks the operator out until the break-glass above is applied by hand.
    That is an acceptable trade — it should be **monitored rather than discovered**. Tracked as
    ROADMAP **FU-9**. Detail: ADR-0047 Amendment 5, "Operational consequence".
+   **2026-09-25:** the hourly false `JWKS unavailable` bursts (276 in 72 h, all during healthy
+   refreshes) are fixed (ADR-0047 Am. 6, ROADMAP FU-11). That log line now fires only on a real
+   fetch failure, so FU-9 can alert on it without paging every hour.
 2. **No alert on a broken machine caller.** Six broke across this programme, three of them
    silently — the marketing bridge ran 6 h dark and the DroneOpsMap GPU render node ran **3 days**
    dark. Neither had a monitor. Tracked as ROADMAP **FU-10**; the fleet-level write-up is

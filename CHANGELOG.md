@@ -4,6 +4,51 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-09-25 — Hourly false SSO denials: the JWKS refresh race is fixed (ADR-0047 Am. 6)
+
+**Symptom.** Every ~61 minutes the backend logged exactly six
+`[CF-ACCESS] JWKS unavailable — denying: jwks fetch cooldown active … no fresh keys available`
+lines: **276 in 72 h** (46 bursts × 6), from 2026-09-22 until the fix. The last pre-fix burst was
+13:54 UTC (06:54 PDT) on 2026-09-25. **Not one** of them was a real fetch failure: every
+denial carried the cooldown reason, none carried `jwks_fetch_failed`, and Cloudflare's certs
+endpoint returned 200 throughout. The operator saw it as a page load of 6×401 plus a 403 on
+refresh.
+
+**Cause** (`backend/app/auth/cf_access.py::_get_jwks`). When the 1 h TTL lapsed, the request that
+won the refresh stamped `_last_fetch_attempt` and then awaited Cloudflare. Every request arriving
+during that await read the stamp **outside the lock**, could not tell "refresh in flight" from
+"refresh just failed", and denied. The forced-refetch path (key rotation) had the same flaw: a
+request queued behind a *successful* forced refetch was denied with `cooldown active` while
+fresh keys sat in the cache.
+
+**Fix.** Every cooldown decision now happens under the lock, after any in-flight fetch has
+finished, and acts on that fetch's **outcome**:
+- a success serves its keys to every waiter. A forced refetch is satisfied by one that
+  succeeded inside the cooldown, and the retry still checks the token's `kid` against those keys.
+- a failure makes every waiter deny at once, without a second fetch against a dead endpoint.
+
+The fresh-cache hot path is unchanged and still lock-free, so the machine callers see no added
+latency. Their bearer-token path never reaches this code in any case.
+
+**Behaviour change, deliberate.** An unknown `kid` arriving seconds after a successful fetch now
+denies as `unknown_kid`, which is the real cause, instead of `jwks fetch cooldown active`. It
+still spends no extra fetch.
+
+**Tests** (`backend/tests/test_cf_access.py`, +6). The core test is 8 requests arriving while a
+gated refresh is in flight. Against the pre-fix code, **7 of 8 were denied** with the exact
+production message. Against the fix, all 8 pass on one fetch. The other five cover: the same
+race on a cold cache; a real outage during the refresh (everyone still denied, one fetch); 8
+concurrent requests after a key rotation (all recover, one forced fetch); a forged `kid` riding
+a rotation refetch (still `unknown_kid`); and the hot path never taking the lock.
+
+**Live control, pre-deploy (2026-09-26 06:16 UTC / 2026-09-25 23:16 PDT).** Eight concurrent
+`POST /api/auth/sso-exchange` requests went to the running backend on an expired cache. Each
+carried the Cloudflare-signed `meta` JWT from the Access redirect, the ADR-0047 Am. 5
+technique: a real team-key signature with no `iss`. Result: **7 denied**
+`jwks fetch cooldown active`. The 8th got keys, failed claims, and then its forced refetch was
+*also* cooldown-denied. That is the race reproduced in production, on both paths. Auth-touching
+backend suite: 284 passed / 8 skipped.
+
 ## 2026-09-25 — docs: four stale open-item rows corrected (O-6/BK-4, O-12, O-14, O-16) [skip-deploy]
 
 Docs-only. A fleet roadmap audit found rows describing work as open that was already done;

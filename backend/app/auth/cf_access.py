@@ -211,30 +211,46 @@ async def _get_jwks(
 ) -> list[dict]:
     """Return a (possibly cached) JWKS key list. Raises ``JwksUnavailable``
     on any fetch failure — including when a fresh fetch is required but the
-    cooldown blocks it. Never returns a keyset past its TTL."""
-    now = time.monotonic()
-    entry = _jwks_cache.get(team_domain)
-    if not force and entry is not None and (now - entry.fetched_at) < JWKS_TTL_SECONDS:
-        return entry.keys
+    cooldown blocks it. Never returns a keyset past its TTL.
 
-    last_attempt = _last_fetch_attempt.get(team_domain, 0.0)
-    if (now - last_attempt) < JWKS_COOLDOWN_SECONDS:
-        # Another caller already tried very recently (and presumably
-        # failed, or we would have a fresh cache entry above). Do not
-        # hammer Cloudflare — deny rather than serve anything stale.
-        raise JwksUnavailable(
-            f"jwks fetch cooldown active for {team_domain} — no fresh keys available"
-        )
+    CONCURRENCY (ADR-0047 Amendment 6): every cooldown decision is made
+    UNDER the lock. The refresher stamps ``_last_fetch_attempt`` before it
+    awaits Cloudflare, so a caller that read that stamp outside the lock
+    could not tell "a refresh is in flight" from "a refresh just failed" and
+    denied either way — 144 false denials in 48h, ~6 per hourly TTL expiry,
+    against a healthy endpoint. Callers now queue on the lock behind the
+    in-flight fetch and act on its OUTCOME: success → use its keys;
+    failure → deny on the cooldown (no second fetch against a dead endpoint).
+    """
+    entry = _jwks_cache.get(team_domain)
+    if not force and entry is not None and (time.monotonic() - entry.fetched_at) < JWKS_TTL_SECONDS:
+        return entry.keys  # hot path: lock-free
 
     async with _get_lock(team_domain):
-        # Re-check after acquiring the lock: a concurrent caller may have
-        # already refreshed the cache while we waited.
         now = time.monotonic()
         entry = _jwks_cache.get(team_domain)
-        if not force and entry is not None and (now - entry.fetched_at) < JWKS_TTL_SECONDS:
+        last_attempt = _last_fetch_attempt.get(team_domain)
+        attempted_recently = last_attempt is not None and (now - last_attempt) < JWKS_COOLDOWN_SECONDS
+        # A forced refetch is satisfied by one that SUCCEEDED inside the
+        # cooldown: those keys are as new as the cooldown allows, and the
+        # caller's retry still verifies the token's kid against them.
+        refreshed_recently = (
+            attempted_recently and entry is not None and entry.fetched_at >= last_attempt
+        )
+        if (
+            entry is not None
+            and (now - entry.fetched_at) < JWKS_TTL_SECONDS
+            and (not force or refreshed_recently)
+        ):
             return entry.keys
+        if attempted_recently:
+            # The recent attempt failed (or a success would have returned
+            # above). Do not hammer Cloudflare — deny, never serve stale.
+            raise JwksUnavailable(
+                f"jwks fetch cooldown active for {team_domain} — no fresh keys available"
+            )
 
-        _last_fetch_attempt[team_domain] = time.monotonic()
+        _last_fetch_attempt[team_domain] = now
         try:
             keys = await _fetch_jwks(team_domain, http_client=http_client)
         except JwksUnavailable:
