@@ -49,6 +49,17 @@ technique: a real team-key signature with no `iss`. Result: **7 denied**
 *also* cooldown-denied. That is the race reproduced in production, on both paths. Auth-touching
 backend suite: 284 passed / 8 skipped.
 
+**Deployed and verified live.** Fix commit `4111e5b`. The deployer recreated
+`droneops-backend-1` at 06:19:16 UTC (23:19 PDT 2026-09-25), healthy. The identical 8-way
+probe was then run twice:
+- on the **cold cache**, straight after deploy;
+- after the **first TTL expiry**, at 07:21 UTC (00:21 PDT 2026-09-26).
+
+Both runs: **8/8** reached claims validation (`missing required key "iss"`), so every request
+obtained keys. There were **0** `JWKS unavailable` lines in the container's whole post-deploy
+life. Machine callers: **122/122** `POST /api/auth/login` returned 200, 946/946 non-SSO
+responses returned 200, and there were 0 errors.
+
 ## 2026-09-25 — docs: four stale open-item rows corrected (O-6/BK-4, O-12, O-14, O-16) [skip-deploy]
 
 Docs-only. A fleet roadmap audit found rows describing work as open that was already done;
