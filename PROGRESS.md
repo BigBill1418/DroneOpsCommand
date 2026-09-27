@@ -67,8 +67,10 @@ code was changed. The defect was a property of `python-jose`, not of the module 
 
 Re-enabling local login is **one line** on the BOS-HQ `.env` (`LOCAL_LOGIN_DISABLED=false`) plus
 `docker compose up -d backend`, about 30 seconds. **`restart` does not re-read the environment —
-it must be `up -d`.** Backups of every prior state are on the host as `.env.bak-*`, including
-`.env.bak-pre-killpw-20260922-092138` taken immediately before the cutover.
+it must be `up -d`.** Two prior-state snapshots are kept on the host:
+`.env.bak-pre-killpw-20260922-092138` (taken immediately before the cutover) and
+`.env.bak-adr0047-rollback-20260922-023140`. Every other `.env.bak-*` was shredded on 2026-09-27
+(see CHANGELOG); the break-glass itself never needed them.
 
 ### Open, not built — both are monitoring gaps this programme created or exposed
 

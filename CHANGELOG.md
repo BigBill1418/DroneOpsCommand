@@ -4,6 +4,30 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-09-27 — BOS-HQ host hygiene: 14 stale `.env`/compose backups shredded
+
+Host-local housekeeping on `~/droneops` (BOS-HQ); no code or live-config change. The live `.env`
+and `docker-compose.override.yml` hashed identical before and after, and the backend reported
+`healthy` (db/redis/stripe ok) on-box and through the tunnel afterwards.
+
+- **Shredded (14, `shred -u -z -n 3`):** 11 `.env` snapshots (`.env.bak.1777793920`,
+  `.env.bak.1777796722-adr0012`, `.env.bak.20260504-065915-a8`, `.env.pre-cutover-2026-05-09`,
+  both `.env.bak-rotate-20260605-*`, `.env.bak-adr0155-*`, `.env.bak-appversion-20260921`,
+  `.env.bak-sso-*`, `.env.bak-stepb-*`, `.env.bak-pre-sso-*`), both
+  `docker-compose.override.yml.bak-rotate-20260605-*`, and
+  `docker-compose.standby.override.yml.bak.1777796722-adr0012`.
+- **Why it was safe.** None was referenced by a script, cron entry, systemd unit or compose file
+  (the ADR-0041 config lane is an allowlist), none was open (`lsof`), none was git-tracked, and
+  all predated the live `.env`. Every value that differed from the live config was checked for
+  liveness: the two old `droneops` DB passwords and the old replication password do not verify
+  against the live SCRAM verifiers of any DroneOps database (control: the live values do), and
+  the old ntfy publisher token is no longer registered on the ntfy server. The remaining
+  differences were GlitchTip/Sentry DSNs (ingest-only, shipped in the frontend bundle), an OTLP
+  endpoint and version strings. **Nothing needed filing into 1Password.**
+- **Kept on purpose:** `.env.bak-pre-killpw-20260922-092138` and
+  `.env.bak-adr0047-rollback-20260922-023140`, which ADR-0047 / PROGRESS name as the SSO-cutover
+  rollback record. Their values equal the live `.env` except `LOCAL_LOGIN_DISABLED`.
+
 ## 2026-09-25 — Hourly false SSO denials: the JWKS refresh race is fixed (ADR-0047 Am. 6)
 
 **Symptom.** Every ~61 minutes the backend logged exactly six
