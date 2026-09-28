@@ -72,7 +72,12 @@ it must be `up -d`.** Two prior-state snapshots are kept on the host:
 `.env.bak-adr0047-rollback-20260922-023140`. Every other `.env.bak-*` was shredded on 2026-09-27
 (see CHANGELOG); the break-glass itself never needed them.
 
-### Open, not built — both are monitoring gaps this programme created or exposed
+### Monitoring gaps this programme created or exposed — **both CLOSED 2026-09-25 by InfraWatch ADR-0045**
+
+> **2026-09-27:** both items below are built and live as InfraWatch Grafana rule group
+> `machine-auth` (`obs-rule-machine-auth-jwks-droneops`, `-caller-failing`, `-bridge-silent`),
+> re-verified provisioned and evaluating `health=ok` on BOS-HQ. See ROADMAP FU-9 / FU-10 for the
+> by-design residual (`marketing-bridge` has no staleness rule). Text below kept as the record.
 
 1. **No alert on JWKS fetch failure.** `JWKS_TTL_SECONDS = 3600`, `JWKS_COOLDOWN_SECONDS = 30`,
    fail-closed with no stale-if-error path. Before Step B a JWKS outage merely degraded SSO and

@@ -4,6 +4,19 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-09-27 — Docs: ROADMAP FU-9 / FU-10 closed (shipped via InfraWatch ADR-0045)
+
+Documentation only. FU-9 (alert on JWKS fetch failure) and FU-10 (alert on a broken machine
+caller) were still listed OPEN although the work shipped on 2026-09-25 as InfraWatch ADR-0045,
+Grafana rule group `machine-auth`: `obs-rule-machine-auth-jwks-droneops` (FU-9),
+`obs-rule-machine-auth-caller-failing` and `obs-rule-machine-auth-bridge-silent` (FU-10). Before
+closing, the rules were re-read from the live `infrawatch-grafana` on BOS-HQ (provisioned, not
+paused, `health=ok`, last evaluated 2026-09-27 20:27 PDT) and every log string they match was
+confirmed still present verbatim in `backend/app/auth/cf_access.py` and
+`backend/app/routers/auth.py`. The by-design residual (`marketing-bridge` has no staleness rule;
+an edge-blocked `marketing-bridge` stays invisible) is recorded on FU-10 and tracked in
+InfraWatch ROADMAP item 22. PROGRESS.md's "Open, not built" heading updated to match.
+
 ## 2026-09-27 — BOS-HQ host hygiene: 14 stale `.env`/compose backups shredded
 
 Host-local housekeeping on `~/droneops` (BOS-HQ); no code or live-config change. The live `.env`

@@ -358,7 +358,20 @@ a different controller.
   fixture log file in `backend/tests/fixtures/flight-records/`.
 - **Owner.** TBD. ~0.5 eng day.
 
-### FU-9 — Alert on JWKS fetch failure — **OPEN, raised 2026-09-22 (ADR-0047 Amendment 5)**
+### FU-9 — Alert on JWKS fetch failure — **CLOSED 2026-09-25 by InfraWatch ADR-0045** (raised 2026-09-22, ADR-0047 Amendment 5)
+
+- **Closed by.** InfraWatch ADR-0045 (`docs/adr/0045-machine-auth-alerts-keyed-to-sustained-failure.md`,
+  commits `b864f53` + `bc174da`), Grafana rule group `machine-auth`, rule
+  **`obs-rule-machine-auth-jwks-droneops`** (plus `-jwks-droneopsmap` for DroneOpsMap): fires on
+  `[CF-ACCESS] JWKS unavailable — denying` lines from `droneops-backend-1` in both the last 10 min
+  **and** the 10 min window ending 20 min ago, `for: 5m`, severity `high`, topic
+  `infrawatch-alerts`, click `/status/droneops`. Keyed to sustained failure so a deploy-restart
+  cooldown cannot page.
+- **Verified live 2026-09-27 20:27 PDT:** the rule is provisioned in `infrawatch-grafana` on BOS-HQ
+  (not paused), evaluating with `health=ok`, state `inactive`; the matched log line still exists
+  verbatim at `backend/app/auth/cf_access.py:334`. **If that line is reworded, the rule goes quiet
+  with no error** (ADR-0045 § Consequences) — keep the string or update the rule in the same change.
+- *Original row, kept for history:*
 
 - **Why it exists now.** `LOCAL_LOGIN_DISABLED=true` since 2026-09-22 09:21 PDT, so a verified
   Cloudflare Access assertion is the **only** human credential this app accepts. The verifier's
@@ -383,7 +396,24 @@ a different controller.
   the break-glass is 30 seconds and the operator is the only affected party.
 - **Cross-reference.** InfraWatch `ROADMAP.md` item 23. **Owner.** TBD. ~0.5 eng day.
 
-### FU-10 — Alert on a broken machine caller — **OPEN, raised 2026-09-22**
+### FU-10 — Alert on a broken machine caller — **CLOSED 2026-09-25 for this repo by InfraWatch ADR-0045** (raised 2026-09-22)
+
+- **Closed by.** InfraWatch ADR-0045, Grafana rule group `machine-auth`:
+  **`obs-rule-machine-auth-caller-failing`** (≥3 `Login failed` for a username in 1 h with no
+  `Login SUCCESS`/`Token refreshed` for it, `for: 10m`, labelled by `user` — covers both
+  `marketing-bridge` and `droneopsmap-bridge`) and **`obs-rule-machine-auth-bridge-silent`** (no
+  successful auth by `droneopsmap-bridge` in 2 h while `droneops-backend-1` is still logging,
+  `for: 10m` — the edge-blocked silent class). Both `high` → `infrawatch-alerts`.
+- **Verified live 2026-09-27 20:27 PDT:** both rules provisioned in `infrawatch-grafana` on BOS-HQ,
+  not paused, `health=ok`, state `inactive`; the matched strings still exist verbatim at
+  `backend/app/routers/auth.py:238/243/250` (`Login failed`), `:260` (`Login SUCCESS`), `:478`
+  (`Token refreshed`).
+- **Residual, by design, tracked fleet-side (not here):** `marketing-bridge` has **no** staleness
+  rule — its normal idle gap is days, so a bound that loose is worthless. If it is blocked at the
+  Cloudflare edge it never reaches this backend and stays invisible; the next place to instrument
+  is `barnardhq-api`'s own error surface. That, and callers of other fleet APIs, is InfraWatch
+  `ROADMAP.md` item 22 (PARTLY DONE).
+- *Original row, kept for history:*
 
 - **Why.** Six machine callers broke across the 2026-09-18→22 fleet SSO programme and **three
   broke silently** — no alert, no dashboard, no error the operator would see. The
