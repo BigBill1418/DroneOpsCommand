@@ -180,6 +180,9 @@ services:
       # the WireGuard-mesh machine callers keep working when Step B is on.
       # Blank = no exemptions = pre-ADR-0048 behaviour. See .env.example.
       - SERVICE_ACCOUNT_USERNAMES=${SERVICE_ACCOUNT_USERNAMES:-}
+      # ADR-0049 — SHA-256 hex of EyesOn's read token. Blank = the
+      # /api/integrations/eyeson/* routes answer 503. See .env.example.
+      - EYESON_SERVICE_TOKEN_SHA256=${EYESON_SERVICE_TOKEN_SHA256:-}
       - DEMO_ADMIN_USERNAME=${DEMO_ADMIN_USERNAME:-}
       - DEMO_ADMIN_PASSWORD=${DEMO_ADMIN_PASSWORD:-}
       - SMTP_HOST=${SMTP_HOST:-}
@@ -223,7 +226,7 @@ services:
       # tests/test_app_version_parity.py). A hand-set APP_VERSION in a host
       # .env pinned 2.67.4 through ~25 releases and mis-tagged every error
       # group; that dependency is gone. ROADMAP H-1. Bumped for tidiness only.
-      - APP_VERSION=${APP_VERSION:-2.95.0}
+      - APP_VERSION=${APP_VERSION:-2.96.0}
       # ADR-0002 §5 + ADR-0003 alerts via ntfy (ADR-0036).
       # Unset = no-op (structured JSON logs still emit).
       - NTFY_DRONEOPS_PUBLISHER_TOKEN=${NTFY_DRONEOPS_PUBLISHER_TOKEN:-}
@@ -324,7 +327,7 @@ services:
       - OTEL_SERVICE_NAME=droneops-worker
       - TENANT=${TENANT:-shared}
       - ENV=${ENV:-prod}
-      - APP_VERSION=${APP_VERSION:-2.95.0}
+      - APP_VERSION=${APP_VERSION:-2.96.0}
       # ADR-0002 §5 + ADR-0003 alerts from silence watchdog task via
       # ntfy (ADR-0036).
       - NTFY_DRONEOPS_PUBLISHER_TOKEN=${NTFY_DRONEOPS_PUBLISHER_TOKEN:-}
@@ -363,7 +366,7 @@ services:
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - TENANT=${TENANT:-shared}
       - ENV=${ENV:-prod}
-      - APP_VERSION=${APP_VERSION:-2.95.0}
+      - APP_VERSION=${APP_VERSION:-2.96.0}
       # ADR-0036 — beat scheduler enqueues silence watchdog and rotation
       # finalizer; the watchdog task itself emits the alert via ntfy.
       - NTFY_DRONEOPS_PUBLISHER_TOKEN=${NTFY_DRONEOPS_PUBLISHER_TOKEN:-}
@@ -418,7 +421,7 @@ services:
         # `__APP_VERSION__` (frontend/package.json), and the Login/Setup
         # footers always did. Kept and bumped so `docker compose config` does
         # not display a version 25 releases stale. See ROADMAP H-1.
-        VITE_APP_VERSION: "${APP_VERSION:-2.95.0}"
+        VITE_APP_VERSION: "${APP_VERSION:-2.96.0}"
     restart: unless-stopped
     # BOS-HQ 2026-06-05 sweep: static nginx SPA (~8 MiB) → 256M floor.
     # Health interval kept at 30s — customer edge + the probed :3080 target.

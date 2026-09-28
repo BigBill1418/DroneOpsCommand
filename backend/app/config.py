@@ -153,6 +153,12 @@ class Settings(BaseSettings):
     # operator identity (ADR-0055) when unset.
     cf_access_allowed_emails: str = ""
 
+    # ADR-0049 — SHA-256 (hex) of the token EyesOn presents in
+    # `X-EyesOn-Service-Token` to the read-only /api/integrations/eyeson/*
+    # routes. Blank = those routes answer 503 (dark). The raw token lives only
+    # on the EyesOn host (DRONEOPS_SERVICE_TOKEN), never here.
+    eyeson_service_token_sha256: str = ""
+
     # Step B kill switch (ADR-0047) — OFF by default everywhere, including
     # BarnardHQ's own production compose file. Only an operator flipping
     # this explicitly, after CF Access verification has been proven live

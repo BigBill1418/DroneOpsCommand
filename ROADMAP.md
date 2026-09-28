@@ -95,6 +95,13 @@ there is more data or set it per-region.
 
 ### FP-1 — Extract the untapped DJI log data into a Flight Details view — **P0 + P1 LIVE; P-EVAL DONE (no crate bump exists); P2–P7 remain**
 
+> **Open defect found 2026-09-27 (EyesOn ADR-0065 backfill, DroneOps ADR-0049):**
+> `flight_details.first_frame_at` is `1970-01-01 00:00:00` on M4TD flights
+> `DJI-Matrice-4TD_20260916_0002` and `…_0001`. `last_frame_at` is correct. The frame-clock
+> decode yields epoch for part of the log. Consumers must not trust `first_frame_at` without
+> checking it against `start_time`. Fix it at the parser/ingest, then re-run the details
+> backfill.
+
 **Status 2026-09-05/06.** P0 (schema + read path) and P1 (Tier 0 extraction)
 are merged and **live on BOS-HQ** — app **2.83.0**, parser **1.2.0**, alembic
 head `0011_battery_src_truth`, `flight_details` + `flight_series` present and

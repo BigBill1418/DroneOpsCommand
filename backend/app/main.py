@@ -20,7 +20,7 @@ from app.config import settings
 from app.database import async_session, engine, get_db
 from app.utils.client_ip import get_trusted_client_ip
 import app.models  # noqa: F401 — register all models on Base.metadata (Alembic + legacy helpers read it)
-from app.routers import auth, customers, aircraft, missions, flights, maps, reports, invoices, rate_templates, llm, system_settings, financials, weather, intake, flight_library, batteries, maintenance, backup, device_keys, pilots, client_portal, stripe_webhook, business_signals, admin_device_rotation, tos, basemap_health
+from app.routers import auth, customers, aircraft, missions, flights, maps, reports, invoices, rate_templates, llm, system_settings, financials, weather, intake, flight_library, batteries, maintenance, backup, device_keys, pilots, client_portal, stripe_webhook, business_signals, admin_device_rotation, tos, basemap_health, eyeson_integration
 
 
 def _setup_json_logging() -> None:
@@ -609,7 +609,7 @@ logger.info("MultiPartParser spool threshold set to 4 MB (large uploads spool to
 app = FastAPI(
     title="D.O.C — Drone Operations Command",
     description="Self-hosted mission management, flight log analysis, AI report generation, invoicing, telemetry visualization, and real-time airspace monitoring for commercial drone operators.",
-    version="2.95.0",
+    version="2.96.0",
     lifespan=lifespan,
 )
 
@@ -695,6 +695,7 @@ app.include_router(business_signals.router)
 app.include_router(admin_device_rotation.router)
 app.include_router(tos.router)
 app.include_router(basemap_health.router)
+app.include_router(eyeson_integration.router)
 
 
 # ── Demo status endpoint (no auth required) ───────────────────────────

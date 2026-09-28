@@ -4,6 +4,22 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-09-27 — v2.96.0: EyesOn flight-record read API (ADR-0049), ships dark
+
+- **New router `/api/integrations/eyeson/*`** (read-only, two routes). `GET /flights?start=&end=`
+  lists the flights whose record overlaps a ≤ 48 h window, using scalar columns only.
+  `GET /flights/{id}/timeline` returns one flight's telemetry, track and frame series,
+  downsampled by index stride through the shared `select_indices`. The consumer is EyesOn
+  ADR-0065, which matches stream sessions to flight records.
+- **Auth: scoped service token.** The `X-EyesOn-Service-Token` header is SHA-256'd and compared
+  in constant time to `EYESON_SERVICE_TOKEN_SHA256` (hash only on this host). Unset → `503`.
+  This was chosen over an ADR-0048 service account, whose credential would read and write
+  the whole business.
+- **Data-quality finding (not fixed here):** `flight_details.first_frame_at` is `1970-01-01`
+  on M4TD flights `…_20260916_0002` and `…_0001`. The overlap filter ignores a frame bound
+  more than 5 min from the header bound.
+- Tests: `backend/tests/test_eyeson_integration_adr0049.py` has 10 tests. Full suite quoted in
+  the PR.
 ## 2026-09-27 — Docs: ROADMAP FU-9 / FU-10 closed (shipped via InfraWatch ADR-0045)
 
 Documentation only. FU-9 (alert on JWKS fetch failure) and FU-10 (alert on a broken machine

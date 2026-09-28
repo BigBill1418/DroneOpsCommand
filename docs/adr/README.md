@@ -4,7 +4,7 @@
 exhaustive docs-freshness pass. Every row's status was read from the ADR's own
 `Status:` line after that pass reconciled it against the running system.
 
-- **Numbering:** `0001`–`0048`, **contiguous, no gaps, no duplicates** (verified
+- **Numbering:** `0001`–`0049`, **contiguous, no gaps, no duplicates** (verified
   `2026-09-22` against every local and remote branch, not just `main`). The next
   ADR is **`0049`**.
 - **Repo state when this index was generated:** live app **v2.92.1**,
@@ -89,6 +89,7 @@ narrative quality.**
 | [0046](0046-keyless-basemap-registry-and-tile-health-probe.md) | Keyless basemap registry + tile-health probe | Accepted — **shipped and deployed v2.92.0, 2026-09-21** | 2026-09-21 | Supersedes in practice the five hard-coded CARTO/Esri/OSM tile URLs |
 | [0047](0047-operator-cloudflare-access-sso.md) | Operator Cloudflare Access SSO | **ROLLED BACK 2026-09-22** — code merged v2.94.0, inert while the CF vars are empty | 2026-09-21 | Amendment 1 (blast radius = 8 endpoints) + Amendment 2 (Step B *did* take effect; precondition 5) |
 | [0048](0048-service-account-allowlist-and-sso-bearer-exchange.md) | Service-account allow-list + SSO→bearer exchange | Accepted — merged v2.95.0, **ships inert** (empty allow-list, `404` until Access is configured) | 2026-09-22 | Closes [0047](0047-operator-cloudflare-access-sso.md) precondition 5 and supplies the mint precondition 1 needs |
+| [0049](0049-eyeson-flight-record-read-api.md) | EyesOn flight-record read API (scoped read-only service token) | Accepted — v2.96.0, **ships dark** (`503` until `EYESON_SERVICE_TOKEN_SHA256` is set) | 2026-09-27 | Consumer: EyesOn ADR-0065 |
 
 ---
 
