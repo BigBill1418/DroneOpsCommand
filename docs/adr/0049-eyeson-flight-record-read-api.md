@@ -1,7 +1,8 @@
 # ADR-0049: EyesOn reads flight records through a scoped, read-only service token
 
-- **Status:** Accepted, shipped **dark**. Both routes answer `503` until
-  `EYESON_SERVICE_TOKEN_SHA256` is set on the backend.
+- **Status:** Accepted. **Live and enabled on BOS-HQ since 2026-09-27 22:41 PDT** (v2.96.0,
+  merge `a6317aa`; token hash set; verified 503 → 401/401/200, see PROGRESS). On any other
+  install both routes answer `503` until `EYESON_SERVICE_TOKEN_SHA256` is set.
 - **Date:** 2026-09-27
 - **Consumer:** EyesOn **ADR-0065** (session ↔ flight-record matching). Operator approval
   2026-09-27: *"you can match fligt logs - yes"*.

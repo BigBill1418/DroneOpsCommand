@@ -6,6 +6,8 @@ Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
 ## 2026-09-27 — v2.96.0: EyesOn flight-record read API (ADR-0049), ships dark
 
+**Deployed and enabled 2026-09-27 22:41 PDT** (merge `a6317aa`). Verified live: see PROGRESS.
+
 - **New router `/api/integrations/eyeson/*`** (read-only, two routes). `GET /flights?start=&end=`
   lists the flights whose record overlaps a ≤ 48 h window, using scalar columns only.
   `GET /flights/{id}/timeline` returns one flight's telemetry, track and frame series,

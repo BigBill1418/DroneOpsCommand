@@ -10,7 +10,23 @@ blocked.
 > the archive is the record. The authoritative open-items + operator to-do list
 > as of today is `docs/reports/2026-09-21-open-items-inventory.md`.
 
-## 2026-09-27 (17:00–18:30 PDT / 00:00–01:30 UTC 09-28) — EyesOn flight-record read API (ADR-0049) — **PR open, not merged, dark**
+## 2026-09-27 (22:36–22:42 PDT / 05:36–05:42 UTC 09-28) — ADR-0049 **MERGED, LIVE, TOKEN SET**
+
+Verified on BOS-HQ after merge `a6317aa` (PR #43):
+- Deployed by the fleet deployer: `openapi.json` → **2.96.0** at 22:40:15 PDT, and
+  `/app/app/routers/eyeson_integration.py` is present in `droneops-backend-1`.
+- **Dark check before the token:** `GET /api/integrations/eyeson/flights` → **503** `EyesOn integration not configured`.
+- **Token:** generated without printing and filed in 1Password Fleet as *DroneOps ↔ EyesOn
+  flight-record read token*. The readback hash matches. `EYESON_SERVICE_TOKEN_SHA256` was set in
+  `~/droneops/.env` (backup `.env.bak-adr0049-20260927-224100`, mode 600). The raw token and
+  `DRONEOPS_API_URL` were set in `~/EyesOn/.env` (same backup name). Backend recreated
+  22:41 PDT, healthy.
+- **Auth:** no token → **401**, wrong token → **401**. The real token → **200**. The 9/16 window
+  returns `…_0003`, the 265 window returns `…_0002` + `…_0001`, and the `…_0003` timeline returns
+  500/500/500 points.
+- Remaining: the EyesOn side (ADR-0065) goes live when EyesOn PR #33 deploys and `eyeson-api` is recreated.
+
+## 2026-09-27 (17:00–18:30 PDT / 00:00–01:30 UTC 09-28) — EyesOn flight-record read API (ADR-0049) — PR opened (superseded by the entry above)
 
 - Branch `feat/eyeson-flight-read-api`, v2.96.0. Pairs with EyesOn ADR-0065 (its own PR).
 - **To enable (operator/Claude, after merge + deploy):** generate a random token and put its
