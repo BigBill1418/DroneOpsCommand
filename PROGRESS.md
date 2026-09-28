@@ -10,6 +10,16 @@ blocked.
 > the archive is the record. The authoritative open-items + operator to-do list
 > as of today is `docs/reports/2026-09-21-open-items-inventory.md`.
 
+## 2026-09-27 (17:00–18:30 PDT / 00:00–01:30 UTC 09-28) — EyesOn flight-record read API (ADR-0049) — **PR open, not merged, dark**
+
+- Branch `feat/eyeson-flight-read-api`, v2.96.0. Pairs with EyesOn ADR-0065 (its own PR).
+- **To enable (operator/Claude, after merge + deploy):** generate a random token and put its
+  SHA-256 hex in BOS `~/droneops/.env` as `EYESON_SERVICE_TOKEN_SHA256`. Put the raw token in BOS
+  `~/EyesOn/.env` as `DRONEOPS_SERVICE_TOKEN`, with `DRONEOPS_API_URL=http://10.99.0.4:8000`.
+  Store it in 1Password Fleet. Recreate `backend` here and `api` there.
+- **Open (FP-1):** `first_frame_at = 1970-01-01` on 2 of 3 M4TD flights from 2026-09-16. The
+  frame-clock decode failed. The read API works around it. The ingest still writes it.
+
 ## 2026-09-22 — Operator Cloudflare Access SSO — **COMPLETE. The operator password is retired.**
 
 **State, read off the running system 2026-09-22 (PDT):**
