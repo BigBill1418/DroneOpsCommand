@@ -4,6 +4,13 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-10-03 — backup timer comment: retired CallSign slot removed
+
+Comment-only (`scripts/systemd/droneops-backup.timer`). The note on the stacked nightly backup window
+listed a `callsign 03:30` UTC slot. That backup job no longer exists (the internal CallSign tool was
+retired 2026-10-03), so the comment now lists only the live neighbours. The schedule is unchanged and
+the installed unit is not re-deployed.
+
 ## 2026-09-27 — v2.96.0: EyesOn flight-record read API (ADR-0049) — LIVE + enabled 22:41 PDT (merged dark, token set the same night)
 
 **Deployed and enabled 2026-09-27 22:41 PDT** (merge `a6317aa`). Verified live: see PROGRESS.
