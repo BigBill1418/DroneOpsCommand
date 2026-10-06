@@ -20,7 +20,15 @@ ADR-0050 (DOC) + marketing ADR-0110. Spec/plan under `docs/superpowers/`. Live c
 
 Found in passing and fixed: the sidebar showed a stale `v2.96.0` literal (v2.97.1, #46).
 
-### LD-2 — LD-1 deferred review minors — **BUILT v2.97.2 — verifying live**
+### LD-2 — LD-1 deferred review minors — **DONE — live v2.97.2, verified 2026-10-06**
+
+Shipped in #48 (DOC) + marketing #47. Verified live ~09:50 PDT with a synthetic lead (`web-101`), since deleted:
+- **M-1:** the new `POST /api/leads/missions/{id}/mark-won` returns `200 {"ok":true}`; the old caller-supplied route returns 404, and an unknown mission returns 404.
+- **M-5:** "Edit that customer instead" shows **View lead → web-101** on a customer that had no link (Playwright, 1440 and 375 widths).
+- **M-3:** live in the marketing API.
+- **M-2, M-4, M-6, M-7, M-8:** covered by tests that failed first; backend 1020 passed, frontend 114/114.
+
+The original item list follows for the record.
 
 From the LD-1 final review (ledger `Final: minor (deferred)`). None blocks use; take them when next in this code.
 - **M-1** `POST /api/leads/{key}/mark-won` trusts the caller's key and `mission_id`. Replace it with
