@@ -6,7 +6,7 @@ exhaustive docs-freshness pass. Every row's status was read from the ADR's own
 
 - **Numbering:** `0001`–`0049`, **contiguous, no gaps, no duplicates** (verified
   `2026-09-22` against every local and remote branch, not just `main`). The next
-  ADR is **`0051`**.
+  ADR is **`0052`**.
 - **Repo state when this index was generated:** live app **v2.97.0** (2026-10-05),
   flight-parser **1.2.0**, alembic head **`0013_lead_integration`**.
 - **Keep this table current.** When you add or re-status an ADR, add or edit its
@@ -90,6 +90,7 @@ narrative quality.**
 | [0048](0048-service-account-allowlist-and-sso-bearer-exchange.md) | Service-account allow-list + SSO→bearer exchange | Accepted — merged v2.95.0, **ships inert** (empty allow-list, `404` until Access is configured) | 2026-09-22 | Closes [0047](0047-operator-cloudflare-access-sso.md) precondition 5 and supplies the mint precondition 1 needs |
 | [0049](0049-eyeson-flight-record-read-api.md) | EyesOn flight-record read API (scoped read-only service token) | Accepted — v2.96.0, **live on BOS-HQ 2026-09-27** (token set; `503` elsewhere until configured) | 2026-09-27 | Consumer: EyesOn ADR-0065 |
 | [0050](0050-website-lead-prefill-and-won-writeback.md) | Website-lead prefill for missions/customers + `won` write-back | Accepted — v2.97.0 | 2026-10-05 | Amends [0016](0016-mission-source-attribution.md) (`source_ref` now carries the lead key); counterpart marketing ADR-0110 |
+| [0051](0051-ntfy-non-ascii-headers-rfc2047.md) | ntfy header values RFC 2047-encoded when non-ASCII (em-dash titles were silently dropped since v2.63.12) | Accepted — v2.97.3 | 2026-10-06 | Fixes the ntfy helper from the ADR-0036 migration |
 
 ---
 

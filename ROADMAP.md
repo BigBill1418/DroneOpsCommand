@@ -77,7 +77,16 @@ Pacific-Northwest or CONUS extract is manageable; planet is ~120 GB and not
 warranted. Swapping the app onto it is a one-line change in
 `frontend/src/lib/basemaps.ts` — that is the point of the registry.
 
-### MP-2 — Tune the probe, then arm ntfy — **NOT STARTED, earliest 2026-10-05**
+### MP-2 — Tune the probe, then arm ntfy — **DONE 2026-10-06 — thresholds confirmed, ntfy armed (v2.97.3)**
+
+> **Outcome 2026-10-06.** Both weekly runs (09-28, 10-05 at 15:47 UTC) and an on-demand run gave
+> 5/5 layers, with hash distance 0 and a byte delta of 0.0% on every layer against the 2026-09-21
+> baseline. There was no variance to tune against, so the thresholds stay at Hamming 8 / ±40%. The
+> caveat is that no provider refresh has been observed yet, so the first refresh is the real test.
+> The re-fire through the production helper found that every non-ASCII alert title was being
+> dropped (ADR-0051); this was fixed in v2.97.3 before the probe was armed. Alerts go to
+> `droneops-alerts` at default priority, deduped for 24h per set of failing layers.
+
 
 > **Schedule corrected 2026-09-21.** The beat entry is
 > `crontab(day_of_week=1, hour=15, minute=47)` — **Mondays 15:47 UTC = 08:47
@@ -273,7 +282,13 @@ surviving lead is time-critical and is an operator action: see
   mostly-empty padded segments to protect ~1 MB/day of change.
 - **Reference.** ADR-0041 D5 + Option D.
 
-### BK-3 — Grafana `obs-rule-droneops-backup-stale` description text — **OPEN, UNBLOCKED 2026-09-21**
+### BK-3 — Grafana `obs-rule-droneops-backup-stale` description text — **DONE 2026-09-25 (InfraWatch `b864f53`; ROADMAP row closed 2026-10-06)**
+
+> Verified 2026-10-06: the rule text lives in the **InfraWatch** repo (not noc-master as written
+> below). It now gives `journalctl -u droneops-backup.service` and
+> `sudo systemctl start droneops-backup.service`, and notes that `snapshot.sh` is retired. The BOS-HQ
+> provisioning file and the copy mounted in `infrawatch-grafana` (restarted 2026-10-05) carry it.
+
 
 - **Scope.** The rule's `description` still tells the operator to
   `tail ~/droneops/backups/snapshot.log` and re-run `snapshot.sh`. Both are gone

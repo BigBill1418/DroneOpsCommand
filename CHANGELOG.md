@@ -4,6 +4,24 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-10-06 — v2.97.3: ntfy alerts with non-ASCII titles were silently dropped (ADR-0051)
+
+* **What broke.** httpx sends header values as ASCII. Every alert title containing an em dash raised
+  before sending, on the primary publish and on the ntfy.sh fallback, and the helper logged
+  "alert dropped". The affected alerts:
+  * device-silence watchdog (86 drop lines in 29 days)
+  * Stripe "Deposit received" and "Balance paid"
+  * the stale-device-key alert
+  * the basemap probe alert, once armed
+
+  These have been broken since the 2026-04-26 ntfy migration (v2.63.12).
+* **How it was found.** Re-firing the alert path while arming ROADMAP MP-2: the test alert itself
+  was dropped.
+* **Fix.** `_build_headers` RFC 2047-encodes non-ASCII `Title`/`Tags` (`=?UTF-8?B?…?=`). Verified
+  against `ntfy.barnardhq.com` before shipping: an encoded em-dash title read back decoded.
+  Tests: `tests/test_ntfy_non_ascii_headers.py` (red → green).
+* **Expect** device-silence and Stripe payment alerts on `droneops-alerts` from now on.
+
 ## 2026-10-06 — v2.97.2: LD-2 — the eight deferred LD-1 review minors (ADR-0050 Amendment 1)
 
 * **Retry is bound to the mission.** `POST /api/leads/missions/{id}/mark-won` reads the lead key from the
