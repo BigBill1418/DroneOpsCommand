@@ -4,6 +4,31 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-10-06 — v2.97.4: silent drones stay reported; flights relinked by serial
+
+**Incident.** Bill's Mavic 4 Pro (RC2 uploader, key `M4P`) has made no call to DOC since
+2026-09-19 20:45 UTC, although it has flown. Nobody was told, for two reasons:
+1. Every watchdog alert from 2026-09-16 to 2026-09-26 was dropped by the em-dash bug (ADR-0051, fixed v2.97.3).
+2. The watchdog only considered keys used within the last 7 days, so from 2026-09-26 it stopped looking at M4P.
+
+The server side is fine. The key is active and was never rejected (zero stale-key or failed-auth
+attempts in Loki since 9/19), and all 58 M4P flights up to 9/19 are stored and linked. The stop is
+on the RC2.
+
+* **Watchdog.** An active key that is silent for more than 48h keeps alerting, once a day
+  (`DEVICE_SILENCE_DEDUP_HOURS` 12 → 24), until it uploads again or its key is deactivated.
+  `DEVICE_SILENCE_ACTIVITY_WINDOW_DAYS` now defaults to 0 (no cap). The compose defaults that pinned
+  7/12 are updated. Selection is the testable `select_silent_device_keys`
+  (`tests/test_device_silence_watchdog.py`).
+* **Flight ↔ aircraft linkage.** An audit of all 829 flights against the production matcher found
+  79 flights with the decommissioned Mavic 3 Pro's serial (`1581F67QE236L00A0027`, flown Aug 2023 –
+  Feb 2024) linked to the current Mavic 3 Pro (`…QC23CN014`). They were imported 2026-03-18..25,
+  before the `M3P - DECOM` aircraft existed, and the backfill only ever looked at UNLINKED flights.
+  New `reconcile_serial_mislinks` relinks a flight when its own serial identifies a different
+  aircraft. It runs in the startup backfill and in `POST /api/flight-library/backfill-aircraft`.
+  Serial evidence only: flights without a serial are never moved and `drone_model` is untouched.
+  Tests: `tests/test_reconcile_serial_mislinks.py`.
+
 ## 2026-10-06 — v2.97.3: ntfy alerts with non-ASCII titles were silently dropped (ADR-0051)
 
 * **What broke.** httpx sends header values as ASCII. Every alert title containing an em dash raised

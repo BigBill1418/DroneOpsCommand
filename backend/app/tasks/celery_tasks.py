@@ -323,6 +323,23 @@ def generate_report_task(
 
 # ── ADR-0002 §5 layer 3 — silent-drift watchdog ───────────────────────
 @celery_app.task(name="check_device_silence")
+def select_silent_device_keys(rows, now, *, silence_hours: int, activity_window_days: int = 0) -> list:
+    """Return the active, previously-used keys silent for more than ``silence_hours``.
+
+    ``activity_window_days`` > 0 additionally drops keys silent for longer than
+    that many days (the pre-2026-10-06 behaviour); 0 keeps reporting a silent key
+    for as long as it stays active.
+    """
+    silence_cutoff = now - timedelta(hours=silence_hours)
+    activity_cutoff = now - timedelta(days=activity_window_days) if activity_window_days > 0 else None
+    return [
+        r for r in rows
+        if r.is_active and r.last_used_at is not None
+        and r.last_used_at < silence_cutoff
+        and (activity_cutoff is None or r.last_used_at >= activity_cutoff)
+    ]
+
+
 def check_device_silence_task() -> dict:
     """Detect device API keys that were recently active but have gone silent.
 
@@ -349,25 +366,26 @@ def check_device_silence_task() -> dict:
     from app.services.ntfy import send_alert_sync
 
     now = datetime.utcnow()
-    activity_cutoff = now - timedelta(days=settings.device_silence_activity_window_days)
-    silence_cutoff = now - timedelta(hours=settings.device_silence_hours)
 
     alerts: list[dict] = []
 
     engine = create_engine(settings.database_url_sync, pool_pre_ping=True)
     try:
         with Session(engine) as db:
-            # is_active + last_used_at >= activity_cutoff + last_used_at < silence_cutoff
-            rows = db.execute(
+            candidates = db.execute(
                 select(DeviceApiKey).where(
                     and_(
                         DeviceApiKey.is_active.is_(True),
                         DeviceApiKey.last_used_at.isnot(None),
-                        DeviceApiKey.last_used_at >= activity_cutoff,
-                        DeviceApiKey.last_used_at < silence_cutoff,
                     )
                 )
             ).scalars().all()
+            rows = select_silent_device_keys(
+                candidates,
+                now,
+                silence_hours=settings.device_silence_hours,
+                activity_window_days=settings.device_silence_activity_window_days,
+            )
 
             for row in rows:
                 hours_silent = int((now - row.last_used_at).total_seconds() // 3600)

@@ -438,7 +438,7 @@ async def _run_startup_schema_and_seed():
     # all linked flights" workflows.
     try:
         from app.models.flight import Flight
-        from app.routers.flight_library import _match_fleet_aircraft
+        from app.routers.flight_library import _match_fleet_aircraft, reconcile_serial_mislinks
         async with async_session() as backfill_session:
             result = await backfill_session.execute(
                 select(Flight).where(Flight.aircraft_id.is_(None))
@@ -452,10 +452,15 @@ async def _run_startup_schema_and_seed():
                     flight.drone_model = fleet_match.model_name
                     matched += 1
 
-            if matched > 0:
+            # 2026-10-06: also correct flights linked to the WRONG aircraft when
+            # their own serial says otherwise (serial evidence only).
+            relinked = await reconcile_serial_mislinks(backfill_session)
+
+            if matched > 0 or relinked > 0:
                 await backfill_session.commit()
-            logger.info("STARTUP: Aircraft backfill — %d/%d unlinked matched (Phase 2 normalize moved to manual endpoint)",
-                        matched, len(unlinked))
+            logger.info("STARTUP: Aircraft backfill — %d/%d unlinked matched, %d mislinked corrected by serial "
+                        "(Phase 2 normalize moved to manual endpoint)",
+                        matched, len(unlinked), relinked)
     except Exception as e:
         logger.warning("STARTUP: Aircraft backfill failed: %s", e)
 
@@ -609,7 +614,7 @@ logger.info("MultiPartParser spool threshold set to 4 MB (large uploads spool to
 app = FastAPI(
     title="D.O.C — Drone Operations Command",
     description="Self-hosted mission management, flight log analysis, AI report generation, invoicing, telemetry visualization, and real-time airspace monitoring for commercial drone operators.",
-    version="2.97.3",
+    version="2.97.4",
     lifespan=lifespan,
 )
 

@@ -1648,6 +1648,46 @@ async def device_upload_status(
     }
 
 
+async def reconcile_serial_mislinks(db: AsyncSession) -> int:
+    """Relink flights whose OWN serial identifies a different fleet aircraft.
+
+    The backfill below only links UNLINKED flights, so a flight linked before
+    its real aircraft existed stayed on the wrong aircraft forever (2026-10-06:
+    79 decommissioned-Mavic-3-Pro flights sat on the current Mavic 3 Pro).
+    Serial evidence is authoritative (ADR-0007/0044); flights without a serial
+    are never moved, and drone_model is left as logged. A mission_flights row
+    that carried the old aircraft follows its flight.
+    """
+    from sqlalchemy import update as _update
+    from app.models.mission import MissionFlight
+
+    rows = (await db.execute(
+        select(Flight).where(Flight.aircraft_id.isnot(None), Flight.drone_serial.isnot(None))
+    )).scalars().all()
+    cache: dict = {}
+    moved = 0
+    for flight in rows:
+        serial = (flight.drone_serial or "").strip()
+        if not serial:
+            continue
+        if serial not in cache:
+            match = await _match_fleet_aircraft(db, serial, flight.drone_model)
+            cache[serial] = match.id if match else None
+        target = cache[serial]
+        if target is None or target == flight.aircraft_id:
+            continue
+        old = flight.aircraft_id
+        flight.aircraft_id = target
+        await db.execute(
+            _update(MissionFlight)
+            .where(MissionFlight.flight_id == flight.id, MissionFlight.aircraft_id == old)
+            .values(aircraft_id=target)
+        )
+        moved += 1
+        logger.info("fleet-reconcile: flight %s serial=%s moved %s -> %s", flight.id, serial, old, target)
+    return moved
+
+
 # ── Backfill fleet attribution for existing flights ──────────────
 @router.post("/backfill-aircraft")
 async def backfill_aircraft_attribution(
@@ -1656,9 +1696,12 @@ async def backfill_aircraft_attribution(
 ):
     """Match all unlinked flights to fleet aircraft and normalize drone_model names.
 
+    Phase 0: Correct flights linked to the wrong aircraft by their own serial.
     Phase 1: Match flights without aircraft_id to fleet by serial/model.
     Phase 2: Normalize drone_model on ALL flights with aircraft_id to canonical fleet name.
     """
+    relinked = await reconcile_serial_mislinks(db)
+
     # ── Phase 1: Match unlinked flights ──
     result = await db.execute(
         select(Flight).where(Flight.aircraft_id.is_(None))
@@ -1696,7 +1739,7 @@ async def backfill_aircraft_attribution(
             logger.debug("Backfill: normalized drone_model '%s' → '%s' for flight %s",
                          old_name, ac.model_name, flight.id)
 
-    changes = matched + normalized
+    changes = matched + normalized + relinked
     if changes > 0:
         await db.flush()
 
@@ -1707,6 +1750,7 @@ async def backfill_aircraft_attribution(
         "matched": matched,
         "still_unlinked": len(unlinked) - matched,
         "names_normalized": normalized,
+        "relinked_by_serial": relinked,
     }
 
 
