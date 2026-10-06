@@ -58,6 +58,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import api from '../api/client';
 import type { Customer, Invoice, Mission, Report } from '../api/types';
 import MissionFacetCard from '../components/MissionFacetCard';
+import MissionLeadStatus from '../components/MissionLeadStatus';
 import MissionStatusBadge from '../components/MissionStatusBadge';
 
 const cardStyle = { background: '#0e1117', border: '1px solid #1a1f2e' };
@@ -262,6 +263,12 @@ export default function MissionDetail() {
           )}
         </Group>
       )}
+      <MissionLeadStatus
+        missionId={mission.id}
+        sourceRef={mission.source_ref}
+        leadWritebackAt={mission.lead_writeback_at}
+        onRetried={reload}
+      />
     </Stack>
   );
 

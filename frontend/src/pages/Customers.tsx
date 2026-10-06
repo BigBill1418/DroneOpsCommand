@@ -1,6 +1,8 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import {
   ActionIcon,
+  Alert,
+  Anchor,
   Badge,
   Button,
   Card,
@@ -25,6 +27,8 @@ import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
 import { useApiCache, invalidate as invalidateCache } from '../hooks/useApiCache';
 import { Customer, NominatimResult } from '../api/types';
+import LeadPicker from '../components/LeadPicker';
+import { leadPortalUrl, type LeadDetail } from '../api/leads';
 import PdfViewer from '../components/PDFPreview/PdfViewer';
 import { inputStyles } from '../components/shared/styles';
 
@@ -87,8 +91,20 @@ export default function Customers() {
   };
 
   const form = useForm({
-    initialValues: { name: '', email: '', phone: '', address: '', city: '', state: '', zip_code: '', company: '', notes: '' },
+    initialValues: { name: '', email: '', phone: '', address: '', city: '', state: '', zip_code: '', company: '', notes: '', source_ref: '' },
   });
+  // ADR-0050 — existing customer whose email matches the picked website lead.
+  const [leadMatch, setLeadMatch] = useState<LeadDetail['matching_customer']>(null);
+
+  const applyLead = (d: LeadDetail) => {
+    const l = d.lead;
+    form.setValues({
+      ...form.values,
+      name: l.name, email: l.email, phone: formatPhone(l.phone), company: l.organization,
+      source_ref: l.key,
+    });
+    setLeadMatch(d.matching_customer);
+  };
 
   const [addressSuggestions, setAddressSuggestions] = useState<NominatimResult[]>([]);
   const [addressLoading, setAddressLoading] = useState(false);
@@ -148,7 +164,7 @@ export default function Customers() {
 
   const handleSubmit = async (values: typeof form.values) => {
     try {
-      const payload = { ...values, phone: values.phone.replace(/\D/g, '') || null };
+      const payload = { ...values, phone: values.phone.replace(/\D/g, '') || null, source_ref: values.source_ref || null };
       if (editingId) {
         await api.put(`/customers/${editingId}`, payload);
         notifications.show({ title: 'Updated', message: 'Customer updated', color: 'cyan' });
@@ -158,6 +174,7 @@ export default function Customers() {
       }
       setModalOpen(false);
       setEditingId(null);
+      setLeadMatch(null);
       form.reset();
       loadCustomers();
     } catch {
@@ -177,6 +194,7 @@ export default function Customers() {
       zip_code: customer.zip_code || '',
       company: customer.company || '',
       notes: customer.notes || '',
+      source_ref: customer.source_ref ?? '',
     });
     setModalOpen(true);
   };
@@ -339,7 +357,7 @@ export default function Customers() {
           <Button
             leftSection={<IconPlus size={16} />}
             color="cyan"
-            onClick={() => { setEditingId(null); form.reset(); setModalOpen(true); }}
+            onClick={() => { setEditingId(null); setLeadMatch(null); form.reset(); setModalOpen(true); }}
             styles={{ root: { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: '1px' } }}
           >
             ADD CUSTOMER
@@ -427,7 +445,7 @@ export default function Customers() {
       {/* Add/Edit Customer Modal */}
       <Modal
         opened={modalOpen}
-        onClose={() => { setModalOpen(false); setEditingId(null); }}
+        onClose={() => { setModalOpen(false); setEditingId(null); setLeadMatch(null); }}
         title={editingId ? 'Edit Customer' : 'New Customer'}
         styles={{
           header: { background: '#0e1117' },
@@ -437,6 +455,27 @@ export default function Customers() {
       >
         <form onSubmit={form.onSubmit(handleSubmit)}>
           <Stack gap="sm">
+            {!editingId && <LeadPicker onPick={applyLead} />}
+            {!editingId && leadMatch && (
+              <Alert color="cyan" variant="light">
+                Matches existing customer {leadMatch.name}.{' '}
+                <Anchor
+                  component="button"
+                  type="button"
+                  onClick={() => {
+                    const existing = customers.find((c) => c.id === leadMatch.id);
+                    if (existing) { setLeadMatch(null); handleEdit(existing); }
+                  }}
+                >
+                  Edit that customer instead
+                </Anchor>
+              </Alert>
+            )}
+            {editingId && form.values.source_ref && (
+              <Anchor href={leadPortalUrl(form.values.source_ref)} target="_blank" rel="noopener noreferrer" size="xs">
+                View lead
+              </Anchor>
+            )}
             <TextInput label="Name" required {...form.getInputProps('name')} styles={inputStyles} />
             <TextInput label="Email" {...form.getInputProps('email')} styles={inputStyles} />
             <TextInput label="Phone" placeholder="xxx-xxx-xxxx" value={form.values.phone} onChange={(e) => form.setFieldValue('phone', formatPhone(e.target.value))} styles={inputStyles} />
