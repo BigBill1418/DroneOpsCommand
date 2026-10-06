@@ -34,6 +34,7 @@ unchanged:
 
 from __future__ import annotations
 
+import base64
 import logging
 from typing import Iterable, Optional
 
@@ -123,6 +124,21 @@ def _map_priority(priority: int) -> str:
     return "urgent"
 
 
+def _header_safe(value: str) -> str:
+    """Return ``value`` as an HTTP-header-safe string.
+
+    httpx encodes header values as ASCII, so a title with an em dash raised on
+    BOTH the primary and the fallback publish and the alert was dropped
+    (found 2026-10-06 arming ROADMAP MP-2). Non-ASCII values are sent as an
+    RFC 2047 encoded-word, which ntfy decodes back to UTF-8.
+    """
+    try:
+        value.encode("ascii")
+        return value
+    except UnicodeEncodeError:
+        return "=?UTF-8?B?" + base64.b64encode(value.encode("utf-8")).decode("ascii") + "?="
+
+
 def _build_headers(
     *,
     title: str,
@@ -143,7 +159,7 @@ def _build_headers(
         full_title = f"[FALLBACK] {full_title}"[:250]
 
     headers: dict[str, str] = {
-        "Title": full_title,
+        "Title": _header_safe(full_title),
         "Priority": _map_priority(priority),
         "Click": click or _DEFAULT_CLICK,
     }
@@ -151,7 +167,7 @@ def _build_headers(
         # Filter out empties so callers can pass `tags or []` safely.
         joined = ",".join(t for t in tags if t)
         if joined:
-            headers["Tags"] = joined
+            headers["Tags"] = _header_safe(joined)
     if not fallback and publisher_token:
         headers["Authorization"] = f"Bearer {publisher_token}"
     return headers
