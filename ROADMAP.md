@@ -5,6 +5,20 @@ in-flight scope is tracked in `PROGRESS.md`. This file holds only
 not-yet-started work with a clear trigger, scope, and ADR/decision
 reference where applicable.
 
+## Leads integration (spec 2026-10-05)
+
+### LD-1 — Website lead → customer/mission prefill + `won` write-back — **SPEC IN REVIEW**
+
+**Spec:** `docs/superpowers/specs/2026-10-05-lead-to-customer-mission-design.md`
+(operator decisions recorded there). "Start from a lead" picker in the new-mission
+and new-customer forms reads website leads from the marketing API on BOS-HQ through
+new DOC-token-scoped `/api/doc/leads` routes, prefills customer and mission fields,
+suggests an existing customer on an email match, stamps `source_ref = web-<id>`
+(fills the slot ADR-0016 reserved), and marks the lead `won` in the marketing
+pipeline after the mission saves. Off unless `LEADS_API_BASE`/`LEADS_API_TOKEN` are
+set — never configured on the demo instance. Touches the `marketing` repo too.
+Next: operator approves spec → implementation plan → ADR-0050.
+
 ## Maps (ADR-0046, 2026-09-21)
 
 Basemaps moved off CARTO to keyless Esri + OSM at v2.92.0 after CARTO began
