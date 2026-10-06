@@ -124,12 +124,15 @@ class Settings(BaseSettings):
     # don't go out). Watchdog contract from ADR-0002 §5 + ADR-0003 is
     # preserved unchanged — only the transport switched.
     ntfy_droneops_publisher_token: str = ""
-    # Silence threshold — a device key used inside activity_window_days
-    # that has NOT been seen in silence_hours triggers an alert.
-    device_silence_activity_window_days: int = 7
+    # Silence threshold — an ACTIVE device key not seen in silence_hours
+    # triggers an alert, and keeps alerting (once per dedup window) for as
+    # long as it stays silent. 2026-10-06: the old default 7-day activity
+    # window stopped reporting M4P a week into an outage. 0 = no cap; a
+    # positive value restores the cap. Retire a device by deactivating its key.
+    device_silence_activity_window_days: int = 0
     device_silence_hours: int = 48
-    # Per-key dedup cooldown to avoid alert spam on a long outage.
-    device_silence_dedup_hours: int = 12
+    # Per-key dedup cooldown — one message a day on a long outage.
+    device_silence_dedup_hours: int = 24
 
     # Google review prompt. Surfaces on the final-invoice PDF, the
     # report-delivery email, the post-payment success state in the
