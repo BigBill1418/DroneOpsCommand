@@ -455,7 +455,12 @@ export default function Customers() {
       >
         <form onSubmit={form.onSubmit(handleSubmit)}>
           <Stack gap="sm">
-            {!editingId && <LeadPicker onPick={applyLead} />}
+            {!editingId && (
+              <LeadPicker
+                onPick={applyLead}
+                onClear={() => { form.setFieldValue('source_ref', ''); setLeadMatch(null); }}
+              />
+            )}
             {!editingId && leadMatch && (
               <Alert color="cyan" variant="light">
                 Matches existing customer {leadMatch.name}.{' '}

@@ -126,6 +126,13 @@ export default function MissionCreateModal({ opened, onClose }: Props) {
     });
   };
 
+  // Final-review I-3: clearing the picker must unlink the lead, or a manual
+  // mission would still carry source_ref and mark the wrong lead `won`.
+  const clearLead = () => {
+    setLead(null);
+    form.setValues({ source: '', source_ref: '', description: '', customer_mode: 'existing', customer_id: '' });
+  };
+
   const handleSubmit = form.onSubmit(async (values) => {
     setSubmitting(true);
     try {
@@ -141,6 +148,13 @@ export default function MissionCreateModal({ opened, onClose }: Props) {
           source_ref: values.source_ref,
         });
         customerId = c.data?.id;
+        // Final-review I-3: remember the customer we just created, so a retry after
+        // a failed mission POST reuses it instead of creating a duplicate.
+        if (customerId) {
+          setLead({ ...lead, matching_customer: { id: customerId, name: c.data?.name ?? values.new_name } });
+          form.setFieldValue('customer_id', customerId);
+          form.setFieldValue('customer_mode', 'existing');
+        }
       }
       // EXPLICIT: never include `id` in the create payload — spec §4
       // defensive guard rejects POSTs that smuggle an id field.
@@ -196,7 +210,7 @@ export default function MissionCreateModal({ opened, onClose }: Props) {
     >
       <form onSubmit={handleSubmit}>
         <Stack gap="md">
-          <LeadPicker onPick={applyLead} />
+          <LeadPicker onPick={applyLead} onClear={clearLead} />
           <TextInput
             label="Title"
             placeholder="e.g. Smith Property Inspection"

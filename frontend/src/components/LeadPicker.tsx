@@ -11,6 +11,8 @@ import { fetchLeadsEnabled, getLead, listLeads, type DocLead, type LeadDetail } 
 
 interface Props {
   onPick: (detail: LeadDetail) => void;
+  /** Picker cleared — the caller must unlink the lead it applied. */
+  onClear?: () => void;
 }
 
 function ago(iso: string | null): string {
@@ -23,7 +25,7 @@ export function leadLabel(l: DocLead): string {
   return [l.name, l.organization, l.service, ago(l.created_at)].filter(Boolean).join(' — ');
 }
 
-export default function LeadPicker({ onPick }: Props) {
+export default function LeadPicker({ onPick, onClear }: Props) {
   const [enabled, setEnabled] = useState(false);
   const [leads, setLeads] = useState<DocLead[]>([]);
   const [search, setSearch] = useState('');
@@ -47,7 +49,10 @@ export default function LeadPicker({ onPick }: Props) {
 
   const pick = async (key: string | null) => {
     setValue(key);
-    if (!key) return;
+    if (!key) {
+      onClear?.();
+      return;
+    }
     try {
       onPick(await getLead(key));
     } catch {
@@ -68,6 +73,7 @@ export default function LeadPicker({ onPick }: Props) {
         data={leads.map((l) => ({ value: l.key, label: leadLabel(l) }))}
         searchable
         clearable
+        clearButtonProps={{ 'aria-label': 'Clear lead', 'aria-hidden': false }}
         searchValue={search}
         onSearchChange={setSearch}
         filter={({ options }) => options}

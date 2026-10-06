@@ -190,6 +190,50 @@ describe('MissionCreateModal — start from a lead (ADR-0050)', () => {
     expect(lastBody.customer_id).toBe('cust-new');
   });
 
+  it('I-3: a failed mission POST then retry does not create a second customer', async () => {
+    useLeadHandlers(null);
+    let customerPosts = 0;
+    let missionPosts = 0;
+    server.use(
+      http.post('*/api/customers', async ({ request }) => {
+        customerPosts += 1;
+        customerBody = await request.json();
+        return HttpResponse.json({ id: 'cust-new', name: customerBody.name }, { status: 201 });
+      }),
+      http.post('*/api/missions', async ({ request }) => {
+        missionPosts += 1;
+        const body: any = await request.json();
+        if (missionPosts === 1) return HttpResponse.json({ detail: 'boom' }, { status: 500 });
+        lastBody = body;
+        return HttpResponse.json({ id: FAKE_NEW_ID, title: body.title, mission_type: 'other', status: 'draft',
+          is_billable: false, customer_id: body.customer_id, created_at: 'x', updated_at: 'x', flights: [], images: [],
+          description: null, mission_date: null, location_name: null, area_coordinates: null }, { status: 201 });
+      }),
+    );
+    render(<TestProviders><MissionCreateModal opened onClose={vi.fn()} /></TestProviders>);
+    await pickLead();
+    const submit = await screen.findByRole('button', { name: /create mission/i });
+    await userEvent.click(submit);
+    await waitFor(() => expect(missionPosts).toBe(1));
+    await userEvent.click(screen.getByRole('button', { name: /create mission/i }));
+    await waitFor(() => expect(lastBody).not.toBeNull());
+    expect(customerPosts).toBe(1);
+    expect(lastBody.customer_id).toBe('cust-new');
+  });
+
+  it('I-3: clearing the picked lead unlinks it from the mission', async () => {
+    useLeadHandlers(null);
+    render(<TestProviders><MissionCreateModal opened onClose={vi.fn()} /></TestProviders>);
+    await pickLead();
+    await screen.findByText(/create new customer/i);
+    await userEvent.click(screen.getByRole('button', { name: /clear lead/i }));
+    await userEvent.click(screen.getByRole('button', { name: /create mission/i }));
+    await waitFor(() => expect(lastBody).not.toBeNull());
+    expect(lastBody).not.toHaveProperty('source_ref');
+    expect(lastBody).not.toHaveProperty('source');
+    expect(customerBody).toBeNull();
+  });
+
   it('operator can choose "Create new" despite a match', async () => {
     useLeadHandlers({ id: 'cust-1', name: 'Casey Operator' });
     render(<TestProviders><MissionCreateModal opened onClose={vi.fn()} /></TestProviders>);
