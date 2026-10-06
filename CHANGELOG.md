@@ -4,6 +4,13 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-10-06 — v2.97.1: sidebar version reads package.json
+
+The sidebar footer showed a hand-typed `v2.96.0` after v2.97.0 shipped. `AppShell.tsx` held
+two version literals outside the three markers `test_app_version_parity.py` checks. It now renders the
+vite-defined `__APP_VERSION__` (from `frontend/package.json`), so the label can no longer drift;
+`AppShell.version.test.ts` fails if a literal comes back. Found during the LD-1 live check.
+
 ## 2026-10-05 — v2.97.0: start missions/customers from a website lead (ADR-0050)
 
 * **Lead picker.** "Start from a lead" in the new-mission modal and the new-customer form
