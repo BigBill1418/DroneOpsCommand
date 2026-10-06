@@ -28,6 +28,11 @@ on the RC2.
   aircraft. It runs in the startup backfill and in `POST /api/flight-library/backfill-aircraft`.
   Serial evidence only: flights without a serial are never moved and `drone_model` is untouched.
   Tests: `tests/test_reconcile_serial_mislinks.py`.
+* **Verified live 2026-10-06 ~12:40 PDT.**
+  * The startup backfill logged "79 mislinked corrected by serial", and a re-audit shows 829/829 flights linked correctly.
+  * The empty serial-less `DJI Mavic 3 Pro` aircraft row (created 2026-05-01, zero references) was deleted.
+  * Running the watchdog delivered "M4P silent for 406h" and "M3P silent for 3407h" to `droneops-alerts`, read back from the server.
+  * Open: the RC2 (M4P uploader) needs a hands-on check; the M3P key is pending the operator's call (active aircraft `…QC23CN014`, silent since 2026-05-17).
 
 ## 2026-10-06 — v2.97.3: ntfy alerts with non-ASCII titles were silently dropped (ADR-0051)
 
