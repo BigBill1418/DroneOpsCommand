@@ -7,18 +7,32 @@ reference where applicable.
 
 ## Leads integration (spec 2026-10-05)
 
-### LD-1 — Website lead → customer/mission prefill + `won` write-back — **BUILT v2.97.0 (ADR-0050) — awaiting merge/deploy + live verification**
+### LD-1 — Website lead → customer/mission prefill + `won` write-back — **DONE — live v2.97.0, verified 2026-10-06**
 
-**Spec:** `docs/superpowers/specs/2026-10-05-lead-to-customer-mission-design.md`
-(operator decisions recorded there). "Start from a lead" picker in the new-mission
-and new-customer forms reads website leads from the marketing API on BOS-HQ through
-new DOC-token-scoped `/api/doc/leads` routes, prefills customer and mission fields,
-suggests an existing customer on an email match, stamps `source_ref = web-<id>`
-(fills the slot ADR-0016 reserved), and marks the lead `won` in the marketing
-pipeline after the mission saves. Off unless `LEADS_API_BASE`/`LEADS_API_TOKEN` are
-set — never configured on the demo instance. Touches the `marketing` repo too.
-Plan: `docs/superpowers/plans/2026-10-05-lead-to-customer-mission.md`. Next: final review →
-merge both PRs → token on BOS-HQ → deploy → live check.
+ADR-0050 (DOC) + marketing ADR-0110. Spec/plan under `docs/superpowers/`. Live check 2026-10-06
+~00:20 PDT on BOS-HQ with a synthetic lead (`web-99`, since deleted):
+- **Marketing routes:** `/api/doc/leads` returns 401 with no token and 401 with the global token; the DOC token returns 200.
+- **DOC backend:** v2.97.0 running, alembic head `0013_lead_integration`, and the backend container reaches the marketing API via `host.docker.internal`.
+- **UI:** checked by Playwright at 1440×900 and 375×812, by eye. The picker fills the fields with no overflow.
+- **End to end:** creating the mission set the lead to `won` with the note `DOC mission <id>`. The mission has `lead_writeback_at` set, and both mission and customer have `source_ref=web-99`.
+- **Customer form:** the matching-customer banner and the "show closed" toggle both work.
+- **Test data:** the test mission, customer and lead rows were removed afterwards.
+
+Found in passing and fixed: the sidebar showed a stale `v2.96.0` literal (v2.97.1, #46).
+
+### LD-2 — LD-1 deferred review minors — **NOT STARTED**
+
+From the LD-1 final review (ledger `Final: minor (deferred)`). None blocks use; take them when next in this code.
+- **M-1** `POST /api/leads/{key}/mark-won` trusts the caller's key and `mission_id`. Replace it with
+  `POST /api/missions/{id}/lead-writeback`, which reads the mission's own `source_ref`.
+- **M-2** The customer email match should be `lower(trim(email))` on the stored side too.
+- **M-3** Map the portal's `'(no name)'` placeholder to `''` in `toDocLead` (marketing).
+- **M-4** `run_lead_writeback`: catch `Exception` around both the HTTP call and the DB stamp
+  (non-JSON 2xx, DB error).
+- **M-5** "Edit that customer instead" could carry the lead's `source_ref` onto a customer that has none.
+- **M-6** LeadPicker search responses are not sequenced, so a stale result can win.
+- **M-7** A serialize failure after the mission commits returns 500 for a saved mission.
+- **M-8** Hide the Hub "Retry" when `/api/leads/status` reports disabled.
 
 ## Maps (ADR-0046, 2026-09-21)
 

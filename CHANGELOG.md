@@ -28,6 +28,7 @@ vite-defined `__APP_VERSION__` (from `frontend/package.json`), so the label can 
   `missions.lead_writeback_at`. Idempotent on fresh installs.
 * **Off unless configured.** Needs `LEADS_API_BASE` + `LEADS_API_TOKEN` (see `.env.example`).
   Never set on the demo instance. Counterpart: marketing ADR-0110.
+* **Verified live 2026-10-06** on BOS-HQ end to end (synthetic lead → mission → lead `won`); see ROADMAP LD-1.
 
 ## 2026-10-03 — backup timer comment: retired CallSign slot removed
 
