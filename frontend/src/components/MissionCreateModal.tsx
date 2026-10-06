@@ -15,11 +15,14 @@
  */
 import { useEffect, useState } from 'react';
 import {
+  Alert,
   Button,
   Group,
   Modal,
+  Radio,
   Select,
   Stack,
+  Textarea,
   TextInput,
   Loader,
 } from '@mantine/core';
@@ -30,6 +33,8 @@ import { useNavigate } from 'react-router-dom';
 
 import api from '../api/client';
 import type { Customer } from '../api/types';
+import { missionTitleFromLead, type LeadDetail } from '../api/leads';
+import LeadPicker from './LeadPicker';
 
 const MISSION_TYPES = [
   { value: 'sar', label: 'Search and Rescue' },
@@ -64,6 +69,8 @@ export default function MissionCreateModal({ opened, onClose }: Props) {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [loadingCustomers, setLoadingCustomers] = useState(false);
+  // ADR-0050 — the website lead this mission is being started from, if any.
+  const [lead, setLead] = useState<LeadDetail | null>(null);
   const navigate = useNavigate();
 
   const form = useForm({
@@ -73,6 +80,14 @@ export default function MissionCreateModal({ opened, onClose }: Props) {
       mission_type: 'other',
       mission_date: null as Date | null,
       source: '' as string,
+      // ADR-0050 — lead prefill fields (only used when a lead is picked).
+      description: '',
+      source_ref: '',
+      customer_mode: 'existing' as 'existing' | 'new',
+      new_name: '',
+      new_email: '',
+      new_phone: '',
+      new_company: '',
     },
     validate: {
       title: (v) => (v.trim().length === 0 ? 'Title is required' : null),
@@ -90,19 +105,50 @@ export default function MissionCreateModal({ opened, onClose }: Props) {
       .finally(() => setLoadingCustomers(false));
     // Reset on each open so a previous submission doesn't linger
     form.reset();
+    setLead(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [opened]);
+
+  const applyLead = (d: LeadDetail) => {
+    setLead(d);
+    const l = d.lead;
+    form.setValues({
+      title: missionTitleFromLead(l),
+      description: l.details,
+      source: 'website',
+      source_ref: l.key,
+      customer_mode: d.matching_customer ? 'existing' : 'new',
+      customer_id: d.matching_customer?.id ?? '',
+      new_name: l.name,
+      new_email: l.email,
+      new_phone: l.phone,
+      new_company: l.organization,
+    });
+  };
 
   const handleSubmit = form.onSubmit(async (values) => {
     setSubmitting(true);
     try {
+      // ADR-0050 — starting from a lead with no matching customer: create the
+      // customer first (linked to the lead), then the mission.
+      let customerId = values.customer_id;
+      if (lead && values.customer_mode === 'new') {
+        const c = await api.post('/customers', {
+          name: values.new_name.trim() || lead.lead.email,
+          email: values.new_email.trim() || null,
+          phone: values.new_phone.replace(/\D/g, '') || null,
+          company: values.new_company.trim() || null,
+          source_ref: values.source_ref,
+        });
+        customerId = c.data?.id;
+      }
       // EXPLICIT: never include `id` in the create payload — spec §4
       // defensive guard rejects POSTs that smuggle an id field.
       const payload: Record<string, unknown> = {
         title: values.title.trim(),
         mission_type: values.mission_type,
       };
-      if (values.customer_id) payload.customer_id = values.customer_id;
+      if (customerId) payload.customer_id = customerId;
       if (values.mission_date) {
         // Send YYYY-MM-DD string (Date column on the server)
         payload.mission_date = values.mission_date.toISOString().slice(0, 10);
@@ -110,6 +156,8 @@ export default function MissionCreateModal({ opened, onClose }: Props) {
       // ADR-0016 — only send source when the operator picked one; an
       // empty selection leaves origin unknown (NULL on the server).
       if (values.source) payload.source = values.source;
+      if (values.description.trim()) payload.description = values.description.trim();
+      if (values.source_ref) payload.source_ref = values.source_ref;
 
       const resp = await api.post('/missions', payload);
       const newId = resp.data?.id;
@@ -148,6 +196,7 @@ export default function MissionCreateModal({ opened, onClose }: Props) {
     >
       <form onSubmit={handleSubmit}>
         <Stack gap="md">
+          <LeadPicker onPick={applyLead} />
           <TextInput
             label="Title"
             placeholder="e.g. Smith Property Inspection"
@@ -155,6 +204,37 @@ export default function MissionCreateModal({ opened, onClose }: Props) {
             data-autofocus
             {...form.getInputProps('title')}
           />
+          {lead && lead.matching_customer && (
+            <Alert color="cyan" variant="light">
+              Matches existing customer {lead.matching_customer.name}
+            </Alert>
+          )}
+          {lead && (
+            <Radio.Group
+              label="Customer"
+              value={form.values.customer_mode}
+              onChange={(v) => form.setFieldValue('customer_mode', v as 'existing' | 'new')}
+            >
+              <Group mt={4}>
+                {lead.matching_customer && (
+                  <Radio value="existing" label={`Use ${lead.matching_customer.name}`} />
+                )}
+                <Radio value="new" label="Create new customer" />
+              </Group>
+            </Radio.Group>
+          )}
+          {lead && form.values.customer_mode === 'new' && (
+            <Stack gap="xs">
+              <TextInput label="Name" {...form.getInputProps('new_name')} />
+              <TextInput label="Email" {...form.getInputProps('new_email')} />
+              <TextInput label="Phone" {...form.getInputProps('new_phone')} />
+              <TextInput label="Company" {...form.getInputProps('new_company')} />
+            </Stack>
+          )}
+          {lead && (
+            <Textarea label="Description" autosize minRows={2} {...form.getInputProps('description')} />
+          )}
+          {(!lead || form.values.customer_mode === 'existing') && (
           <Select
             label="Customer"
             placeholder={loadingCustomers ? 'Loading...' : 'Select customer (optional)'}
@@ -167,6 +247,7 @@ export default function MissionCreateModal({ opened, onClose }: Props) {
             disabled={loadingCustomers}
             {...form.getInputProps('customer_id')}
           />
+          )}
           <Select
             label="Mission Type"
             data={MISSION_TYPES}
