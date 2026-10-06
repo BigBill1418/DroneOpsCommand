@@ -360,6 +360,10 @@ async def create_mission(
         if mission.customer_id:
             await _send_portal_email_for_mission(mission.id, mission.customer_id, db)
 
+        # Build the response BEFORE committing, so a serialize failure rolls back
+        # instead of returning 500 for a mission that was saved (LD-2 M-7).
+        response = _serialize_mission(mission)
+
         # ADR-0050 — mark the website lead `won`. Commit FIRST so the lead is never
         # marked for a mission that then fails to persist; the write-back runs after
         # the response and can never fail this request.
@@ -367,7 +371,7 @@ async def create_mission(
             await db.commit()
             background_tasks.add_task(run_lead_writeback, mission.id, mission.source_ref)
 
-        return _serialize_mission(mission)
+        return response
     except HTTPException:
         raise
     except Exception as exc:
@@ -595,11 +599,13 @@ async def update_mission(
         if new_customer_id and new_customer_id != old_customer_id:
             await _send_portal_email_for_mission(mission.id, new_customer_id, db)
 
+        response = _serialize_mission(mission)  # before commit (LD-2 M-7)
+
         if lead_changed and background_tasks is not None:
             await db.commit()
             background_tasks.add_task(run_lead_writeback, mission.id, mission.source_ref)
 
-        return _serialize_mission(mission)
+        return response
     except Exception as exc:
         logger.exception("Failed to update mission: %s", exc)
         raise HTTPException(status_code=500, detail="An internal error occurred")

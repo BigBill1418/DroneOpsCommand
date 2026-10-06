@@ -57,7 +57,11 @@ class LeadSourceClient:
             logger.error("[LEADS] marketing API rejected the DOC token (401) — check LEADS_API_TOKEN")
         if resp.status_code >= 400:
             raise LeadSourceUnavailable(f"HTTP {resp.status_code}")
-        return resp.json()
+        try:
+            return resp.json()
+        except ValueError as exc:  # e.g. a proxy's HTML page with 200 (LD-2 M-4)
+            logger.warning("[LEADS] %s %s returned non-JSON %s", method, path, resp.status_code)
+            raise LeadSourceUnavailable("non-JSON response") from exc
 
     async def list_leads(
         self, q: str | None = None, include_closed: bool = False, limit: int = 25

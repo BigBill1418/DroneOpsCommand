@@ -135,3 +135,26 @@ def test_update_same_source_ref_does_not_reschedule(harness):
     r = client.put(f"/api/missions/{existing.id}", json={"source_ref": "web-1", "title": "Renamed"})
     assert r.status_code == 200, r.text
     assert calls == []
+
+
+# ---- LD-2 M-7: build the response BEFORE committing ----
+def _boom(*a, **kw):
+    raise RuntimeError("serialize failed")
+
+
+def test_create_serialize_failure_does_not_commit(harness, monkeypatch):
+    client, db, calls, missions_router = harness
+    monkeypatch.setattr(missions_router, "_serialize_mission", _boom)
+    r = client.post("/api/missions", json={"title": "X", "source": "website", "source_ref": "web-1"})
+    assert r.status_code == 500
+    assert "commit" not in db.events and calls == []
+
+
+def test_update_serialize_failure_does_not_commit(harness, monkeypatch):
+    client, db, calls, missions_router = harness
+    existing = _mission_obj(source_ref=None)
+    db.added.append(existing)
+    monkeypatch.setattr(missions_router, "_serialize_mission", _boom)
+    r = client.put(f"/api/missions/{existing.id}", json={"source_ref": "web-2"})
+    assert r.status_code == 500
+    assert "commit" not in db.events and calls == []

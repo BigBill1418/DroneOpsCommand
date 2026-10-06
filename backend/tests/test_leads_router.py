@@ -30,6 +30,10 @@ class _FakeSession:
     def __init__(self, results: list[Any]):
         self._results = list(results)
         self.statements = []
+        self.missions: dict = {}
+
+    async def get(self, model, ident):
+        return self.missions.get(ident)
 
     async def execute(self, stmt):
         self.statements.append(stmt)
@@ -113,7 +117,8 @@ def test_get_lead_with_matching_customer(monkeypatch):
     assert body["matching_customer"] == {"id": str(cust.id), "name": "Ann Existing"}
     # The lookup normalises case + whitespace ("Ann@Acme.com " → "ann@acme.com").
     compiled = str(db.statements[0].compile(compile_kwargs={"literal_binds": True}))
-    assert "lower(customers.email)" in compiled and "'ann@acme.com'" in compiled
+    # LD-2 M-2: the stored side is trimmed too.
+    assert "lower(trim(customers.email))" in compiled and "'ann@acme.com'" in compiled
 
 
 def test_get_lead_without_email_skips_match(monkeypatch):
@@ -132,24 +137,55 @@ def test_get_lead_not_found_404(monkeypatch):
     assert c.get("/api/leads/web-9").status_code == 404
 
 
-def test_mark_won_retry(monkeypatch):
+def _mission(source_ref="web-1"):
+    return SimpleNamespace(id=uuid.uuid4(), source_ref=source_ref)
+
+
+def test_mark_won_retry_uses_the_missions_own_lead(monkeypatch):
     calls = []
 
     async def ok(mission_id, key, **kw):
         calls.append((mission_id, key))
         return True
 
-    c, _ = _app(monkeypatch, writeback=ok)
-    mid = uuid.uuid4()
-    r = c.post(f"/api/leads/web-1/mark-won", params={"mission_id": str(mid)})
+    m = _mission("cold-7")
+    c, db = _app(monkeypatch, writeback=ok)
+    db.missions = {m.id: m}
+    r = c.post(f"/api/leads/missions/{m.id}/mark-won")
     assert r.status_code == 200 and r.json() == {"ok": True}
-    assert calls == [(mid, "web-1")]
+    assert calls == [(m.id, "cold-7")]
+
+
+def test_mark_won_retry_unknown_mission_404(monkeypatch):
+    async def never(*a, **kw):
+        raise AssertionError("must not write back")
+
+    c, db = _app(monkeypatch, writeback=never)
+    db.missions = {}
+    assert c.post(f"/api/leads/missions/{uuid.uuid4()}/mark-won").status_code == 404
+
+
+def test_mark_won_retry_mission_without_lead_404(monkeypatch):
+    async def never(*a, **kw):
+        raise AssertionError("must not write back")
+
+    m = _mission("INV-9")
+    c, db = _app(monkeypatch, writeback=never)
+    db.missions = {m.id: m}
+    assert c.post(f"/api/leads/missions/{m.id}/mark-won").status_code == 404
 
 
 def test_mark_won_retry_failure_502(monkeypatch):
     async def fail(mission_id, key, **kw):
         return False
 
-    c, _ = _app(monkeypatch, writeback=fail)
+    m = _mission()
+    c, db = _app(monkeypatch, writeback=fail)
+    db.missions = {m.id: m}
+    assert c.post(f"/api/leads/missions/{m.id}/mark-won").status_code == 502
+
+
+def test_old_caller_supplied_route_is_gone(monkeypatch):
+    c, _ = _app(monkeypatch)
     r = c.post("/api/leads/web-1/mark-won", params={"mission_id": str(uuid.uuid4())})
-    assert r.status_code == 502
+    assert r.status_code in (404, 405)
