@@ -14,6 +14,7 @@ class CustomerCreate(BaseModel):
     zip_code: str | None = None
     company: str | None = None
     notes: str | None = None
+    source_ref: str | None = None
 
 
 class CustomerUpdate(BaseModel):
@@ -26,6 +27,7 @@ class CustomerUpdate(BaseModel):
     zip_code: str | None = None
     company: str | None = None
     notes: str | None = None
+    source_ref: str | None = None
 
 
 class CustomerResponse(BaseModel):
@@ -51,6 +53,8 @@ class CustomerResponse(BaseModel):
     latest_tos_audit_id: str | None = None
     latest_tos_signed_sha: str | None = None
     latest_tos_template_version: str | None = None
+    # ADR-0050 — website lead key this customer was created from.
+    source_ref: str | None = None
 
     model_config = {"from_attributes": True}
 

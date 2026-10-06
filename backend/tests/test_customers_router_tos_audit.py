@@ -35,6 +35,7 @@ def _mk_customer(*, name="Casey Operator", tos_signed=True):
         zip_code=None,
         company=None,
         notes=None,
+        source_ref=None,
         tos_signed=tos_signed,
         tos_signed_at=_now() if tos_signed else None,
         intake_completed_at=None,

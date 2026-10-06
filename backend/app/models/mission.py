@@ -92,6 +92,9 @@ class Mission(Base):
     # promotion runs the same idempotent ALTER in _add_missing_columns).
     source: Mapped[str | None] = mapped_column(String(50), nullable=True)
     source_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # ADR-0050 — set when the lead in `source_ref` was marked `won` in the
+    # marketing pipeline; NULL + a lead-key source_ref = write-back pending/failed.
+    lead_writeback_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     unas_folder_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
     download_link_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     download_link_expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

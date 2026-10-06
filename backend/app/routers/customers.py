@@ -39,6 +39,7 @@ def _serialize_customer(
         zip_code=customer.zip_code,
         company=customer.company,
         notes=customer.notes,
+        source_ref=customer.source_ref,
         tos_signed=customer.tos_signed,
         tos_signed_at=customer.tos_signed_at,
         intake_completed_at=customer.intake_completed_at,

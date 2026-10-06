@@ -20,7 +20,7 @@ from app.config import settings
 from app.database import async_session, engine, get_db
 from app.utils.client_ip import get_trusted_client_ip
 import app.models  # noqa: F401 — register all models on Base.metadata (Alembic + legacy helpers read it)
-from app.routers import auth, customers, aircraft, missions, flights, maps, reports, invoices, rate_templates, llm, system_settings, financials, weather, intake, flight_library, batteries, maintenance, backup, device_keys, pilots, client_portal, stripe_webhook, business_signals, admin_device_rotation, tos, basemap_health, eyeson_integration
+from app.routers import auth, customers, aircraft, missions, flights, maps, reports, invoices, rate_templates, llm, system_settings, financials, weather, intake, flight_library, batteries, maintenance, backup, device_keys, pilots, client_portal, stripe_webhook, business_signals, admin_device_rotation, tos, basemap_health, eyeson_integration, leads
 
 
 def _setup_json_logging() -> None:
@@ -673,6 +673,7 @@ app.include_router(auth.router)
 app.include_router(customers.router)
 app.include_router(aircraft.router)
 app.include_router(missions.router)
+app.include_router(leads.router)
 app.include_router(flights.router)
 app.include_router(maps.router)
 app.include_router(reports.router)
