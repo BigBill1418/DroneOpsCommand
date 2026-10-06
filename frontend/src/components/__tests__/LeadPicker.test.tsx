@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { setupServer } from 'msw/node';
-import { http, HttpResponse } from 'msw';
+import { http, HttpResponse, delay } from 'msw';
 
 import LeadPicker from '../LeadPicker';
 import { missionTitleFromLead, leadPortalUrl } from '../../api/leads';
@@ -60,4 +60,30 @@ describe('LeadPicker', () => {
     render(<TestProviders><LeadPicker onPick={vi.fn()} /></TestProviders>);
     expect(await screen.findByText(/fill the form in by hand/i)).toBeInTheDocument();
   });
+});
+
+describe('LeadPicker — LD-2 M-6', () => {
+  it('a slow earlier search cannot overwrite a newer one', async () => {
+    const OLD = { ...LEAD, key: 'web-2', name: 'Old Result' };
+    const NEW = { ...LEAD, key: 'web-3', name: 'New Result' };
+    server.use(
+      http.get('*/api/leads/status', () => HttpResponse.json({ enabled: true })),
+      http.get('*/api/leads', async ({ request }) => {
+        const q = new URL(request.url).searchParams.get('q') ?? '';
+        if (q === 'ol') { await delay(1500); return HttpResponse.json({ leads: [OLD] }); }
+        if (q === 'olx') return HttpResponse.json({ leads: [NEW] });
+        return HttpResponse.json({ leads: [] });
+      }),
+    );
+    render(<TestProviders><LeadPicker onPick={vi.fn()} /></TestProviders>);
+    const input = await screen.findByPlaceholderText(/search website leads/i);
+    await userEvent.click(input);
+    await userEvent.type(input, 'ol');
+    await new Promise((r) => setTimeout(r, 450)); // debounce fires the slow 'ol' request
+    await userEvent.type(input, 'x');
+    await screen.findByText(/New Result/, {}, { timeout: 3000 });
+    await new Promise((r) => setTimeout(r, 1600)); // let the slow 'ol' response land
+    expect(screen.queryByText(/Old Result/)).toBeNull();
+    expect(screen.getByText(/New Result/)).toBeInTheDocument();
+  }, 10000);
 });

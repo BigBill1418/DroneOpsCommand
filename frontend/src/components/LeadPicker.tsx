@@ -40,9 +40,12 @@ export default function LeadPicker({ onPick, onClear }: Props) {
 
   useEffect(() => {
     if (!enabled) return;
+    // Ignore responses from superseded searches (LD-2 M-6).
+    let current = true;
     listLeads(debounced, includeClosed)
-      .then((l) => { setLeads(l); setError(false); })
-      .catch(() => { setLeads([]); setError(true); });
+      .then((l) => { if (current) { setLeads(l); setError(false); } })
+      .catch(() => { if (current) { setLeads([]); setError(true); } });
+    return () => { current = false; };
   }, [enabled, debounced, includeClosed]);
 
   if (!enabled) return null;

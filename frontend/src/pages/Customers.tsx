@@ -469,7 +469,12 @@ export default function Customers() {
                   type="button"
                   onClick={() => {
                     const existing = customers.find((c) => c.id === leadMatch.id);
-                    if (existing) { setLeadMatch(null); handleEdit(existing); }
+                    if (!existing) return;
+                    const leadKey = form.values.source_ref;
+                    setLeadMatch(null);
+                    handleEdit(existing);
+                    // Carry the lead link onto a customer that has none (LD-2 M-5).
+                    if (!existing.source_ref && leadKey) form.setFieldValue('source_ref', leadKey);
                   }}
                 >
                   Edit that customer instead

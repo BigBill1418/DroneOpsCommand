@@ -4,6 +4,21 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-10-06 — v2.97.2: LD-2 — the eight deferred LD-1 review minors (ADR-0050 Amendment 1)
+
+* **Retry is bound to the mission.** `POST /api/leads/missions/{id}/mark-won` reads the lead key from the
+  mission's own `source_ref`. The old caller-supplied `POST /api/leads/{key}/mark-won` is removed. A
+  missing mission or a mission without a lead link returns 404 (M-1).
+* **Email match trims the stored side** too: `lower(trim(customers.email))` (M-2).
+* **The write-back never raises.** A non-JSON 2xx, a client error or a DB error returns False and is
+  logged. A missing mission row is reported, not counted as success (M-4).
+* **No more "(no name)".** The portal's placeholder name is no longer prefilled (marketing, M-3).
+* **"Edit that customer instead"** carries the lead link onto a customer that has none (M-5).
+* **Lead search** ignores responses from superseded queries (M-6).
+* **Create/update build the response before committing**, so a serialize error rolls back instead of
+  returning 500 for a saved mission (M-7).
+* **The Hub hides Retry** where the integration is disabled (M-8).
+
 ## 2026-10-06 — v2.97.1: sidebar version reads package.json
 
 The sidebar footer showed a hand-typed `v2.96.0` after v2.97.0 shipped. `AppShell.tsx` held
