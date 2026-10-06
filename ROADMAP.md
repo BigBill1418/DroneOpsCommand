@@ -7,7 +7,7 @@ reference where applicable.
 
 ## Leads integration (spec 2026-10-05)
 
-### LD-1 — Website lead → customer/mission prefill + `won` write-back — **SPEC IN REVIEW**
+### LD-1 — Website lead → customer/mission prefill + `won` write-back — **BUILT v2.97.0 (ADR-0050) — awaiting merge/deploy + live verification**
 
 **Spec:** `docs/superpowers/specs/2026-10-05-lead-to-customer-mission-design.md`
 (operator decisions recorded there). "Start from a lead" picker in the new-mission
@@ -17,7 +17,8 @@ suggests an existing customer on an email match, stamps `source_ref = web-<id>`
 (fills the slot ADR-0016 reserved), and marks the lead `won` in the marketing
 pipeline after the mission saves. Off unless `LEADS_API_BASE`/`LEADS_API_TOKEN` are
 set — never configured on the demo instance. Touches the `marketing` repo too.
-Next: operator approves spec → implementation plan → ADR-0050.
+Plan: `docs/superpowers/plans/2026-10-05-lead-to-customer-mission.md`. Next: final review →
+merge both PRs → token on BOS-HQ → deploy → live check.
 
 ## Maps (ADR-0046, 2026-09-21)
 
