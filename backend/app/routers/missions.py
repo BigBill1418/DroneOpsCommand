@@ -526,9 +526,11 @@ async def get_mission(
 async def update_mission(
     mission_id: UUID,
     data: MissionUpdate,
-    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
+    # Last + defaulted so existing positional callers (tests, internal) keep
+    # working; FastAPI injects it by annotation on real requests (ADR-0050).
+    background_tasks: BackgroundTasks = None,
 ):
     result = await db.execute(select(Mission).where(Mission.id == mission_id))
     mission = result.scalar_one_or_none()
@@ -593,7 +595,7 @@ async def update_mission(
         if new_customer_id and new_customer_id != old_customer_id:
             await _send_portal_email_for_mission(mission.id, new_customer_id, db)
 
-        if lead_changed:
+        if lead_changed and background_tasks is not None:
             await db.commit()
             background_tasks.add_task(run_lead_writeback, mission.id, mission.source_ref)
 
