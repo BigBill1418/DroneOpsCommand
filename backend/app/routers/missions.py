@@ -6,7 +6,7 @@ import uuid as uuid_mod
 from datetime import datetime, timedelta
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, File, Form, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, UploadFile, File, Form, status
 from pydantic import BaseModel, ValidationError
 from PIL import Image as PILImage
 from sqlalchemy import select, func
@@ -35,6 +35,7 @@ from app.schemas.mission import (
 )
 from app.services import airspace
 from app.services.opendronelog import opendronelog_client
+from app.services.lead_writeback import run_lead_writeback, should_write_back
 # ADR-0035 — reuse the EXISTING weather-router aviation feeds (AviationWeather
 # TFR/METAR, Open-Meteo) for the mission preflight; do NOT reinvent them.
 # Aliased so tests can patch them at the missions-module boundary.
@@ -259,6 +260,7 @@ async def list_missions(
 @router.post("", response_model=MissionResponse, status_code=status.HTTP_201_CREATED)
 async def create_mission(
     request: Request,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
@@ -357,6 +359,13 @@ async def create_mission(
         # Auto-send client portal email if customer is assigned
         if mission.customer_id:
             await _send_portal_email_for_mission(mission.id, mission.customer_id, db)
+
+        # ADR-0050 — mark the website lead `won`. Commit FIRST so the lead is never
+        # marked for a mission that then fails to persist; the write-back runs after
+        # the response and can never fail this request.
+        if should_write_back(mission.source_ref):
+            await db.commit()
+            background_tasks.add_task(run_lead_writeback, mission.id, mission.source_ref)
 
         return _serialize_mission(mission)
     except HTTPException:
@@ -519,6 +528,9 @@ async def update_mission(
     data: MissionUpdate,
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
+    # Last + defaulted so existing positional callers (tests, internal) keep
+    # working; FastAPI injects it by annotation on real requests (ADR-0050).
+    background_tasks: BackgroundTasks = None,
 ):
     result = await db.execute(select(Mission).where(Mission.id == mission_id))
     mission = result.scalar_one_or_none()
@@ -528,6 +540,7 @@ async def update_mission(
     try:
         old_customer_id = mission.customer_id
         old_download_link_url = mission.download_link_url
+        old_source_ref = mission.source_ref
         update_fields = data.model_dump(exclude_unset=True)
 
         for key, value in update_fields.items():
@@ -539,6 +552,15 @@ async def update_mission(
             if key == "source" and isinstance(value, MissionSource):
                 value = value.value
             setattr(mission, key, value)
+
+        # ADR-0050 — a new lead link re-arms the `won` write-back.
+        lead_changed = (
+            "source_ref" in update_fields
+            and (mission.source_ref or None) != (old_source_ref or None)
+            and should_write_back(mission.source_ref)
+        )
+        if lead_changed:
+            mission.lead_writeback_at = None
 
         # ADR-0040: a new/changed download link re-arms the automated
         # delivery email (a replacement link must reach the client too),
@@ -572,6 +594,10 @@ async def update_mission(
         new_customer_id = update_fields.get("customer_id")
         if new_customer_id and new_customer_id != old_customer_id:
             await _send_portal_email_for_mission(mission.id, new_customer_id, db)
+
+        if lead_changed and background_tasks is not None:
+            await db.commit()
+            background_tasks.add_task(run_lead_writeback, mission.id, mission.source_ref)
 
         return _serialize_mission(mission)
     except Exception as exc:

@@ -43,7 +43,7 @@ def _script_dir():
 def test_migration_tree_has_single_linear_head():
     script = _script_dir()
     heads = script.get_heads()
-    assert heads == ["0012_cf_access_ident"], heads
+    assert heads == ["0013_lead_integration"], heads
 
 
 def test_baseline_is_the_root_revision():
@@ -57,6 +57,7 @@ def test_revision_chain_is_baseline_then_indexes():
     # Walk from head back to base; expect exactly the revisions, in order.
     revs = [r.revision for r in script.walk_revisions()]
     assert revs == [
+        "0013_lead_integration",
         "0012_cf_access_ident",
         "0011_battery_src_truth",
         "0010_flight_details",

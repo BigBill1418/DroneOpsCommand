@@ -26,6 +26,11 @@ class Settings(BaseSettings):
 
     # OpenDroneLog
     opendronelog_url: str = ""
+    # ADR-0050 — website-lead prefill. Marketing API base (host-local on BOS-HQ:
+    # http://host.docker.internal:3002) + its DOC_LEADS_TOKEN. Both empty = feature
+    # off. NEVER set on the demo instance (real prospects' personal details).
+    leads_api_base: str = ""
+    leads_api_token: str = ""
 
     # JWT
     jwt_secret_key: str = "changeme_generate_a_random_secret"

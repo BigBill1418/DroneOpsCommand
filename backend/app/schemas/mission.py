@@ -107,6 +107,8 @@ class MissionResponse(BaseModel):
     is_billable: bool
     source: MissionSource | None = None
     source_ref: str | None = None
+    # ADR-0050 — when the lead in source_ref was marked `won` (NULL = pending/failed).
+    lead_writeback_at: datetime | None = None
     unas_folder_path: str | None = None
     download_link_url: str | None = None
     download_link_expires_at: datetime | None = None

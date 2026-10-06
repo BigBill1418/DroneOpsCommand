@@ -67,6 +67,7 @@ class _MissionStub:
         self.download_link_url = None
         self.download_link_expires_at = None
         self.client_notes = None
+        self.source_ref = None
         self.created_at = now
         self.updated_at = now
         self.flights: list = []

@@ -4,6 +4,24 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-10-05 — v2.97.0: start missions/customers from a website lead (ADR-0050)
+
+* **Lead picker.** "Start from a lead" in the new-mission modal and the new-customer form
+  lists open website leads from the marketing portal (search; a "show closed" toggle). Picking
+  one prefills name, email, phone, company, mission title (`<service> — <organization>`) and
+  description.
+* **Existing customer.** An email match (case-insensitive) shows "Matches existing customer X".
+  Reuse is the default; "Create new customer" is one click.
+* **Lead link.** Missions and customers store the lead key in `source_ref` (the slot ADR-0016
+  reserved). The mission Hub shows **View lead**, deep-linking to the portal row.
+* **`won` write-back.** Creating a mission from a lead marks it `won` in the marketing pipeline
+  after the mission commits. A failure never blocks the save; the Hub shows "Lead not marked
+  won — Retry".
+* **Migration `0013_lead_integration`.** Adds `customers.source_ref` and
+  `missions.lead_writeback_at`. Idempotent on fresh installs.
+* **Off unless configured.** Needs `LEADS_API_BASE` + `LEADS_API_TOKEN` (see `.env.example`).
+  Never set on the demo instance. Counterpart: marketing ADR-0110.
+
 ## 2026-10-03 — backup timer comment: retired CallSign slot removed
 
 Comment-only (`scripts/systemd/droneops-backup.timer`). The note on the stacked nightly backup window

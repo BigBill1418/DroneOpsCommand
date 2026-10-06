@@ -153,6 +153,10 @@ services:
     # they never accumulate as <defunct> (matches worker service; observed
     # uvicorn zombies 2026-04-19 during HSH-HQ high-load incident).
     init: true
+    # ADR-0050 — reach the marketing API on the same host (BOS-HQ :3002) without
+    # the Cloudflare Access front door. Harmless where LEADS_API_BASE is unset.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     dns:
       - 1.1.1.1
       - 8.8.8.8
@@ -183,6 +187,11 @@ services:
       # ADR-0049 — SHA-256 hex of EyesOn's read token. Blank = the
       # /api/integrations/eyeson/* routes answer 503. See .env.example.
       - EYESON_SERVICE_TOKEN_SHA256=${EYESON_SERVICE_TOKEN_SHA256:-}
+      # ADR-0050 — website-lead prefill (marketing API DOC routes). Both blank =
+      # feature off (picker hidden, /api/leads* 404). NEVER set on the demo
+      # instance — these are real prospects' personal details. See .env.example.
+      - LEADS_API_BASE=${LEADS_API_BASE:-}
+      - LEADS_API_TOKEN=${LEADS_API_TOKEN:-}
       - DEMO_ADMIN_USERNAME=${DEMO_ADMIN_USERNAME:-}
       - DEMO_ADMIN_PASSWORD=${DEMO_ADMIN_PASSWORD:-}
       - SMTP_HOST=${SMTP_HOST:-}

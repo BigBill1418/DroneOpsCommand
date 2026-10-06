@@ -9,6 +9,7 @@ export interface Customer {
   zip_code: string | null;
   company: string | null;
   notes: string | null;
+  source_ref: string | null;
   tos_signed: boolean;
   tos_signed_at: string | null;
   signature_data: string | null;
@@ -94,6 +95,7 @@ export interface Mission {
   // ADR-0016 — lead-source attribution. null = origin unknown.
   source: string | null;
   source_ref: string | null;
+  lead_writeback_at?: string | null;
   unas_folder_path: string | null;
   download_link_url: string | null;
   download_link_expires_at: string | null;
