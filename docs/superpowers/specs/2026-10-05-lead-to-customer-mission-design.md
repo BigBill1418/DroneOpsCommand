@@ -49,7 +49,20 @@ DOC reads from the **marketing portal API**. Reasons:
 Accepted cost: the portal copy has one row per email and no UTMs/click ids. Decision 6
 (link only) means DOC never needs those.
 
-**Lead key** used everywhere in DOC: the portal's unified id, `web-<integer>`.
+**Lead key** used everywhere in DOC: the portal's unified, canonical id. The portal
+merges a website lead with a cold-campaign contact that has the same email
+(`buildUnifiedLeads`, ADR-0030 #4); the merged lead's canonical id is then `cold-<id>`,
+and stage writes land on that canonical id. So:
+
+- "Website lead" means `sources` includes `website` — not `source === 'website'`.
+- The key is `web-<int>` **or** `cold-<int>` (pattern `^(web|cold)-\d{1,12}$`), always the
+  canonical id the portal returns.
+
+**Network path (verified 2026-10-05):** the marketing API publishes `0.0.0.0:3002` on
+BOS-HQ; from `droneops-backend-1` a request to the `droneops_default` gateway on `:3002`
+returns `401` (reachable, auth enforced). DOC uses `http://host.docker.internal:3002` with
+`extra_hosts: host.docker.internal:host-gateway` on the backend service, so it never goes
+through the Cloudflare Access front door of `marketing.barnardhq.com`.
 
 ## 4. Components
 
@@ -62,9 +75,9 @@ internal token, and the DOC token is accepted nowhere else. Registered before th
 
 | Route | Behaviour |
 |-------|-----------|
-| `GET /api/doc/leads?q=&include_closed=0\|1&limit=` | Website leads only (from `buildUnifiedLeads`, `source === 'website'`). Default: `is_open` only, newest first, `limit` default 25, max 100. `q` matches name, email, organization (case-insensitive substring). Returns `{ leads: [{ key, name, email, phone, organization, service, details, created_at, stage, is_open }] }`. |
-| `GET /api/doc/leads/:key` | One website lead by `web-<id>`; 404 for unknown keys and for any `cold-*` key. |
-| `POST /api/doc/leads/:key/won` | Upserts `lead_pipeline.stage = 'won'` through the same SQL as `PATCH /api/leads/:lead_key`. Idempotent; returns `{ key, stage }`. Body may carry `{ mission_ref }`, appended to `lead_pipeline.notes` as `DOC mission <id>` only if not already present. |
+| `GET /api/doc/leads?q=&include_closed=0\|1&limit=` | Website leads only (from `buildUnifiedLeads`, `sources` includes `website`). Default: `is_open` only, newest first, `limit` default 25, max 100. `q` matches name, email, organization (case-insensitive substring). Returns `{ leads: [{ key, name, email, phone, organization, service, details, created_at, stage, is_open }] }`. |
+| `GET /api/doc/leads/:key` | One website lead by canonical key; 404 when the key is unknown or the lead has no `website` source. |
+| `POST /api/doc/leads/:key/won` | 404 unless the key is a website lead (so DOC can never move a pure cold-campaign lead). Upserts `lead_pipeline.stage = 'won'` through the same SQL as `PATCH /api/leads/:lead_key`. Idempotent; returns `{ key, stage }`. Body may carry `{ mission_ref }`, appended to `lead_pipeline.notes` as `DOC mission <id>` only if not already present. |
 
 Plus one portal UI change: `/outbound/leads?lead=web-<id>` scrolls to and highlights that
 lead, so DOC's "View lead" link lands on the right row. The portal has no per-lead
@@ -91,8 +104,8 @@ page today.
   (`ADD COLUMN IF NOT EXISTS`) — see the fresh-install migration trap fixed in v2.80.2.
   `missions.source` / `missions.source_ref` already exist (ADR-0016).
 - **Mission create/update**: no new endpoint. After the mission row commits, if
-  `source_ref` starts with `web-` and the mission was just created (or `source_ref` just
-  changed to a `web-` value), call `mark_won` in the background. It is **never inside the
+  `source_ref` matches the lead-key pattern and the mission was just created (or `source_ref` just
+  changed to a lead key), call `mark_won` in the background. It is **never inside the
   DB transaction** and its failure never fails the request. Outcome recorded on the
   mission as `lead_writeback_at` (timestamp, nullable) — one more nullable column in the
   same migration — so the UI can show "not yet marked won".
@@ -112,8 +125,7 @@ page today.
   - If `matching_customer` is set: banner *"Matches existing customer {name}"*, with
     **Use existing** (default) / **Create new**.
 - **Mission page**: a **View lead** link to
-  `https://marketing.barnardhq.com/outbound/leads?lead=<key>` when `source_ref` is a `web-`
-  key. If `lead_writeback_at` is null, a warning *"Lead not marked won"* with **Retry**.
+  `https://marketing.barnardhq.com/outbound/leads?lead=<key>` when `source_ref` is a lead key. If `lead_writeback_at` is null, a warning *"Lead not marked won"* with **Retry**.
   The same link shows on the customer page when `customers.source_ref` is set.
 
 ## 5. Data flow
@@ -144,7 +156,7 @@ gate Q1/Q2 it isn't worth paging over.
 ## 7. Testing
 
 - **Marketing**: route tests — token required and the global token rejected; website-only
-  filter; `cold-*` key 404; open/closed filter; `q` search; `won` idempotency and the notes
+  filter (incl. a merged `cold-*` lead that has a website source); pure cold-campaign key 404; open/closed filter; `q` search; `won` idempotency and the notes
   append not duplicating.
 - **DOC backend**: mocked `lead_source` — feature-off 404s; prefill payload mapping;
   email match case-insensitive; write-back runs after commit and its failure leaves the
