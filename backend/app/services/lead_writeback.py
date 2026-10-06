@@ -15,7 +15,7 @@ from sqlalchemy import update
 from app.database import async_session
 from app.models.mission import Mission
 from app.services.lead_source import (
-    LEAD_KEY_RE, LeadNotFound, LeadSourceClient, LeadSourceUnavailable, get_client, is_enabled,
+    LEAD_KEY_RE, LeadSourceClient, get_client, is_enabled,
 )
 
 logger = logging.getLogger("doc.leads")
@@ -38,13 +38,21 @@ async def run_lead_writeback(
         client = get_client()
     try:
         await client.mark_won(lead_key, str(mission_id))
-    except (LeadSourceUnavailable, LeadNotFound) as exc:
+    except Exception as exc:  # never raise (LD-2 M-4) — includes LeadSourceUnavailable/LeadNotFound
         logger.warning("[LEAD-WRITEBACK] mission=%s lead=%s failed: %s", mission_id, lead_key, type(exc).__name__)
         return False
-    async with session_factory() as session:
-        await session.execute(
-            update(Mission).where(Mission.id == mission_id).values(lead_writeback_at=datetime.utcnow())
-        )
-        await session.commit()
+    try:
+        async with session_factory() as session:
+            result = await session.execute(
+                update(Mission).where(Mission.id == mission_id).values(lead_writeback_at=datetime.utcnow())
+            )
+            await session.commit()
+    except Exception as exc:
+        logger.warning("[LEAD-WRITEBACK] mission=%s lead=%s marked won but stamp failed: %s",
+                       mission_id, lead_key, type(exc).__name__)
+        return False
+    if not getattr(result, "rowcount", 1):
+        logger.warning("[LEAD-WRITEBACK] mission=%s lead=%s marked won but no mission row", mission_id, lead_key)
+        return False
     logger.info("[LEAD-WRITEBACK] mission=%s lead=%s marked won", mission_id, lead_key)
     return True

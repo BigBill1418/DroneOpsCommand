@@ -20,7 +20,7 @@ ADR-0050 (DOC) + marketing ADR-0110. Spec/plan under `docs/superpowers/`. Live c
 
 Found in passing and fixed: the sidebar showed a stale `v2.96.0` literal (v2.97.1, #46).
 
-### LD-2 — LD-1 deferred review minors — **NOT STARTED**
+### LD-2 — LD-1 deferred review minors — **BUILT v2.97.2 — verifying live**
 
 From the LD-1 final review (ledger `Final: minor (deferred)`). None blocks use; take them when next in this code.
 - **M-1** `POST /api/leads/{key}/mark-won` trusts the caller's key and `mission_id`. Replace it with

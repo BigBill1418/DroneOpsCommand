@@ -91,3 +91,9 @@ async def test_mark_won_posts_mission_ref():
     assert out == {"key": "web-1", "stage": "won"}
     assert seen["path"] == "/api/doc/leads/web-1/won"
     assert b'"mission_ref":"m-1"' in seen["body"].replace(b" ", b"")
+
+
+async def test_non_json_2xx_is_unavailable():
+    # LD-2 M-4: a proxy HTML page with 200 must not escape as a JSON error.
+    with pytest.raises(LeadSourceUnavailable):
+        await _client(lambda r: httpx.Response(200, text="<html>login</html>")).list_leads()

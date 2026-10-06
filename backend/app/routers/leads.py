@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.jwt import get_current_user
 from app.database import get_db
 from app.models.customer import Customer
+from app.models.mission import Mission
 from app.models.user import User
 from app.services.lead_source import (
     LEAD_KEY_RE, LeadNotFound, LeadSourceUnavailable, get_client, is_enabled,
@@ -70,7 +71,7 @@ async def get_lead(
     if email:
         result = await db.execute(
             select(Customer)
-            .where(func.lower(Customer.email) == email)
+            .where(func.lower(func.trim(Customer.email)) == email)
             .order_by(Customer.created_at)
             .limit(1)
         )
@@ -80,13 +81,20 @@ async def get_lead(
     return {"lead": lead, "matching_customer": match}
 
 
-@router.post("/{key}/mark-won", dependencies=[Depends(_require_enabled)])
-async def mark_won(
-    key: str,
+@router.post("/missions/{mission_id}/mark-won", dependencies=[Depends(_require_enabled)])
+async def retry_mark_won(
     mission_id: UUID,
+    db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
-    _check_key(key)
-    if not await run_lead_writeback(mission_id, key):
+    """Retry the `won` write-back for a mission (Hub "Retry").
+
+    The lead key comes from the mission's own source_ref, never from the caller
+    (LD-2 M-1), so this can only ever mark the lead the mission is linked to.
+    """
+    mission = await db.get(Mission, mission_id)
+    if mission is None or not mission.source_ref or not LEAD_KEY_RE.match(mission.source_ref):
+        raise HTTPException(status_code=404, detail="Mission has no linked lead")
+    if not await run_lead_writeback(mission.id, mission.source_ref):
         raise HTTPException(status_code=502, detail="Lead not marked won")
     return {"ok": True}

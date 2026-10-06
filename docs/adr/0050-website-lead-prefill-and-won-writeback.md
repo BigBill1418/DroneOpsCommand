@@ -74,6 +74,16 @@ Mechanics:
   `None`, so direct positional callers keep working. A direct call schedules no write-back.
 - **Logging.** Lead keys, mission ids and outcomes only. No names, emails or phone numbers.
 
+## Amendment 1 — 2026-10-06 (v2.97.2, LD-2)
+
+- **Retry route.** The retry route is now `POST /api/leads/missions/{mission_id}/mark-won`. The lead key
+  comes from the mission's `source_ref`, so a caller can no longer name an arbitrary lead. The old
+  `POST /api/leads/{key}/mark-won` is removed.
+- **Write-back hardening.** `run_lead_writeback` catches every exception and returns False when the
+  mission row is missing.
+- **Commit order.** Create and update serialize before they commit.
+- **UI.** The Hub hides Retry when `/api/leads/status` reports disabled.
+
 ## Failover self-check
 
 The feature degrades to manual entry if the marketing API or its host is down. The only

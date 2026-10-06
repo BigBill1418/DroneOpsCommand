@@ -1,5 +1,6 @@
 """ADR-0050 won write-back service."""
 import uuid
+from types import SimpleNamespace
 
 import pytest
 
@@ -28,8 +29,14 @@ class FakeSession:
     async def __aexit__(self, *a):
         return False
 
+    rowcount = 1
+    raise_on_execute = False
+
     async def execute(self, stmt):
+        if FakeSession.raise_on_execute:
+            raise RuntimeError("db down")
         FakeSession.executed.append(stmt)
+        return SimpleNamespace(rowcount=FakeSession.rowcount)
 
     async def commit(self):
         FakeSession.committed += 1
@@ -38,6 +45,7 @@ class FakeSession:
 @pytest.fixture(autouse=True)
 def _reset(monkeypatch):
     FakeSession.executed, FakeSession.committed = [], 0
+    FakeSession.rowcount, FakeSession.raise_on_execute = 1, False
     monkeypatch.setattr(lead_source.settings, "leads_api_base", "http://x")
     monkeypatch.setattr(lead_source.settings, "leads_api_token", "t")
 
@@ -73,3 +81,23 @@ async def test_disabled_without_client_is_noop(monkeypatch):
     monkeypatch.setattr(lead_source.settings, "leads_api_base", "")
     ok = await lead_writeback.run_lead_writeback(uuid.uuid4(), "web-1", session_factory=FakeSession)
     assert ok is False and FakeSession.executed == []
+
+
+# ---- LD-2 M-4: never raises ----
+async def test_unexpected_client_error_returns_false():
+    ok = await lead_writeback.run_lead_writeback(
+        uuid.uuid4(), "web-1", client=FakeClient(ValueError("non-JSON 2xx")), session_factory=FakeSession
+    )
+    assert ok is False and FakeSession.executed == []
+
+
+async def test_db_error_returns_false():
+    FakeSession.raise_on_execute = True
+    ok = await lead_writeback.run_lead_writeback(uuid.uuid4(), "web-1", client=FakeClient(), session_factory=FakeSession)
+    assert ok is False
+
+
+async def test_no_mission_row_returns_false():
+    FakeSession.rowcount = 0
+    ok = await lead_writeback.run_lead_writeback(uuid.uuid4(), "web-1", client=FakeClient(), session_factory=FakeSession)
+    assert ok is False

@@ -40,8 +40,9 @@ export async function getLead(key: string): Promise<LeadDetail> {
   return r.data as LeadDetail;
 }
 
-export async function retryLeadWon(key: string, missionId: string): Promise<void> {
-  await api.post(`/leads/${encodeURIComponent(key)}/mark-won`, null, { params: { mission_id: missionId } });
+// The server reads the lead key from the mission's own source_ref (LD-2 M-1).
+export async function retryLeadWon(missionId: string): Promise<void> {
+  await api.post(`/leads/missions/${encodeURIComponent(missionId)}/mark-won`);
 }
 
 function titleCase(s: string): string {
