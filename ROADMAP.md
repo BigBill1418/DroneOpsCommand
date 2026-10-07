@@ -42,6 +42,22 @@ From the LD-1 final review (ledger `Final: minor (deferred)`). None blocks use; 
 - **M-7** A serialize failure after the mission commits returns 500 for a saved mission.
 - **M-8** Hide the Hub "Retry" when `/api/leads/status` reports disabled.
 
+## Device uploads (2026-10-06)
+
+### FU-12 — Confirm the RC Pro (M3P) and M4P controllers resume uploading — **WAITING ON OPERATOR**
+
+Both aircraft are flying but their device keys have made no call since 2026-05-17 (M3P) and
+2026-09-19 (M4P). The server side was verified on 2026-10-06: the keys are active, there were zero
+rejected attempts, and every flight received so far is stored and linked. The cause is a dead SAF
+folder grant in DroneOpsSync; the fix is DroneOpsSync v1.3.33.
+- **Operator:** on each controller, accept the OTA and re-grant the FlightRecord folder (DroneOpsSync
+  ROADMAP "Current phase").
+- **Verify afterwards:** `device_api_keys.last_used_at` for M3P and M4P is recent; new flights
+  (M3P after 2026-05-17, M4P after 2026-09-19) exist with the right `aircraft_id`, and a re-audit
+  shows 0 mislinked; the daily `droneops-alerts` silence alerts for both stop.
+- **Context:** v2.97.4 watchdog fix (alerts daily while silent) and ADR-0051 (em-dash alerts were
+  dropped, which is why nobody was told).
+
 ## Maps (ADR-0046, 2026-09-21)
 
 Basemaps moved off CARTO to keyless Esri + OSM at v2.92.0 after CARTO began
