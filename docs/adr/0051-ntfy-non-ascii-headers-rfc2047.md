@@ -52,3 +52,17 @@ title to `ntfy.barnardhq.com/droneops-alerts` was read back with the title decod
   were not checked by this ADR. Their em-dash titles have been observed arriving, so they are
   assumed to be fine. Verify before relying on that.
 - Failover: there is no state change and the helper's request shape is unchanged.
+
+## Amendment 1 — 2026-10-06: DOC's shell-script alerts checked
+
+DOC's `scripts/droneops-backup.sh`, `restore-drill.sh`, `droneops-backup-cutover.sh` and
+`demo-nightly-reset.sh` publish through the host helper `~/.local/bin/ntfy-publish.sh`
+(`curl -H "Title: …"`), not through `app/services/ntfy.py`. They are **not affected**:
+- Every title they pass is plain ASCII (backup FAILED, restore drill OK/FAILED, cutover
+  ABORTED/complete, demo reset FAILED). The cutover em dash is in the body, not a header.
+- curl sends a raw UTF-8 `Title:` header and ntfy decodes it. A probe from BOS-HQ to an
+  unsubscribed scratch topic read back `[DroneOps Command] probe — raw UTF-8 title` intact.
+  The failure in this ADR is specific to httpx's ASCII header encoding.
+
+Helix-Hub fixed the same httpx bug independently in its ADR-0200 (#182/#184).
+
