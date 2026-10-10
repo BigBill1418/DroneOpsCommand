@@ -61,6 +61,17 @@ services:
     environment:
       DATABASE_URL: "${BOS_PROMOTED_DATABASE_URL:?set in .env — postgresql+asyncpg://droneops:<pw>@droneops-standby-db:5432/droneops}"
 
+  # Tunnel token as a FILE, never env or argv (auth-posture audit 2026-09-18 #13; same pattern
+  # as the demo, barnardhq-preview, ntfy, docs-hub and atlas-portal connectors). `!override`
+  # replaces the base TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN} entry, which stays in the base file
+  # for self-hosted installs. File created by NOC scripts/cf-connector: dir root 0711, file 0400
+  # uid 65532 (override with CF_TOKEN_FILE). CLOUDFLARE_TUNNEL_TOKEN in .env is no longer read.
+  cloudflared:
+    environment: !override
+      - TUNNEL_TOKEN_FILE=/run/secrets/cloudflared_tunnel_token
+    secrets:
+      - cloudflared_tunnel_token
+
   # Promoted primary (no standby.signal in the volume → read-write).
   db-standby:
     container_name: droneops-standby-db
@@ -79,3 +90,7 @@ volumes:
   droneops_standby_pgdata:
     external: true
     name: droneops_standby_pgdata
+
+secrets:
+  cloudflared_tunnel_token:
+    file: ${CF_TOKEN_FILE:-/opt/cf-tunnel-tokens/droneops-cloudflared-1/token}
