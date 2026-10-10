@@ -4,7 +4,10 @@
 # (`/home/bbarnard065/droneops-demo` — corrected 2026-09-21; this header said
 # `/opt/droneops-demo`, which does not exist). It is **NOT deployer-managed**:
 # the NOC fleet deployer targets prod only, so the demo is updated by hand.
-# Prefer `./bootstrap.sh`, which validates `.env.demo` first; the raw form is:
+# Prefer `./bootstrap.sh`, which validates `.env.demo` first.
+# CAUTION (found 2026-10-10): `./bootstrap.sh` does NOT rebuild images; only `./bootstrap.sh --clean` adds `--build --no-cache`.
+# After a `git pull` that changes backend/ or frontend/, plain `./bootstrap.sh` recreates the containers on the OLD images and
+# the schema stays behind the new migrations. Use `--clean`, or the raw form below with `--build`:
 #   cd ~/droneops-demo && git pull --ff-only && \
 #   docker compose -p droneops-demo -f docker-compose.yml -f docker-compose.demo.yml \
 #     --env-file .env.demo up -d --build
