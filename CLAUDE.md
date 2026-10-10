@@ -235,9 +235,11 @@ Known recreate gotchas (all hit on the 2026-06-11 v2.70.1 update — see
 `docs/incidents/2026-06-11-deploy-rename-conflicts-demo-bringup.md`):
 containers created outside compose carry no compose labels and cause name
 conflicts on recreate (`docker rm -f` them first), and a recreated cloudflared
-re-reads `.env.demo` — if the tunnel token rotated since the container was
-created, registration fails with "Invalid tunnel secret" (fix per
-`docs/cloudflare-tunnel-setup.md` troubleshooting).
+re-reads its token — since 2026-10-09 from the secret FILE
+`/opt/cf-tunnel-tokens/droneops-demo-cloudflared-1/token` (root 0711 dir, 0400
+uid 65532 file; `docker-compose.demo.yml`), no longer from `.env.demo`. If the
+tunnel token rotated, registration fails with "Invalid tunnel secret": rewrite
+that file (NOC `scripts/cf-connector`), never put the token back in env.
 
 ## Notifications (ADR-0036 + ADR-0006 addendum, 2026-04-26)
 

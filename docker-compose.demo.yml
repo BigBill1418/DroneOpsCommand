@@ -111,12 +111,20 @@ services:
   # Uses host network so cloudflared can reach frontend on host port
   # Force HTTP/2 protocol — QUIC is unstable on this host due to small UDP buffers
   # (rmem_max=208KiB, cloudflared wants 7168KiB, causes connection drops)
-  # Token is set via CLOUDFLARE_TUNNEL_TOKEN in .env.demo
+  # Token is a FILE, never env or argv (auth-posture audit 2026-09-18 #13; same pattern as the
+  # barnardhq-preview, ntfy, docs-hub and atlas-portal connectors). Default path is created by
+  # NOC scripts/cf-connector: dir root 0711, file 0400 uid 65532 (override with CF_TOKEN_FILE).
+  # `!override` replaces the base service's TUNNEL_TOKEN env entry instead of merging into it, so
+  # the base file keeps its env-var path for self-hosted installs. No env_file here: cloudflared
+  # reads none of .env.demo's keys, and loading it copied the token and DB secrets into the env.
+  # CLOUDFLARE_TUNNEL_TOKEN stays in .env.demo (bootstrap.sh checks it) but is no longer read.
   cloudflared:
     # BOS-HQ 2026-06-05 sweep: demo tunnel sidecar ~15 MiB -> 256M floor.
     mem_limit: 256m
-    env_file:
-      - .env.demo
+    environment: !override
+      - TUNNEL_TOKEN_FILE=/run/secrets/cloudflared_tunnel_token
+    secrets:
+      - cloudflared_tunnel_token
     command: tunnel --no-autoupdate --protocol http2 run
     network_mode: host
     restart: unless-stopped
@@ -162,3 +170,7 @@ services:
       <<: *barnardhq-labels-demo
       com.barnardhq.service: "droneops-db"
     logging: *logging-demo
+
+secrets:
+  cloudflared_tunnel_token:
+    file: ${CF_TOKEN_FILE:-/opt/cf-tunnel-tokens/droneops-demo-cloudflared-1/token}
