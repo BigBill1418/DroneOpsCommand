@@ -206,6 +206,11 @@ header. **Host port map:** base `db` 5434 (neutralized on BOS) ·
 `droneops-standby-db` 5434 (the real primary) · demo-standby 5437. If the
 override is ever absent, base `db` tries to bind 5434 and collides with the
 running primary → stack bring-up fails. That's the foot-gun this guards.
+Since 2026-10-09 the override also gives prod `cloudflared` its tunnel token as a
+secret FILE (`/opt/cf-tunnel-tokens/droneops-cloudflared-1/token`, root 0711 dir,
+0400 uid 65532 file) via `environment: !override` — no token in env or argv. The
+base file keeps `TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}` for self-hosted installs;
+on BOS that `.env` value is no longer read. A rotated token goes into the file.
 
 Deployer: managed by NOC Master Control (`~/noc-master`).
 
