@@ -232,7 +232,11 @@ echo "[restore-drill] files lane verified: $(basename "${TOS_PATH}") matches db-
 
 # --- 5. Success: stamp metric, quarterly OK note (cleanup trap drops the DB) --
 emit_freshness_metric
-notify default "[DroneOps Command] quarterly restore drill OK" \
+# Success is a metric, not a message (ADR-0037; operator decision 2026-10-16).
+# The deadman is InfraWatch obs-rule-droneops-restore-drill-stale (>100 d, or
+# metric absent -> infrawatch-alerts). Set NTFY_OK=1 to restore the OK push.
+echo "[restore-drill] OK: success push $([[ "${NTFY_OK:-0}" == "1" ]] && echo on || echo off)"
+[[ "${NTFY_OK:-0}" == "1" ]] && notify default "[DroneOps Command] quarterly restore drill OK" \
   --tags "backup,white_check_mark" --dedup-key droneops-restore-drill-ok --cooldown 86400 \
   -- "Restored db snapshot ${SNAP_ID} (${AGE_H}h old) from the encrypted R2 repo into ${DRILL_DB}: flights=${DRILL_FLIGHTS}/${LIVE_FLIGHTS}, battery_logs=${DRILL_BATT}, tos_acceptances=${DRILL_TOS}. Config lane .env sha256 matches live. Files lane $(basename "${TOS_PATH}") matches db-recorded sha256. Scratch DB dropped."
 echo "[restore-drill] done. snapshot=${SNAP_ID} flights=${DRILL_FLIGHTS}/${LIVE_FLIGHTS} config=verified files=verified"

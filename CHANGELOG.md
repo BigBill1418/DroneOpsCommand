@@ -4,6 +4,20 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-10-16 — restore drill: success is a metric, not a push
+
+Operator decision 2026-10-16 (ADR-0037: a periodic "X is OK" is a dashboard, not a
+notification). `[DroneOps Command] quarterly restore drill OK` reached `infrawatch-alerts` at
+09:24 PDT that day, one of 12 success pushes in 12 h.
+
+- `scripts/restore-drill.sh`: the OK push is now behind `NTFY_OK` (default `0`). The script
+  still logs `[restore-drill] OK: success push off`. `fail()` (`high`, 6 h dedup) is unchanged.
+- Deadman, verified live 2026-10-16 ~13:10 PDT: `droneops_restore_drill_last_success_timestamp_seconds`
+  (BOS-HQ textfile) was 3.7 h old. InfraWatch `obs-rule-droneops-restore-drill-stale` (>100 d,
+  or metric `absent()`, `noDataState: OK`) shows inactive with health ok and routes to
+  `infrawatch-alerts` through the root policy.
+- Tests: `bash -n` and `shellcheck -S warning` are clean.
+
 ## 2026-10-06 — v2.97.4: silent drones stay reported; flights relinked by serial
 
 **Incident.** Bill's Mavic 4 Pro (RC2 uploader, key `M4P`) has made no call to DOC since
