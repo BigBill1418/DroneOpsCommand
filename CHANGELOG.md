@@ -4,6 +4,10 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-10-21 — managed-hosting doc: live hostname + first-tenant provisioning notes [skip-deploy]
+
+Docs only. Subdomain pattern corrected to `*.managed.droneops.barnardhq.com` (what DNS/cert/ingress actually serve); added the four provisioning gotchas found while standing up tenant `todd`. See droneops-managed CHANGELOG 2026-10-21.
+
 ## 2026-10-21 — setup wizard: say what failed instead of "Could not create admin account"
 
 A self-hosted installer (Todd) hit "Could not create admin account" with no way to tell why.
