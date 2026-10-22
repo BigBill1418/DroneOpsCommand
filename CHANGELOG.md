@@ -4,6 +4,22 @@
 
 Notable changes to DroneOpsCommand. Dates are absolute (YYYY-MM-DD, UTC).
 
+## 2026-10-21 — setup wizard: say what failed instead of "Could not create admin account"
+
+A self-hosted installer (Todd) hit "Could not create admin account" with no way to tell why.
+That string is only the frontend's fallback in `Setup.tsx`: it shows whenever the response has no
+string `detail`. Measured on a fresh Postgres + backend built from `main` (2026-10-21): the happy
+path works (`/auth/setup` 200, repeat 403 with `detail`), but the 6th attempt in a minute returns
+`{"error":"Rate limit exceeded: 5 per 1 minute"}` (429, no `detail`), and 422/5xx/502/network
+failures fall to the same generic line.
+
+- `frontend/src/pages/Setup.tsx`: `setupErrorMessage()` now names the cause (no response, 422
+  field messages, 429, 502/503/504, other 5xx, otherwise the HTTP status) and points at
+  `docker compose logs backend`. Toast stays up 15 s.
+- Root cause of Todd's specific failure is NOT yet established; this change makes the next
+  attempt report it. Backend unchanged.
+- Checks: `tsc --noEmit` clean.
+
 ## 2026-10-16 — restore drill: success is a metric, not a push
 
 Operator decision 2026-10-16 (ADR-0037: a periodic "X is OK" is a dashboard, not a
