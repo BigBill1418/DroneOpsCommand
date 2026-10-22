@@ -33,6 +33,39 @@ const PASSWORD_RULES: PasswordRule[] = [
   { label: 'At least one special character', test: (pw) => /[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]/.test(pw) },
 ];
 
+
+/**
+ * Turn a failed POST /auth/setup into a message that says WHAT failed.
+ * The backend only sends a string `detail` for its own 4xx rejections; a
+ * rate-limit 429 (`{"error": ...}`), a FastAPI 422 (`detail` is a list), a
+ * 5xx, a proxy 502/504 (HTML) or a dead connection all used to collapse into
+ * one generic line, which left an installer with nothing to act on.
+ */
+function setupErrorMessage(err: unknown): string {
+  const e = err as { response?: { status?: number; data?: { detail?: unknown; error?: string } } };
+  const status = e.response?.status;
+  const data = e.response?.data;
+  if (!e.response) {
+    return 'Cannot reach the DroneOps server (no response). Check that the backend container is running and that this page is served by the same stack: docker compose ps, docker compose logs backend.';
+  }
+  if (typeof data?.detail === 'string' && data.detail) return data.detail;
+  if (Array.isArray(data?.detail)) {
+    const msgs = data.detail
+      .map((d) => (d as { msg?: string }).msg)
+      .filter(Boolean)
+      .join('; ');
+    if (msgs) return `Invalid input: ${msgs}`;
+  }
+  if (status === 429) return 'Too many setup attempts. Wait one minute and try again.';
+  if (status === 502 || status === 503 || status === 504) {
+    return `The backend is not answering (HTTP ${status}). It may still be starting; wait a minute, then check: docker compose logs backend.`;
+  }
+  if (status && status >= 500) {
+    return `The server hit an error creating the account (HTTP ${status}). Check: docker compose logs backend.`;
+  }
+  return `Could not create admin account (HTTP ${status ?? 'unknown'}). Check: docker compose logs backend.`;
+}
+
 export default function Setup({ onSetupComplete }: SetupProps) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -60,11 +93,11 @@ export default function Setup({ onSetupComplete }: SetupProps) {
       });
       onSetupComplete(access_token, refresh_token);
     } catch (err: unknown) {
-      const axiosErr = err as { response?: { status?: number; data?: { detail?: string } } };
       notifications.show({
         title: 'Setup Failed',
-        message: axiosErr.response?.data?.detail || 'Could not create admin account. Please try again.',
+        message: setupErrorMessage(err),
         color: 'red',
+        autoClose: 15000,
       });
     } finally {
       setLoading(false);
