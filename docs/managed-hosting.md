@@ -14,7 +14,7 @@ DroneOps Command Hosted is a fully managed instance operated by BarnardHQ.
 
 - All features: missions, AI reports (Claude-powered), Client Portal, pilot management, fleet tracking, flight logs, financial engine
 - Unlimited missions, storage, and users — no caps
-- Custom subdomain: `yourname.droneops.barnardhq.com`
+- Custom subdomain: `yourname.managed.droneops.barnardhq.com` (the live wildcard DNS + cert + tunnel ingress are `*.managed.droneops.barnardhq.com`; verified 2026-10-21)
 - Automated backups and health monitoring
 - Email support (support@barnardhq.com)
 
@@ -103,3 +103,14 @@ When `MANAGED_INSTANCE=true`:
 1. **Setup wizard is skipped** — admin user auto-created from env vars on first boot
 2. **LLM provider locked to Claude** — Ollama settings hidden, provider selection disabled
 3. **Health endpoint** includes `managed: true` and `client_id` for monitoring
+
+## Provisioning notes (first tenant, 2026-10-21)
+
+The first tenant (`todd`, 60-day evaluation) exposed gaps in the April template. Fixes live in
+`BigBill1418/droneops-managed` (`templates/docker-compose.managed.yml`, CHANGELOG 2026-10-21):
+
+- The tenant needs `flight-parser` (the backend hardcodes `http://flight-parser:8100`) and `beat`; the old template had neither.
+- BOS-HQ's docker default address pools are exhausted, so each tenant network must pin its own free /24.
+- The gateway Caddyfile is a single-file bind mount: edit it in place and `caddy reload`; replacing the file leaves the container on the old inode.
+- Route to the tenant via `host.docker.internal:<CADDY_PORT>` (eyeson-managed precedent), not the tenant's container name.
+
